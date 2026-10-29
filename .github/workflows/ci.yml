@@ -22,6 +22,11 @@ jobs:
       # wrapper 검증은 setup-gradle에 내장돼 있다.
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       - run: ./gradlew check
+      # 배포 테스트 하네스 (a): mavenLocal에 배포한 core를 외부 소비자 4개가 받아 쓰는지 확인한다.
+      - name: Publish to mavenLocal
+        run: ./gradlew publishToMavenLocal
+      - name: Deploy test harness (a)
+        run: deploy-test/run.sh "$(sed -n 's/^version=//p' gradle.properties)"
 
   runtime:
     name: runtime (JDK ${{ matrix.java }})
