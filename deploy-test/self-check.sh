@@ -5,6 +5,8 @@ set -euo pipefail
 
 version="${1:?usage: self-check.sh <버전>}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=deploy-test/origin-check.sh
+source "$here/origin-check.sh"
 pom="$HOME/.m2/repository/io/github/ppzxc/strand-core/$version/strand-core-$version.pom"
 
 for tag in "<groupId>io.github.ppzxc</groupId>" "<artifactId>strand-core</artifactId>" "<name>" "<description>" \
@@ -24,3 +26,18 @@ if ! grep -q "버전 불일치" <<<"$output" || ! grep -q "expected=0.0.0-wrong"
   exit 1
 fi
 echo "틀린 기대 버전에서 하네스가 버전 불일치로 실패 확인"
+
+# Maven 3.9.x와 3.10의 출처 기록 형식을 모두 인정하고, 다른 저장소나 빈 기록은 거부하는지 확인한다.
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+check_origin() { # <기대: ok|no> <기록 내용>
+  printf '%s\n' "$2" > "$tmp"
+  if recorded_from_input "$tmp"; then got=ok; else got=no; fi
+  [ "$got" = "$1" ] || { echo "출처 판별이 틀렸다(기대 $1, 실제 $got): $2" >&2; exit 1; }
+}
+check_origin ok 'strand-core-0.0.1.jar>strand-input='
+check_origin ok 'strand-core-0.0.1.jar>strand-input-5daa61b217292085aa248281e11a84e126668d37='
+check_origin no 'strand-core-0.0.1.jar>central='
+check_origin no 'strand-core-0.0.1.jar>other-strand-input='
+check_origin no ''
+echo "출처 기록 판별 확인"
