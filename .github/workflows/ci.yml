@@ -54,7 +54,7 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
         run: |
           echo "$NEEDS"
-          if echo "$NEEDS" | grep -E '"result": "' | grep -v '"result": "success"'; then
+          if ! echo "$NEEDS" | jq -e '[.[].result] | all(. == "success")' >/dev/null; then
             echo "::error::verify 또는 runtime 매트릭스가 success가 아니다"
             exit 1
           fi
