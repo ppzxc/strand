@@ -4,6 +4,7 @@ import org.gradle.external.javadoc.StandardJavadocDocletOptions
 
 plugins {
   id("strand.java-conventions")
+  id("strand.api-compat-conventions")
   id("net.ltgt.errorprone")
   id("net.ltgt.nullaway")
   jacoco

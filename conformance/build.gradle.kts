@@ -1,5 +1,6 @@
 plugins {
   id("strand.internal-conventions")
+  id("strand.vector-compat-conventions")
 }
 
 dependencies {
