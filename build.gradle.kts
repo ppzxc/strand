@@ -14,3 +14,17 @@ tasks.register("runtimeMatrixTest") {
   description = "런타임 매트릭스 대상 모듈(core, conformance)의 테스트만 실행한다. -PtestJavaVersion=<N>과 함께 쓴다."
   dependsOn(":core:test", ":conformance:test")
 }
+
+// 배포 테스트 하네스 (a): mavenLocal에 배포한 core를 외부 소비자 4개가 받아 쓰는지 확인한다. 느려서 check에는 묶지 않는다.
+// 소비자 JDK 25와 mvn(없으면 고정 버전을 받아 온다)이 필요하다.
+val deployTestVersion = providers.gradleProperty("version")
+tasks.register<Exec>("deployTest") {
+  group = "verification"
+  description = "publishToMavenLocal 뒤 deploy-test/run.sh로 외부 소비자 4개를 돌린다(하네스 a)."
+  dependsOn(":core:publishToMavenLocal")
+  workingDir = layout.projectDirectory.asFile
+  commandLine(
+    layout.projectDirectory.file("deploy-test/run.sh").asFile.path,
+    deployTestVersion.get(),
+  )
+}

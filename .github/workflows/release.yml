@@ -22,6 +22,15 @@ jobs:
           persist-credentials: false
       # 태그가 ^[0-9]+\.[0-9]+\.[0-9]+$ 이고 gradle.properties의 version과 같은지 본다. 아니면 업로드 전에 실패한다.
       - run: .github/scripts/check-release-tag.sh "$GITHUB_REF_NAME"
+      # 업로드에 쓰는 시크릿 5개가 비어 있지 않은지 본다(길이만 검사, 값은 출력하지 않는다). 비어 있으면 업로드 전에 실패한다.
+      - name: Check release secrets are set
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralUsername }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralPassword }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyId }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyPassword }}
+        run: .github/scripts/check-release-secrets.sh
 
   # 게이트는 PR CI와 같은 reusable workflow다.
   gate:
