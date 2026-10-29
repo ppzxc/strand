@@ -91,7 +91,7 @@ abstract class GitBaselineSource : ValueSource<String, GitBaselineSource.Params>
       }
     } catch (e: Exception) {
       // git 실행 파일이 없을 때만 태그도 없는 것으로 본다. 권한 오류 등 그 밖의 실행 실패는 빌드 실패다.
-      if (isExecutableMissing(e)) return null
+      if (isExecutableMissing(e, parameters.gitExecutable.get(), parameters.gitDir.get().asFile)) return null
       throw GradleException("git을 실행하지 못했다: ${e.message}", e)
     }
     if (result.exitValue != 0) {
@@ -105,9 +105,18 @@ abstract class GitBaselineSource : ValueSource<String, GitBaselineSource.Params>
 
 private val ENOENT = Regex("""error[=:]\s*2\b""")
 
-/** 프로세스 시작 실패 원인이 "실행 파일 없음"(ENOENT)인가. JDK에 따라 메시지가 `error=2,` 또는 `error: 2 (`로 나온다. */
-private fun isExecutableMissing(e: Throwable): Boolean =
-  generateSequence(e) { it.cause }.any { it is java.io.IOException && ENOENT.containsMatchIn(it.message ?: "") }
+/**
+ * 프로세스 시작 실패 원인이 "[gitExecutable] 실행 파일 없음"인가.
+ * 작업 디렉터리([workingDir])가 없어도 같은 ENOENT가 나므로 디렉터리가 있을 때만 git 부재로 본다.
+ * JDK에 따라 메시지가 `error=2,` 또는 `error: 2 (`로 나온다.
+ */
+fun isExecutableMissing(e: Throwable, gitExecutable: String, workingDir: java.io.File): Boolean =
+  workingDir.isDirectory &&
+    generateSequence(e) { it.cause }.any {
+      it is java.io.IOException &&
+        "Cannot run program \"$gitExecutable\"" in (it.message ?: "") &&
+        ENOENT.containsMatchIn(it.message ?: "")
+    }
 
 /** 기준선 버전 provider. 호환성 검사 태스크가 모두 같은 값을 본다. */
 fun Project.compatBaselineVersion(): Provider<String> =

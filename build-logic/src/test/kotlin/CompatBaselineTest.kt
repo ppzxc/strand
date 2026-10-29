@@ -35,4 +35,28 @@ class CompatBaselineTest {
     assertThat(SemVer.parseTag("99999999999.0.0")).isNull()
     assertThat(SemVer.parseVersion("0.0.99999999999")).isNull()
   }
+
+  private val enoent = java.io.IOException("Cannot run program \"git\" (in directory \"/x\"): error=2, No such file or directory")
+
+  @Test
+  fun `실행 파일이 없는 ENOENT는 git 부재로 본다`(@org.junit.jupiter.api.io.TempDir dir: java.io.File) {
+    val wrapped = RuntimeException("start failed", enoent)
+
+    assertThat(isExecutableMissing(wrapped, "git", dir)).isTrue()
+    assertThat(isExecutableMissing(IllegalStateException("x", java.io.IOException("Cannot run program \"git\": error: 2 (No such file)")), "git", dir)).isTrue()
+  }
+
+  @Test
+  fun `작업 디렉터리가 없어서 생긴 ENOENT는 git 부재가 아니다`(@org.junit.jupiter.api.io.TempDir dir: java.io.File) {
+    assertThat(isExecutableMissing(enoent, "git", java.io.File(dir, "missing"))).isFalse()
+  }
+
+  @Test
+  fun `다른 프로그램의 ENOENT나 권한 오류는 git 부재가 아니다`(@org.junit.jupiter.api.io.TempDir dir: java.io.File) {
+    val other = java.io.IOException("Cannot run program \"tar\": error=2, No such file or directory")
+    val eacces = java.io.IOException("Cannot run program \"git\": error=13, Permission denied")
+
+    assertThat(isExecutableMissing(other, "git", dir)).isFalse()
+    assertThat(isExecutableMissing(eacces, "git", dir)).isFalse()
+  }
 }
