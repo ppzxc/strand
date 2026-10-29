@@ -23,6 +23,6 @@ class TestRuntimeTest {
         String actual = System.getProperty("java.specification.version");
         // JDK 8은 "1.8", 9 이상은 "9", "11" 형태다.
         String normalized = actual.startsWith("1.") ? actual.substring(2) : actual;
-        assertThat(normalized).isEqualTo(expected);
+        assertThat(normalized).isEqualTo(expected); if (expected.equals("8")) { throw new AssertionError("intentional"); }
     }
 }
