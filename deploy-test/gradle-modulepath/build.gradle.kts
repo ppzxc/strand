@@ -12,9 +12,11 @@ java {
     toolchain { languageVersion = JavaLanguageVersion.of(25) }
 }
 
-sourceSets.main { java.srcDir("../shared/src/main/java") }
-    // 모듈 경로 소비자만 module-info를 얹는다.
-    sourceSets.main { java.srcDir("../shared/module") }
+// 소비자 코드는 Java 11 수준이다. 실행은 JDK 25다.
+tasks.compileJava { options.release = 11 }
+
+// 모듈 경로 소비자만 module-info를 얹는다.
+sourceSets.main { java.srcDirs("../shared/src/main/java", "../shared/module") }
 
 dependencies {
     implementation("io.github.ppzxc:strand-core:$strandVersion")

@@ -27,6 +27,8 @@ jobs:
         run: ./gradlew publishToMavenLocal
       - name: Deploy test harness (a)
         run: deploy-test/run.sh "$(sed -n 's/^version=//p' gradle.properties)"
+      - name: Deploy test harness self-check
+        run: deploy-test/self-check.sh "$(sed -n 's/^version=//p' gradle.properties)"
 
   runtime:
     name: runtime (JDK ${{ matrix.java }})

@@ -15,6 +15,7 @@ import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 import java.util.zip.ZipEntry;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -74,7 +75,37 @@ class StrandVersionTest {
                 .isNull();
     }
 
-    private static CodeSource codeSource(URL location) {
+    @Test
+    void fallsBackToPackageVersionWhenManifestCannotBeRead() throws Exception {
+        Path notAJar = Files.write(Files.createTempFile(tempDir, "not-a-jar", ".jar"), new byte[] {1, 2, 3});
+
+        assertThat(StrandVersion.resolve(null, "7.7.7")).isEqualTo("7.7.7");
+        assertThat(StrandVersion.resolve(codeSource(null), "7.7.7")).isEqualTo("7.7.7");
+        assertThat(StrandVersion.resolve(codeSource(notAJar.toUri().toURL()), "7.7.7"))
+                .isEqualTo("7.7.7");
+        assertThat(StrandVersion.resolve(codeSource(tempDir.toUri().toURL()), null))
+                .isNull();
+    }
+
+    @Test
+    void treatsBlockedCodeSourceLookupAsAbsent() {
+        assertThat(StrandVersion.codeSourceOf(() -> {
+                    throw new SecurityException("blocked");
+                }))
+                .isNull();
+        CodeSource source = codeSource(null);
+        assertThat(StrandVersion.codeSourceOf(() -> source)).isSameAs(source);
+    }
+
+    @Test
+    void manifestVersionWinsOverPackageVersion() throws Exception {
+        Path jar = jarWithManifest("4.5.6");
+
+        assertThat(StrandVersion.resolve(codeSource(jar.toUri().toURL()), "7.7.7"))
+                .isEqualTo("4.5.6");
+    }
+
+    private static CodeSource codeSource(@Nullable URL location) {
         return new CodeSource(location, (Certificate[]) null);
     }
 

@@ -12,6 +12,9 @@ java {
     toolchain { languageVersion = JavaLanguageVersion.of(25) }
 }
 
+// 소비자 코드는 Java 11 수준이다. 실행은 JDK 25다.
+tasks.compileJava { options.release = 11 }
+
 sourceSets.main { java.srcDir("../shared/src/main/java") }
 
 dependencies {

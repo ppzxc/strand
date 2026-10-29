@@ -10,12 +10,13 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.release>25</maven.compiler.release>
+    <maven.compiler.release>11</maven.compiler.release>
     <repoUrl>https://repo.maven.apache.org/maven2</repoUrl>
     <!-- 기본적으로 받아 온 버전이다. 비교 경로 자체를 시험할 때만 -DexpectedVersion으로 덮어쓴다. -->
     <expectedVersion>${strandVersion}</expectedVersion>
   </properties>
 
+  <!-- 원격 모드에서 strand-core가 이 저장소에서 왔는지는 run.sh가 _remote.repositories로 확인한다. -->
   <repositories>
     <repository>
       <id>strand-input</id>

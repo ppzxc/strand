@@ -129,9 +129,10 @@ mavenPublishing {
   // artifactId 기본값은 프로젝트 이름("core")이라 좌표를 명시한다.
   coordinates(project.group.toString(), artifactName, project.version.toString())
 
-  // 서명 키(in-memory, CI의 ORG_GRADLE_PROJECT_signingInMemoryKey)가 있을 때만 서명한다.
-  // signAllPublications()는 키가 없으면 빌드를 실패시키므로, 키 없는 로컬 publishToMavenLocal은 무서명으로 둔다.
-  if (providers.gradleProperty("signingInMemoryKey").isPresent) {
+  // 서명 키(in-memory, CI의 ORG_GRADLE_PROJECT_signingInMemoryKey)가 비어 있지 않을 때만 서명한다.
+  // signAllPublications()는 SNAPSHOT이 아닌 버전에서 서명 자격이 없으면 빌드를 실패시킨다
+  // (vanniktech 문서, 확인: publishToMavenLocal이 "No configured signatory"로 실패). 그래서 키 없는 로컬 배포는 무서명으로 둔다.
+  if (!providers.gradleProperty("signingInMemoryKey").orNull.isNullOrBlank()) {
     signAllPublications()
   }
 

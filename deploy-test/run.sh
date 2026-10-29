@@ -28,20 +28,22 @@ resolve_mvn() {
     command -v mvn
     return
   fi
-  local cache="${STRAND_TOOLS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/strand-deploy-test}"
+  local cache="${XDG_CACHE_HOME:-$HOME/.cache}/strand-deploy-test"
   local dir="$cache/apache-maven-$MAVEN_VERSION"
   if [ ! -x "$dir/bin/mvn" ]; then
     mkdir -p "$cache"
-    local tmp
     tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT # $(...) 서브셸 안이라 아래 전역 trap과 별개다.
     curl -fsSL -o "$tmp/maven.tar.gz" \
       "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/$MAVEN_VERSION/apache-maven-$MAVEN_VERSION-bin.tar.gz"
     echo "$MAVEN_SHA512  $tmp/maven.tar.gz" | sha512sum -c - >&2
     tar -xzf "$tmp/maven.tar.gz" -C "$cache"
-    rm -rf "$tmp"
   fi
   echo "$dir/bin/mvn"
 }
+
+maven_local_repo=""
+trap 'rm -rf "$maven_local_repo"' EXIT
 
 gradle_args=("-PstrandVersion=$version")
 maven_args=("-DstrandVersion=$version")
@@ -55,7 +57,6 @@ if [ "$repo" != "mavenLocal" ]; then
   maven_args+=("-DrepoUrl=$repo")
   # ~/.m2에 로컬 설치본이 있으면 원격 검증이 가려진다. 원격 모드는 빈 로컬 저장소를 쓴다.
   maven_local_repo="$(mktemp -d)"
-  trap 'rm -rf "$maven_local_repo"' EXIT
   maven_opts+=("-Dmaven.repo.local=$maven_local_repo")
   if [ -n "${STRAND_REPO_TOKEN:-}" ]; then
     maven_opts+=(-s "$here/maven-settings.xml")
@@ -75,8 +76,15 @@ run_gradle() {
 
 run_maven() {
   echo "=== $1 ==="
-  "$mvn" -B -ntp "${maven_opts[@]}" -f "$here/$1/pom.xml" compile exec:exec "${maven_args[@]}" | tee "$here/$1/output.log"
+  "$mvn" -B -ntp ${maven_opts[@]+"${maven_opts[@]}"} -f "$here/$1/pom.xml" compile exec:exec "${maven_args[@]}" | tee "$here/$1/output.log"
   check_output "$1"
+  if [ "$repo" != "mavenLocal" ]; then
+    # Central에도 같은 좌표가 있을 수 있다. strand-core가 지정 저장소에서 왔는지 로컬 저장소의 출처 기록으로 확인한다.
+    grep -q ">strand-input=" "$maven_local_repo/io/github/ppzxc/strand-core/$version/_remote.repositories" || {
+      echo "strand-core가 지정 저장소($repo)에서 오지 않았다" >&2
+      exit 1
+    }
+  fi
 }
 
 mvn="$(resolve_mvn)"
