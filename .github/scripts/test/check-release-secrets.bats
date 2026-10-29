@@ -39,10 +39,16 @@ setup() {
 }
 
 @test "시크릿 값은 출력하지 않는다" {
+  export ORG_GRADLE_PROJECT_mavenCentralUsername="SENTINEL-username-1"
+  export ORG_GRADLE_PROJECT_mavenCentralPassword="SENTINEL-password-2"
+  export ORG_GRADLE_PROJECT_signingInMemoryKey="SENTINEL-key-3"
+  export ORG_GRADLE_PROJECT_signingInMemoryKeyId="SENTINEL-keyid-4"
+  export ORG_GRADLE_PROJECT_signingInMemoryKeyPassword="SENTINEL-keypass-5"
+  # 통과 경로와 실패 경로 모두에서 값이 새지 않는지 본다.
+  run "$script"
+  [[ "$output" != *"SENTINEL"* ]]
   export ORG_GRADLE_PROJECT_signingInMemoryKeyId=""
   run "$script"
-  [[ "$output" != *"user-secret-value"* ]]
-  [[ "$output" != *"pass-secret-value"* ]]
-  [[ "$output" != *"key-secret-value"* ]]
-  [[ "$output" != *"keypass-secret-value"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"SENTINEL"* ]]
 }

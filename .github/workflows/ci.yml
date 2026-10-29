@@ -27,7 +27,7 @@ jobs:
       - run: ./gradlew check
       # .github/scripts의 셸 스크립트 시험. 러너 이미지에 bats가 없을 수 있어 설치한다.
       - name: Install bats
-        run: sudo apt-get install -y --no-install-recommends bats
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bats
       - name: Test CI scripts (bats)
         run: bats .github/scripts/test
       # 배포 테스트 하네스 (a): mavenLocal에 배포한 core를 외부 소비자 4개가 받아 쓰는지 확인한다.
