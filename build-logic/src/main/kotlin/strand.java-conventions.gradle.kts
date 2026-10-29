@@ -35,6 +35,15 @@ dependencies {
 }
 
 tasks.test {
+  // 런타임 매트릭스: Gradle과 컴파일은 JDK 25 그대로 두고 테스트 JVM만 -PtestJavaVersion=<N>으로 바꾼다.
+  providers.gradleProperty("testJavaVersion").orNull?.let { version ->
+    systemProperty("strand.expectedJavaVersion", version)
+    // 매트릭스 실행에서만 테스트 출력(java.version 증거)을 로그로 보인다.
+    testLogging.showStandardStreams = true
+    javaLauncher = javaToolchains.launcherFor {
+      languageVersion = JavaLanguageVersion.of(version.toInt())
+    }
+  }
   useJUnitPlatform()
   testLogging {
     exceptionFormat = TestExceptionFormat.FULL
