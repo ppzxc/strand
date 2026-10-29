@@ -13,8 +13,14 @@ for tag in "<groupId>io.github.ppzxc</groupId>" "<artifactId>strand-core</artifa
 done
 echo "POM 메타데이터 확인"
 
-if STRAND_EXPECTED_VERSION="0.0.0-wrong" "$here/run.sh" "$version" >/dev/null 2>&1; then
+# 소비자 하나만 돌린다(전체 4개는 하네스 본 스텝이 이미 돌렸다). 실패 사유가 버전 불일치일 때만 의도한 실패로 본다.
+if output="$(STRAND_CONSUMERS=gradle-classpath STRAND_EXPECTED_VERSION="0.0.0-wrong" "$here/run.sh" "$version" 2>&1)"; then
   echo "기대 버전이 틀렸는데 하네스가 통과했다" >&2
   exit 1
 fi
-echo "틀린 기대 버전에서 하네스 실패 확인"
+if ! grep -q "버전 불일치" <<<"$output" || ! grep -q "expected=0.0.0-wrong" <<<"$output"; then
+  echo "하네스가 버전 불일치가 아닌 다른 사유로 실패했다:" >&2
+  echo "$output" >&2
+  exit 1
+fi
+echo "틀린 기대 버전에서 하네스가 버전 불일치로 실패 확인"

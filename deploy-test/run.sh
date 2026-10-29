@@ -4,6 +4,7 @@
 #   저장소 URL을 생략하면 mavenLocal(a). Portal 스테이징(b)과 Central(c)은 URL만 바꿔 같은 스크립트를 쓴다.
 #   환경 변수 STRAND_REPO_TOKEN이 있으면 저장소 요청에 Bearer 헤더를 붙인다. 토큰은 인자나 파일에 쓰지 않는다.
 # 환경 변수 STRAND_EXPECTED_VERSION은 하네스 자체 시험용이다. 주면 받아 온 jar가 아니라 이 값과 비교한다(불일치 실패 확인).
+# 환경 변수 STRAND_CONSUMERS는 소비자를 공백으로 구분해 일부만 고른다(기본은 4개 전체). self-check가 쓴다.
 # 각 소비자는 core만 의존하고, 실행 중인 core의 StrandVersion.get()이 기대 버전과 같을 때만 통과한다.
 # 소비자 JDK는 25다. 하나라도 실패하면 비정상 종료한다.
 set -euo pipefail
@@ -89,8 +90,11 @@ run_maven() {
 
 mvn="$(resolve_mvn)"
 
-run_gradle gradle-classpath
-run_gradle gradle-modulepath
-run_maven maven-classpath
-run_maven maven-modulepath
-echo "배포 테스트 소비자 4개 통과: strand-core $version ($repo)"
+for consumer in ${STRAND_CONSUMERS:-gradle-classpath gradle-modulepath maven-classpath maven-modulepath}; do
+  case "$consumer" in
+    gradle-*) run_gradle "$consumer" ;;
+    maven-*) run_maven "$consumer" ;;
+    *) echo "알 수 없는 소비자: $consumer" >&2; exit 2 ;;
+  esac
+done
+echo "배포 테스트 소비자 통과: strand-core $version ($repo)"
