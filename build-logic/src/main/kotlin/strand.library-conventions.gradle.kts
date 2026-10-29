@@ -10,13 +10,15 @@ plugins {
   `maven-publish`
 }
 
-private val catalog = versionCatalogs.named("libs")
+private val catalog = libsCatalog
+private val artifactName = "strand-${project.name}"
 private val moduleName = "io.github.ppzxc.strand.${project.name}"
+private val minimumCoverage = "0.90".toBigDecimal()
 
 dependencies {
-  errorprone(catalog.findLibrary("errorprone-core").get())
-  errorprone(catalog.findLibrary("nullaway").get())
-  compileOnlyApi(catalog.findLibrary("jspecify").get())
+  errorprone(catalog.library("errorprone-core"))
+  errorprone(catalog.library("nullaway"))
+  compileOnlyApi(catalog.library("jspecify"))
 }
 
 nullaway {
@@ -25,7 +27,7 @@ nullaway {
   requireExplicitNullMarking { error() }
 }
 
-// main: 경고 하나도 허용하지 않는다. test는 린트 경고만 보여 주고 실패시키지 않는다.
+// main: 경고 하나도 허용하지 않는다. (test 컴파일은 java-conventions에서 -Werror 없이 린트 경고만 보여 준다.)
 //
 // `-Werror`를 직접 쓰지 못하는 이유: JSpecify의 @NullMarked는 @Target에 ElementType.MODULE(Java 9)을
 // 가지고 있어서 `--release 8`로 컴파일하면 javac(JDK 21, 25 확인)가 "unknown enum constant
@@ -52,7 +54,7 @@ tasks.named<JavaCompile>("compileTestJava") {
 }
 
 base {
-  archivesName = "strand-${project.name}"
+  archivesName = artifactName
 }
 
 java {
@@ -72,33 +74,28 @@ tasks.jar {
   manifest {
     attributes(
       "Automatic-Module-Name" to moduleName,
-      "Implementation-Title" to "strand-${project.name}",
+      "Implementation-Title" to artifactName,
       "Implementation-Version" to project.version.toString(),
     )
   }
 }
 
 jacoco {
-  toolVersion = "0.8.14"
-}
-
-tasks.jacocoTestReport {
-  dependsOn(tasks.test)
+  toolVersion = catalog.version("jacoco")
 }
 
 tasks.jacocoTestCoverageVerification {
-  dependsOn(tasks.test)
   violationRules {
     rule {
       limit {
         counter = "LINE"
         value = "COVEREDRATIO"
-        minimum = "0.90".toBigDecimal()
+        minimum = minimumCoverage
       }
       limit {
         counter = "BRANCH"
         value = "COVEREDRATIO"
-        minimum = "0.90".toBigDecimal()
+        minimum = minimumCoverage
       }
     }
   }
@@ -116,9 +113,9 @@ val verifyDependencies = tasks.register<VerifyDependencyAllowlist>("verifyDepend
   modulePath.set(project.path)
   runtimeComponents.set(resolved("runtimeClasspath"))
   compileComponents.set(resolved("compileClasspath"))
-  val jspecify = catalog.findLibrary("jspecify").get().get()
+  val jspecify = catalog.library("jspecify").get()
   allowedCompile.add("${jspecify.module.group}:${jspecify.module.name}:${jspecify.versionConstraint.requiredVersion}")
-  marker.set(layout.buildDirectory.file("verifyDependencies/ok"))
+  passedMarker.set(layout.buildDirectory.file("verifyDependencies/ok"))
 }
 
 tasks.check {
@@ -129,9 +126,9 @@ publishing {
   publications {
     create<MavenPublication>("maven") {
       from(components["java"])
-      artifactId = "strand-${project.name}"
+      artifactId = artifactName
       pom {
-        name = "strand-${project.name}"
+        name = artifactName
         description = "strand: 바이트 인코딩·디코딩 규격의 Java 구현"
         url = "https://github.com/ppzxc/strand"
         licenses {

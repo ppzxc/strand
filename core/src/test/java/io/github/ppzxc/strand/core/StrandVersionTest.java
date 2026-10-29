@@ -55,7 +55,7 @@ class StrandVersionTest {
         Path jar = Files.createTempFile(tempDir, "strand-version", ".jar");
         try (OutputStream out = Files.newOutputStream(jar);
                 JarOutputStream jos = new JarOutputStream(out, manifest);
-                InputStream classBytes = StrandVersion.class.getClassLoader().getResourceAsStream(CLASS_ENTRY)) {
+                InputStream classBytes = openClassBytes()) {
             jos.putNextEntry(new ZipEntry(CLASS_ENTRY));
             byte[] buffer = new byte[4096];
             int read;
@@ -65,6 +65,14 @@ class StrandVersionTest {
             jos.closeEntry();
         }
         return jar;
+    }
+
+    private static InputStream openClassBytes() {
+        InputStream stream = StrandVersion.class.getClassLoader().getResourceAsStream(CLASS_ENTRY);
+        if (stream == null) {
+            throw new IllegalStateException("테스트 클래스패스에서 " + CLASS_ENTRY + "를 찾을 수 없다");
+        }
+        return stream;
     }
 
     private static String versionLoadedFrom(Path jar) throws Exception {

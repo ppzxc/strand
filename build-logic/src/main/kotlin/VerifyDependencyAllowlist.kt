@@ -31,7 +31,7 @@ abstract class VerifyDependencyAllowlist : DefaultTask() {
   abstract val allowedCompile: SetProperty<String>
 
   @get:OutputFile
-  abstract val marker: RegularFileProperty
+  abstract val passedMarker: RegularFileProperty
 
   @TaskAction
   fun verify() {
@@ -47,6 +47,6 @@ abstract class VerifyDependencyAllowlist : DefaultTask() {
     if (problems.isNotEmpty()) {
       throw GradleException("${modulePath.get()} 의존성 0 검사 실패\n" + problems.joinToString("\n") { "  - $it" })
     }
-    marker.get().asFile.writeText("ok\n")
+    passedMarker.get().asFile.writeText("ok\n")
   }
 }
