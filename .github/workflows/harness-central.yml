@@ -1,0 +1,32 @@
+name: Harness (Central)
+
+# 배포 테스트 하네스 (c): Publish 뒤 Maven Central에서 같은 소비자 4개가 동작하는지 확인한다.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Central에서 받을 strand-core 버전(X.Y.Z)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 25
+      - name: Deploy test harness (c) against Maven Central
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::버전은 X.Y.Z여야 한다"; exit 1; }
+          deploy-test/run.sh "$VERSION" https://repo.maven.apache.org/maven2

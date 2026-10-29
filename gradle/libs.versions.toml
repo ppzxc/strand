@@ -13,6 +13,7 @@ spotless = "8.10.4"
 japicmp = "0.26.5"
 japicmp-plugin = "0.4.6"
 vanniktech-maven-publish = "0.37.0"
+cyclonedx-plugin = "3.5.1"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -31,3 +32,4 @@ nullaway = { id = "net.ltgt.nullaway", version.ref = "nullaway-plugin" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 japicmp = { id = "me.champeau.gradle.japicmp", version.ref = "japicmp-plugin" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "vanniktech-maven-publish" }
+cyclonedx = { id = "org.cyclonedx.bom", version.ref = "cyclonedx-plugin" }
