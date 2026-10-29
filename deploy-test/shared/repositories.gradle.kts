@@ -4,28 +4,28 @@ val repoUrl = providers.gradleProperty("repoUrl").orElse("mavenLocal").get()
 val repoToken = providers.environmentVariable("STRAND_REPO_TOKEN").orNull
 
 repositories {
-    if (repoUrl == "mavenLocal") {
-        mavenLocal()
-    } else {
-        maven {
-            url = uri(repoUrl)
-            // strand-core는 이 저장소에서만 받는다. mavenCentral에 같은 좌표가 있어도 검증을 가리지 못한다.
-            content { includeGroup("io.github.ppzxc") }
-            if (!repoToken.isNullOrEmpty()) {
-                credentials(HttpHeaderCredentials::class) {
-                    name = "Authorization"
-                    value = "Bearer $repoToken"
-                }
-                authentication {
-                    create<HttpHeaderAuthentication>("header")
-                }
-            }
+  if (repoUrl == "mavenLocal") {
+    mavenLocal()
+  } else {
+    maven {
+      url = uri(repoUrl)
+      // strand-core는 이 저장소에서만 받는다. mavenCentral에 같은 좌표가 있어도 검증을 가리지 못한다.
+      content { includeGroup("io.github.ppzxc") }
+      if (!repoToken.isNullOrEmpty()) {
+        credentials(HttpHeaderCredentials::class) {
+          name = "Authorization"
+          value = "Bearer $repoToken"
         }
-    }
-    // 이행 의존성(JSpecify 등)은 항상 Central에서 받는다.
-    mavenCentral {
-        if (repoUrl != "mavenLocal") {
-            content { excludeGroup("io.github.ppzxc") }
+        authentication {
+          create<HttpHeaderAuthentication>("header")
         }
+      }
     }
+  }
+  // 이행 의존성(JSpecify 등)은 항상 Central에서 받는다.
+  mavenCentral {
+    if (repoUrl != "mavenLocal") {
+      content { excludeGroup("io.github.ppzxc") }
+    }
+  }
 }
