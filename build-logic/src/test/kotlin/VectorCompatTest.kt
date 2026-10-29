@@ -20,9 +20,11 @@ class VectorCompatTest {
       @Test
       void vectors() throws Exception {
         String dir = System.getProperty("strand.conformance.vectors.dir");
-        if (dir == null) return;
-        try (Stream<Path> files = Files.list(Paths.get(dir))) {
-          for (Path p : files.collect(Collectors.toList())) {
+        if (dir == null) fail("strand.conformance.vectors.dir가 전달되지 않았다");
+        try (Stream<Path> stream = Files.list(Paths.get(dir))) {
+          java.util.List<Path> files = stream.collect(Collectors.toList());
+          if (files.isEmpty()) fail("벡터가 하나도 읽히지 않았다: " + dir);
+          for (Path p : files) {
             if (new String(Files.readAllBytes(p)).contains("FAIL")) fail("rejected " + p.getFileName());
           }
         }
@@ -30,8 +32,8 @@ class VectorCompatTest {
     }
   """.trimIndent()
 
-  private fun fixture(version: String): CompatFixture =
-    CompatFixture(dir, "strand.vector-compat-conventions").also {
+  private fun fixture(version: String): BuildFixture =
+    BuildFixture(dir, "strand.vector-compat-conventions").also {
       it.buildScript(
         version,
         """
@@ -49,7 +51,10 @@ class VectorCompatTest {
       it.write("src/test/java/VectorConformanceTest.java", runnerTest)
     }
 
-  private fun baselineVectors(f: CompatFixture, content: String, working: String = "ok") {
+  private fun rejectedReport(): String =
+    File(dir, "build/test-results/baselineVectorTest").listFiles()!!.single { it.extension == "xml" }.readText()
+
+  private fun baselineVectors(f: BuildFixture, content: String, working: String = "ok") {
     f.write("conformance/vectors/v.json", content)
     f.commitAndTag("0.0.1")
     f.write("conformance/vectors/v.json", working)
@@ -83,6 +88,7 @@ class VectorCompatTest {
     val result = f.fail("check")
 
     assertThat(result.task(":baselineVectorTest")!!.outcome).isEqualTo(TaskOutcome.FAILED)
+    assertThat(rejectedReport()).contains("rejected v.json")
   }
 
   @Test
@@ -93,7 +99,55 @@ class VectorCompatTest {
     val result = f.run("check")
 
     assertThat(result.task(":baselineVectorTest")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
-    val report = File(dir, "build/test-results/baselineVectorTest").listFiles()!!.single { it.extension == "xml" }.readText()
-    assertThat(report).contains("<failure")
+    assertThat(rejectedReport()).contains("<failure").contains("rejected v.json")
+  }
+
+  @Test
+  fun `MINOR로 실행한 뒤 PATCH로 올리면 UP-TO-DATE로 실패가 사라지지 않는다`() {
+    val f = fixture("0.1.0")
+    baselineVectors(f, "FAIL")
+    f.run("baselineVectorTest")
+
+    f.setVersion("0.0.2")
+    val result = f.fail("baselineVectorTest")
+
+    assertThat(result.task(":baselineVectorTest")!!.outcome).isEqualTo(TaskOutcome.FAILED)
+  }
+
+  @Test
+  fun `기준선이 바뀌어 벡터 내용이 달라지면 UP-TO-DATE로 건너뛰지 않는다`() {
+    val f = fixture("0.0.3")
+    baselineVectors(f, "ok")
+    f.run("baselineVectorTest")
+    f.write("conformance/vectors/v.json", "FAIL")
+    f.commitAndTag("0.0.2")
+    f.write("conformance/vectors/v.json", "ok")
+
+    val result = f.fail("baselineVectorTest")
+
+    assertThat(result.task(":baselineVectorTest")!!.outcome).isEqualTo(TaskOutcome.FAILED)
+  }
+
+  @Test
+  fun `입력이 같으면 configuration cache를 재사용하고 테스트는 UP-TO-DATE다`() {
+    val f = fixture("0.0.2")
+    baselineVectors(f, "ok")
+    f.run("baselineVectorTest")
+
+    val second = f.run("baselineVectorTest")
+
+    assertThat(second.output).contains("Reusing configuration cache")
+    assertThat(second.task(":baselineVectorTest")!!.outcome).isEqualTo(TaskOutcome.UP_TO_DATE)
+  }
+
+  @Test
+  fun `테스트 필터가 적용되어 벡터 러너 외의 테스트는 돌지 않는다`() {
+    val f = fixture("0.0.2")
+    f.write("src/test/java/OtherTest.java", "class OtherTest { @org.junit.jupiter.api.Test void other() { org.junit.jupiter.api.Assertions.fail(\"필터가 무시됐다\"); } }")
+    baselineVectors(f, "ok")
+
+    val result = f.run("baselineVectorTest")
+
+    assertThat(result.task(":baselineVectorTest")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
   }
 }

@@ -41,7 +41,7 @@ afterEvaluate {
 val japicmp = tasks.register<JapicmpTask>("japicmp") {
   group = "verification"
   description = "기준선 jar 대비 core의 바이너리·소스 호환성을 비교한다. .internal은 제외한다."
-  val hasBaseline = baselineVersion.map { true }.orElse(false)
+  val hasBaseline = compatHasBaseline()
   onlyIf { hasBaseline.get() }
   oldArchives.from(baselineJar)
   newArchives.from(tasks.named("jar"))

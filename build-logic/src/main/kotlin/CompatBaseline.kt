@@ -1,4 +1,5 @@
 import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.Property
@@ -42,7 +43,11 @@ data class SemVer(val major: Int, val minor: Int, val patch: Int) : Comparable<S
     /** 프로젝트 `version`용. `0.1.0-SNAPSHOT` 같은 접미어는 무시하고 숫자 부분만 본다. */
     fun parseVersion(text: String): SemVer? = VERSION_PREFIX.matchEntire(text)?.toSemVer()
 
-    private fun MatchResult.toSemVer() = SemVer(groupValues[1].toInt(), groupValues[2].toInt(), groupValues[3].toInt())
+    // Int 범위를 넘는 숫자는 버전으로 인정하지 않는다.
+    private fun MatchResult.toSemVer(): SemVer? {
+      val (major, minor, patch) = groupValues.drop(1).map { it.toIntOrNull() ?: return null }
+      return SemVer(major, minor, patch)
+    }
   }
 }
 
@@ -70,18 +75,24 @@ abstract class GitBaselineSource : ValueSource<String, GitBaselineSource.Params>
   override fun obtain(): String? {
     val version = SemVer.parseVersion(parameters.projectVersion.get()) ?: return null
     val out = ByteArrayOutputStream()
+    val err = ByteArrayOutputStream()
     val result = try {
       exec.exec {
         commandLine("git", "tag", "--list")
         workingDir = parameters.gitDir.get().asFile
+        environment("LC_ALL", "C") // 오류 메시지 판별이 로케일에 흔들리지 않게 한다.
         standardOutput = out
-        errorOutput = ByteArrayOutputStream()
+        errorOutput = err
         isIgnoreExitValue = true
       }
     } catch (e: Exception) {
       return null // git이 없으면 태그도 없는 것으로 본다.
     }
-    if (result.exitValue != 0) return null
+    if (result.exitValue != 0) {
+      if ("not a git repository" in err.toString(Charsets.UTF_8)) return null // 소스 압축본 같은 비 git 빌드
+      // 저장소 안에서의 실패(safe.directory, 손상 등)를 기준선 없음으로 삼키면 검사가 조용히 꺼진다.
+      throw GradleException("git tag --list 실패(종료 코드 ${result.exitValue}): ${err.toString(Charsets.UTF_8).trim()}")
+    }
     return selectBaseline(version, out.toString(Charsets.UTF_8).lines().map { it.trim() })?.toString()
   }
 }
@@ -92,6 +103,9 @@ fun Project.compatBaselineVersion(): Provider<String> =
     parameters.projectVersion.set(provider { version.toString() })
     parameters.gitDir.set(rootProject.layout.projectDirectory)
   }
+
+/** 기준선이 있으면 true. 태스크의 onlyIf에 쓴다. */
+fun Project.compatHasBaseline(): Provider<Boolean> = compatBaselineVersion().map { true }.orElse(false)
 
 /** PATCH만 올랐으면 true. 기준선이 없으면 값이 없다. */
 fun Project.compatPatchOnly(): Provider<Boolean> {

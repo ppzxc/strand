@@ -9,8 +9,8 @@ class DependencyAllowlistTest {
   @TempDir
   lateinit var dir: File
 
-  private fun fixture(dependencies: String): CompatFixture =
-    CompatFixture(dir, "strand.library-conventions").also {
+  private fun fixture(dependencies: String): BuildFixture =
+    BuildFixture(dir, "strand.library-conventions", usesCompatExtension = false).also {
       it.buildScript("0.0.1", "dependencies { $dependencies }")
     }
 

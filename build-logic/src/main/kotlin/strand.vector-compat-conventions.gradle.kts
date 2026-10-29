@@ -6,7 +6,7 @@ plugins {
 
 val compat = extensions.getByType<StrandCompatExtension>()
 val baselineVersion = compatBaselineVersion()
-val patchOnly = compatPatchOnly()
+val patchOnly = compatPatchOnly().orElse(false)
 
 val extractBaselineVectors = tasks.register<ExtractBaselineVectors>("extractBaselineVectors") {
   group = "verification"
@@ -25,22 +25,28 @@ val baselineVectorTest = tasks.register<Test>("baselineVectorTest") {
   testClassesDirs = files(testSourceSet.map { it.output.classesDirs })
   classpath = files(testSourceSet.map { it.runtimeClasspath })
   useJUnitPlatform()
-  val hasBaseline = baselineVersion.map { true }.orElse(false)
+  val hasBaseline = compatHasBaseline()
   onlyIf { hasBaseline.get() }
-  dependsOn(extractBaselineVectors)
-  ignoreFailures = !patchOnly.orElse(false).get()
+
+  // 결과를 바꾸는 값은 모두 입력으로 선언한다. 안 그러면 MINOR로 돈 결과가 PATCH에서도 UP-TO-DATE로 재사용된다.
   val vectorsDir = extractBaselineVectors.flatMap { it.outputDir }
-  val relative = compat.vectorsPath
+  inputs.dir(vectorsDir).withPropertyName("baselineVectors").withPathSensitivity(PathSensitivity.RELATIVE)
+  val patchOnlyProvider = patchOnly
+  val vectorsPath = compat.vectorsPath
+  val testFilter = compat.vectorTestFilter
+  inputs.property("patchOnly", patchOnlyProvider)
+  inputs.property("vectorsPath", vectorsPath)
+  inputs.property("vectorTestFilter", testFilter)
+
+  // 스크립트 객체를 잡지 않도록 지역 값만 쓴다(configuration cache). 값은 실행 시점에 읽는다.
   doFirst {
+    ignoreFailures = !patchOnlyProvider.get()
+    filter.includeTestsMatching(testFilter.get())
     systemProperty(
       "strand.conformance.vectors.dir",
-      vectorsDir.get().asFile.resolve(relative.get()).absolutePath,
+      vectorsDir.get().asFile.resolve(vectorsPath.get()).absolutePath,
     )
   }
-}
-
-afterEvaluate {
-  baselineVectorTest { filter.includeTestsMatching(compat.vectorTestFilter.get()) }
 }
 
 tasks.named("check") {
