@@ -1,11 +1,18 @@
 package io.github.ppzxc.strand.conformance;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
+import com.google.gson.Strictness;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import java.io.IOException;
+import java.io.StringReader;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,7 +38,7 @@ final class VectorLoader {
 
     private VectorLoader() {}
 
-    static List<Vector> load(Path file) {
+    static List<ConformanceVector> load(Path file) {
         try {
             return parse(file.getFileName().toString(), new String(Files.readAllBytes(file), StandardCharsets.UTF_8));
         } catch (IOException e) {
@@ -39,23 +46,21 @@ final class VectorLoader {
         }
     }
 
-    static List<Vector> parse(String fileName, String json) {
-        JsonElement root;
-        try {
-            root = JsonParser.parseString(json);
-        } catch (JsonParseException e) {
-            throw fail(fileName, "JSON 문법 오류: " + e.getMessage());
+    static List<ConformanceVector> parse(String fileName, String json) {
+        if (json.trim().isEmpty()) {
+            throw fail(fileName, "", "파일이 비어 있다");
         }
+        JsonElement root = readTree(fileName, json);
         if (!root.isJsonArray()) {
-            throw fail(fileName, "최상위 값은 벡터 객체의 배열이어야 한다");
+            throw fail(fileName, "", "최상위 값은 벡터 객체의 배열이어야 한다");
         }
-        List<Vector> vectors = new ArrayList<>();
+        List<ConformanceVector> vectors = new ArrayList<>();
         Set<String> ids = new HashSet<>();
         int index = 0;
         for (JsonElement element : root.getAsJsonArray()) {
-            Vector vector = parseVector(fileName, index, element);
+            ConformanceVector vector = parseVector(fileName, index, element);
             if (!ids.add(vector.id())) {
-                throw fail(fileName, "id 중복: " + vector.id());
+                throw fail(fileName, location(index, vector.id()), "id 중복");
             }
             vectors.add(vector);
             index++;
@@ -63,45 +68,113 @@ final class VectorLoader {
         return vectors;
     }
 
-    private static Vector parseVector(String fileName, int index, JsonElement element) {
-        String where = "[" + index + "]";
+    /**
+     * 엄격 모드 JsonReader로 트리를 만든다. Gson 트리 API는 한 객체 안의 같은 키를 조용히 덮어쓰므로
+     * 객체를 직접 조립하면서 중복 키를 거부한다.
+     */
+    private static JsonElement readTree(String fileName, String json) {
+        try (JsonReader reader = new JsonReader(new StringReader(json))) {
+            reader.setStrictness(Strictness.STRICT);
+            JsonElement root = readValue(fileName, reader);
+            if (reader.peek() != JsonToken.END_DOCUMENT) {
+                throw fail(fileName, "", "JSON 문법 오류: 최상위 값 뒤에 내용이 더 있다");
+            }
+            return root;
+        } catch (IOException | JsonParseException | IllegalStateException | NumberFormatException e) {
+            throw fail(fileName, "", "JSON 문법 오류: " + e.getMessage());
+        }
+    }
+
+    private static JsonElement readValue(String fileName, JsonReader reader) throws IOException {
+        switch (reader.peek()) {
+            case BEGIN_OBJECT:
+                JsonObject object = new JsonObject();
+                reader.beginObject();
+                while (reader.hasNext()) {
+                    String name = reader.nextName();
+                    if (object.has(name)) {
+                        throw fail(fileName, "", "JSON 중복 키: " + name);
+                    }
+                    object.add(name, readValue(fileName, reader));
+                }
+                reader.endObject();
+                return object;
+            case BEGIN_ARRAY:
+                JsonArray array = new JsonArray();
+                reader.beginArray();
+                while (reader.hasNext()) {
+                    array.add(readValue(fileName, reader));
+                }
+                reader.endArray();
+                return array;
+            case STRING:
+                return new JsonPrimitive(reader.nextString());
+            case NUMBER:
+                return new JsonPrimitive(new BigDecimal(reader.nextString()));
+            case BOOLEAN:
+                return new JsonPrimitive(reader.nextBoolean());
+            case NULL:
+                reader.nextNull();
+                return JsonNull.INSTANCE;
+            default:
+                throw new IllegalStateException("예상하지 못한 토큰: " + reader.peek());
+        }
+    }
+
+    private static String location(int index, String id) {
+        return id.isEmpty() ? "[" + index + "]" : "[" + index + "](id=" + id + ")";
+    }
+
+    private static ConformanceVector parseVector(String fileName, int index, JsonElement element) {
         if (!element.isJsonObject()) {
-            throw fail(fileName, where + " 벡터는 객체여야 한다");
+            throw fail(fileName, location(index, ""), "벡터는 객체여야 한다");
         }
         JsonObject object = element.getAsJsonObject();
+        // id를 알 수 있으면 이후 모든 오류 메시지에 id를 넣는다.
+        String knownId =
+                object.has(ID) && isString(object.get(ID)) ? object.get(ID).getAsString() : "";
+        String where = location(index, knownId);
         for (String name : object.keySet()) {
             if (!REQUIRED.contains(name)) {
-                throw fail(fileName, where + " 알 수 없는 필드: " + name);
+                throw fail(fileName, where, "알 수 없는 필드: " + name);
             }
         }
         for (String name : REQUIRED) {
             if (!object.has(name)) {
-                throw fail(fileName, where + " 필수 필드 누락: " + name);
+                throw fail(fileName, where, "필수 필드 누락: " + name);
             }
         }
         String id = string(fileName, where, object, ID);
+        if (id.isEmpty()) {
+            throw fail(fileName, where, "id는 비어 있으면 안 된다");
+        }
         String description = string(fileName, where, object, DESCRIPTION);
         String result = string(fileName, where, object, RESULT);
-        String bytes = string(fileName, where + "(" + id + ")", object, BYTES);
-        return new Vector(id, description, parseResult(fileName, where, result), parseHex(fileName, where, bytes));
+        String bytes = string(fileName, where, object, BYTES);
+        return new ConformanceVector(
+                id, description, parseResult(fileName, where, result), parseHex(fileName, where, bytes));
+    }
+
+    private static boolean isString(JsonElement value) {
+        return value.isJsonPrimitive() && value.getAsJsonPrimitive().isString();
     }
 
     private static String string(String fileName, String where, JsonObject object, String name) {
         JsonElement value = object.get(name);
-        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
-            throw fail(fileName, where + " 필드 " + name + "은 문자열이어야 한다");
+        if (!isString(value)) {
+            throw fail(fileName, where, "필드 " + name + "은 문자열이어야 한다");
         }
         return value.getAsString();
     }
 
-    private static Vector.Result parseResult(String fileName, String where, String result) {
+    private static ConformanceVector.Result parseResult(String fileName, String where, String result) {
         switch (result) {
             case "valid":
-                return Vector.Result.VALID;
+                return ConformanceVector.Result.VALID;
             case "invalid":
-                return Vector.Result.INVALID;
+                return ConformanceVector.Result.INVALID;
             default:
-                throw fail(fileName, where + " result는 valid 또는 invalid여야 한다: " + result);
+                throw fail(fileName, where, "result는 valid 또는 invalid여야 한다: " + result);
         }
     }
 
@@ -113,15 +186,15 @@ final class VectorLoader {
                 continue;
             }
             if (c >= 'A' && c <= 'F') {
-                throw fail(fileName, where + " hex에 대문자가 있다(소문자만 허용): " + c);
+                throw fail(fileName, where, "hex에 대문자가 있다(소문자만 허용): " + c);
             }
             if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
-                throw fail(fileName, where + " hex가 아닌 문자: " + c);
+                throw fail(fileName, where, "hex가 아닌 문자: " + c);
             }
             digits.append(c);
         }
         if (digits.length() % 2 != 0) {
-            throw fail(fileName, where + " hex 길이가 홀수다: " + digits.length());
+            throw fail(fileName, where, "hex 길이가 홀수다: " + digits.length());
         }
         byte[] bytes = new byte[digits.length() / 2];
         for (int i = 0; i < bytes.length; i++) {
@@ -130,7 +203,8 @@ final class VectorLoader {
         return bytes;
     }
 
-    private static InvalidVectorException fail(String fileName, String message) {
-        return new InvalidVectorException(fileName + ": " + message);
+    /** 모든 오류는 {@code 파일명: [위치](id=...) 메시지} 형식이다. */
+    private static InvalidVectorException fail(String fileName, String where, String message) {
+        return new InvalidVectorException(fileName + ": " + (where.isEmpty() ? "" : where + " ") + message);
     }
 }

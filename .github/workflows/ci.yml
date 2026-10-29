@@ -40,8 +40,8 @@ jobs:
           distribution: temurin
           java-version: 25
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-      # examples(release 11)는 매트릭스에서 뺀다. 배포 모듈과 conformance만 테스트한다.
-      - run: ./gradlew :core:test :conformance:test -PtestJavaVersion=${{ matrix.java }}
+      # 매트릭스 대상 모듈은 루트 build.gradle.kts의 runtimeMatrixTest가 정한다(examples 제외).
+      - run: ./gradlew runtimeMatrixTest -PtestJavaVersion=${{ matrix.java }}
 
   ci-ok:
     name: ci-ok

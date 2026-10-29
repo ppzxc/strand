@@ -19,9 +19,15 @@ final class VectorSuite {
 
     private VectorSuite() {}
 
-    /** Gradle test 작업의 작업 디렉터리는 모듈 디렉터리이므로 {@code conformance/vectors/}를 가리킨다. */
+    static final String VECTORS_DIR_PROPERTY = "strand.conformance.vectors.dir";
+
+    /** 빌드가 {@value #VECTORS_DIR_PROPERTY} 시스템 프로퍼티로 넘긴 벡터 디렉터리. 다른 디렉터리의 벡터를 돌릴 때도 같은 프로퍼티를 쓴다. */
     static Path defaultDirectory() {
-        return Paths.get("vectors");
+        String dir = System.getProperty(VECTORS_DIR_PROPERTY);
+        if (dir == null) {
+            throw new IllegalStateException("시스템 프로퍼티 " + VECTORS_DIR_PROPERTY + "가 없다");
+        }
+        return Paths.get(dir);
     }
 
     static Stream<DynamicTest> dynamicTests(Path directory) {
@@ -30,7 +36,7 @@ final class VectorSuite {
         List<DynamicTest> tests = new ArrayList<>();
         for (Path file : files) {
             String fileName = file.getFileName().toString();
-            for (Vector vector : VectorLoader.load(file)) {
+            for (ConformanceVector vector : VectorLoader.load(file)) {
                 tests.add(DynamicTest.dynamicTest(fileName + "/" + vector.id(), () -> run(vector)));
             }
         }
@@ -48,9 +54,12 @@ final class VectorSuite {
         }
     }
 
-    // core에 규격 구현이 생기기 전까지는 로더가 받아들였다는 사실 외에 검증할 대상이 없다.
+    // core에 규격 구현이 생기기 전까지는 로더가 받아들인 필드가 일관된지만 확인한다(내용 단언은 로더 테스트가 한다).
     // 규격 구현이 들어오면 여기서 vector.bytes()를 core에 넘기고 result와 비교한다.
-    private static void run(Vector vector) {
-        assertThat(vector.result()).isNotNull();
+    private static void run(ConformanceVector vector) {
+        assertThat(vector.id()).isNotEmpty();
+        assertThat(vector.description()).isNotNull();
+        assertThat(vector.result()).isIn(ConformanceVector.Result.VALID, ConformanceVector.Result.INVALID);
+        assertThat(vector.bytes()).isNotNull();
     }
 }
