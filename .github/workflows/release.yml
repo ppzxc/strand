@@ -15,6 +15,7 @@ jobs:
   preflight:
     name: preflight
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,6 +33,11 @@ jobs:
     name: release
     needs: [preflight, gate]
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # 같은 태그의 중복 실행이 Portal에 같은 버전을 두 번 올리지 않게 직렬화한다. 진행 중인 실행은 취소하지 않는다.
+    concurrency:
+      group: release-${{ github.ref_name }}
+      cancel-in-progress: false
     # 쓰기 권한은 이 잡에만 준다(draft Release 생성).
     permissions:
       contents: write
@@ -47,37 +53,51 @@ jobs:
           java-version: 25
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
-      # Central Portal에 서명해 업로드한다. USER_MANAGED라 VALIDATED에서 멈추고 Publish는 사람이 한다.
+      # Central Portal에 서명해 업로드한다. USER_MANAGED라 Publish는 사람이 한다.
+      # vanniktech 0.37.0은 automaticRelease=false이면 검증을 기다리지 않고 "Skipping deployment validation!"으로 끝낸다.
+      # 그래서 업로드 로그에서 deployment id를 얻고 다음 단계가 VALIDATED까지 기다린다.
       # signingInMemoryKey는 `gpg --export-secret-keys <KEY_ID> | base64 -w0` 값이다(#21에서 이 형식으로 시험).
-      - name: Upload to Central Portal (stops at VALIDATED)
+      # --no-configuration-cache는 쓰지 않는다: vanniktech 플러그인은 configuration cache를 지원하고,
+      # 이 저장소는 `org.gradle.configuration-cache.problems=fail`이라 호환 문제가 있으면 실패로 드러난다.
+      - name: Upload to Central Portal
+        id: upload
+        shell: bash
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralUsername }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralPassword }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyId }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyPassword }}
-        run: ./gradlew publishToMavenCentral --no-configuration-cache
+        run: |
+          ./gradlew publishToMavenCentral --console=plain 2>&1 | tee "$RUNNER_TEMP/upload.log"
+          echo "deployment-id=$(.github/scripts/parse-deployment-id.sh < "$RUNNER_TEMP/upload.log")" >> "$GITHUB_OUTPUT"
 
-      # 하네스 (b): VALIDATED 상태 배포를 Portal의 download 엔드포인트(Maven 저장소 형식)에서 Bearer 토큰으로 받아 검증한다.
+      # 하네스 (b): 먼저 이 deployment가 VALIDATED가 될 때까지 기다린다(FAILED, 30분 타임아웃이면 실패).
+      # 그다음 Portal의 download 엔드포인트(Maven 저장소 형식)를 Bearer 토큰으로 쓴다.
+      # URL을 `/deployment/<id>/download/`로 한정해 이전 VALIDATED 잔여 배포가 검증을 가리지 못하게 한다.
       # 토큰은 사용자 토큰 `username:password`의 base64다(Central Portal 문서 "Publisher API").
-      - name: Deploy test harness (b) against Portal staging
+      - name: Wait for VALIDATED and run deploy test harness (b)
         env:
           PORTAL_USERNAME: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralUsername }}
           PORTAL_PASSWORD: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralPassword }}
+          DEPLOYMENT_ID: ${{ steps.upload.outputs.deployment-id }}
         run: |
           STRAND_REPO_TOKEN="$(printf '%s:%s' "$PORTAL_USERNAME" "$PORTAL_PASSWORD" | base64 -w0)"
           echo "::add-mask::$STRAND_REPO_TOKEN"
           export STRAND_REPO_TOKEN
-          deploy-test/run.sh "$VERSION" https://central.sonatype.com/api/v1/publisher/deployments/download/
+          .github/scripts/wait-portal-validated.sh "$DEPLOYMENT_ID"
+          deploy-test/run.sh "$VERSION" "https://central.sonatype.com/api/v1/publisher/deployment/$DEPLOYMENT_ID/download/"
 
       # SBOM(CycloneDX JSON)은 Release에만 붙이고 Central에는 올리지 않는다.
       - name: Generate SBOM
-        run: ./gradlew :core:cyclonedxBom --no-configuration-cache
+        run: ./gradlew :core:cyclonedxBom
 
       - name: Collect and sign release assets
         env:
           SIGNING_KEY: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
           SIGNING_PASSWORD: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyPassword }}
+          # Portal 업로드(vanniktech)와 같은 키로 서명하도록 --local-user에 쓴다.
+          SIGNING_KEY_ID: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyId }}
         run: |
           mkdir release-assets
           cp "core/build/libs/strand-core-$VERSION.jar" \
