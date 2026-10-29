@@ -10,6 +10,19 @@ updates:
       github-actions:
         patterns: ['*']
 
+  # 배포 테스트 하네스의 Maven 소비자. Gradle 소비자는 일부러 추가하지 않는다.
+  - package-ecosystem: maven
+    directories:
+      - /deploy-test/maven-classpath
+      - /deploy-test/maven-modulepath
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      maven:
+        patterns: ['*']
+
   # 버전 카탈로그(gradle/libs.versions.toml)는 루트와 build-logic이 공유한다.
   # build-logic은 별도 included build라 directories에 둘 다 적는다.
   - package-ecosystem: gradle
