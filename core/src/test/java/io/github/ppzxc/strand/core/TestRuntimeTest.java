@@ -26,3 +26,5 @@ class TestRuntimeTest {
         assertThat(normalized).isEqualTo(expected);
     }
 }
+
+class   Ugly   { }
