@@ -63,3 +63,38 @@ STUB
   run "$scripts/wait-portal-validated.sh" some-id
   [ "$status" -ne 0 ]
 }
+
+@test "PUBLISHING·PUBLISHED는 이미 검증 단계를 지났지만 하네스 (b) 전에 공개됐다는 뜻이라 실패한다" {
+  for st in PUBLISHING PUBLISHED; do
+    printf '%s\n' "$st" > "$STUB_STATES"
+    run "$scripts/wait-portal-validated.sh" some-id
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"$st"* ]]
+    [[ "$output" == *"Publish"* ]]
+  done
+}
+
+@test "timeout·interval이 숫자가 아니면 실패" {
+  printf 'VALIDATED\n' > "$STUB_STATES"
+  TIMEOUT_SECONDS=abc run "$scripts/wait-portal-validated.sh" some-id
+  [ "$status" -ne 0 ]
+  INTERVAL_SECONDS=1.5 run "$scripts/wait-portal-validated.sh" some-id
+  [ "$status" -ne 0 ]
+  INTERVAL_SECONDS= run "$scripts/wait-portal-validated.sh" some-id
+  [ "$status" -ne 0 ]
+}
+
+@test "curl에 connect-timeout과 max-time을 준다" {
+  sed -i '2i echo "$*" > "$STUB_ARGS"' "$BATS_TEST_TMPDIR/bin/curl"
+  export STUB_ARGS="$BATS_TEST_TMPDIR/args"
+  printf 'VALIDATED\n' > "$STUB_STATES"
+  run "$scripts/wait-portal-validated.sh" some-id
+  [ "$status" -eq 0 ]
+  grep -q -- '--connect-timeout' "$STUB_ARGS"
+  grep -q -- '--max-time 30' "$STUB_ARGS"
+}
+
+@test "id가 빈 문자열이면 실패" {
+  run "$scripts/wait-portal-validated.sh" ""
+  [ "$status" -ne 0 ]
+}

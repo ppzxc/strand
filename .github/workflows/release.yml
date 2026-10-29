@@ -70,7 +70,10 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyPassword }}
         run: |
           ./gradlew publishToMavenCentral --console=plain 2>&1 | tee "$RUNNER_TEMP/upload.log"
-          echo "deployment-id=$(.github/scripts/parse-deployment-id.sh < "$RUNNER_TEMP/upload.log")" >> "$GITHUB_OUTPUT"
+          # 대입과 echo를 나눠야 파싱 실패가 즉시 종료(set -e)로 이어진다. 빈 id도 거부한다.
+          id="$(.github/scripts/parse-deployment-id.sh < "$RUNNER_TEMP/upload.log")"
+          [ -n "$id" ] || { echo "::error::deployment id가 비어 있다"; exit 1; }
+          echo "deployment-id=$id" >> "$GITHUB_OUTPUT"
 
       # 하네스 (b): 먼저 이 deployment가 VALIDATED가 될 때까지 기다린다(FAILED, 30분 타임아웃이면 실패).
       # 그다음 Portal의 download 엔드포인트(Maven 저장소 형식)를 Bearer 토큰으로 쓴다.
