@@ -8,8 +8,8 @@ set -euo pipefail
 
 id="${1:?usage: wait-portal-validated.sh <deployment id>}"
 : "${STRAND_REPO_TOKEN:?STRAND_REPO_TOKEN이 없다}"
-timeout_s="${TIMEOUT_SECONDS:-1800}"
-interval="${INTERVAL_SECONDS:-10}"
+timeout_s="${TIMEOUT_SECONDS-1800}"
+interval="${INTERVAL_SECONDS-10}"
 base="${PORTAL_BASE:-https://central.sonatype.com}"
 
 for v in "$timeout_s" "$interval"; do
