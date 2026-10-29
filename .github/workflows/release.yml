@@ -1,0 +1,120 @@
+name: Release
+
+# X.Y.Z 태그를 밀면: 게이트 -> Central Portal 업로드(VALIDATED에서 정지) -> 하네스 (b) -> SBOM·서명 -> draft GitHub Release.
+# Publish(Portal)와 Release 공개는 사람이 한다.
+on:
+  push:
+    # 태그 필터는 glob이라 0.0.1-rc1 같은 태그도 통과할 수 있다. 첫 잡이 정규식으로 다시 검사한다.
+    tags:
+      - '[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # 태그가 ^[0-9]+\.[0-9]+\.[0-9]+$ 이고 gradle.properties의 version과 같은지 본다. 아니면 업로드 전에 실패한다.
+      - run: .github/scripts/check-release-tag.sh "$GITHUB_REF_NAME"
+
+  # 게이트는 PR CI와 같은 reusable workflow다.
+  gate:
+    name: gate
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: release
+    needs: [preflight, gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # 같은 태그의 중복 실행이 Portal에 같은 버전을 두 번 올리지 않게 직렬화한다. 진행 중인 실행은 취소하지 않는다.
+    concurrency:
+      group: release-${{ github.ref_name }}
+      cancel-in-progress: false
+    # 쓰기 권한은 이 잡에만 준다(draft Release 생성).
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      # Central Portal에 서명해 업로드한다. USER_MANAGED라 Publish는 사람이 한다.
+      # vanniktech 0.37.0은 automaticRelease=false이면 검증을 기다리지 않고 "Skipping deployment validation!"으로 끝낸다.
+      # 그래서 업로드 로그에서 deployment id를 얻고 다음 단계가 VALIDATED까지 기다린다.
+      # signingInMemoryKey는 `gpg --export-secret-keys <KEY_ID> | base64 -w0` 값이다(#21에서 이 형식으로 시험).
+      # --no-configuration-cache는 쓰지 않는다: vanniktech 플러그인은 configuration cache를 지원하고,
+      # 이 저장소는 `org.gradle.configuration-cache.problems=fail`이라 호환 문제가 있으면 실패로 드러난다.
+      - name: Upload to Central Portal
+        id: upload
+        shell: bash
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralUsername }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralPassword }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyId }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyPassword }}
+        run: |
+          ./gradlew publishToMavenCentral --console=plain 2>&1 | tee "$RUNNER_TEMP/upload.log"
+          # 대입과 echo를 나눠야 파싱 실패가 즉시 종료(set -e)로 이어진다. 빈 id도 거부한다.
+          id="$(.github/scripts/parse-deployment-id.sh < "$RUNNER_TEMP/upload.log")"
+          [ -n "$id" ] || { echo "::error::deployment id가 비어 있다"; exit 1; }
+          echo "deployment-id=$id" >> "$GITHUB_OUTPUT"
+
+      # 하네스 (b): 먼저 이 deployment가 VALIDATED가 될 때까지 기다린다(FAILED, 30분 타임아웃이면 실패).
+      # 그다음 Portal의 download 엔드포인트(Maven 저장소 형식)를 Bearer 토큰으로 쓴다.
+      # URL을 `/deployment/<id>/download/`로 한정해 이전 VALIDATED 잔여 배포가 검증을 가리지 못하게 한다.
+      # 토큰은 사용자 토큰 `username:password`의 base64다(Central Portal 문서 "Publisher API").
+      - name: Wait for VALIDATED and run deploy test harness (b)
+        env:
+          PORTAL_USERNAME: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralUsername }}
+          PORTAL_PASSWORD: ${{ secrets.ORG_GRADLE_PROJECT_mavenCentralPassword }}
+          DEPLOYMENT_ID: ${{ steps.upload.outputs.deployment-id }}
+        run: |
+          STRAND_REPO_TOKEN="$(printf '%s:%s' "$PORTAL_USERNAME" "$PORTAL_PASSWORD" | base64 -w0)"
+          echo "::add-mask::$STRAND_REPO_TOKEN"
+          export STRAND_REPO_TOKEN
+          .github/scripts/wait-portal-validated.sh "$DEPLOYMENT_ID"
+          deploy-test/run.sh "$VERSION" "https://central.sonatype.com/api/v1/publisher/deployment/$DEPLOYMENT_ID/download/"
+
+      # SBOM(CycloneDX JSON)은 Release에만 붙이고 Central에는 올리지 않는다.
+      - name: Generate SBOM
+        run: ./gradlew :core:cyclonedxBom
+
+      - name: Collect and sign release assets
+        env:
+          SIGNING_KEY: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
+          SIGNING_PASSWORD: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyPassword }}
+          # Portal 업로드(vanniktech)와 같은 키로 서명하도록 --local-user에 쓴다.
+          SIGNING_KEY_ID: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyId }}
+        run: |
+          mkdir release-assets
+          cp "core/build/libs/strand-core-$VERSION.jar" \
+             "core/build/libs/strand-core-$VERSION-sources.jar" \
+             "core/build/libs/strand-core-$VERSION-javadoc.jar" release-assets/
+          cp core/build/reports/cyclonedx/bom.json "release-assets/strand-core-$VERSION-cyclonedx.json"
+          cd release-assets
+          ../.github/scripts/sign-artifacts.sh ./*
+
+      # draft Release. 공개는 사람이 한다.
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$VERSION" --draft --verify-tag --title "$VERSION" \
+            --notes "strand-core $VERSION. Central Portal에서 Publish한 뒤 이 draft를 공개한다." \
+            release-assets/*

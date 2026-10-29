@@ -11,6 +11,7 @@ errorprone-plugin = "5.1.1"
 nullaway-plugin = "3.3.0"
 spotless = "8.10.4"
 vanniktech-maven-publish = "0.37.0"
+cyclonedx-plugin = "3.5.1"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -27,3 +28,4 @@ errorprone = { id = "net.ltgt.errorprone", version.ref = "errorprone-plugin" }
 nullaway = { id = "net.ltgt.nullaway", version.ref = "nullaway-plugin" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "vanniktech-maven-publish" }
+cyclonedx = { id = "org.cyclonedx.bom", version.ref = "cyclonedx-plugin" }

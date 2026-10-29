@@ -11,6 +11,7 @@ plugins {
   id("net.ltgt.nullaway")
   jacoco
   id("com.vanniktech.maven.publish")
+  id("org.cyclonedx.bom")
 }
 
 private val catalog = libsCatalog
@@ -160,4 +161,14 @@ mavenPublishing {
       developerConnection = "scm:git:ssh://git@github.com/ppzxc/strand.git"
     }
   }
+}
+
+// SBOM: CycloneDX JSON만 만든다(릴리스 워크플로가 서명해 GitHub Release에 붙인다. Central에는 올리지 않는다).
+tasks.cyclonedxBom {
+  xmlOutput.unsetConvention()
+  // 프로젝트 이름("core") 대신 배포 좌표 io.github.ppzxc:strand-core:<version>으로 기록한다.
+  componentName.set(artifactName)
+  componentGroup.set(project.group.toString())
+  componentVersion.set(project.version.toString())
+  jsonOutput.set(layout.buildDirectory.file("reports/cyclonedx/bom.json"))
 }
