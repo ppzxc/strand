@@ -81,12 +81,15 @@ run_maven() {
   check_output "$1"
   if [ "$repo" != "mavenLocal" ]; then
     # Central에도 같은 좌표가 있을 수 있다. strand-core가 지정 저장소에서 왔는지 로컬 저장소의 출처 기록으로 확인한다.
-    grep -q ">strand-input=" "$maven_local_repo/io/github/ppzxc/strand-core/$version/_remote.repositories" || {
+    recorded_from_input "$maven_local_repo/io/github/ppzxc/strand-core/$version/_remote.repositories" || {
       echo "strand-core가 지정 저장소($repo)에서 오지 않았다" >&2
       exit 1
     }
   fi
 }
+
+# shellcheck source=deploy-test/origin-check.sh
+source "$here/origin-check.sh"
 
 mvn="$(resolve_mvn)"
 
