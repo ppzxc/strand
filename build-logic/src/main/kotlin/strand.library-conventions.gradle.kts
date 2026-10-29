@@ -1,3 +1,6 @@
+import com.vanniktech.maven.publish.JavaLibrary
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.SourcesJar
 import net.ltgt.gradle.errorprone.errorprone
 import net.ltgt.gradle.nullaway.nullaway
 import org.gradle.external.javadoc.StandardJavadocDocletOptions
@@ -7,7 +10,7 @@ plugins {
   id("net.ltgt.errorprone")
   id("net.ltgt.nullaway")
   jacoco
-  `maven-publish`
+  id("com.vanniktech.maven.publish")
 }
 
 private val catalog = libsCatalog
@@ -57,11 +60,6 @@ tasks.named<JavaCompile>("compileTestJava") {
 
 base {
   archivesName = artifactName
-}
-
-java {
-  withSourcesJar()
-  withJavadocJar()
 }
 
 tasks.javadoc {
@@ -124,35 +122,42 @@ tasks.check {
   dependsOn(verifyDependencies, tasks.jacocoTestCoverageVerification, tasks.javadoc)
 }
 
-publishing {
-  publications {
-    create<MavenPublication>("maven") {
-      from(components["java"])
-      artifactId = artifactName
-      pom {
-        name = artifactName
-        description = "strand: 바이트 인코딩·디코딩 규격의 Java 구현"
-        url = "https://github.com/ppzxc/strand"
-        licenses {
-          license {
-            name = "The Apache License, Version 2.0"
-            url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
-            distribution = "repo"
-          }
-        }
-        developers {
-          developer {
-            id = "ppzxc"
-            name = "ppzxc"
-            url = "https://github.com/ppzxc"
-          }
-        }
-        scm {
-          url = "https://github.com/ppzxc/strand"
-          connection = "scm:git:https://github.com/ppzxc/strand.git"
-          developerConnection = "scm:git:ssh://git@github.com/ppzxc/strand.git"
-        }
+// 배포: Central Portal USER_MANAGED(VALIDATED에서 멈추고 사람이 Publish). jar, sources jar, javadoc jar.
+mavenPublishing {
+  publishToMavenCentral(automaticRelease = false)
+  configure(JavaLibrary(javadocJar = JavadocJar.Javadoc(), sourcesJar = SourcesJar.Sources()))
+  // artifactId 기본값은 프로젝트 이름("core")이라 좌표를 명시한다.
+  coordinates(project.group.toString(), artifactName, project.version.toString())
+
+  // 서명 키(in-memory, CI의 ORG_GRADLE_PROJECT_signingInMemoryKey)가 비어 있지 않을 때만 서명한다.
+  // signAllPublications()는 SNAPSHOT이 아닌 버전에서 서명 자격이 없으면 빌드를 실패시킨다
+  // (vanniktech 문서, 확인: publishToMavenLocal이 "No configured signatory"로 실패). 그래서 키 없는 로컬 배포는 무서명으로 둔다.
+  if (!providers.gradleProperty("signingInMemoryKey").orNull.isNullOrBlank()) {
+    signAllPublications()
+  }
+
+  pom {
+    name = artifactName
+    description = "strand: 바이트 인코딩·디코딩 규격의 Java 구현"
+    url = "https://github.com/ppzxc/strand"
+    licenses {
+      license {
+        name = "The Apache License, Version 2.0"
+        url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
+        distribution = "repo"
       }
+    }
+    developers {
+      developer {
+        id = "ppzxc"
+        name = "ppzxc"
+        url = "https://github.com/ppzxc"
+      }
+    }
+    scm {
+      url = "https://github.com/ppzxc/strand"
+      connection = "scm:git:https://github.com/ppzxc/strand.git"
+      developerConnection = "scm:git:ssh://git@github.com/ppzxc/strand.git"
     }
   }
 }

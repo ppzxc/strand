@@ -7,3 +7,6 @@ out/
 .kotlin/
 .claude/
 *.class
+deploy-test/*/output.log
+deploy-test/*/.gradle/
+deploy-test/*/target/

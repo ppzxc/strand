@@ -13,4 +13,5 @@ dependencies {
   implementation(libs.plugins.errorprone.asDependency())
   implementation(libs.plugins.nullaway.asDependency())
   implementation(libs.plugins.spotless.asDependency())
+  implementation(libs.plugins.maven.publish.asDependency())
 }
