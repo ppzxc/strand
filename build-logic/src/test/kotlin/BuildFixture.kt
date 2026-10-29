@@ -9,6 +9,8 @@ import javax.tools.ToolProvider
 /**
  * 임시 디렉터리에 git 저장소, 태그, 파일 기반 Maven 저장소(기준선 jar), 벡터를 만들고 GradleRunner로 빌드한다.
  * 태그는 이 임시 저장소에만 만든다.
+ *
+ * 한계: 벡터 재실행 시나리오의 테스트 의존성(JUnit)은 mavenCentral에서 받으므로 네트워크가 필요하다(CI는 문제없다). 오프라인 로컬에서는 해당 테스트가 실패한다.
  */
 class BuildFixture(
   val dir: File,
@@ -17,13 +19,16 @@ class BuildFixture(
   private val usesCompatExtension: Boolean = true,
   /** false면 git 저장소를 만들지 않는다. */
   gitRepository: Boolean = true,
+  /** Gradle 프로젝트 디렉터리. git 저장소 루트([dir])의 하위 디렉터리일 수 있다. */
+  val projectDir: File = dir,
 ) {
+
   private var extraScript = ""
   val repo = File(dir, "baseline-repo").also { it.mkdirs() }
 
   init {
     if (gitRepository) git("init", "-q")
-    write(".gitignore", "build/\n.gradle/\nbaseline-repo/\n")
+    writeAtRepoRoot(".gitignore", "build/\n.gradle/\nbaseline-repo/\n")
     // 실제 저장소의 카탈로그를 그대로 쓴다. build-logic 테스트의 작업 디렉터리는 build-logic이다.
     val catalog = File("../gradle/libs.versions.toml").absoluteFile.invariantSeparatorsPath
     write(
@@ -59,8 +64,14 @@ class BuildFixture(
     )
   }
 
-  fun write(path: String, text: String) {
-    val file = File(dir, path)
+  /** 프로젝트 디렉터리 기준 경로에 쓴다. */
+  fun write(path: String, text: String) = writeTo(projectDir, path, text)
+
+  /** git 저장소 루트 기준 경로에 쓴다. 벡터(`conformance/vectors`)는 루트 기준이다. */
+  fun writeAtRepoRoot(path: String, text: String) = writeTo(dir, path, text)
+
+  private fun writeTo(base: File, path: String, text: String) {
+    val file = File(base, path)
     file.parentFile.mkdirs()
     file.writeText(text)
   }
@@ -106,7 +117,7 @@ class BuildFixture(
   }
 
   private fun runner(vararg args: String) = GradleRunner.create()
-    .withProjectDir(dir)
+    .withProjectDir(projectDir)
     .withPluginClasspath()
     .withArguments(*args, "--configuration-cache", "--stacktrace")
 

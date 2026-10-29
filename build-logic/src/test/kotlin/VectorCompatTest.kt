@@ -34,8 +34,11 @@ class VectorCompatTest {
 
   private fun fixture(version: String): BuildFixture =
     BuildFixture(dir, "strand.vector-compat-conventions").also {
-      it.buildScript(
-        version,
+      it.buildScript(version, fixtureBuildExtra)
+      it.write("src/test/java/VectorConformanceTest.java", runnerTest)
+    }
+
+  private val fixtureBuildExtra =
         """
         dependencies {
           testImplementation(platform("org.junit:junit-bom:5.14.4"))
@@ -46,10 +49,7 @@ class VectorCompatTest {
           useJUnitPlatform()
           systemProperty("strand.conformance.vectors.dir", "${'$'}projectDir/conformance/vectors")
         }
-        """.trimIndent(),
-      )
-      it.write("src/test/java/VectorConformanceTest.java", runnerTest)
-    }
+        """.trimIndent()
 
   private fun rejectedReport(): String =
     File(dir, "build/test-results/baselineVectorTest").listFiles()!!.single { it.extension == "xml" }.readText()
@@ -145,6 +145,20 @@ class VectorCompatTest {
     val f = fixture("0.0.2")
     f.write("src/test/java/OtherTest.java", "class OtherTest { @org.junit.jupiter.api.Test void other() { org.junit.jupiter.api.Assertions.fail(\"필터가 무시됐다\"); } }")
     baselineVectors(f, "ok")
+
+    val result = f.run("baselineVectorTest")
+
+    assertThat(result.task(":baselineVectorTest")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
+  }
+
+  @Test
+  fun `프로젝트가 git 저장소의 하위 디렉터리여도 기준선 벡터를 루트 기준 경로로 꺼낸다`() {
+    val f = BuildFixture(dir, "strand.vector-compat-conventions", projectDir = File(dir, "sub").also { it.mkdirs() })
+    f.buildScript("0.0.2", fixtureBuildExtra)
+    f.write("src/test/java/VectorConformanceTest.java", runnerTest)
+    f.writeAtRepoRoot("conformance/vectors/v.json", "ok")
+    f.commitAndTag("0.0.1")
+    f.writeAtRepoRoot("conformance/vectors/v.json", "FAIL") // 작업 트리 벡터는 실패지만 기준선은 통과
 
     val result = f.run("baselineVectorTest")
 

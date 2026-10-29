@@ -194,4 +194,26 @@ class ApiCompatTest {
 
     assertThat(f.run("compatBaseline").output).contains("기준선 없음")
   }
+
+  @Test
+  fun `git 실행 파일이 없으면 기준선 없음이다`() {
+    val f = fixture("0.0.2")
+    f.commitAndTag("0.0.1")
+    f.buildScript("0.0.2", "strandCompat { gitExecutable = \"${File(dir, "no-such-git").path}\" }")
+
+    assertThat(f.run("compatBaseline").output).contains("기준선 없음")
+  }
+
+  @Test
+  fun `git은 있는데 실행할 수 없으면 기준선 없음으로 삼키지 않고 빌드가 실패한다`() {
+    val f = fixture("0.0.2")
+    f.commitAndTag("0.0.1")
+    // 실행 권한이 없는 파일이라 프로세스 시작이 EACCES(error=13)로 실패한다.
+    val broken = File(dir, "broken-git").apply { writeText("#!/bin/sh\n"); setExecutable(false) }
+    f.buildScript("0.0.2", "strandCompat { gitExecutable = \"${broken.path}\" }")
+
+    val result = f.fail("compatBaseline")
+
+    assertThat(result.output).contains("git을 실행하지 못했다")
+  }
 }

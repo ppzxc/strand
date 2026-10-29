@@ -14,6 +14,7 @@ val extractBaselineVectors = tasks.register<ExtractBaselineVectors>("extractBase
   baseline.set(baselineVersion)
   vectorsPath.set(compat.vectorsPath)
   gitDir.set(rootProject.layout.projectDirectory)
+  gitExecutable.set(compat.gitExecutable)
   outputDir.set(layout.buildDirectory.dir("compat/baseline-vectors"))
 }
 
@@ -38,7 +39,8 @@ val baselineVectorTest = tasks.register<Test>("baselineVectorTest") {
   inputs.property("vectorsPath", vectorsPath)
   inputs.property("vectorTestFilter", testFilter)
 
-  // 스크립트 객체를 잡지 않도록 지역 값만 쓴다(configuration cache). 값은 실행 시점에 읽는다.
+  // 위 inputs 선언과 짝이다: 여기서 실행 시점에 설정하는 값(ignoreFailures, 필터, 시스템 프로퍼티)은 모두 위에서 입력으로 선언돼 있어야 한다.
+  // 스크립트 객체를 잡지 않도록 지역 값만 쓴다(configuration cache).
   doFirst {
     ignoreFailures = !patchOnlyProvider.get()
     filter.includeTestsMatching(testFilter.get())

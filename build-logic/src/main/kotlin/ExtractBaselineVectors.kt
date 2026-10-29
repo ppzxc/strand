@@ -26,8 +26,12 @@ abstract class ExtractBaselineVectors : DefaultTask() {
   @get:Input
   abstract val vectorsPath: Property<String>
 
+  /** git을 실행할 디렉터리. 저장소 루트의 하위여도 된다(경로는 모두 저장소 루트 기준으로 쓴다). */
   @get:Internal
   abstract val gitDir: DirectoryProperty
+
+  @get:Internal
+  abstract val gitExecutable: Property<String>
 
   @get:OutputDirectory
   abstract val outputDir: DirectoryProperty
@@ -46,7 +50,8 @@ abstract class ExtractBaselineVectors : DefaultTask() {
     if (!baseline.isPresent) return
     val ref = "refs/tags/${baseline.get()}"
     val listing = ByteArrayOutputStream()
-    git(listing, "ls-tree", "-r", "--name-only", "-z", ref, "--", vectorsPath.get())
+    // --full-tree: 경로 인자와 출력 모두 저장소 루트 기준. 하위 디렉터리에서 실행해도 `git show ref:path`와 어긋나지 않는다.
+    git(listing, "ls-tree", "--full-tree", "-r", "--name-only", "-z", ref, "--", vectorsPath.get())
     val files = listing.toString(Charsets.UTF_8).split('\u0000').filter { it.isNotEmpty() }
     if (files.isEmpty()) {
       throw GradleException("기준선 태그 ${baseline.get()}에 ${vectorsPath.get()}가 없다")
@@ -61,7 +66,7 @@ abstract class ExtractBaselineVectors : DefaultTask() {
   private fun git(stdout: java.io.OutputStream, vararg args: String) {
     val err = ByteArrayOutputStream()
     val result = exec.exec {
-      commandLine("git", *args)
+      commandLine(gitExecutable.get(), *args)
       workingDir = gitDir.get().asFile
       standardOutput = stdout
       errorOutput = err

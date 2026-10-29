@@ -24,6 +24,9 @@ abstract class StrandCompatExtension {
 
   /** 기준선 벡터 재실행에서 돌릴 테스트(Gradle 테스트 필터 패턴). */
   abstract val vectorTestFilter: Property<String>
+
+  /** git 실행 파일. 기본은 PATH의 `git`. */
+  abstract val gitExecutable: Property<String>
 }
 
 /** `X.Y.Z` 정확히 한 형태만 받는다. `v1.2.3`이나 `1.2.3-rc1` 같은 태그는 기준선 후보가 아니다. */
@@ -67,6 +70,7 @@ abstract class GitBaselineSource : ValueSource<String, GitBaselineSource.Params>
   interface Params : ValueSourceParameters {
     val projectVersion: Property<String>
     val gitDir: DirectoryProperty
+    val gitExecutable: Property<String>
   }
 
   @get:Inject
@@ -78,7 +82,7 @@ abstract class GitBaselineSource : ValueSource<String, GitBaselineSource.Params>
     val err = ByteArrayOutputStream()
     val result = try {
       exec.exec {
-        commandLine("git", "tag", "--list")
+        commandLine(parameters.gitExecutable.get(), "tag", "--list")
         workingDir = parameters.gitDir.get().asFile
         environment("LC_ALL", "C") // 오류 메시지 판별이 로케일에 흔들리지 않게 한다.
         standardOutput = out
@@ -86,7 +90,9 @@ abstract class GitBaselineSource : ValueSource<String, GitBaselineSource.Params>
         isIgnoreExitValue = true
       }
     } catch (e: Exception) {
-      return null // git이 없으면 태그도 없는 것으로 본다.
+      // git 실행 파일이 없을 때만 태그도 없는 것으로 본다. 권한 오류 등 그 밖의 실행 실패는 빌드 실패다.
+      if (isExecutableMissing(e)) return null
+      throw GradleException("git을 실행하지 못했다: ${e.message}", e)
     }
     if (result.exitValue != 0) {
       if ("not a git repository" in err.toString(Charsets.UTF_8)) return null // 소스 압축본 같은 비 git 빌드
@@ -97,11 +103,18 @@ abstract class GitBaselineSource : ValueSource<String, GitBaselineSource.Params>
   }
 }
 
+private val ENOENT = Regex("""error[=:]\s*2\b""")
+
+/** 프로세스 시작 실패 원인이 "실행 파일 없음"(ENOENT)인가. JDK에 따라 메시지가 `error=2,` 또는 `error: 2 (`로 나온다. */
+private fun isExecutableMissing(e: Throwable): Boolean =
+  generateSequence(e) { it.cause }.any { it is java.io.IOException && ENOENT.containsMatchIn(it.message ?: "") }
+
 /** 기준선 버전 provider. 호환성 검사 태스크가 모두 같은 값을 본다. */
 fun Project.compatBaselineVersion(): Provider<String> =
   providers.of(GitBaselineSource::class.java) {
     parameters.projectVersion.set(provider { version.toString() })
     parameters.gitDir.set(rootProject.layout.projectDirectory)
+    parameters.gitExecutable.set(extensions.getByType(StrandCompatExtension::class.java).gitExecutable)
   }
 
 /** 기준선이 있으면 true. 태스크의 onlyIf에 쓴다. */
