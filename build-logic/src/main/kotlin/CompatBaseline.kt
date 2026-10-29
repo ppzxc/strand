@@ -22,9 +22,6 @@ abstract class StrandCompatExtension {
   /** 저장소 루트 기준 벡터 디렉터리. 기준선 태그에서 이 경로를 꺼낸다. */
   abstract val vectorsPath: Property<String>
 
-  /** 기준선 벡터 재실행에서 돌릴 테스트(Gradle 테스트 필터 패턴). */
-  abstract val vectorTestFilter: Property<String>
-
   /** git 실행 파일. 기본은 PATH의 `git`. */
   abstract val gitExecutable: Property<String>
 }

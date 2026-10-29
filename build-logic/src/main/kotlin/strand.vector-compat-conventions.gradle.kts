@@ -6,8 +6,6 @@ plugins {
 
 val compat = extensions.getByType<StrandCompatExtension>()
 val baselineVersion = compatBaselineVersion()
-val patchOnly = compatPatchOnly().orElse(false)
-
 val extractBaselineVectors = tasks.register<ExtractBaselineVectors>("extractBaselineVectors") {
   group = "verification"
   description = "기준선 태그의 벡터 디렉터리를 git에서 꺼낸다."
@@ -32,18 +30,17 @@ val baselineVectorTest = tasks.register<Test>("baselineVectorTest") {
   // 결과를 바꾸는 값은 모두 입력으로 선언한다. 안 그러면 MINOR로 돈 결과가 PATCH에서도 UP-TO-DATE로 재사용된다.
   val vectorsDir = extractBaselineVectors.flatMap { it.outputDir }
   inputs.dir(vectorsDir).withPropertyName("baselineVectors").withPathSensitivity(PathSensitivity.RELATIVE)
-  val patchOnlyProvider = patchOnly
+  val vectorTestFilter = "*VectorConformanceTest.vectors"
+  val patchOnly = compatPatchOnly().orElse(false)
   val vectorsPath = compat.vectorsPath
-  val testFilter = compat.vectorTestFilter
-  inputs.property("patchOnly", patchOnlyProvider)
+  inputs.property("patchOnly", patchOnly)
   inputs.property("vectorsPath", vectorsPath)
-  inputs.property("vectorTestFilter", testFilter)
 
   // 위 inputs 선언과 짝이다: 여기서 실행 시점에 설정하는 값(ignoreFailures, 필터, 시스템 프로퍼티)은 모두 위에서 입력으로 선언돼 있어야 한다.
   // 스크립트 객체를 잡지 않도록 지역 값만 쓴다(configuration cache).
   doFirst {
-    ignoreFailures = !patchOnlyProvider.get()
-    filter.includeTestsMatching(testFilter.get())
+    ignoreFailures = !patchOnly.get()
+    filter.includeTestsMatching(vectorTestFilter)
     systemProperty(
       "strand.conformance.vectors.dir",
       vectorsDir.get().asFile.resolve(vectorsPath.get()).absolutePath,
