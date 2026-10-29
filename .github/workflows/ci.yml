@@ -1,0 +1,60 @@
+name: CI
+
+# PR 워크플로와 이후 릴리스 워크플로가 이 workflow를 호출한다.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 25
+      # wrapper 검증은 setup-gradle에 내장돼 있다.
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - run: ./gradlew check
+
+  runtime:
+    name: runtime (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [8, 11, 17, 21, 25]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Gradle과 컴파일은 JDK 25. 테스트 JVM만 -PtestJavaVersion으로 바뀌고 toolchain이 해당 JDK를 받아 온다.
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - run: ./gradlew test -PtestJavaVersion=${{ matrix.java }}
+
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [verify, runtime]
+    runs-on: ubuntu-latest
+    steps:
+      # skipped·cancelled도 통과로 치지 않는다. 모두 success여야 한다.
+      - name: Require every needed job to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS"
+          if echo "$NEEDS" | grep -E '"result": "' | grep -v '"result": "success"'; then
+            echo "::error::verify 또는 runtime 매트릭스가 success가 아니다"
+            exit 1
+          fi
