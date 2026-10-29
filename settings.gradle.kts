@@ -9,3 +9,5 @@ plugins {
 rootProject.name = "strand"
 
 include("core")
+include("conformance")
+include("examples")

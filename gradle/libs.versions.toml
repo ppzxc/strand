@@ -2,6 +2,7 @@
 junit = "5.14.4"
 assertj = "3.27.7"
 jspecify = "1.0.1"
+gson = "2.15.0"
 errorprone = "2.51.0"
 nullaway = "0.14.3"
 palantir-java-format = "2.103.0"
@@ -17,6 +18,7 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 errorprone-core = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
 nullaway = { module = "com.uber.nullaway:nullaway", version.ref = "nullaway" }
 
