@@ -5,6 +5,7 @@ import org.gradle.api.provider.Property
 import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
 
@@ -18,7 +19,8 @@ import org.gradle.api.tasks.TaskAction
  */
 @CacheableTask
 abstract class VerifyDependencyAllowlist : DefaultTask() {
-  @get:Input
+  // 실패 메시지용이라 캐시 키에 넣지 않는다.
+  @get:Internal
   abstract val modulePath: Property<String>
 
   @get:Input

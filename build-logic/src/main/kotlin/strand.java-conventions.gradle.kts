@@ -13,18 +13,18 @@ repositories {
 
 java {
   toolchain {
-    languageVersion = JavaLanguageVersion.of(25)
+    languageVersion = JavaLanguageVersion.of(StrandBuild.TOOLCHAIN_JAVA_VERSION)
   }
 }
 
 tasks.withType<JavaCompile>().configureEach {
-  options.release = 8
+  options.release = StrandBuild.JAVA_RELEASE
   options.encoding = "UTF-8"
 }
 
 tasks.named<JavaCompile>("compileTestJava") {
-  // test는 -Werror 없이 린트 경고만 보여 준다. release 8 관련 [options] 경고만 끈다.
-  options.compilerArgs.add("-Xlint:-options")
+  // test는 -Werror 없이 린트 경고만 보여 준다. release 8 관련 [options] 경고는 끈다.
+  options.compilerArgs.add("-Xlint:all,-options")
 }
 
 dependencies {

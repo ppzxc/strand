@@ -41,6 +41,8 @@ tasks.named<JavaCompile>("compileJava") {
     logging.addStandardOutputListener(collector)
     logging.addStandardErrorListener(collector)
   }
+  // 리스너는 이 태스크의 LoggingManager에만 붙으므로 컴파일이 실패해 doLast가 안 돌아도 태스크가 끝나면
+  // Gradle이 정리한다. 컴파일 오류로 실패하면 경고 수집·판정은 건너뛰지만 그 빌드는 이미 실패다.
   doLast {
     logging.removeStandardOutputListener(collector)
     logging.removeStandardErrorListener(collector)
