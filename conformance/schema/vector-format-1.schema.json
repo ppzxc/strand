@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:strand:conformance:vector-format:1",
+  "title": "Strand 적합성 벡터 파일 (format 1)",
+  "description": "규범의 원천은 규격 부록 G다. 이 스키마와 부록이 어긋나면 부록이 우선한다. id 유일성, 스트림 번호 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 부록에만 있다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "vectors"],
+  "properties": {
+    "format": { "const": 1 },
+    "vectors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/vector" }
+    }
+  },
+  "$defs": {
+    "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "hex": {
+      "description": "소문자 hex. 공백·줄바꿈은 허용하며, 모두 지운 뒤 자릿수가 짝수여야 한다.",
+      "type": "string",
+      "pattern": "^\\s*(?:[0-9a-f]\\s*[0-9a-f]\\s*)*$"
+    },
+    "status": {
+      "description": "2.5.1절의 이름. 17~255는 예약 값이다.",
+      "oneOf": [
+        {
+          "enum": [
+            "OK", "CANCELLED", "UNKNOWN", "INVALID_ARGUMENT", "DEADLINE_EXCEEDED", "NOT_FOUND",
+            "ALREADY_EXISTS", "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION",
+            "ABORTED", "OUT_OF_RANGE", "UNIMPLEMENTED", "INTERNAL", "UNAVAILABLE", "DATA_LOSS",
+            "UNAUTHENTICATED"
+          ]
+        },
+        { "type": "integer", "minimum": 17, "maximum": 255 }
+      ]
+    },
+    "error_code": {
+      "description": "2.5.2절의 이름. 9 이상은 예약 값이다.",
+      "oneOf": [
+        {
+          "enum": [
+            "NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "FRAME_SIZE_ERROR", "HELLO_TIMEOUT",
+            "STREAM_CLOSED", "REFUSED", "CANCEL", "OVERLOAD"
+          ]
+        },
+        { "type": "integer", "minimum": 9, "maximum": 4294967295 }
+      ]
+    },
+    "app_type": { "type": "integer", "minimum": 256, "maximum": 65535 },
+    "stream_id": { "$ref": "#/$defs/u32" },
+    "extension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "value"],
+      "properties": {
+        "tag": { "$ref": "#/$defs/u16" },
+        "value": { "$ref": "#/$defs/hex" }
+      }
+    },
+    "extensions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/extension" }
+    },
+    "hello_params": {
+      "description": "3.2.1절의 파라미터. 빠진 값은 규격 기본값이다.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_frame_size": { "$ref": "#/$defs/u32" },
+        "max_pending_bytes": { "$ref": "#/$defs/u32" },
+        "max_concurrent_streams": { "$ref": "#/$defs/u32" },
+        "capabilities": { "$ref": "#/$defs/u32" },
+        "content_types": { "$ref": "#/$defs/u32" },
+        "content_type": { "$ref": "#/$defs/u32" }
+      }
+    },
+    "config": {
+      "description": "부록 G.8.2의 설정 항목. 빠진 값은 기본값이다.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "draining_retention_limit": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "hello_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+      }
+    },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "established"],
+      "properties": {
+        "role": { "enum": ["client", "server"] },
+        "local_hello": { "$ref": "#/$defs/hello_params" },
+        "peer_hello": { "$ref": "#/$defs/hello_params" },
+        "established": { "type": "boolean" },
+        "config": { "$ref": "#/$defs/config" }
+      }
+    },
+    "control_flags": {
+      "type": "array",
+      "items": { "enum": ["ACK"] },
+      "uniqueItems": true
+    },
+    "app_flags": {
+      "type": "array",
+      "items": { "enum": ["RESPONSE", "END"] },
+      "uniqueItems": true
+    },
+    "frame_preface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": { "type": { "const": "PREFACE" } }
+    },
+    "frame_hello": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "HELLO" },
+        "flags": { "$ref": "#/$defs/control_flags" },
+        "stream_id": { "const": 0 },
+        "params": { "$ref": "#/$defs/hello_params" }
+      }
+    },
+    "frame_ping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "payload"],
+      "properties": {
+        "type": { "const": "PING" },
+        "flags": { "$ref": "#/$defs/control_flags" },
+        "stream_id": { "const": 0 },
+        "payload": { "type": "string", "pattern": "^[0-9a-f]{16}$" }
+      }
+    },
+    "frame_close": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "last_stream_id", "error_code"],
+      "properties": {
+        "type": { "const": "CLOSE" },
+        "stream_id": { "const": 0 },
+        "last_stream_id": { "$ref": "#/$defs/u32" },
+        "error_code": { "$ref": "#/$defs/error_code" }
+      }
+    },
+    "frame_reset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "stream_id", "error_code"],
+      "properties": {
+        "type": { "const": "RESET" },
+        "stream_id": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "error_code": { "$ref": "#/$defs/error_code" }
+      }
+    },
+    "frame_app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "flags", "stream_id"],
+      "properties": {
+        "type": { "$ref": "#/$defs/app_type" },
+        "flags": { "$ref": "#/$defs/app_flags" },
+        "stream_id": { "$ref": "#/$defs/stream_id" },
+        "status": { "$ref": "#/$defs/status" },
+        "extensions": { "$ref": "#/$defs/extensions" },
+        "payload": { "$ref": "#/$defs/hex" }
+      }
+    },
+    "frame": {
+      "oneOf": [
+        { "$ref": "#/$defs/frame_preface" },
+        { "$ref": "#/$defs/frame_hello" },
+        { "$ref": "#/$defs/frame_ping" },
+        { "$ref": "#/$defs/frame_close" },
+        { "$ref": "#/$defs/frame_reset" },
+        { "$ref": "#/$defs/frame_app" }
+      ]
+    },
+    "event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event", "stream_id", "type"],
+          "properties": {
+            "event": { "const": "request_received" },
+            "stream_id": { "$ref": "#/$defs/stream_id" },
+            "type": { "$ref": "#/$defs/app_type" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event", "stream_id", "status"],
+          "properties": {
+            "event": { "const": "result" },
+            "stream_id": { "$ref": "#/$defs/stream_id" },
+            "status": { "$ref": "#/$defs/status" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event"],
+          "properties": { "event": { "const": "closed" } }
+        }
+      ]
+    },
+    "expect_send": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/frame" }
+    },
+    "expect_events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event" }
+    },
+    "step": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "hex", "send", "events"],
+          "properties": {
+            "kind": { "const": "recv" },
+            "hex": { "$ref": "#/$defs/hex" },
+            "send": { "$ref": "#/$defs/expect_send" },
+            "events": { "$ref": "#/$defs/expect_events" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "type", "send", "events"],
+          "properties": {
+            "kind": { "const": "request" },
+            "type": { "$ref": "#/$defs/app_type" },
+            "extensions": { "$ref": "#/$defs/extensions" },
+            "payload": { "$ref": "#/$defs/hex" },
+            "send": { "$ref": "#/$defs/expect_send" },
+            "events": { "$ref": "#/$defs/expect_events" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "stream_id", "status", "send", "events"],
+          "properties": {
+            "kind": { "const": "respond" },
+            "stream_id": { "$ref": "#/$defs/stream_id" },
+            "status": { "$ref": "#/$defs/status" },
+            "extensions": { "$ref": "#/$defs/extensions" },
+            "payload": { "$ref": "#/$defs/hex" },
+            "send": { "$ref": "#/$defs/expect_send" },
+            "events": { "$ref": "#/$defs/expect_events" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "stream_id", "send", "events"],
+          "properties": {
+            "kind": { "const": "cancel" },
+            "stream_id": { "$ref": "#/$defs/stream_id" },
+            "send": { "$ref": "#/$defs/expect_send" },
+            "events": { "$ref": "#/$defs/expect_events" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "error_code", "send", "events"],
+          "properties": {
+            "kind": { "const": "close" },
+            "error_code": { "$ref": "#/$defs/error_code" },
+            "send": { "$ref": "#/$defs/expect_send" },
+            "events": { "$ref": "#/$defs/expect_events" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ms", "send", "events"],
+          "properties": {
+            "kind": { "const": "advance" },
+            "ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+            "send": { "$ref": "#/$defs/expect_send" },
+            "events": { "$ref": "#/$defs/expect_events" }
+          }
+        }
+      ]
+    },
+    "vector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "spec", "setup", "steps"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+        "description": { "type": "string", "minLength": 1 },
+        "spec": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^(?:[0-9]+|[A-G])(?:\\.[0-9]+)*$" }
+        },
+        "setup": { "$ref": "#/$defs/setup" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    }
+  }
+}
