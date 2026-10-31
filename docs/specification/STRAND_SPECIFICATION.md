@@ -278,7 +278,7 @@ C0 DE 53 54 52 30 00 00
 
 첫 바이트를 `0xC0`으로 정한 것은 ASCII 범위 밖이기 때문이다. 같은 포트로 HTTP 요청이 잘못 들어와도 첫 바이트만 보고 바로 구분할 수 있다. 다만 연결 서문은 엉뚱한 상대를 걸러내는 용도일 뿐 보안 장치는 아니다.
 
-서버는 연결 서문을 보내지 않고, 첫 바이트(또는 첫 바이너리 메시지)부터 HELLO 프레임을 보낸다.
+서버는 연결 서문을 보내지 않는다. 서버가 보내는 첫 프레임은 HELLO다(3.2절).
 
 연결 서문의 역사적 기원, 4대 설계 목적, 업계 표준·리더 비교, 8바이트 워드 정렬 및 식별자 충돌 분석에 대한 상세한 설계 근거는 부록 D.3을 참고한다.
 
@@ -290,6 +290,14 @@ HELLO는 연결마다 한 번, 내가 받을 수 있는 한도와 지원하는 �
 * **stream_id**: `0`
 * **payload**: `(identifier u16, value u32)`의 반복. 확인은 `ACK` 플래그 + 빈 payload (길이 0).
 
+한 연결에서 HELLO 프레임은 엔드포인트마다 파라미터 HELLO(`flags = 0`) 하나와 상대 HELLO를 확인하는 ACK HELLO(`flags = ACK`) 하나다. 파라미터 HELLO와 ACK HELLO는 서로 다른 프레임이다. 둘을 한 프레임으로 합칠 수 없다.
+
+서버의 HELLO 송신 규칙은 다음과 같다(모두 MUST).
+
+1. **독립 프레임**: 서버는 파라미터 `HELLO(flags=0)`와 확인용 `HELLO(flags=ACK, payload 길이 0)`를 서로 다른 두 프레임으로 보낸다. 둘을 합친 프레임(ACK이면서 payload가 비어 있지 않은 HELLO)은 허용하지 않으며, 받으면 3.2.5절에 따라 `CLOSE(FRAME_SIZE_ERROR)`로 처리한다.
+2. **순서**: 서버가 보내는 순서는 `HELLO` → `HELLO+ACK` → (이후 애플리케이션 프레임)로 고정이다.
+3. **송신 시점**: 서버는 클라이언트의 첫 프레임이 3.2.4절 검사를 통과하고 그 payload(`content_types`)를 읽은 뒤에만 자기 HELLO를 보낸다.
+
 #### 3.2.1 파라미터 정의
 
 | identifier | 이름 | 기본값 | 보내는 쪽 | 의미 |
@@ -300,6 +308,8 @@ HELLO는 연결마다 한 번, 내가 받을 수 있는 한도와 지원하는 �
 | `0x0004` | `capabilities` | 0 | 양쪽 | 기능 비트셋. 이 버전에서는 모든 비트가 예약 |
 | `0x0005` | `content_types` | `0x00000002` | 클라이언트 | 지원하는 payload 형식. 비트 *n*이 형식 코드 *n* (0-indexed LSB: `1 << n`) |
 | `0x0006` | `content_type` | 1 | 서버 | 서버가 고른 payload 형식 코드 |
+
+`content_types`의 비트 *n*은 형식 코드 *n*에 대응한다. 코드 *n*을 지원하면 `1 << n` 비트를 켠다. 기본값 `0x00000002`는 형식 1만 지원한다는 뜻이다. 3.2.2절에서 예약된 코드(0, 3\~31)의 비트가 켜져 있어도 받는 쪽은 무시하며 오류가 아니다. 이 규칙의 비트 번호 매김은 최하위 비트가 0번이다.
 
 #### 3.2.2 payload 형식 코드
 
@@ -314,27 +324,52 @@ HELLO는 연결마다 한 번, 내가 받을 수 있는 한도와 지원하는 �
 
 모르는 identifier는 무시한다(MUST). 같은 identifier가 두 번 나오면 뒤의 값을 쓴다.
 
-`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알려 준 한도를 넘지 않게 보내야 한다(MUST). 또 `max_frame_size`는 `max_pending_bytes`보다 클 수 없으며(MUST), 이를 어기면 `CLOSE(PROTOCOL_ERROR)`로 끊는다.
+`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알려 준 한도를 넘지 않게 보내야 한다(MUST). 또 `max_frame_size`는 `max_pending_bytes`보다 클 수 없다(MUST). 이 검증은 양쪽 엔드포인트가 모두 상대 HELLO에 대해 한다. 서버는 클라이언트 HELLO가 이를 어기면 아래 협상 실패 경로로 처리한다. 클라이언트는 서버 HELLO가 이를 어기면 `CLOSE(PROTOCOL_ERROR)`를 보내고 닫는다(MUST).
 
 연결에서 실제로 쓸 수 있는 기능은 양쪽 `capabilities`에 공통으로 켜진 비트뿐이다.
 
-payload 형식은 서버가 정한다. 서버는 클라이언트의 `content_types` 가운데 하나를 골라 `content_type`으로 알려 주고, 고를 것이 없으면 `CLOSE(PROTOCOL_ERROR)`로 끊는다. 그 뒤로 연결의 애플리케이션 payload는 모두 이 형식을 따른다.
+payload 형식은 서버가 정한다. 서버는 클라이언트의 `content_types` 가운데 하나를 골라 `content_type`으로 알려 주고, 그 뒤로 연결의 애플리케이션 payload는 모두 이 형식을 따른다. 서버는 예약된 코드를 `content_type`으로 고르지 않는다(MUST NOT). `content_types`가 0이거나 예약 비트만 켜져 있으면 고를 것이 없는 경우다.
+
+**협상 실패 경로(서버)**: 협상이 실패하면 서버는 먼저 HELLO를 보내고, ACK 없이 곧바로 `CLOSE(PROTOCOL_ERROR)`를 보낸 뒤 연결을 닫는다(MUST). 협상 실패는 다음 두 경우다.
+
+* 고를 형식이 없다(클라이언트의 `content_types`에 서버가 지원하는 형식 코드가 없다).
+* 클라이언트 HELLO의 `max_frame_size`가 `max_pending_bytes`보다 크다.
+
+이때 보내는 HELLO의 파라미터는 의미가 없으며 `content_type`을 생략해도 된다(MAY). 클라이언트는 이 HELLO의 내용을 3.2.3절 검증 대상으로 삼지 않고, 이어서 오는 CLOSE를 처리한다. 단 이 HELLO도 3.2.4절 첫 프레임 검사는 받는다. 첫 프레임 검사는 HELLO 하나만 허용하는 형태로 유지하므로, 이 경로에서도 서버 송신 순서는 HELLO 다음 CLOSE다.
+
+**서버 HELLO 검증(클라이언트)**: 클라이언트는 서버 HELLO의 payload를 읽고 다음 중 하나라도 해당하면 `CLOSE(PROTOCOL_ERROR)`를 보내고 닫는다(MUST).
+
+* `content_type`이 클라이언트가 `content_types`로 제시한 코드가 아니다. `content_type`을 생략하면 기본값 1이므로, 클라이언트가 형식 1을 제시하지 않았는데 서버가 생략하면 이 경우에 해당한다.
+* `max_frame_size`가 `max_pending_bytes`보다 크다.
+
+이 검증은 첫 프레임 검사(아무것도 보내지 않고 닫음)와 달리 payload 검사 단계라서 `CLOSE`를 보낸다. 클라이언트는 이 검증을 통과한 뒤에만 서버 HELLO에 ACK로 답한다.
 
 HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면 새 연결을 맺는다.
 
 #### 3.2.4 첫 프레임 검사
 
-서버는 프리페이스 다음에 오는 첫 프레임의 헤더만 읽은 상태에서, payload를 읽기 전에 아래를 확인한다(MUST). 하나라도 어긋나면 아무것도 보내지 않고 연결을 닫는다.
+각 엔드포인트는 상대에게서 처음 받는 프레임(첫 프레임)의 헤더만 읽은 상태에서, payload를 읽기 전에 아래를 확인한다(MUST). 하나라도 어긋나면 아무것도 보내지 않고 연결을 닫는다. 서버에게 첫 프레임은 연결 서문 다음에 오는 프레임이고, 클라이언트에게는 서버가 보낸 첫 프레임이다. 클라이언트가 서버 HELLO 전에 애플리케이션 프레임을 먼저 보냈더라도(3.3절 4단계) 검사 대상은 처음 **받은** 프레임이다.
 
 1. `type`이 `0x0001`(HELLO)인가
 2. `stream_id`와 `flags`가 모두 0인가
 3. `length`가 12 + 6 × 64 이하인가. 협상이 끝나기 전에 큰 버퍼를 잡지 않게 하는 제한이다.
 
+#### 3.2.5 HELLO 형태 위반
+
+첫 프레임 검사를 통과한 뒤에도 HELLO 형태가 어긋나면 연결 오류다. 아래는 모두 연결 오류이며 해당 `CLOSE`를 보내고 닫는다(MUST).
+
+| 위반 | 오류 코드 |
+| --- | --- |
+| 파라미터 HELLO의 payload 길이가 6의 배수가 아님 | `CLOSE(FRAME_SIZE_ERROR)` |
+| ACK HELLO의 payload가 비어 있지 않음 | `CLOSE(FRAME_SIZE_ERROR)` |
+| 파라미터 HELLO를 두 번째로 받음 | `CLOSE(PROTOCOL_ERROR)` |
+| 내가 보낸 HELLO에 대한 ACK를 두 번째로 받음, 또는 HELLO를 보내기 전에 ACK를 받음 | `CLOSE(PROTOCOL_ERROR)` |
+
 ### 3.3 수립 순서
 
-1. 클라이언트가 프리페이스를 보내고 곧바로 HELLO를 이어 보낸다.
-2. 서버는 프리페이스와 첫 프레임을 3.2.4절 기준으로 확인한다. 문제가 없으면 자기 HELLO를 보내고, 클라이언트 HELLO에 `ACK`로 답한다.
-3. 클라이언트도 서버 HELLO에 `ACK`로 답한다.
+1. 클라이언트는 연결 서문을 보내고 곧바로 파라미터 HELLO를 이어 보낸다(MUST).
+2. 서버는 연결 서문과 첫 프레임을 3.1절, 3.2.4절 기준으로 확인하고, 클라이언트 HELLO의 payload(`content_types`)를 읽는다. 문제가 없으면 서버는 자기 파라미터 HELLO를 보낸 뒤 클라이언트 HELLO에 ACK HELLO로 답한다(MUST). 두 프레임은 이 순서로 서로 다른 프레임이다(3.2절). 협상이 실패하면 서버는 HELLO를 보낸 뒤 ACK 없이 `CLOSE(PROTOCOL_ERROR)`를 보낸다(3.2.3절).
+3. 클라이언트는 서버 HELLO를 3.2.4절과 3.2.3절 기준으로 검증하고, 통과하면 서버 HELLO에 ACK HELLO로 답한다(MUST). 검증에 실패하면 ACK 대신 3.2.3절대로 닫는다.
 4. 상대의 HELLO를 받은 뒤부터는 애플리케이션 프레임을 보낼 수 있다. 클라이언트는 기본값 범위를 넘지 않는다면 서버 HELLO를 기다리지 않고 먼저 보내도 된다(MAY).
 5. HELLO를 보내고 정해 둔 시간 안에 `ACK`가 오지 않으면 `CLOSE(HELLO_TIMEOUT)`을 보내고 연결을 닫는다.
 
@@ -346,19 +381,27 @@ sequenceDiagram
 
     Note over C,S: 바이트 스트림(TCP) 또는 WebSocket 연결 개설
     C->>S: 연결 서문 (8바이트: C0 DE 53 54 52 30 00 00)
-    C->>S: HELLO (flags=0: 클라이언트 한도 및 포맷 후보 제시, 3.2절)
-    
-    Note over S: 3.1절 및 3.2.4절 첫 프레임 검증
-    S->>C: HELLO (flags=0: 서버 한도 및 최종 포맷 결정, 3.2절)
-    S->>C: HELLO (flags=ACK: 클라이언트 HELLO 확인, payload=0)
-    
-    Note over C: 서버 HELLO 검증
-    C->>S: HELLO (flags=ACK: 서버 HELLO 확인, payload=0)
+    C->>S: HELLO (flags=0: 클라이언트 한도 및 형식 후보 제시, 3.2절)
 
-    Note over C,S: 연결 수립 완료 (애플리케이션 요청/응답 스트림 개시 가능)
+    Note over S: 연결 서문 확인, 첫 프레임 검사(3.2.4절), content_types 읽기
+    alt 협상 성공
+        S->>C: HELLO (flags=0: 서버 한도 및 최종 형식 결정, 독립 프레임)
+        S->>C: HELLO (flags=ACK: 클라이언트 HELLO 확인, payload=0, 독립 프레임)
+
+        Note over C: 첫 프레임 검사(3.2.4절), 서버 HELLO 검증(3.2.3절)
+        alt 검증 통과
+            C->>S: HELLO (flags=ACK: 서버 HELLO 확인, payload=0)
+            Note over C,S: 연결 수립 완료 (애플리케이션 요청/응답 스트림 개시 가능)
+        else 검증 실패
+            C->>S: CLOSE(PROTOCOL_ERROR)
+        end
+    else 협상 실패
+        S->>C: HELLO (flags=0: 내용 무의미, content_type 생략 가능)
+        S->>C: CLOSE(PROTOCOL_ERROR) (ACK 없음)
+    end
 ```
 
-프리페이스 다음에 설정 프레임을 주고받는 흐름은 HTTP/2의 연결 시작 방식을 참고했다 [^RFC9113].
+연결 서문 다음에 설정 프레임을 주고받는 흐름은 HTTP/2의 연결 시작 방식을 참고했다 [^RFC9113].
 
 ### 3.4 생존 확인: PING
 
