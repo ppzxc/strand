@@ -51,8 +51,9 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 | **확장 영역 (Extension Area)** | 헤더와 본문 사이에 위치하는 선택적 메타데이터 영역. TLV(`tag`, `length`, `value`) 구조로 인코딩 |
 | **본문 (Payload)** | 프레임에 실리는 실제 데이터 바이트열. 제어 프레임은 고정 바이너리 형식을, 애플리케이션 프레임은 협상된 직렬화 포맷을 따름 |
 | **기능 비트 (Capabilities Bitset)** | HELLO 프레임에서 교환하는 32비트 비트셋. 양 엔드포인트가 모두 켠 비트의 기능만 해당 연결에서 활성화 |
-| **배압 (Backpressure)** | 수신자의 버퍼 용량을 초과하지 않도록 송신량을 제어하는 메커니즘. 소켓을 블로킹하지 않고 초과 시 즉시 오류 응답 거절 |
-| **유예 상태 (Draining State)** | CLOSE 신호를 주고받아 새로운 스트림 요청 수락을 중단하고, 기 진행 중인 스트림들의 완료를 대기하는 상태 |
+| **배압 (Backpressure)** | 수신자의 버퍼 용량을 초과하지 않도록 송신량을 제어하는 메커니즘. 소켓을 블로킹하지 않고 미응답 바이트가 한도를 넘으면 그 요청을 즉시 거절 |
+| **유예 상태 (Draining State)** | 스트림이 응답이나 RESET을 보내거나 받아 끝난 직후, 지연 도착하는 프레임을 안전하게 폐기하려고 잠시 유지하는 상태(4.3절) |
+| **미응답 바이트 (Pending Bytes)** | 아직 응답이나 RESET으로 끝나지 않은 요청 프레임의 와이어 크기(`4 + length`) 합(4.5절) |
 
 ### 1.4 표기 규칙
 
@@ -182,9 +183,11 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 | 내가 연 스트림, `RESPONSE` 없음 | 오류: `RESET(PROTOCOL_ERROR)` |
 | 상대가 연 스트림, `RESPONSE` 있음 | 오류: `RESET(PROTOCOL_ERROR)` |
 
+두 오류 행은 대기 중인 스트림과 방금 열린 새 스트림에만 걸린다. 유예 상태이거나 끝난 스트림은 5.1절 7번이 먼저 처리하고, 아직 열리지 않은 유휴 스트림을 가리키는 프레임은 5.1절 6번의 연결 오류다(4.2.1절).
+
 #### 2.3.2 END
 
-이 버전에서는 모든 애플리케이션 프레임에 `END`를 1로 설정한다(MUST). 0인 프레임을 받으면 `RESET(PROTOCOL_ERROR)`으로 처리한다. 지금은 쓸모가 없어 보이지만, 나중에 메시지 분할을 넣을 때를 대비해 자리를 잡아 둔 비트다. 분할은 양쪽이 해당 기능 비트를 켠 연결에서만 쓸 수 있다(부록 F).
+이 버전에서는 모든 애플리케이션 프레임에 `END`를 1로 설정한다(MUST). 0인 프레임을 받으면 `RESET(PROTOCOL_ERROR)`으로 처리한다(5.1절 8번, 대기 중이거나 방금 열린 스트림에 한한다). 지금은 쓸모가 없어 보이지만, 나중에 메시지 분할을 넣을 때를 대비해 자리를 잡아 둔 비트다. 분할은 양쪽이 해당 기능 비트를 켠 연결에서만 쓸 수 있다(부록 F).
 
 #### 2.3.3 제어 프레임의 플래그
 
@@ -376,7 +379,7 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 
 #### 3.2.5 HELLO 형태 위반
 
-첫 프레임 검사를 통과한 뒤에도 HELLO 형태가 어긋나면 연결 오류다. 아래는 모두 연결 오류이며 해당 `CLOSE`를 보내고 닫는다(MUST).
+첫 프레임 검사를 통과한 뒤에도 HELLO 형태가 어긋나면 연결 오류다. 아래는 모두 5.1절 5번 검사에서 걸리는 연결 오류이며 해당 `CLOSE`를 보내고 닫는다(MUST).
 
 | 위반 | 오류 코드 |
 | --- | --- |
@@ -531,10 +534,10 @@ service MessageService {
 `highest_peer_seq`는 이 6번 검사를 통과하는 즉시 갱신한다. 그 뒤 `RESET(REFUSED)`로 거절했는지, CLOSE 이후라 버렸는지, 7~11번 검사에서 실패했는지와 상관없이 그 번호는 쓰인 것으로 센다.
 
 유휴 스트림을 가리키는 다음 프레임은 6번 단계의 연결 오류이므로 `CLOSE(PROTOCOL_ERROR)`로 처리한다.
-* 내 공간 번호인데 일련번호가 `highest_local_seq`보다 큰 응답 프레임 또는 RESET
-* 상대 공간 번호인데 일련번호가 `highest_peer_seq`보다 큰 RESET
+* 내 공간 번호인데 일련번호가 `highest_local_seq`보다 큰 애플리케이션 프레임(`RESPONSE` 값과 상관없다) 또는 RESET
+* 상대 공간 번호인데 일련번호가 `highest_peer_seq`보다 큰 `RESPONSE` = 1 애플리케이션 프레임 또는 RESET
 
-새 스트림을 여는 시도(상대 공간 번호, `RESPONSE`=0인 애플리케이션 프레임)는 유휴 스트림을 가리켜도 연결 오류가 아니라 위의 새 스트림 판정을 따른다. 일련번호가 해당 공간의 최고값 이하인 끝난 스트림은 이 규칙이 아니라 끝난 스트림의 처리 규칙(4.3절, 5.1절 8번)을 따른다.
+새 스트림을 여는 시도(상대 공간 번호, `RESPONSE`=0인 애플리케이션 프레임)는 유휴 스트림을 가리켜도 연결 오류가 아니라 위의 새 스트림 판정을 따른다. 일련번호가 해당 공간의 최고값 이하인 끝난 스트림은 이 규칙이 아니라 끝난 스트림의 처리 규칙(4.3절, 5.1절 7번)을 따른다.
 
 ### 4.3 스트림 생명주기 및 상태 머신
 
@@ -567,11 +570,11 @@ stateDiagram-v2
     종료 --> [*]
 ```
 
-**유예 상태의 프레임 처리.** 유예 상태인 스트림에 늦게 도착한 프레임(`RESPONSE`든 RESET이든)은 조용히 버린다(MUST). 5.1절 8번의 `RESET(STREAM_CLOSED)`을 보내지 않는다. 취소(RESET)와 응답이 엇갈려 도착하는 일이 흔하기 때문이다. 유예 상태는 전이 조건만 정할 뿐 시간 제한이 없고, 얼마나 오래 두는지는 아래 보관 한도가 정한다.
+**유예 상태의 프레임 처리.** 유예 상태인 스트림에 늦게 도착한 프레임(`RESPONSE`든 RESET이든)은 조용히 버린다(MUST). 5.1절 7번의 `RESET(STREAM_CLOSED)`을 보내지 않는다. 취소(RESET)와 응답이 엇갈려 도착하는 일이 흔하기 때문이다. 유예 상태는 전이 조건만 정할 뿐 시간 제한이 없고, 얼마나 오래 두는지는 아래 보관 한도가 정한다.
 
 **유예 보관 한도.** 엔드포인트는 최근에 끝난 스트림의 `stream_id`를 보관해 유예 상태를 유지한다. 보관 한도는 고정 개수 윈도우(링 버퍼나 LRU)로 정하거나 시간 윈도우로 정한다. 개수 윈도우를 쓴다면 최근 끝난 스트림 1,024개 이상을 보관한다(SHOULD). 한도를 넘겨 보관에서 빠지면 그 스트림은 종료다.
 
-**종료 스트림의 프레임 처리.** 개시된 뒤 끝났고 유예 보관에서도 빠진 스트림(종료)에 비-RESET 프레임이 도착하면 `RESET(STREAM_CLOSED)`을 보낸다(MUST, 5.1절 8번). 종료 스트림에 RESET이 도착하면 아무것도 보내지 않고 버린다(4.4절).
+**종료 스트림의 프레임 처리.** 개시된 뒤 끝났고 유예 보관에서도 빠진 스트림(종료)에 비-RESET 프레임이 도착하면 `RESET(STREAM_CLOSED)`을 보낸다(MUST, 5.1절 7번). 종료 스트림에 RESET이 도착하면 아무것도 보내지 않고 버린다(4.4절).
 
 보관 한도는 적합성 검증에서 결정적으로 다룬다. 시간에 기대지 않고 개수를 설정해 두고, 한도를 넘기도록 스트림을 끝낸 뒤 처음 끝난 스트림으로 프레임을 보내 `RESET(STREAM_CLOSED)`이 오는지 확인한다. 한도 안에서는 같은 프레임이 조용히 버려지는지 확인한다.
 
@@ -610,8 +613,8 @@ payload 길이가 정확히 4바이트가 아니면 `CLOSE(FRAME_SIZE_ERROR)`로
 
 | 쪽 | 반환을 일으키는 사건 |
 | --- | --- |
-| 송신 측(요청을 보낸 쪽) | 응답 수신, RESET 수신, 자신의 `RESET(CANCEL)` 송신 |
-| 수신 측(요청을 받은 쪽) | 응답 송신, 자신의 RESET 송신, 상대의 `RESET(CANCEL)` 수신 |
+| 송신 측(요청을 보낸 쪽) | 응답 수신(5.1절 12번에서 해석에 실패한 응답 포함), RESET 수신, 자신의 RESET 송신(`RESET(CANCEL)`, 5.1절 8번의 `RESET(PROTOCOL_ERROR)`) |
+| 수신 측(요청을 받은 쪽) | 응답 송신, 자신의 RESET 송신, 상대의 RESET 수신(`RESET(CANCEL)` 등) |
 
 연결이 CLOSE로 끝나면 미응답 바이트 회계를 통째로 버리고 따로 반환하지 않는다.
 
@@ -643,53 +646,69 @@ payload 길이가 정확히 4바이트가 아니면 `CLOSE(FRAME_SIZE_ERROR)`로
 
 | 순서 | 검사 | 실패 시 |
 | --- | --- | --- |
-| 1 | 프리페이스(3.1절) | 아무것도 보내지 않고 닫음 |
-| 2 | 첫 프레임(3.2.4절) | 아무것도 보내지 않고 닫음 |
+| 1 | 연결 서문(3.1절) | 아무것도 보내지 않고 닫음 |
+| 2 | 첫 프레임(3.2.4절). 양쪽 엔드포인트가 상대에게서 처음 받는 프레임에 적용 | 아무것도 보내지 않고 닫음 |
 | 3 | `length` 범위(2.2.1절) | `CLOSE(FRAME_SIZE_ERROR)` |
-| 4 | 확장 영역 길이·형식(2.2.6절, 2.4절) | `CLOSE(PROTOCOL_ERROR)` |
-| 5 | 제어 프레임의 `stream_id`가 0 (RESET 제외), payload 크기 | `CLOSE(PROTOCOL_ERROR)` 또는 `CLOSE(FRAME_SIZE_ERROR)` |
-| 6 | 새 스트림의 번호가 0이 아니고, 개시자 비트가 맞고, 이전보다 큼 | `CLOSE(PROTOCOL_ERROR)` |
-| 7 | `RESPONSE`와 개시자 비트 일치, `END` = 1 (애플리케이션 프레임) | `RESET(PROTOCOL_ERROR)` |
-| 8 | 끝난 스트림이 아님 | `RESET(STREAM_CLOSED)` |
-| 9 | 동시 스트림 수, 미응답 바이트 한도(4.5절) | `RESET(REFUSED)` |
-| 10 | 모르는 필수 확장, 모르는 `type` | `status` = `UNIMPLEMENTED` |
-| 11 | payload를 협상된 형식으로 해석 가능 | `status` = `INVALID_ARGUMENT` |
+| 4 | 확장 영역 길이·형식(2.2.6절, 2.4절). 제어 프레임은 형식만 보고 내용은 무시(5장 서두) | `CLOSE(PROTOCOL_ERROR)` |
+| 5 | 제어 프레임(예약 타입 `0x0005`\~`0x00FF` 제외). HELLO·PING·CLOSE의 `stream_id`가 0. payload 크기(RESET 포함). HELLO 형태(3.2.5절). CLOSE의 `last_stream_id`(3.5절) | `CLOSE(PROTOCOL_ERROR)` 또는 `CLOSE(FRAME_SIZE_ERROR)` |
+| 6 | 애플리케이션 프레임·RESET의 `stream_id`. 일련번호 0 금지. 새 스트림(상대 공간 번호, `RESPONSE` = 0)의 일련번호가 `highest_peer_seq`보다 큼. 새 스트림을 뺀 유휴 스트림 참조 금지(4.2.1절) | `CLOSE(PROTOCOL_ERROR)` |
+| 7 | 스트림 상태 분류(4.3절). 유예 상태이면 폐기. 유예 보관에서 빠진 끝난 스트림이면 비-RESET 프레임은 거절, RESET은 폐기 | 유예 상태: 아무것도 보내지 않고 조용히 폐기. 끝난 스트림: 비-RESET이면 `RESET(STREAM_CLOSED)`, RESET이면 조용히 폐기 |
+| 8 | `RESPONSE`와 개시자 비트 일치, `END` = 1 (애플리케이션 프레임. 대기 중인 스트림과 방금 열린 새 스트림에만 적용) | `RESET(PROTOCOL_ERROR)` |
+| 9 | 새 요청의 동시 스트림 수, 미응답 바이트 한도(4.5절). `p + s > max_pending_bytes`이면 실패, 같으면 통과 | `RESET(REFUSED)` |
+| 10 | 요청 전용. 모르는 필수 확장, 모르는 `type` | `status` = `UNIMPLEMENTED`로 응답 |
+| 11 | 요청 전용. payload를 협상된 형식으로 해석 가능 | `status` = `INVALID_ARGUMENT`로 응답 |
+| 12 | 응답 전용. 응답을 해석할 수 있는지, 아래 순서로 처음 걸린 하나만 쓴다. (1) 응답 `type`이 요청 `type`과 같음(2.2.2절), (2) 모르는 필수 확장이 없음, (3) payload를 협상된 형식으로 해석 가능. 응답 헤더의 `status`가 `OK`가 아니어도 이 검사가 먼저다 | 와이어로는 아무것도 보내지 않는다. 스트림은 정상 응답을 받은 것처럼 유예 상태로 넘기고 미응답 바이트를 1회 반환한다. 호출자에게만 로컬 `status`를 넘긴다. (1)은 `INTERNAL`, (2)는 `UNIMPLEMENTED`, (3)은 `INTERNAL` |
 
-1번에서 6번까지는 연결을 닫고, 7번에서 9번까지는 해당 스트림만, 10번과 11번은 해당 요청만 실패로 처리한다.
+1번에서 6번까지는 연결을 닫는다. 1번과 2번은 아무것도 보내지 않고, 3번~6번은 `CLOSE`를 보내고 닫는다. 7번에서 9번까지는 해당 스트림만 다룬다(7번은 조용히 버리거나 `RESET(STREAM_CLOSED)`, 8번과 9번은 RESET). 10번과 11번은 해당 요청만 `status`로 실패시킨다. 12번은 와이어에 아무것도 보내지 않고 호출자에게만 로컬 실패를 넘긴다. 7번이 8번보다 앞서므로 끝난 스트림으로 늦게 온 형식 위반 프레임 때문에 RESET이 나가는 일은 없다. 8번에서 대기 중인 내 요청 스트림이 `RESET(PROTOCOL_ERROR)`으로 끝나면 그 스트림도 유예 상태로 넘어가고 미응답 바이트를 1회 반환하며, 호출자에게 오류를 전달한다(4.5절). 응답 해석 실패에 쓰는 `INTERNAL`·`UNIMPLEMENTED`는 상대가 보낸 것이 아니라 로컬에서 만든 결과이며, 호출자에게 이를 구분해 보여 줄지는 구현이 정한다.
 
 ```mermaid
 flowchart TD
-    Start["수신 프레임 도착"] --> Step1{"프리페이스 직후<br/>첫 프레임인가?"}
-    
-    Step1 -- 예 --> CheckFirst{"첫 프레임 검사 (3.2.4절)<br/>HELLO & length 검증"}
-    CheckFirst -- 실패 --> DropConn["무응답 연결 즉시 종료"]
-    CheckFirst -- 통과 --> Proceed
-    
-    Step1 -- 아니오 --> Proceed{"length 및 확장 크기<br/>유효한가? (2.2.1, 2.2.6절)"}
-    
-    Proceed -- 실패 --> CloseConn1["CLOSE(FRAME_SIZE_ERROR)<br/>또는 CLOSE(PROTOCOL_ERROR)"]
-    Proceed -- 통과 --> CheckCtrl{"제어 프레임 여부<br/>(type < 0x0100)"}
-    
-    CheckCtrl -- 제어 프레임 --> CheckCtrlRules{"stream_id=0 &<br/>payload 길이 일치?"}
-    CheckCtrlRules -- 실패 --> CloseConn2["CLOSE(PROTOCOL_ERROR)<br/>또는 CLOSE(FRAME_SIZE_ERROR)"]
-    CheckCtrlRules -- 통과 --> HandleCtrl["제어 프레임 처리<br/>(HELLO / PING / CLOSE / RESET)"]
-    
-    CheckCtrl -- 애플리케이션 프레임 --> CheckStream{"스트림 번호 유효성<br/>(단조 증가 / I비트 / RESPONSE 일치)"}
-    CheckStream -- 연결 위반 --> CloseConn3["CLOSE(PROTOCOL_ERROR)"]
-    CheckStream -- 스트림 위반 --> ResetStream1["RESET(PROTOCOL_ERROR)"]
-    
-    CheckStream -- 통과 --> CheckState{"스트림 상태<br/>(종료 스트림 여부)"}
-    CheckState -- 종료 스트림 --> DropFrame["조용히 폐기 또는<br/>RESET(STREAM_CLOSED)"]
-    
-    CheckState -- 정상 (대기/신규) --> CheckCapacity{"동시 스트림 수 /<br/>max_pending_bytes 초과?"}
-    CheckCapacity -- 한도 초과 --> ResetRefused["RESET(REFUSED)"]
-    
-    CheckCapacity -- 통과 --> CheckExt{"필수 확장 지원 여부 &<br/>type 인식 여부"}
-    CheckExt -- 미지원 --> StatusUnimplemented["status = UNIMPLEMENTED 로 응답"]
-    
-    CheckExt -- 통과 --> ParsePayload{"payload 파싱 가능 여부"}
-    ParsePayload -- 역직렬화 실패 --> StatusInvalidArg["status = INVALID_ARGUMENT 로 응답"]
-    ParsePayload -- 성공 --> DeliverApp["애플리케이션 계층 처리 전달"]
+    Start["수신 프레임 도착"] --> First{"이 엔드포인트가 상대에게서<br/>처음 받는 프레임인가?"}
+
+    First -- 예 --> CheckFirst{"1번 연결 서문 (서버만, 3.1절)<br/>2번 첫 프레임 검사 (3.2.4절)<br/>HELLO, stream_id=0, flags=0, length 상한"}
+    CheckFirst -- 실패 --> DropConn["아무것도 보내지 않고 연결 종료"]
+    CheckFirst -- 통과 --> Len
+
+    First -- 아니오 --> Len{"3번 length 범위<br/>(2.2.1절)"}
+    Len -- 실패 --> CloseSize["CLOSE(FRAME_SIZE_ERROR)"]
+    Len -- 통과 --> Ext{"4번 확장 영역 길이·형식<br/>(2.2.6절, 2.4절)"}
+    Ext -- 실패 --> CloseProto1["CLOSE(PROTOCOL_ERROR)"]
+    Ext -- 통과 --> Kind{"제어 프레임인가?<br/>(type < 0x0100)"}
+
+    Kind -- 제어 프레임 --> Reserved{"예약 제어 타입인가?<br/>(0x0005~0x00FF)"}
+    Reserved -- 예 --> Ignore["무시"]
+    Reserved -- 아니오 --> Ctrl{"5번 HELLO·PING·CLOSE의 stream_id=0,<br/>payload 크기(RESET 포함), HELLO 형태 (3.2.5절),<br/>CLOSE의 last_stream_id (3.5절)"}
+    Ctrl -- 실패 --> CloseCtrl["CLOSE(PROTOCOL_ERROR)<br/>또는 CLOSE(FRAME_SIZE_ERROR)"]
+    Ctrl -- 통과 --> IsReset{"RESET인가?"}
+    IsReset -- 아니오 --> HandleCtrl["HELLO / PING / CLOSE 처리"]
+    IsReset -- 예 --> Id
+
+    Kind -- 애플리케이션 프레임 --> Id{"6번 stream_id<br/>(일련번호 0 금지, 새 스트림 번호 증가,<br/>유휴 스트림 참조 금지)"}
+    Id -- 실패 --> CloseProto2["CLOSE(PROTOCOL_ERROR)"]
+    Id -- 통과 --> State{"7번 스트림 상태 분류<br/>(4.3절)"}
+
+    State -- 유예 상태 --> Discard["아무것도 보내지 않고 조용히 폐기"]
+    State -- 끝난 스트림 --> Ended{"RESET인가?"}
+    Ended -- 예 --> Discard
+    Ended -- 아니오 --> ResetClosed["RESET(STREAM_CLOSED)"]
+    State -- 대기 중 / 새 스트림 --> IsReset2{"RESET인가?"}
+
+    IsReset2 -- 예 --> HandleReset["RESET 처리<br/>대기 → 유예 상태, 미응답 바이트 반환<br/>(4.4절, 4.5절)"]
+    IsReset2 -- 아니오 --> Resp{"8번 RESPONSE·개시자 비트 일치,<br/>END=1"}
+    Resp -- 실패 --> ResetProto["RESET(PROTOCOL_ERROR)"]
+    Resp -- 통과 --> Dir{"요청인가 응답인가?<br/>(RESPONSE 플래그)"}
+
+    Dir -- 요청 --> Cap{"9번 동시 스트림 수 /<br/>미응답 바이트 (p + s > max_pending_bytes)"}
+    Cap -- 초과 --> ResetRefused["RESET(REFUSED)"]
+    Cap -- 통과 --> Ext2{"10번 모르는 필수 확장 /<br/>모르는 type"}
+    Ext2 -- 해당 --> StatusUnimpl["status = UNIMPLEMENTED 로 응답"]
+    Ext2 -- 통과 --> Parse{"11번 payload 해석 가능?"}
+    Parse -- 실패 --> StatusInvalid["status = INVALID_ARGUMENT 로 응답"]
+    Parse -- 성공 --> Deliver["애플리케이션 계층에 요청 전달"]
+
+    Dir -- 응답 --> RespCheck{"12번 응답 해석<br/>(1) type 불일치 (2) 모르는 필수 확장<br/>(3) payload 해석 불가, 앞선 것이 우선"}
+    RespCheck -- 실패 --> LocalFail["와이어 무응답<br/>유예 상태로 전이, 미응답 바이트 반환<br/>호출자에게 로컬 INTERNAL 또는 UNIMPLEMENTED"]
+    RespCheck -- 통과 --> DeliverResp["유예 상태로 전이, 미응답 바이트 반환<br/>호출자에게 응답 전달"]
 ```
 
 ---
@@ -791,7 +810,7 @@ CLOSE의 `reason`과 오류 상세 메시지는 상대에게 그대로 전달된
 
 | 모듈 | 의존성 | 역할 |
 | --- | --- | --- |
-| `strand-core` | 없음 | 프리페이스·프레임·제어 프레임 처리, 스트림 상태, HELLO 협상, 5절 검사, 배압 계산 |
+| `strand-core` | 없음 | 연결 서문·프레임·제어 프레임 처리, 스트림 상태, HELLO 협상, 5절 검사, 배압 계산 |
 | `strand-netty` | core, Netty 4.1 | Netty 파이프라인 어댑터 |
 | `strand-nio` | core | JDK `SSLEngine`과 NIO 전송 모듈 |
 | `strand-protobuf` | core, protobuf-java, 공통 proto | 메시지 직렬화, `type_code` 매핑, 오류 상세 변환 |
@@ -849,9 +868,9 @@ pipeline
 | 플래그 | 5/10 | 헤더 `flags` |
 | 확장 영역 | 5/10 | 헤더 `extensions_length` + TLV |
 | 응답 상태 | 4/10 (대부분 응답 전용) | 헤더 `status` (응답에서만 의미) |
-| 프레임마다의 식별값 | 4/10 | 프리페이스로 1회 |
+| 프레임마다의 식별값 | 4/10 | 연결 서문로 1회 |
 | 메시지마다의 직렬화 형식 | 4/10 | HELLO로 1회 |
-| 프레임마다의 버전 | 3/10 | 프리페이스 + 기능 비트 |
+| 프레임마다의 버전 | 3/10 | 연결 서문 + 기능 비트 |
 | 고정 헤더의 제한 시간 | 1/10 | 확장 항목 `timeout` |
 | 프레임 체크섬 | 1/10 | 없음 (하위 계층이 담당) |
 
@@ -859,7 +878,7 @@ pipeline
 
 | 장치 | 착안한 곳 |
 | --- | --- |
-| 프리페이스 후 설정 교환 | HTTP/2 연결 시작 [^RFC9113] |
+| 연결 서문 후 설정 교환 | HTTP/2 연결 시작 [^RFC9113] |
 | 개시자별 번호 공간 | HTTP/2 스트림 번호 [^RFC9113], QUIC [^RFC9000] |
 | 요청·응답 표시 비트 | Dubbo [^DUBBO2], SOFABolt [^SOFABOLT] |
 | 길이를 가진 확장 항목 | Thrift THeader [^THRIFT-THEADER], Kafka tagged fields [^KAFKA-PROTOCOL], Memcached extras [^MEMCACHED-BINARY] |
@@ -893,7 +912,7 @@ pipeline
 | **QUIC** [^RFC9000] | 패킷 헤더 내재화 | 패킷당 4바이트 (Initial Long Header Version) | UDP 기반이므로 스트림 서문 대신 모든 Initial 패킷에 버전을 포함 |
 | **Apache Dubbo** [^DUBBO2] | 프레임 헤더 매직 | 매 프레임마다 2바이트 (`0xDA 0xBB`) | 연결 단위 서문이 없고 매 프레임 대역폭을 낭비하는 2010년대 초기 방식 |
 | **Ant Group SOFABolt** [^SOFABOLT] | 프레임 헤더 매직 | 매 프레임마다 1바이트 (`0x01` or `0x02`) | 프레임마다 프로토콜 코드를 중복 전송하는 구조 |
-| **RSocket** | 첫 프레임 통합 | `SETUP` 프레임 헤더 내 32비트 버전 | 별도 프리페이스 없이 첫 제어 프레임이 서문 역할을 겸함 |
+| **RSocket** | 첫 프레임 통합 | `SETUP` 프레임 헤더 내 32비트 버전 | 별도 연결 서문 없이 첫 제어 프레임이 서문 역할을 겸함 |
 | **Strand** | 클라이언트 단방향 | 8바이트 바이너리 (`C0 DE 53 54 52 30 00 00`) | 64비트 워드 정렬, 프레임 매직 완전 제거, TCP/WebSocket 100% 동일 규정 |
 
 #### D.3.4 바이트 구조와 충돌 검증
@@ -925,7 +944,7 @@ Strand의 서문 `C0 DE 53 54 52 30 00 00`은 다음 원칙으로 구성되었�
 | 6 | 타이머·저장소는 부록 A | 명세는 주고받는 것만 다룸 | 구현 간 수치 차이 가능 |
 | 7 | 오류 상세는 `google.rpc.Status` | `status` 체계와 짝 [^GOOGLE-RPC] | 상위 모듈에 공통 proto 의존 |
 | 8 | 식별자는 `ppzxc` 이름 공간 | 프로토콜은 구현 소유자 기준 | 미등록 사설 식별자 |
-| 9 | 읽기를 멈추지 않는 배압, 응답 = 크레딧 반환 | 읽기를 멈추면 제어 프레임까지 막힘 | 거절된 요청은 읽고 버림 |
+| 9 | 읽기를 멈추지 않는 배압, 응답 = 미응답 바이트 반환 | 읽기를 멈추면 제어 프레임까지 막힘 | 거절된 요청은 읽고 버림 |
 | 10 | 프로토콜 이름 Strand, 메이저 0 | 기존 codec과 별개 | 식별자 전체 교체 |
 | 11 | 제어 프레임·HELLO는 고정 바이너리 | 코어 모듈 의존성 0 | HELLO에 문자열 값 불가, 코드표 관리 |
 | 12 | Java 8, 단일 저장소 여러 모듈 | 설치형 환경 호환성 | JPMS 미사용 |
@@ -935,12 +954,18 @@ Strand의 서문 `C0 DE 53 54 52 30 00 00`은 다음 원칙으로 구성되었�
 | 16 | 분할·압축 제외, 확장 지점만 유지 | 현재 요구 없음 | 부록 F |
 | 17 | 참조는 규범/참고로 분리 | 실제 의존성을 드러냄 | 없음 |
 | 18 | 적합성 벡터는 "초기 상태 + 단계 목록" 시나리오 하나로 통일하고, 규범 부록 G와 JSON Schema로 형식을 정의. 관측은 송신 프레임과 애플리케이션 경계 이벤트로 한정 | 디코딩 벡터와 세션 벡터를 따로 만들지 않고 러너와 `core` 접점을 하나로 유지. 내부 상태는 늦은 프레임의 조용한 폐기나 같은 크기 요청의 재수락 같은 간접 관측으로 검증하므로 구현 구조에 묶이지 않음 | 벡터가 MUST만 검증하므로 SHOULD 동작은 적합성 판정 밖. 구현은 설정 항목과 가상 시계를 주입받을 수 있어야 함 |
+| 19 | `RESET`을 받으면 어떤 경우에도 `RESET`으로 답하지 않는다. 응답이나 `RESET`으로 끝난 스트림은 유예 상태로 넘겨 늦은 프레임을 조용히 버리고, 유예 보관에서 빠진 스트림의 비-`RESET` 프레임에만 `RESET(STREAM_CLOSED)`을 보낸다. 보관 한도는 1,024개 이상(SHOULD) (#42) | 서로 `RESET`을 주고받는 연쇄를 끊고, 취소와 응답이 엇갈리는 흔한 경합에 오류를 내지 않음 | 엔드포인트가 최근 끝난 스트림 번호를 보관해야 함 |
+| 20 | 미응답 바이트는 `4 + length`(와이어 전체 크기)로 센다. 5.1절 9번을 통과한 상대의 요청만 세고, `p + s > max_pending_bytes`일 때 거절하며 같으면 수락한다. 대기에서 유예로 넘어가는 순간 한 번 반환한다. 거절한 요청은 세지 않는다. 송신 측 의무는 SHOULD (#43) | `max_frame_size` ≤ `max_pending_bytes`와 같은 기준이라 미응답 바이트가 0이면 프레임 하나는 반드시 수락됨. 별도 크기 단위 개념을 두지 않음 | 서버 HELLO 전에 기본값으로 먼저 보낸 요청은 정당하게 `REFUSED`될 수 있음 |
+| 21 | `stream_id`는 같은 개시자 공간 안의 31비트 일련번호로만 비교한다. 일련번호 0 금지, HELLO·PING·CLOSE는 `stream_id` 0. 유휴 스트림 참조는 연결 오류. CLOSE는 한 번만 보내고 `last_stream_id`는 개시자 비트를 포함한 `stream_id`로 적는다 (#44) | 부호 실수를 막고, 이미 끝난 스트림의 경합(조용한 폐기)과 규약 위반(연결 오류)을 가른다. 2단계 CLOSE 없이 3.5절 보장만으로 재시도가 안전함 | 번호를 건너뛰어도 되지만 그 번호는 다시 쓰지 못함 |
+| 22 | 양쪽 엔드포인트가 상대의 첫 프레임을 같은 기준으로 검사한다. 서버는 HELLO와 `HELLO+ACK`를 따로, 이 순서로 보내고, 클라이언트 HELLO를 읽은 뒤에만 보낸다. 협상 실패 시 `HELLO` 다음 `CLOSE(PROTOCOL_ERROR)`. 클라이언트도 서버 HELLO의 `content_type`과 한도를 검증한다. `content_types`는 `1 << n` 비트맵이고 예약 비트는 무시 (#45) | 대칭 검사로 규칙이 하나이고, HTTP/2의 SETTINGS 다음 GOAWAY와 같은 실패 경로를 씀. HELLO 형태 위반을 표로 고정 | 협상 실패에도 의미 없는 HELLO를 한 번 보냄 |
+| 23 | 프레임 타입마다 플래그 의미를 표 하나로 정하고, 정의되지 않은 비트는 0으로 보내고 받으면 무시한다. 5.1절은 스트림 상태 분류(7번)를 `RESPONSE`·`END` 검사(8번)보다 앞에 둔다. 유휴 스트림을 가리키는 프레임은 새 스트림 시도를 빼고 모두 연결 오류 (#46) | RESET `flags` 검사 단계를 따로 두지 않아 분기가 줄고, 끝난 스트림에 늦게 온 형식 위반 프레임이 RESET을 부르지 않음 | 대기 중인 스트림만 `RESET(PROTOCOL_ERROR)`을 받음 |
+| 24 | 응답을 해석할 수 없으면(`type` 불일치, 모르는 필수 확장, payload 해석 불가) 와이어로는 아무것도 보내지 않고 유예 전이와 미응답 바이트 반환만 하며, 호출자에게 로컬 `INTERNAL` 또는 `UNIMPLEMENTED`를 넘긴다. 5.1절 10·11번은 요청 전용. 제어 프레임의 확장 영역은 비워 보내고 받으면 형식만 검사한다. 필수 범위 tag는 협상된 기능 비트가 있을 때만 응답에 싣는다 (#47) | 상대는 이미 유예 상태라 RESET이 효과가 없고, 가장 좁은 범위에서 처리함 | 로컬 실패와 상대가 보낸 실패를 구분해 줄지는 구현 몫 |
 
 ---
 
 ## 부록 F. 향후 확장 항목 (비규범)
 
-이번 버전에서 뺀 기능들이다. 모두 프리페이스 버전을 올리지 않고 나중에 붙일 수 있도록 자리를 남겨 두었다.
+이번 버전에서 뺀 기능들이다. 모두 연결 서문 버전을 올리지 않고 나중에 붙일 수 있도록 자리를 남겨 두었다.
 
 ### F.1 항목
 
@@ -949,7 +974,7 @@ Strand의 서문 `C0 DE 53 54 52 30 00 00`은 다음 원칙으로 구성되었�
 | 메시지 분할 | MB급 메시지가 작은 요청을 지연시킴 | 기능 비트 협상 후 `END` = 0 허용 | 재조립 한도, 프레임·메시지 한도 분리 |
 | 압축 | 텍스트가 많은 큰 payload, 비싼 회선 | 기능 비트 + 플래그 `0x04` + HELLO 압축 코드 | 메시지 단위 압축, 압축 해제 후 크기 한도 |
 | 스트리밍 | 구독, 대량 연속 전송 | 기능 비트 + 메시지 끝과 스트림 끝 표시 분리 | 스트림 단위 흐름 제어 |
-| 스트림 단위 흐름 제어 | 분할·스트리밍 도입 후 스트림 간 간섭 | 기능 비트 + 예약 제어 타입 | 크레딧 갱신 프레임 |
+| 스트림 단위 흐름 제어 | 분할·스트리밍 도입 후 스트림 간 간섭 | 기능 비트 + 예약 제어 타입 | 한도 갱신 프레임 |
 | 응답 없는 요청 | 유실을 허용하는 대량 이벤트 | 기능 비트 + 예약 플래그. 전달 보장 단계로 정의 | 응답을 대신할 배압 수단 |
 | 추가 확장 항목 | 추적 문맥 전파(`tracestate`, `baggage`), 사용자 메타데이터 | 선택 범위 tag 추가 | 없음 |
 | HELLO 추가 파라미터 | 노드 번호 등 운영 가시성 | identifier 추가 | 없음 |
