@@ -14,7 +14,6 @@
     }
   },
   "$defs": {
-    "u8": { "type": "integer", "minimum": 0, "maximum": 255 },
     "u16": { "type": "integer", "minimum": 0, "maximum": 65535 },
     "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
     "hex": {
