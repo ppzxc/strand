@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:strand:conformance:vector-format:1",
   "title": "Strand 적합성 벡터 파일 (format 1)",
-  "description": "규범의 원천은 규격 부록 G다. 이 스키마와 부록이 어긋나면 부록이 우선한다. id 유일성, 스트림 번호 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 부록에만 있다.",
+  "description": "규범의 원천은 적합성 벡터 형식 문서(STRAND_CONFORMANCE_VECTORS.md)다. 이 스키마와 문서가 어긋나면 문서가 우선한다. id 유일성, 스트림 번호 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 문서에만 있다.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "vectors"],
@@ -76,7 +76,7 @@
       }
     },
     "config": {
-      "description": "부록 G.8.2의 설정 항목. 빠진 값은 기본값이다.",
+      "description": "적합성 벡터 형식 문서 8.2절의 설정 항목. 빠진 값은 기본값이다.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
