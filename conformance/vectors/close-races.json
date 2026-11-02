@@ -608,7 +608,7 @@
     },
     {
       "id": "close-received-closes-after-last-pending-stream-ends",
-      "description": "CLOSE(NO_ERROR)를 받은 클라이언트 역할 구현은 대기 중인 스트림이 있는 동안 연결을 열어 둔다. 마지막 대기 스트림의 응답을 받아 결과를 전달한 뒤 대기 스트림이 없어지면(유예 상태는 세지 않는다) 연결을 닫고 closed 이벤트를 낸다",
+      "description": "CLOSE(NO_ERROR)를 받은 클라이언트 역할 구현은 대기 중인 스트림이 있는 동안 연결을 열어 둔다. 마지막 대기 중인 스트림의 응답을 받아 결과를 전달한 뒤 대기 중인 스트림이 없어지면(유예 상태는 세지 않는다) 연결을 닫고 closed 이벤트를 낸다",
       "spec": [
         "3.5"
       ],
@@ -656,7 +656,7 @@
     },
     {
       "id": "close-sent-closes-after-last-pending-stream-ends",
-      "description": "CLOSE(NO_ERROR)를 보낸 서버 역할 구현은 자기가 연 스트림 0x80000001이 대기 중인 동안 연결을 열어 둔다. 그 응답을 받아 결과를 전달한 뒤 대기 스트림이 없어지면 연결을 닫고 closed 이벤트를 낸다",
+      "description": "CLOSE(NO_ERROR)를 보낸 서버 역할 구현은 자기가 연 스트림 0x80000001이 대기 중인 동안 연결을 열어 둔다. 그 응답을 받아 결과를 전달한 뒤 대기 중인 스트림이 없어지면 연결을 닫고 closed 이벤트를 낸다",
       "spec": [
         "3.5"
       ],
@@ -991,7 +991,7 @@
     },
     {
       "id": "close-sender-keeps-processing-streams-at-or-below-last-stream-id",
-      "description": "CLOSE(last_stream_id=2, NO_ERROR)를 보낸 서버 역할 구현은 번호 2 이하의 요청 1, 2를 계속 처리해 응답을 보낸다. 그 뒤 온 요청 3은 처리하지 않고 조용히 버린다. 대기 스트림이 모두 끝난 마지막 응답 뒤에 closed 이벤트를 낸다",
+      "description": "CLOSE(last_stream_id=2, NO_ERROR)를 보낸 서버 역할 구현은 번호 2 이하의 요청 1, 2를 계속 처리해 응답을 보낸다. 그 뒤 온 요청 3은 처리하지 않고 조용히 버린다. 대기 중인 스트림이 모두 끝난 마지막 응답 뒤에 closed 이벤트를 낸다",
       "spec": [
         "3.5"
       ],
@@ -1239,7 +1239,7 @@
     },
     {
       "id": "second-received-error-close-after-no-error-close-is-ignored",
-      "description": "클라이언트 역할 구현이 CLOSE(NO_ERROR)를 먼저 받아 대기 중인 스트림 1을 마저 끝내는 중에 형태가 올바른 비-NO_ERROR CLOSE(last_stream_id=1, INTERNAL_ERROR)를 두 번째로 받으면 error_code와 무관하게 무시한다. 아무것도 보내지 않고 닫지도 않으며 closed 이벤트도 없다. 비-NO_ERROR CLOSE를 받으면 바로 닫는 규칙은 첫 번째로 받은 CLOSE에만 적용한다. 그 뒤 스트림 1의 응답으로 대기 스트림이 없어지면 연결을 닫고 closed 이벤트를 낸다",
+      "description": "클라이언트 역할 구현이 CLOSE(NO_ERROR)를 먼저 받아 대기 중인 스트림 1을 마저 끝내는 중에 형태가 올바른 비-NO_ERROR CLOSE(last_stream_id=1, INTERNAL_ERROR)를 두 번째로 받으면 error_code와 무관하게 무시한다. 아무것도 보내지 않고 닫지도 않으며 closed 이벤트도 없다. 비-NO_ERROR CLOSE를 받으면 바로 닫는 규칙은 첫 번째로 받은 CLOSE에만 적용한다. 그 뒤 스트림 1의 응답으로 대기 중인 스트림이 없어지면 연결을 닫고 closed 이벤트를 낸다",
       "spec": [
         "3.5",
         "5.1.1"
@@ -1294,7 +1294,7 @@
     },
     {
       "id": "error-close-sent-closes-immediately-with-pending-stream",
-      "description": "서버 역할 구현이 애플리케이션 지시로 비-NO_ERROR CLOSE(last_stream_id=1, INTERNAL_ERROR)를 보내면 보낸 직후 전송 계층을 닫고 closed 이벤트를 낸다. 요청 1이 아직 응답되지 않았어도 기다리지 않는다. 대기 스트림을 마저 끝낸 뒤 닫는 규칙은 NO_ERROR에만 적용한다",
+      "description": "서버 역할 구현이 애플리케이션 지시로 비-NO_ERROR CLOSE(last_stream_id=1, INTERNAL_ERROR)를 보내면 보낸 직후 전송 계층을 닫고 closed 이벤트를 낸다. 요청 1이 아직 응답되지 않았어도 기다리지 않는다. 대기 중인 스트림을 마저 끝낸 뒤 닫는 규칙은 NO_ERROR에만 적용한다",
       "spec": [
         "3.5"
       ],
@@ -1426,7 +1426,7 @@
     },
     {
       "id": "error-close-received-after-own-no-error-close-closes-client",
-      "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 CLOSE(NO_ERROR)를 보낸 뒤 형태가 올바른 첫 번째 비-NO_ERROR CLOSE(last_stream_id=0, INTERNAL_ERROR)를 받으면, 대기 스트림이 남아 있어도 기다리지 않고 닫는다. 받은 오류 CLOSE가 우선하므로 아무것도 더 보내지 않는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 한 번 받고, 그 뒤에 closed 이벤트가 난다",
+      "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 CLOSE(NO_ERROR)를 보낸 뒤 형태가 올바른 첫 번째 비-NO_ERROR CLOSE(last_stream_id=0, INTERNAL_ERROR)를 받으면, 대기 중인 스트림이 남아 있어도 기다리지 않고 닫는다. 받은 오류 CLOSE가 우선하므로 아무것도 더 보내지 않는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 한 번 받고, 그 뒤에 closed 이벤트가 난다",
       "spec": [
         "3.5"
       ],
@@ -1480,7 +1480,7 @@
     },
     {
       "id": "error-close-received-after-own-no-error-close-closes-server",
-      "description": "서버 역할 구현이 받은 요청 1을 대기시킨 채 CLOSE(last_stream_id=1, NO_ERROR)를 보낸 뒤 형태가 올바른 첫 번째 비-NO_ERROR CLOSE(last_stream_id=0, INTERNAL_ERROR)를 받으면, 대기 스트림이 남아 있어도 기다리지 않고 닫는다. 아무것도 더 보내지 않고 closed 이벤트만 난다. 대기 중인 스트림은 상대가 연 요청이라 내 요청이 아니므로 result 이벤트는 없다",
+      "description": "서버 역할 구현이 받은 요청 1을 대기시킨 채 CLOSE(last_stream_id=1, NO_ERROR)를 보낸 뒤 형태가 올바른 첫 번째 비-NO_ERROR CLOSE(last_stream_id=0, INTERNAL_ERROR)를 받으면, 대기 중인 스트림이 남아 있어도 기다리지 않고 닫는다. 아무것도 더 보내지 않고 closed 이벤트만 난다. 대기 중인 스트림은 상대가 연 요청이라 내 요청이 아니므로 result 이벤트는 없다",
       "spec": [
         "3.5"
       ],
