@@ -83,7 +83,6 @@
       "id": "server-hello-waits-for-first-frame-payload-then-hello-before-ack",
       "description": "서버는 연결 서문만으로는 아무것도 보내지 않고, 첫 프레임의 헤더만 와도 보내지 않는다. payload(content_types)를 읽은 뒤에 HELLO를 보내고 그 다음에 ACK HELLO를 보낸다",
       "spec": [
-        "3.2",
         "3.3"
       ],
       "setup": {
@@ -1017,8 +1016,7 @@
       "id": "client-first-frame-ack-before-hello-closes-silently",
       "description": "서버가 HELLO보다 ACK HELLO를 먼저 보내면(순서 위반) 첫 프레임의 flags가 0이 아니므로 클라이언트는 아무것도 보내지 않고 닫는다",
       "spec": [
-        "3.2.4",
-        "3.2"
+        "3.2.4"
       ],
       "setup": {
         "role": "client",
@@ -1453,8 +1451,7 @@
       "id": "client-combined-hello-and-ack-closes",
       "description": "서버가 파라미터와 ACK를 한 프레임으로 합쳐(ACK이면서 payload가 있는 HELLO) 보내면 클라이언트는 CLOSE(FRAME_SIZE_ERROR)를 보내고 닫는다",
       "spec": [
-        "3.2.5",
-        "3.2"
+        "3.2.5"
       ],
       "setup": {
         "role": "client",
