@@ -72,6 +72,6 @@ final class StrictJson {
     }
 
     private static InvalidVectorException fail(String fileName, String message) {
-        return new InvalidVectorException(fileName + ": " + message);
+        return Check.forFile(fileName).fail(message);
     }
 }
