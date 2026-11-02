@@ -654,9 +654,9 @@
       "id": "concurrency-refused-stream-number-reuse-closes",
       "description": "동시 스트림 한도(1)에 걸려 RESET(REFUSED)으로 거절한 요청의 번호(2)도 쓰인 것으로 센다(highest_peer_seq=2). 상대가 그 번호로 새 요청을 다시 보내면 5.1.1절 6번 위반이라 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. last_stream_id는 highest_peer_seq와 같은 2다",
       "spec": [
+        "3.5",
         "4.2.1",
-        "5.1.1",
-        "3.5"
+        "5.1.1"
       ],
       "setup": {
         "role": "server",
