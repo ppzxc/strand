@@ -58,7 +58,8 @@
       "description": "CLOSE(last_stream_id=0)를 보낸 서버 역할 구현이 END 플래그가 없는 요청(번호 1)을 받으면, 5.1.2절 8번의 RESET(PROTOCOL_ERROR)보다 CLOSE 이후 폐기가 앞서 와이어로 아무것도 보내지 않는다. 폐기는 5.1.1절 6번 통과 직후이고 7번 앞이다",
       "spec": [
         "3.5",
-        "5.1.1"
+        "5.1.1",
+        "5.1.2"
       ],
       "setup": {
         "role": "server",
@@ -1202,7 +1203,8 @@
       "id": "second-received-valid-close-is-ignored-without-own-close",
       "description": "CLOSE를 보내지 않은 클라이언트 역할 구현이 형태가 올바른 CLOSE를 두 번 받으면 두 번째는 5.1.1절 5번 검사를 통과하므로 무시한다. 아무것도 보내지 않고 닫지도 않는다. 스트림 1이 대기 중이라 연결은 열려 있다",
       "spec": [
-        "3.5"
+        "3.5",
+        "5.1.1"
       ],
       "setup": {
         "role": "client",
@@ -1696,12 +1698,41 @@
       ]
     },
     {
-      "id": "disconnect-before-server-hello-drops-held-request-without-result",
+      "id": "disconnect-after-closed-emits-nothing",
+      "description": "대기 중인 스트림이 없는 클라이언트 역할 구현이 형태가 올바른 비-NO_ERROR CLOSE(last_stream_id=0, PROTOCOL_ERROR)를 받으면 아무것도 보내지 않고 닫고 closed 이벤트를 낸다. 이미 닫힌 뒤 전송 계층 끊김(disconnect)이 감지되어도 closed를 다시 내지 않고 아무것도 보내지 않는다. closed는 연결당 정확히 한 번이다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000000000001",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        },
+        {
+          "kind": "disconnect",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "first-frame-close-drops-held-request-without-result",
       "description": "content_types를 둘 이상(6) 제시한 클라이언트는 선송신하지 못하므로 서버 HELLO 전에 낸 요청 1을 보관한다. 연결이 열리면 구현이 내보내는 연결 서문과 HELLO가 첫 단계의 send에 합쳐지고 보관된 요청 프레임은 나가지 않는다. 서버가 첫 프레임으로 HELLO가 아닌 CLOSE를 보내면 5.1.1절 2번에 걸려 아무것도 보내지 않고 닫는다. 보관된 요청은 전송된 적이 없고 stream_id가 없으므로 result 이벤트로 관측하지 않으며 closed만 난다",
       "spec": [
         "3.2.4",
         "3.3",
-        "3.5"
+        "3.5",
+        "5.1.1"
       ],
       "setup": {
         "role": "client",
