@@ -256,7 +256,7 @@
     },
     {
       "id": "invalid-close-bit-mismatch-after-own-close-only-closes",
-      "description": "이미 CLOSE를 보낸 클라이언트 역할 구현이 서버 개시 번호(개시자 비트 1)를 가진 last_stream_id=0x80000001 CLOSE를 받으면, 클라이언트 번호 공간과 비트가 달라 잘못된 CLOSE다. 두 번째 CLOSE 없이 연결만 닫는다",
+      "description": "이미 CLOSE를 보낸 클라이언트 역할 구현이 서버 개시 번호(개시자 비트 1)를 가진 last_stream_id=0x80000001 CLOSE를 받으면, 클라이언트 번호 공간과 비트가 달라 잘못된 CLOSE다. 두 번째 CLOSE 없이 연결만 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 한 번 받고, 그 뒤에 closed 이벤트가 난다",
       "spec": [
         "3.5"
       ],
@@ -297,6 +297,11 @@
           "send": [],
           "events": [
             {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
+            {
               "event": "closed"
             }
           ]
@@ -305,7 +310,7 @@
     },
     {
       "id": "invalid-close-above-highest-local-seq-after-own-close-only-closes",
-      "description": "이미 CLOSE를 보낸 클라이언트 역할 구현이 highest_local_seq(1)보다 큰 last_stream_id=2 CLOSE를 받으면, 열지 않은 번호를 주장하는 잘못된 CLOSE다. 두 번째 CLOSE 없이 연결만 닫는다",
+      "description": "이미 CLOSE를 보낸 클라이언트 역할 구현이 highest_local_seq(1)보다 큰 last_stream_id=2 CLOSE를 받으면, 열지 않은 번호를 주장하는 잘못된 CLOSE다. 두 번째 CLOSE 없이 연결만 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 한 번 받고, 그 뒤에 closed 이벤트가 난다",
       "spec": [
         "3.5"
       ],
@@ -346,6 +351,11 @@
           "send": [],
           "events": [
             {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
+            {
               "event": "closed"
             }
           ]
@@ -354,7 +364,7 @@
     },
     {
       "id": "invalid-close-without-own-close-is-answered-with-protocol-error",
-      "description": "아직 CLOSE를 보내지 않은 클라이언트 역할 구현이 잘못된 CLOSE(last_stream_id=0x80000001)를 받으면 CLOSE(PROTOCOL_ERROR)를 보내고 연결을 닫는다. 서버가 연 스트림이 없으므로 보내는 last_stream_id는 0이다",
+      "description": "아직 CLOSE를 보내지 않은 클라이언트 역할 구현이 잘못된 CLOSE(last_stream_id=0x80000001)를 받으면 CLOSE(PROTOCOL_ERROR)를 보내고 연결을 닫는다. 서버가 연 스트림이 없으므로 보내는 last_stream_id는 0이다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 한 번 받고, 그 뒤에 closed 이벤트가 난다",
       "spec": [
         "3.5",
         "5.1.1"
@@ -389,6 +399,11 @@
             }
           ],
           "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
             {
               "event": "closed"
             }
@@ -1069,7 +1084,7 @@
     },
     {
       "id": "second-received-close-with-invalid-last-stream-id-closes",
-      "description": "클라이언트 역할 구현이 올바른 CLOSE(last_stream_id=1, NO_ERROR)를 받은 뒤 두 번째로 받은 CLOSE의 last_stream_id가 잘못이면(0x80000001, 개시자 비트 불일치) 무시하지 않고 5.1.1절 5번 검사로 연결 오류 처리한다. 아직 CLOSE를 보내지 않았으므로 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "description": "클라이언트 역할 구현이 올바른 CLOSE(last_stream_id=1, NO_ERROR)를 받은 뒤 두 번째로 받은 CLOSE의 last_stream_id가 잘못이면(0x80000001, 개시자 비트 불일치) 무시하지 않고 5.1.1절 5번 검사로 연결 오류 처리한다. 아직 CLOSE를 보내지 않았으므로 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 한 번 받고, 그 뒤에 closed 이벤트가 난다",
       "spec": [
         "3.5",
         "5.1.1"
@@ -1111,6 +1126,11 @@
           ],
           "events": [
             {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
+            {
               "event": "closed"
             }
           ]
@@ -1119,7 +1139,7 @@
     },
     {
       "id": "second-received-close-with-invalid-last-stream-id-after-own-close-only-closes",
-      "description": "이미 CLOSE를 보낸 클라이언트 역할 구현이 올바른 CLOSE를 받은 뒤 두 번째로 받은 CLOSE의 last_stream_id가 잘못이면(highest_local_seq(1)보다 큰 2) 연결 오류지만 두 번째 CLOSE는 보내지 않고 닫기만 한다",
+      "description": "이미 CLOSE를 보낸 클라이언트 역할 구현이 올바른 CLOSE를 받은 뒤 두 번째로 받은 CLOSE의 last_stream_id가 잘못이면(highest_local_seq(1)보다 큰 2) 연결 오류지만 두 번째 CLOSE는 보내지 않고 닫기만 한다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 한 번 받고, 그 뒤에 closed 이벤트가 난다",
       "spec": [
         "3.5",
         "5.1.1"
@@ -1166,6 +1186,11 @@
           "hex": "000000140003000000000000000000000000000200000000",
           "send": [],
           "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
             {
               "event": "closed"
             }
@@ -1300,6 +1325,198 @@
               "error_code": "INTERNAL_ERROR"
             }
           ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "error-close-received-fails-pending-request-with-unavailable",
+      "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 형태가 올바른 비-NO_ERROR CLOSE(last_stream_id=0, INTERNAL_ERROR)를 받으면 아무것도 보내지 않고 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 정확히 한 번 받고, 그 뒤에 closed 이벤트가 난다. last_stream_id=0이라 요청 1은 처리되지 않은 것이 보장된다",
+      "spec": [
+        "3.5",
+        "4.6"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000000000002",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "error-close-sent-fails-pending-request-with-unavailable",
+      "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 비-NO_ERROR CLOSE(last_stream_id=0, INTERNAL_ERROR)를 보내면 보낸 직후 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 정확히 한 번 받고, 그 뒤에 closed 이벤트가 난다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "close",
+          "error_code": "INTERNAL_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "last_stream_id": 0,
+              "error_code": "INTERNAL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "error-close-received-after-own-no-error-close-closes-client",
+      "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 CLOSE(NO_ERROR)를 보낸 뒤 형태가 올바른 첫 번째 비-NO_ERROR CLOSE(last_stream_id=0, INTERNAL_ERROR)를 받으면, 대기 스트림이 남아 있어도 기다리지 않고 닫는다. 받은 오류 CLOSE가 우선하므로 아무것도 더 보내지 않는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 한 번 받고, 그 뒤에 closed 이벤트가 난다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "last_stream_id": 0,
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000000000002",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "error-close-received-after-own-no-error-close-closes-server",
+      "description": "서버 역할 구현이 받은 요청 1을 대기시킨 채 CLOSE(last_stream_id=1, NO_ERROR)를 보낸 뒤 형태가 올바른 첫 번째 비-NO_ERROR CLOSE(last_stream_id=0, INTERNAL_ERROR)를 받으면, 대기 스트림이 남아 있어도 기다리지 않고 닫는다. 아무것도 더 보내지 않고 closed 이벤트만 난다. 대기 중인 스트림은 상대가 연 요청이라 내 요청이 아니므로 result 이벤트는 없다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010102000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "last_stream_id": 1,
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000000000002",
+          "send": [],
           "events": [
             {
               "event": "closed"
