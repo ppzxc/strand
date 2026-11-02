@@ -1211,6 +1211,102 @@
           "events": []
         }
       ]
+    },
+    {
+      "id": "second-received-error-close-after-no-error-close-is-ignored",
+      "description": "클라이언트 역할 구현이 CLOSE(NO_ERROR)를 먼저 받아 대기 중인 스트림 1을 마저 끝내는 중에 형태가 올바른 비-NO_ERROR CLOSE(last_stream_id=1, INTERNAL_ERROR)를 두 번째로 받으면 error_code와 무관하게 무시한다. 아무것도 보내지 않고 닫지도 않으며 closed 이벤트도 없다. 비-NO_ERROR CLOSE를 받으면 바로 닫는 규칙은 첫 번째로 받은 CLOSE에만 적용한다. 그 뒤 스트림 1의 응답으로 대기 스트림이 없어지면 연결을 닫고 closed 이벤트를 낸다",
+      "spec": [
+        "3.5",
+        "5.1.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000100000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000100000002",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010103000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "OK"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "error-close-sent-closes-immediately-with-pending-stream",
+      "description": "서버 역할 구현이 애플리케이션 지시로 비-NO_ERROR CLOSE(last_stream_id=1, INTERNAL_ERROR)를 보내면 보낸 직후 전송 계층을 닫고 closed 이벤트를 낸다. 요청 1이 아직 응답되지 않았어도 기다리지 않는다. 대기 스트림을 마저 끝낸 뒤 닫는 규칙은 NO_ERROR에만 적용한다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010102000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "close",
+          "error_code": "INTERNAL_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "last_stream_id": 1,
+              "error_code": "INTERNAL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
