@@ -413,7 +413,7 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 
 1. 클라이언트는 연결 서문을 보내고 곧바로 파라미터 HELLO를 이어 보낸다(MUST).
 2. 서버는 연결 서문과 첫 프레임을 3.1절, 3.2.4절 기준으로 확인하고, 클라이언트 HELLO의 payload(`content_types`)를 읽는다. 문제가 없으면 서버는 자기 파라미터 HELLO를 보낸 뒤 클라이언트 HELLO에 ACK HELLO로 답한다(MUST). 두 프레임은 이 순서로 서로 다른 프레임이다(3.2절). 협상이 실패하면 서버는 HELLO를 보낸 뒤 ACK 없이 `CLOSE(PROTOCOL_ERROR)`를 보낸다(3.2.3절).
-3. 클라이언트는 서버 HELLO를 받으면 3.2.4절과 3.2.3절 기준으로 즉시 검증하고, 통과하면 서버 HELLO에 ACK HELLO로 답한다(MUST). 검증에 실패하면 ACK 대신 3.2.3절대로 닫는다. 서버가 협상 실패 경로(3.2.3절)로 보낸 HELLO도 예외 없이 같다. 이어서 오는 CLOSE는 일반 CLOSE로 처리한다(3.5절).
+3. 클라이언트는 서버 HELLO를 받으면 3.2.4절과 3.2.3절 기준으로 즉시 검증하고, 통과하면 서버 HELLO에 ACK HELLO로 답한다(MUST). 검증에 실패하면 ACK 대신 3.2.3절대로 닫는다. 협상 실패 경로의 HELLO와 뒤따르는 CLOSE의 처리는 3.2.3절이 정한다.
 4. 상대의 HELLO를 받은 뒤부터는 애플리케이션 프레임을 보낼 수 있다. 클라이언트는 아래 조건을 지키면 서버 HELLO를 기다리지 않고 요청을 먼저 보내도 된다(MAY, 선송신).
     * **서버의 길이 검사 기준.** 서버는 자기 HELLO에 대한 클라이언트의 ACK를 받기 전까지 프레임의 `length`를 항상 기본값(4 MiB) 기준으로 검사한다(MUST). 서버가 알린 `max_frame_size`가 기본값보다 크거나 작아도 같다. ACK를 받은 뒤부터는 자기가 알린 `max_frame_size`로 검사한다. 클라이언트 ACK는 서버 한도를 적용하기 시작하는 동기화 지점이다.
     * **클라이언트의 의무.** 클라이언트는 서버 HELLO의 한도에 기댄 프레임을 서버 HELLO에 대한 ACK보다 먼저 보내지 않는다(MUST). 곧 ACK 전에 보내는 프레임은 기본값(4 MiB) 범위를 넘지 않는다. 서버가 알린 한도가 기본값보다 작아도 ACK 전에 보낸 기본값 범위의 프레임은 `FRAME_SIZE_ERROR`가 되지 않는다.
@@ -447,7 +447,7 @@ sequenceDiagram
     else 협상 실패
         S->>C: HELLO (flags=0: 서버 파라미터는 평소 값, content_type 없음)
         S->>C: CLOSE(PROTOCOL_ERROR) (ACK 없음)
-        Note over C: HELLO는 일반 서버 HELLO처럼 즉시 검증(ACK 또는 CLOSE), CLOSE는 일반 CLOSE로 처리(3.5절)
+        Note over C: HELLO와 CLOSE의 처리는 3.2.3절
     end
 ```
 
