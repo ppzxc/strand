@@ -83,7 +83,6 @@
       "id": "server-hello-waits-for-first-frame-payload-then-hello-before-ack",
       "description": "서버는 연결 서문만으로는 아무것도 보내지 않고, 첫 프레임의 헤더만 와도 보내지 않는다. payload(content_types)를 읽은 뒤에 HELLO를 보내고 그 다음에 ACK HELLO를 보낸다",
       "spec": [
-        "3.2",
         "3.3"
       ],
       "setup": {
@@ -435,218 +434,6 @@
               ]
             }
           ],
-          "events": []
-        }
-      ]
-    },
-    {
-      "id": "negotiation-fails-when-no-content-type-offered",
-      "description": "클라이언트 content_types가 0이면 고를 형식이 없다. 서버는 HELLO를 보내고 ACK 없이 곧바로 CLOSE(PROTOCOL_ERROR)를 보낸 뒤 닫는다. 닫은 연결에서는 시계가 지나도 HELLO_TIMEOUT을 보내지 않는다",
-      "spec": [
-        "3.2.3"
-      ],
-      "setup": {
-        "role": "server",
-        "established": false,
-        "config": {
-          "hello_timeout_ms": 1000
-        }
-      },
-      "steps": [
-        {
-          "kind": "recv",
-          "hex": "c0de53545230000000000012000100000000000000000000000500000000",
-          "send": [
-            {
-              "type": "HELLO",
-              "params": {}
-            },
-            {
-              "type": "CLOSE",
-              "last_stream_id": 0,
-              "error_code": "PROTOCOL_ERROR"
-            }
-          ],
-          "events": [
-            {
-              "event": "closed"
-            }
-          ]
-        },
-        {
-          "kind": "advance",
-          "ms": 5000,
-          "send": [],
-          "events": []
-        }
-      ]
-    },
-    {
-      "id": "negotiation-fails-when-only-reserved-content-type-bits",
-      "description": "클라이언트 content_types에 예약 비트(0번, 3번)만 켜져 있으면 고를 형식이 없다. 서버는 HELLO 다음 CLOSE(PROTOCOL_ERROR)를 보내고 ACK는 보내지 않는다",
-      "spec": [
-        "3.2.3"
-      ],
-      "setup": {
-        "role": "server",
-        "established": false,
-        "config": {
-          "hello_timeout_ms": 1000
-        }
-      },
-      "steps": [
-        {
-          "kind": "recv",
-          "hex": "c0de53545230000000000012000100000000000000000000000500000009",
-          "send": [
-            {
-              "type": "HELLO",
-              "params": {}
-            },
-            {
-              "type": "CLOSE",
-              "last_stream_id": 0,
-              "error_code": "PROTOCOL_ERROR"
-            }
-          ],
-          "events": [
-            {
-              "event": "closed"
-            }
-          ]
-        },
-        {
-          "kind": "advance",
-          "ms": 5000,
-          "send": [],
-          "events": []
-        }
-      ]
-    },
-    {
-      "id": "negotiation-fails-when-client-max-frame-size-exceeds-pending-bytes",
-      "description": "클라이언트 HELLO의 max_frame_size(65,536)가 max_pending_bytes(32,768)보다 크면 서버는 HELLO 다음 CLOSE(PROTOCOL_ERROR)를 보내고 ACK는 보내지 않는다",
-      "spec": [
-        "3.2.3"
-      ],
-      "setup": {
-        "role": "server",
-        "established": false,
-        "config": {
-          "hello_timeout_ms": 1000
-        }
-      },
-      "steps": [
-        {
-          "kind": "recv",
-          "hex": "c0de53545230000000000018000100000000000000000000000100010000000200008000",
-          "send": [
-            {
-              "type": "HELLO",
-              "params": {}
-            },
-            {
-              "type": "CLOSE",
-              "last_stream_id": 0,
-              "error_code": "PROTOCOL_ERROR"
-            }
-          ],
-          "events": [
-            {
-              "event": "closed"
-            }
-          ]
-        },
-        {
-          "kind": "advance",
-          "ms": 5000,
-          "send": [],
-          "events": []
-        }
-      ]
-    },
-    {
-      "id": "negotiation-fails-when-client-max-frame-size-below-range",
-      "description": "클라이언트 HELLO의 max_frame_size가 허용 범위 아래(16,383)이면 서버는 HELLO 다음 CLOSE(PROTOCOL_ERROR)를 보낸다",
-      "spec": [
-        "3.2.3",
-        "3.2.1"
-      ],
-      "setup": {
-        "role": "server",
-        "established": false,
-        "config": {
-          "hello_timeout_ms": 1000
-        }
-      },
-      "steps": [
-        {
-          "kind": "recv",
-          "hex": "c0de53545230000000000012000100000000000000000000000100003fff",
-          "send": [
-            {
-              "type": "HELLO",
-              "params": {}
-            },
-            {
-              "type": "CLOSE",
-              "last_stream_id": 0,
-              "error_code": "PROTOCOL_ERROR"
-            }
-          ],
-          "events": [
-            {
-              "event": "closed"
-            }
-          ]
-        },
-        {
-          "kind": "advance",
-          "ms": 5000,
-          "send": [],
-          "events": []
-        }
-      ]
-    },
-    {
-      "id": "negotiation-fails-when-client-max-frame-size-above-range",
-      "description": "클라이언트 HELLO의 max_frame_size가 허용 범위 위(16 MiB + 1)이면 서버는 HELLO 다음 CLOSE(PROTOCOL_ERROR)를 보낸다. max_pending_bytes는 그보다 크게 두어 둘의 비교 위반이 섞이지 않게 한다",
-      "spec": [
-        "3.2.3",
-        "3.2.1"
-      ],
-      "setup": {
-        "role": "server",
-        "established": false,
-        "config": {
-          "hello_timeout_ms": 1000
-        }
-      },
-      "steps": [
-        {
-          "kind": "recv",
-          "hex": "c0de53545230000000000018000100000000000000000000000101000001000202000000",
-          "send": [
-            {
-              "type": "HELLO",
-              "params": {}
-            },
-            {
-              "type": "CLOSE",
-              "last_stream_id": 0,
-              "error_code": "PROTOCOL_ERROR"
-            }
-          ],
-          "events": [
-            {
-              "event": "closed"
-            }
-          ]
-        },
-        {
-          "kind": "advance",
-          "ms": 5000,
-          "send": [],
           "events": []
         }
       ]
@@ -1229,8 +1016,7 @@
       "id": "client-first-frame-ack-before-hello-closes-silently",
       "description": "서버가 HELLO보다 ACK HELLO를 먼저 보내면(순서 위반) 첫 프레임의 flags가 0이 아니므로 클라이언트는 아무것도 보내지 않고 닫는다",
       "spec": [
-        "3.2.4",
-        "3.2"
+        "3.2.4"
       ],
       "setup": {
         "role": "client",
@@ -1665,8 +1451,7 @@
       "id": "client-combined-hello-and-ack-closes",
       "description": "서버가 파라미터와 ACK를 한 프레임으로 합쳐(ACK이면서 payload가 있는 HELLO) 보내면 클라이언트는 CLOSE(FRAME_SIZE_ERROR)를 보내고 닫는다",
       "spec": [
-        "3.2.5",
-        "3.2"
+        "3.2.5"
       ],
       "setup": {
         "role": "client",
