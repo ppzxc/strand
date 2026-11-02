@@ -5,8 +5,8 @@
       "id": "pending-return-receiver-response-sent",
       "description": "한도(16,384)를 가득 채우는 요청이 대기 중이라 16바이트 요청이 REFUSED되는 것을 먼저 확인한다. 받은 요청에 응답을 보내면 그 요청의 크기가 반환된다. 그 직후 한도 크기의 요청이 다시 수락되고, 곧바로 16바이트 요청이 REFUSED되므로 반환은 정확히 한 번이다. 늦게 온 상대의 RESET(CANCEL)은 조용히 버려진다.",
       "spec": [
-        "4.5",
-        "4.3"
+        "4.3",
+        "4.5"
       ],
       "setup": {
         "role": "server",
@@ -94,8 +94,8 @@
       "id": "pending-return-receiver-own-reset-sent",
       "description": "한도(16,384)를 가득 채우는 요청이 대기 중이라 16바이트 요청이 REFUSED되는 것을 먼저 확인한다. 상대가 연 스트림에 RESPONSE 플래그가 켜진 프레임이 오면 RESET(PROTOCOL_ERROR)을 보내고, 그 RESET 송신으로 요청의 크기가 반환된다. 그 직후 한도 크기의 요청이 다시 수락되고, 곧바로 16바이트 요청이 REFUSED되므로 반환은 정확히 한 번이다. 이어서 같은 스트림에 온 늦은 프레임은 조용히 버려진다.",
       "spec": [
-        "4.5",
-        "2.3.1"
+        "2.3.1",
+        "4.5"
       ],
       "setup": {
         "role": "server",
@@ -178,8 +178,8 @@
       "id": "pending-return-receiver-peer-reset-received",
       "description": "한도(16,384)를 가득 채우는 요청이 대기 중이라 16바이트 요청이 REFUSED되는 것을 먼저 확인한다. 상대의 RESET(CANCEL)을 받으면 그 요청의 크기가 반환된다. 받은 쪽은 RESET으로 답하지 않는다. 그 직후 한도 크기의 요청이 다시 수락되고, 곧바로 16바이트 요청이 REFUSED되므로 반환은 정확히 한 번이다. 취소된 요청에 애플리케이션이 뒤늦게 응답을 시도해도 아무것도 보내지 않는다.",
       "spec": [
-        "4.5",
-        "4.4"
+        "4.4",
+        "4.5"
       ],
       "setup": {
         "role": "server",
@@ -257,8 +257,8 @@
       "id": "pending-return-once-receiver-late-frames-after-response",
       "description": "한도(16,384)를 가득 채우는 요청이 대기 중이라 16바이트 요청이 REFUSED되는 것을 먼저 확인한다. 응답을 보내 반환된 뒤 같은 스트림에 늦은 RESPONSE 프레임, RESET(CANCEL), RESET(PROTOCOL_ERROR)이 차례로 와도 아무것도 보내지 않고 다시 반환하지 않는다. 한도 크기의 요청이 하나만 수락되고 다음 16바이트 요청은 REFUSED된다.",
       "spec": [
-        "4.5",
-        "4.3"
+        "4.3",
+        "4.5"
       ],
       "setup": {
         "role": "server",
@@ -358,8 +358,8 @@
       "id": "pending-return-once-receiver-late-frames-after-own-reset",
       "description": "한도(16,384)를 가득 채우는 요청이 대기 중이라 16바이트 요청이 REFUSED되는 것을 먼저 확인한다. 자신의 RESET(PROTOCOL_ERROR) 송신으로 반환된 뒤 같은 스트림에 늦은 RESET(CANCEL)과 RESPONSE 프레임이 와도 아무것도 보내지 않고 다시 반환하지 않는다. 한도 크기의 요청이 하나만 수락되고 다음 16바이트 요청은 REFUSED된다.",
       "spec": [
-        "4.5",
-        "4.3"
+        "4.3",
+        "4.5"
       ],
       "setup": {
         "role": "server",
@@ -448,8 +448,8 @@
       "id": "pending-return-once-receiver-late-frames-after-peer-reset",
       "description": "한도(16,384)를 가득 채우는 요청이 대기 중이라 16바이트 요청이 REFUSED되는 것을 먼저 확인한다. 상대의 RESET(CANCEL)으로 반환된 뒤 같은 스트림에 늦은 RESPONSE 프레임, RESET, 애플리케이션의 응답 시도가 와도 아무것도 보내지 않고 다시 반환하지 않는다. 한도 크기의 요청이 하나만 수락되고 다음 16바이트 요청은 REFUSED된다.",
       "spec": [
-        "4.5",
-        "4.3"
+        "4.3",
+        "4.5"
       ],
       "setup": {
         "role": "server",
@@ -539,8 +539,8 @@
       "id": "pending-return-sender-response-received",
       "description": "보낸 요청에 응답을 받으면 애플리케이션에 OK 결과를 넘기고 스트림이 유예 상태로 넘어간다. 늦은 응답과 RESET(CANCEL)은 조용히 버려진다. 송신 측의 반환은 직접 관측하지 않고 같은 사건이 일으키는 유예 전이로 확인한다. 애플리케이션 결과는 정확히 한 번 나가고, 같은 스트림의 늦은 프레임은 아무것도 보내지 않으며 결과도 다시 나가지 않는다.",
       "spec": [
-        "4.5",
-        "4.3"
+        "4.3",
+        "4.5"
       ],
       "setup": {
         "role": "client",
@@ -955,8 +955,8 @@
       "id": "pending-return-once-sender-late-frames-after-response",
       "description": "응답으로 끝난 요청의 스트림에 늦은 응답, RESET(CANCEL), RESET(PROTOCOL_ERROR), END가 꺼진 응답이 차례로 와도 아무것도 보내지 않고 애플리케이션 결과도 다시 나가지 않는다. 송신 측의 반환은 직접 관측하지 않고 같은 사건이 일으키는 유예 전이로 확인한다. 애플리케이션 결과는 정확히 한 번 나가고, 같은 스트림의 늦은 프레임은 아무것도 보내지 않으며 결과도 다시 나가지 않는다.",
       "spec": [
-        "4.5",
-        "4.3"
+        "4.3",
+        "4.5"
       ],
       "setup": {
         "role": "client",
