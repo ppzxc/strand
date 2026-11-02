@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/** 적합성 벡터 하나(부록 G.3). 로더가 부록 G 규칙을 검증한 뒤에만 만들어진다. */
+/** 적합성 벡터 하나(벡터 형식 문서 3절). 로더가 벡터 형식 문서 규칙을 검증한 뒤에만 만들어진다. */
 final class ConformanceVector {
 
     private final String id;
@@ -39,12 +39,12 @@ final class ConformanceVector {
         return spec;
     }
 
-    /** 검증을 마친 초기 상태(G.4). 생략된 선택 필드는 없는 그대로다. */
+    /** 검증을 마친 초기 상태(벡터 형식 문서 4절). 생략된 선택 필드는 없는 그대로다. */
     JsonObject setup() {
         return setup.deepCopy();
     }
 
-    /** 검증을 마친 단계 목록(G.5). 하나 이상이다. */
+    /** 검증을 마친 단계 목록(벡터 형식 문서 5절). 하나 이상이다. */
     List<JsonObject> steps() {
         return steps;
     }

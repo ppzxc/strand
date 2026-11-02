@@ -10,7 +10,7 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 
-/** 부록 G 형식 벡터 파일 로더의 공개 인터페이스({@link VectorLoader#parse})를 검증한다. */
+/** 벡터 형식 문서 형식 벡터 파일 로더의 공개 인터페이스({@link VectorLoader#parse})를 검증한다. */
 class VectorLoaderTest {
 
     private static final String SETUP = "{\"role\":\"server\",\"established\":true}";

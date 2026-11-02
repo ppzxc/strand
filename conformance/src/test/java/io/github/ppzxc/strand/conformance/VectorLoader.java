@@ -27,7 +27,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 적합성 벡터 파일의 엄격 로더. 규격 부록 G의 규칙을 Gson으로 직접 구현하며, 하나라도 어기면
+ * 적합성 벡터 파일의 엄격 로더. 벡터 형식 문서의 규칙을 Gson으로 직접 구현하며, 하나라도 어기면
  * {@link InvalidVectorException}을 던진다. JSON Schema 파일({@code conformance/schema/})은 다른 언어 구현자를 위한
  * 보조 자료이고, 어긋나면 부록이 우선한다.
  *
@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
  */
 final class VectorLoader {
 
-    /** 이 로더가 아는 형식 버전(G.2). */
+    /** 이 로더가 아는 형식 버전(벡터 형식 문서 2절). */
     private static final int KNOWN_FORMAT = 1;
 
     private static final Pattern ID = Pattern.compile("[a-z0-9]+(-[a-z0-9]+)*");

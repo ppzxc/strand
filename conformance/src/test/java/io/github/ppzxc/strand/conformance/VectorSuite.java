@@ -36,7 +36,7 @@ final class VectorSuite {
         assertThat(files).as("벡터 파일이 하나도 없다: %s", directory.toAbsolutePath()).isNotEmpty();
         List<DynamicTest> tests = new ArrayList<>();
         for (Path file : files) {
-            // 테스트 이름은 파일명에서 .json을 뺀 `파일명/id`(부록 G.3).
+            // 테스트 이름은 파일명에서 .json을 뺀 `파일명/id`(벡터 형식 문서 3절).
             String fileName = file.getFileName().toString();
             String name = fileName.substring(0, fileName.length() - ".json".length());
             for (ConformanceVector vector : VectorLoader.load(file)) {
