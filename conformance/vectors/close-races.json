@@ -1524,6 +1524,58 @@
           ]
         }
       ]
+    },
+    {
+      "id": "close-sent-with-no-pending-streams-closes-immediately",
+      "description": "대기 중인 스트림이 처음부터 없는 클라이언트 역할 구현이 애플리케이션 지시로 CLOSE(NO_ERROR)를 보내면, 기다릴 스트림이 없으므로 보낸 직후 전송 계층을 닫고 closed 이벤트를 낸다. 대기 중인 내 요청이 없어 result 이벤트는 없다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "last_stream_id": 0,
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-received-no-error-with-no-pending-streams-closes-immediately",
+      "description": "대기 중인 스트림이 처음부터 없는 서버 역할 구현이 형태가 올바른 CLOSE(last_stream_id=0, NO_ERROR)를 받으면 기다릴 스트림이 없으므로 아무것도 보내지 않고 곧바로 전송 계층을 닫고 closed 이벤트를 낸다. CLOSE로 답하지 않는다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000000000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
