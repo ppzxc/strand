@@ -1035,6 +1035,7 @@
       "description": "stream_id가 0이 아니고 payload도 있는 ACK HELLO는 stream_id 검사가 3.2.5절 표보다 앞서므로 CLOSE(PROTOCOL_ERROR)다",
       "spec": [
         "2.2.5",
+        "3.2.5",
         "5.1.1"
       ],
       "setup": {
