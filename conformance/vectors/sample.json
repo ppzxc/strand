@@ -1,20 +1,19 @@
-[
-  {
-    "id": "empty-valid",
-    "description": "빈 바이트열. 로더와 러너가 동작하는지 확인하는 샘플",
-    "result": "valid",
-    "bytes": ""
-  },
-  {
-    "id": "ping-valid",
-    "description": "공백이 섞인 소문자 hex 샘플",
-    "result": "valid",
-    "bytes": "01 00 ff"
-  },
-  {
-    "id": "truncated-invalid",
-    "description": "invalid 결과 샘플",
-    "result": "invalid",
-    "bytes": "01"
-  }
-]
+{
+  "format": 1,
+  "vectors": [
+    {
+      "id": "ping-is-acknowledged",
+      "description": "PING을 받으면 같은 8바이트에 ACK를 붙여 돌려준다",
+      "spec": ["3.4"],
+      "setup": { "role": "server", "established": true },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000014 00020000 00000000 00000000 0102030405060708",
+          "send": [{ "type": "PING", "flags": ["ACK"], "payload": "0102030405060708" }],
+          "events": []
+        }
+      ]
+    }
+  ]
+}
