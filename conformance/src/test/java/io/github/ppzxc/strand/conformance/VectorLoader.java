@@ -2,17 +2,9 @@ package io.github.ppzxc.strand.conformance;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParseException;
-import com.google.gson.JsonPrimitive;
-import com.google.gson.Strictness;
-import com.google.gson.stream.JsonReader;
-import com.google.gson.stream.JsonToken;
 import java.io.IOException;
-import java.io.StringReader;
 import java.io.UncheckedIOException;
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -88,7 +80,7 @@ final class VectorLoader {
         if (json.trim().isEmpty()) {
             throw new Check(fileName, "").fail("", "파일이 비어 있다");
         }
-        JsonElement root = readTree(fileName, json);
+        JsonElement root = StrictJson.read(fileName, json);
         Check top = new Check(fileName, "");
         JsonObject file = top.object("", root, fields("format", Kind.ANY, "vectors", Kind.ANY), fields());
         top.checkFormat(file.get("format"));
@@ -106,60 +98,6 @@ final class VectorLoader {
             index++;
         }
         return result;
-    }
-
-    /**
-     * 엄격 모드 JsonReader로 트리를 만든다. Gson 트리 API는 한 객체 안의 같은 키를 조용히 덮어쓰므로
-     * 객체를 직접 조립하면서 중복 키를 거부한다.
-     */
-    private static JsonElement readTree(String fileName, String json) {
-        Check check = new Check(fileName, "");
-        try (JsonReader reader = new JsonReader(new StringReader(json))) {
-            reader.setStrictness(Strictness.STRICT);
-            JsonElement root = readValue(check, reader);
-            if (reader.peek() != JsonToken.END_DOCUMENT) {
-                throw check.fail("", "JSON 문법 오류: 최상위 값 뒤에 내용이 더 있다");
-            }
-            return root;
-        } catch (IOException | JsonParseException | IllegalStateException | NumberFormatException e) {
-            throw check.fail("", "JSON 문법 오류: " + e.getMessage());
-        }
-    }
-
-    private static JsonElement readValue(Check check, JsonReader reader) throws IOException {
-        switch (reader.peek()) {
-            case BEGIN_OBJECT:
-                JsonObject object = new JsonObject();
-                reader.beginObject();
-                while (reader.hasNext()) {
-                    String name = reader.nextName();
-                    if (object.has(name)) {
-                        throw check.fail("", "JSON 중복 키: " + name);
-                    }
-                    object.add(name, readValue(check, reader));
-                }
-                reader.endObject();
-                return object;
-            case BEGIN_ARRAY:
-                JsonArray array = new JsonArray();
-                reader.beginArray();
-                while (reader.hasNext()) {
-                    array.add(readValue(check, reader));
-                }
-                reader.endArray();
-                return array;
-            case STRING:
-                return new JsonPrimitive(reader.nextString());
-            case NUMBER:
-                return new JsonPrimitive(new BigDecimal(reader.nextString()));
-            case BOOLEAN:
-                return new JsonPrimitive(reader.nextBoolean());
-            case NULL:
-                reader.nextNull();
-                return JsonNull.INSTANCE;
-            default:
-                throw new IllegalStateException("예상하지 못한 토큰: " + reader.peek());
-        }
     }
 
     private static String location(int index, String id) {
