@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DynamicTest;
 
 /** 벡터 디렉터리를 읽어 벡터마다 동적 테스트를 만든다. */
@@ -35,9 +36,11 @@ final class VectorSuite {
         assertThat(files).as("벡터 파일이 하나도 없다: %s", directory.toAbsolutePath()).isNotEmpty();
         List<DynamicTest> tests = new ArrayList<>();
         for (Path file : files) {
+            // 테스트 이름은 파일명에서 .json을 뺀 `파일명/id`(부록 G.3).
             String fileName = file.getFileName().toString();
+            String name = fileName.substring(0, fileName.length() - ".json".length());
             for (ConformanceVector vector : VectorLoader.load(file)) {
-                tests.add(DynamicTest.dynamicTest(fileName + "/" + vector.id(), () -> run(vector)));
+                tests.add(DynamicTest.dynamicTest(name + "/" + vector.id(), () -> run(vector)));
             }
         }
         return tests.stream();
@@ -54,12 +57,10 @@ final class VectorSuite {
         }
     }
 
-    // core에 규격 구현이 생기기 전까지는 로더가 받아들인 필드가 일관된지만 확인한다(내용 단언은 로더 테스트가 한다).
-    // 규격 구현이 들어오면 여기서 vector.bytes()를 core에 넘기고 result와 비교한다.
+    // 로드와 구조 검증은 이미 끝났다(dynamicTests가 로더를 부르는 시점에 실패로 드러난다).
+    // core에 규격 구현이 없으므로 실행 단계는 통과로 위장하지 않고 skipped로 보인다.
+    // 규격 구현이 들어오면 여기서 vector.setup()과 vector.steps()를 core에 실행한다.
     private static void run(ConformanceVector vector) {
-        assertThat(vector.id()).isNotEmpty();
-        assertThat(vector.description()).isNotNull();
-        assertThat(vector.result()).isIn(ConformanceVector.Result.VALID, ConformanceVector.Result.INVALID);
-        assertThat(vector.bytes()).isNotNull();
+        Assumptions.abort("core 미구현: 벡터 실행 단계를 건너뛴다 (" + vector.id() + ")");
     }
 }
