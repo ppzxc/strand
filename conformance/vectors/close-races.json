@@ -101,7 +101,7 @@
     },
     {
       "id": "close-received-keeps-streams-at-or-below-last-processing",
-      "description": "클라이언트 역할 구현이 요청 1, 2를 보내고 애플리케이션이 먼저 닫아 CLOSE(last_stream_id=0)를 보낸 뒤, 서버의 CLOSE(last_stream_id=2, NO_ERROR)를 받아도 두 스트림은 계속 처리된다. 이미 CLOSE를 보냈으므로 다시 보내지 않는다. 응답 1이 오면 결과 OK를 애플리케이션에 전달한다. 스트림 2가 대기 중이라 연결은 열려 있다",
+      "description": "클라이언트 역할 구현이 요청 1, 2를 보낸 뒤 서버의 CLOSE(last_stream_id=2, NO_ERROR)를 받으면 CLOSE로 답하지 않는다. 받은 CLOSE만으로는 두 스트림이 끝나지 않으므로 계속 처리된다. 응답 1이 오면 결과 OK를 애플리케이션에 전달한다. 스트림 2가 대기 중이라 연결은 열려 있다",
       "spec": [
         "3.5"
       ],
@@ -139,26 +139,14 @@
           "events": []
         },
         {
-          "kind": "close",
-          "error_code": "NO_ERROR",
-          "send": [
-            {
-              "type": "CLOSE",
-              "last_stream_id": 0,
-              "error_code": "NO_ERROR"
-            }
-          ],
-          "events": []
-        },
-        {
           "kind": "recv",
-          "hex": "00000014 00030000 00000000 00000000 00000002 00000000",
+          "hex": "000000140003000000000000000000000000000200000000",
           "send": [],
           "events": []
         },
         {
           "kind": "recv",
-          "hex": "0000000c 01010300 00000001 00000000",
+          "hex": "0000000c010103000000000100000000",
           "send": [],
           "events": [
             {
@@ -410,7 +398,7 @@
     },
     {
       "id": "close-last-stream-id-zero-is-valid",
-      "description": "last_stream_id 0은 처리한 스트림이 없다는 특수값이라 서버가 연 스트림이 없어도 언제나 올바르다. 이미 CLOSE(last_stream_id=0)를 보낸 서버 역할 구현은 오류 없이 받고 아무것도 보내지 않으며 닫지도 않는다. 올바르지 않은 CLOSE였다면 연결만 닫았을 것이다. 서버가 연 스트림 0x80000001이 대기 중이라 연결은 열려 있다",
+      "description": "last_stream_id 0은 처리한 스트림이 없다는 특수값이라 서버가 연 스트림이 없어도 언제나 올바르다. 서버 역할 구현은 CLOSE(last_stream_id=0)를 오류 없이 받고 아무것도 보내지 않는다. 올바르지 않은 CLOSE였다면 CLOSE(PROTOCOL_ERROR)를 보냈을 것이다. 서버가 연 스트림 0x80000001이 대기 중이라 연결은 열려 있다",
       "spec": [
         "3.5"
       ],
@@ -429,18 +417,6 @@
                 "END"
               ],
               "stream_id": 2147483649
-            }
-          ],
-          "events": []
-        },
-        {
-          "kind": "close",
-          "error_code": "NO_ERROR",
-          "send": [
-            {
-              "type": "CLOSE",
-              "last_stream_id": 0,
-              "error_code": "NO_ERROR"
             }
           ],
           "events": []
@@ -494,7 +470,178 @@
     },
     {
       "id": "server-accepts-client-close-with-0x80000000",
-      "description": "클라이언트가 규격과 달리 last_stream_id에 0 대신 0x80000000을 써도, 서버가 받으면 3.5절의 잘못된 CLOSE 두 조건(개시자 비트 불일치, highest_local_seq 초과)에 모두 해당하지 않아 올바른 CLOSE다. 이미 CLOSE(last_stream_id=0)를 보낸 서버 역할 구현은 오류 없이 받고 아무것도 보내지 않으며 닫지도 않는다. 서버가 연 스트림 0x80000001이 대기 중이라 연결은 열려 있다",
+      "description": "클라이언트가 규격과 달리 last_stream_id에 0 대신 0x80000000을 써도, 서버가 받으면 3.5절의 잘못된 CLOSE 두 조건(개시자 비트 불일치, highest_local_seq 초과)에 모두 해당하지 않아 올바른 CLOSE다. 서버 역할 구현은 오류 없이 받고 아무것도 보내지 않는다. 서버가 연 스트림 0x80000001이 대기 중이라 연결은 열려 있다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 2147483649
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "00000014 00030000 00000000 00000000 80000000 00000000",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "close-received-first-is-not-answered-and-later-own-close-is-sent-once",
+      "description": "클라이언트 역할 구현이 서버의 CLOSE(last_stream_id=1, NO_ERROR)를 먼저 받아도 CLOSE로 답하지 않는다. 받은 CLOSE는 보낸 CLOSE가 아니므로, 그 뒤 애플리케이션이 닫으라고 하면 CLOSE를 한 번 보내고 두 번째 지시에는 보내지 않는다. 스트림 1이 대기 중이라 연결은 열려 있다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000100000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "last_stream_id": 0,
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "close-received-blocks-opening-new-stream",
+      "description": "CLOSE를 받은 클라이언트 역할 구현은 새 스트림을 열지 않는다. 그 뒤 애플리케이션의 새 요청은 프레임을 보내지 않고 애플리케이션에 UNAVAILABLE로 실패를 알리는데, 스트림을 열기 전의 로컬 결과라서 stream_id가 없고 result 이벤트가 아니다. 스트림 1이 대기 중이라 연결은 열려 있다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000100000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "close-received-closes-after-last-pending-stream-ends",
+      "description": "CLOSE(NO_ERROR)를 받은 클라이언트 역할 구현은 대기 중인 스트림이 있는 동안 연결을 열어 둔다. 마지막 대기 스트림의 응답을 받아 결과를 전달한 뒤 대기 스트림이 없어지면(유예 상태는 세지 않는다) 연결을 닫고 closed 이벤트를 낸다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000100000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010103000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "OK"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-sent-closes-after-last-pending-stream-ends",
+      "description": "CLOSE(NO_ERROR)를 보낸 서버 역할 구현은 자기가 연 스트림 0x80000001이 대기 중인 동안 연결을 열어 둔다. 그 응답을 받아 결과를 전달한 뒤 대기 스트림이 없어지면 연결을 닫고 closed 이벤트를 낸다",
       "spec": [
         "3.5"
       ],
@@ -531,9 +678,154 @@
         },
         {
           "kind": "recv",
-          "hex": "00000014 00030000 00000000 00000000 80000000 00000000",
+          "hex": "0000000c010103008000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 2147483649,
+              "status": "OK"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-closes-only-after-streams-of-both-directions-end",
+      "description": "CLOSE를 받은 뒤에는 내가 연 스트림과 상대가 연 스트림을 모두 대기 중인 스트림으로 센다. 클라이언트 역할 구현은 자기 요청 1의 응답을 받아도 서버가 연 0x80000001이 대기 중이면 닫지 않고, 그 응답을 보낸 뒤에야 closed 이벤트를 낸다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010102008000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 2147483649,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000100000000",
           "send": [],
           "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010103000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "OK"
+            }
+          ]
+        },
+        {
+          "kind": "respond",
+          "stream_id": 2147483649,
+          "status": "OK",
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "RESPONSE",
+                "END"
+              ],
+              "stream_id": 2147483649,
+              "status": "OK"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-received-with-error-code-is-not-answered-and-closes",
+      "description": "서버 역할 구현이 형태가 올바른 비-NO_ERROR CLOSE(last_stream_id=0, INTERNAL_ERROR)를 받으면 아무것도 보내지 않고 연결을 닫고 closed 이벤트를 낸다. 대기 중인 요청 1이 아직 응답되지 않았어도 기다리지 않는다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010102000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000000000002",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-received-with-error-code-and-no-pending-streams-closes",
+      "description": "서버 역할 구현이 대기 중인 스트림이 없을 때 형태가 올바른 비-NO_ERROR CLOSE(last_stream_id=0, OVERLOAD)를 받아도 아무것도 보내지 않고 연결을 닫고 closed 이벤트를 낸다. CLOSE로 답하지 않는다",
+      "spec": [
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "000000140003000000000000000000000000000000000008",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
         }
       ]
     }
