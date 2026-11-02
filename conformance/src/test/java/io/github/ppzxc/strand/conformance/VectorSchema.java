@@ -81,6 +81,7 @@ final class VectorSchema {
         STEPS_BY_KIND.put("cancel", STEP_BASE.require("stream_id", FieldKind.U32));
         STEPS_BY_KIND.put("close", STEP_BASE.require("error_code", FieldKind.ERROR_CODE));
         STEPS_BY_KIND.put("advance", STEP_BASE.require("ms", FieldKind.POSITIVE_U32));
+        STEPS_BY_KIND.put("disconnect", STEP_BASE);
     }
 
     // ---- 프레임: type별 필드 ----
