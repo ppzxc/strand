@@ -345,7 +345,7 @@
     },
     {
       "id": "client-holds-request-until-after-ack-when-multiple-content-types",
-      "description": "content_types에 형식을 둘 이상 제시한 클라이언트는 서버 HELLO 전에 애플리케이션이 낸 요청을 보내지 않고 보관한다. 서버 HELLO를 검증하고 ACK HELLO를 보낸 다음에 그 요청 프레임을 보낸다",
+      "description": "content_types에 형식을 둘 이상 제시한 클라이언트는 서버 HELLO 전에 애플리케이션이 낸 요청(request 단계)에는 아무것도 보내지 않고 보관한다. 연결이 열리면서 나가는 연결 서문과 HELLO는 첫 단계(advance)의 send에 합쳐 비교한다. 서버 HELLO를 검증하고 ACK HELLO를 보낸 다음에 그 요청 프레임을 보낸다",
       "spec": [
         "3.2.3",
         "3.3"
@@ -359,8 +359,8 @@
       },
       "steps": [
         {
-          "kind": "request",
-          "type": 257,
+          "kind": "advance",
+          "ms": 1,
           "send": [
             {
               "type": "PREFACE"
@@ -372,6 +372,12 @@
               }
             }
           ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [],
           "events": []
         },
         {
