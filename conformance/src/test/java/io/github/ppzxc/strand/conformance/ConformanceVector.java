@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.UnaryOperator;
 
 /** 적합성 벡터 하나(벡터 형식 문서 3절). 로더가 벡터 형식 문서 규칙을 검증한 뒤에만 만들어진다. */
 final class ConformanceVector {
@@ -17,13 +18,18 @@ final class ConformanceVector {
     ConformanceVector(String id, String description, List<String> spec, JsonObject setup, List<JsonObject> steps) {
         this.id = id;
         this.description = description;
-        this.spec = Collections.unmodifiableList(new ArrayList<>(spec));
+        this.spec = frozen(spec, UnaryOperator.<String>identity());
         this.setup = setup.deepCopy();
-        List<JsonObject> copy = new ArrayList<>();
-        for (JsonObject step : steps) {
-            copy.add(step.deepCopy());
+        this.steps = frozen(steps, JsonObject::deepCopy);
+    }
+
+    /** 원소를 복사해 담은, 수정할 수 없는 목록. 호출자가 넘긴 목록이나 원소를 나중에 바꿔도 영향받지 않는다. */
+    private static <T> List<T> frozen(List<T> items, UnaryOperator<T> copier) {
+        List<T> copy = new ArrayList<>(items.size());
+        for (T item : items) {
+            copy.add(copier.apply(item));
         }
-        this.steps = Collections.unmodifiableList(copy);
+        return Collections.unmodifiableList(copy);
     }
 
     String id() {

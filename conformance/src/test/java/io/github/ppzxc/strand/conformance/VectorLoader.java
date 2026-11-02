@@ -22,9 +22,6 @@ import java.util.Set;
  */
 final class VectorLoader {
 
-    /** 이 로더가 아는 형식 버전(벡터 형식 문서 2절). */
-    private static final int KNOWN_FORMAT = 1;
-
     private VectorLoader() {}
 
     static List<ConformanceVector> load(Path file) {
@@ -41,7 +38,6 @@ final class VectorLoader {
             throw fileCheck.fail("파일이 비어 있다");
         }
         JsonObject file = fileCheck.object(Check.ROOT, StrictJson.read(fileName, json), VectorSchema.FILE);
-        fileCheck.format(file.get("format"), KNOWN_FORMAT);
 
         List<ConformanceVector> result = new ArrayList<>();
         Set<String> ids = new HashSet<>();
@@ -56,22 +52,23 @@ final class VectorLoader {
         return result;
     }
 
+    /** 스키마 검증을 통과한 벡터 객체를 {@link ConformanceVector}로 옮긴다. 값은 이미 검증됐다. */
     private static ConformanceVector parseVector(String fileName, int index, JsonElement element) {
-        Check c = Check.forVector(fileName, index, element);
-        JsonObject vector = c.object(Check.ROOT, element, VectorSchema.VECTOR);
+        JsonObject vector = Check.forVector(fileName, index, element).object(Check.ROOT, element, VectorSchema.VECTOR);
 
-        String id = c.id(vector.get("id"));
-        String description = c.description(vector.get("description"));
-        List<String> spec = c.specSections(vector.get("spec"));
-        JsonObject setup = VectorSchema.setup(c, vector.get("setup"));
-        JsonArray stepArray = c.array("steps", vector.get("steps"));
-        if (stepArray.isEmpty()) {
-            throw c.failAt("steps", "하나 이상이어야 한다");
+        List<String> spec = new ArrayList<>();
+        for (JsonElement section : vector.getAsJsonArray("spec")) {
+            spec.add(section.getAsString());
         }
         List<JsonObject> steps = new ArrayList<>();
-        for (int i = 0; i < stepArray.size(); i++) {
-            steps.add(VectorSchema.step(c, Check.item("steps", i), stepArray.get(i)));
+        for (JsonElement step : vector.getAsJsonArray("steps")) {
+            steps.add(step.getAsJsonObject());
         }
-        return new ConformanceVector(id, description, spec, setup, steps);
+        return new ConformanceVector(
+                vector.get("id").getAsString(),
+                vector.get("description").getAsString(),
+                spec,
+                vector.getAsJsonObject("setup"),
+                steps);
     }
 }

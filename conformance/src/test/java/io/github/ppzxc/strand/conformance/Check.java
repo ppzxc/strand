@@ -4,9 +4,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.math.BigInteger;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -20,6 +20,7 @@ final class Check {
     static final String ROOT = "";
 
     private static final Pattern ID = Pattern.compile("[a-z0-9]+(-[a-z0-9]+)*");
+    private static final Pattern PING_PAYLOAD = Pattern.compile("[0-9a-f]{16}");
     private static final Pattern SPEC_SECTION = Pattern.compile("(?:[0-9]+|[A-G])(?:\\.[0-9]+)*");
 
     private final String fileName;
@@ -98,6 +99,37 @@ final class Check {
         return object;
     }
 
+    /**
+     * 판별 필드로 형태가 정해지는 객체(단계·프레임·이벤트)의 공통 앞부분: 객체인지 확인하고 판별 필드 값을 꺼낸다.
+     * 판별 필드가 없으면 "필수 필드 누락: 필드명"으로 거부한다.
+     */
+    JsonElement tag(String path, JsonElement element, String tagField) {
+        if (!element.isJsonObject()) {
+            throw failAt(path, "객체여야 한다");
+        }
+        JsonElement tag = element.getAsJsonObject().get(tagField);
+        if (tag == null) {
+            throw failAt(path, "필수 필드 누락: " + tagField);
+        }
+        return tag;
+    }
+
+    /** 판별 필드가 문자열 이름인 객체를 검증한다. 이름에 해당하는 형태를 표에서 찾고, 모르는 이름이면 거부한다. */
+    JsonObject objectNamedBy(
+            String path, JsonElement element, String tagField, String tagLabel, Map<String, Shape> shapesByName) {
+        String tagPath = child(path, tagField);
+        String name = string(tagPath, tag(path, element, tagField));
+        return object(path, element, shapeFor(tagPath, tagLabel, shapesByName, name));
+    }
+
+    Shape shapeFor(String tagPath, String tagLabel, Map<String, Shape> shapesByName, String name) {
+        Shape shape = shapesByName.get(name);
+        if (shape == null) {
+            throw failAt(tagPath, "알 수 없는 " + tagLabel + ": " + name);
+        }
+        return shape;
+    }
+
     String string(String path, JsonElement element) {
         if (!isString(element)) {
             throw failAt(path, "문자열이어야 한다");
@@ -112,11 +144,10 @@ final class Check {
         return element.getAsJsonArray();
     }
 
-    boolean bool(String path, JsonElement element) {
+    void bool(String path, JsonElement element) {
         if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isBoolean()) {
             throw failAt(path, "불리언이어야 한다");
         }
-        return element.getAsBoolean();
     }
 
     static boolean isString(JsonElement value) {
@@ -127,49 +158,57 @@ final class Check {
 
     // ---- 벡터 최상위 필드 ----
 
-    void format(JsonElement value, int knownFormat) {
+    void format(String path, JsonElement value, int knownFormat) {
         if (!isInteger(value)) {
-            throw failAt("format", "정수여야 한다");
+            throw failAt(path, "정수여야 한다");
         }
         BigInteger format = integer(value);
         if (!format.equals(BigInteger.valueOf(knownFormat))) {
-            throw failAt("format", "지원하지 않는 format이다(아는 것은 " + knownFormat + "): " + format);
+            throw failAt(path, "지원하지 않는 format이다(아는 것은 " + knownFormat + "): " + format);
         }
     }
 
-    /** 벡터 id: 파일 안에서 고유하고 kebab-case여야 한다(고유성은 파일 단위라 로더가 본다). */
-    String id(JsonElement element) {
-        String id = string("id", element);
+    /** 벡터 id: kebab-case여야 한다. 파일 안의 고유성은 파일 단위라 로더가 본다. */
+    void id(String path, JsonElement element) {
+        String id = string(path, element);
         if (!ID.matcher(id).matches()) {
-            throw failAt("id", "kebab-case([a-z0-9]+(-[a-z0-9]+)*)가 아니다: '" + id + "'");
+            throw failAt(path, "kebab-case([a-z0-9]+(-[a-z0-9]+)*)가 아니다: '" + id + "'");
         }
-        return id;
     }
 
-    String description(JsonElement element) {
-        String description = string("description", element);
-        if (description.isEmpty()) {
-            throw failAt("description", "비어 있으면 안 된다");
+    void nonEmptyText(String path, JsonElement element) {
+        if (string(path, element).isEmpty()) {
+            throw failAt(path, "비어 있으면 안 된다");
         }
-        return description;
     }
 
     /** 근거 규격 절 번호 목록. 비어 있지 않고 모두 절 번호 형식이어야 한다. */
-    List<String> specSections(JsonElement element) {
-        JsonArray array = array("spec", element);
+    void specSections(String path, JsonElement element) {
+        JsonArray array = array(path, element);
         if (array.isEmpty()) {
-            throw failAt("spec", "비어 있으면 안 된다");
+            throw failAt(path, "비어 있으면 안 된다");
         }
-        List<String> sections = new ArrayList<>();
         for (int i = 0; i < array.size(); i++) {
-            String path = item("spec", i);
-            String section = string(path, array.get(i));
+            String section = string(item(path, i), array.get(i));
             if (!SPEC_SECTION.matcher(section).matches()) {
-                throw failAt(path, "규격 절 번호가 아니다: '" + section + "'");
+                throw failAt(item(path, i), "규격 절 번호가 아니다: '" + section + "'");
             }
-            sections.add(section);
         }
-        return sections;
+    }
+
+    void oneOf(String path, JsonElement element, List<String> allowed) {
+        String value = string(path, element);
+        if (!allowed.contains(value)) {
+            throw failAt(path, String.join(" 또는 ", allowed) + "여야 한다: " + value);
+        }
+    }
+
+    /** PING payload: 공백 없는 소문자 16자리 hex(8바이트). */
+    void pingPayload(String path, JsonElement element) {
+        String payload = string(path, element);
+        if (!PING_PAYLOAD.matcher(payload).matches()) {
+            throw failAt(path, "공백 없는 소문자 16자리 hex여야 한다: '" + payload + "'");
+        }
     }
 
     // ---- 값 ----

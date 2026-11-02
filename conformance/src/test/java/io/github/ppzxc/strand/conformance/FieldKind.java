@@ -71,6 +71,101 @@ enum FieldKind {
             c.extensions(path, element);
         }
     },
+    /** 제어 프레임의 stream_id처럼 값이 0으로 고정된 필드. */
+    ZERO {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.range(path, element, 0, 0);
+        }
+    },
+    /** 애플리케이션 프레임의 flags(RESPONSE, END). */
+    APP_FLAGS {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.flags(path, element, VectorSchema.APP_FLAGS);
+        }
+    },
+    /** HELLO·PING의 flags(ACK). */
+    ACK_FLAGS {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.flags(path, element, VectorSchema.ACK_FLAGS);
+        }
+    },
+    PING_PAYLOAD {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.pingPayload(path, element);
+        }
+    },
+    /** 프레임 기대값의 배열. */
+    FRAMES {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            VectorSchema.frames(c, path, element);
+        }
+    },
+    /** 관찰 이벤트 기대값의 배열. */
+    EVENTS {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            VectorSchema.events(c, path, element);
+        }
+    },
+    BOOLEAN {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.bool(path, element);
+        }
+    },
+    ROLE {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.oneOf(path, element, VectorSchema.ROLES);
+        }
+    },
+    SETUP_CONFIG {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.object(path, element, VectorSchema.SETUP_CONFIG);
+        }
+    },
+    FORMAT {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.format(path, element, VectorSchema.KNOWN_FORMAT);
+        }
+    },
+    VECTOR_ID {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.id(path, element);
+        }
+    },
+    DESCRIPTION {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.nonEmptyText(path, element);
+        }
+    },
+    SPEC_SECTIONS {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.specSections(path, element);
+        }
+    },
+    SETUP {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            VectorSchema.setup(c, path, element);
+        }
+    },
+    STEPS {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            VectorSchema.steps(c, path, element);
+        }
+    },
     HELLO_PARAMS {
         @Override
         void check(Check c, String path, JsonElement element) {
