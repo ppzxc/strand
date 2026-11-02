@@ -296,7 +296,7 @@
     },
     {
       "id": "pending-request-answered-without-response-flag-resets-and-fails-caller",
-      "description": "대기 중인 내 요청 스트림에 RESPONSE 없는 프레임이 오면 8번에서 RESET(PROTOCOL_ERROR)을 보내고 호출자에게 로컬 INTERNAL 결과를 넘긴다. 스트림은 유예 상태가 되어 그 뒤 도착한 정상 응답은 조용히 버려진다",
+      "description": "대기 중인 내 요청 스트림에 RESPONSE 없는 프레임이 오면 8번에서 RESET(PROTOCOL_ERROR)을 보내고 애플리케이션에 로컬 INTERNAL 결과를 넘긴다. 스트림은 유예 상태가 되어 그 뒤 도착한 정상 응답은 조용히 버려진다",
       "spec": [
         "2.3.1",
         "5.1.2"
@@ -348,7 +348,7 @@
     },
     {
       "id": "pending-request-answered-with-end-zero-resets-and-fails-caller",
-      "description": "대기 중인 내 요청 스트림에 END=0인 응답이 오면 8번에서 RESET(PROTOCOL_ERROR)을 보내고 호출자에게 로컬 INTERNAL 결과를 넘긴다. 스트림은 유예 상태가 되어 그 뒤 도착한 정상 응답은 조용히 버려진다",
+      "description": "대기 중인 내 요청 스트림에 END=0인 응답이 오면 8번에서 RESET(PROTOCOL_ERROR)을 보내고 애플리케이션에 로컬 INTERNAL 결과를 넘긴다. 스트림은 유예 상태가 되어 그 뒤 도착한 정상 응답은 조용히 버려진다",
       "spec": [
         "2.3.2",
         "5.1.2"
