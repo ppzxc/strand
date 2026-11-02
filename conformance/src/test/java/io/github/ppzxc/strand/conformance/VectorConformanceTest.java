@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.conformance;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -13,10 +14,27 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 import org.junit.jupiter.api.io.TempDir;
+import org.opentest4j.TestAbortedException;
 
-/** {@code conformance/vectors/}의 모든 벡터 파일을 읽어 벡터마다 동적 테스트 하나를 만든다. 이름은 {@code 파일명/id}. */
+/** 벡터 디렉터리의 모든 벡터 파일을 읽어 벡터마다 동적 테스트 하나를 만든다. 이름은 {@code 파일명/id}(파일명의 {@code .json}은 뺀다). */
 class VectorConformanceTest {
 
+    private static final String VECTOR_TEMPLATE = "{\"id\":\"%s\",\"description\":\"d\",\"spec\":[\"3.4\"],"
+            + "\"setup\":{\"role\":\"server\",\"established\":true},"
+            + "\"steps\":[{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[],\"events\":[]}]}";
+
+    private static void writeFile(Path dir, String name, String... ids) throws IOException {
+        String vectors =
+                Stream.of(ids).map(id -> String.format(VECTOR_TEMPLATE, id)).collect(Collectors.joining(","));
+        Files.write(
+                dir.resolve(name), ("{\"format\":1,\"vectors\":[" + vectors + "]}").getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static List<String> names(Path dir) {
+        return VectorSuite.dynamicTests(dir).map(DynamicTest::getDisplayName).collect(Collectors.toList());
+    }
+
+    /** 실제 벡터 디렉터리는 벡터 목록을 단언하지 않는다. 벡터 파일이 추가돼도 깨지지 않게, 읽히는지만 본다. */
     @TestFactory
     Stream<DynamicTest> vectors() {
         return VectorSuite.dynamicTests(VectorSuite.defaultDirectory());
@@ -28,41 +46,45 @@ class VectorConformanceTest {
     }
 
     @Test
-    void sampleVectorsDecodeToTheirExpectedFields() {
-        List<ConformanceVector> vectors =
-                VectorLoader.load(VectorSuite.defaultDirectory().resolve("sample.json"));
+    void testsAreNamedByFileNameWithoutExtensionAndId(@TempDir Path dir) throws IOException {
+        writeFile(dir, "streams.json", "b-one", "a-two");
+        writeFile(dir, "framing.json", "x");
 
-        assertThat(vectors)
-                .extracting(ConformanceVector::id)
-                .containsExactly("empty-valid", "ping-valid", "truncated-invalid");
-        assertThat(vectors)
-                .extracting(ConformanceVector::result)
-                .containsExactly(
-                        ConformanceVector.Result.VALID,
-                        ConformanceVector.Result.VALID,
-                        ConformanceVector.Result.INVALID);
-        assertThat(vectors.get(0).bytes()).isEmpty();
-        assertThat(vectors.get(1).bytes()).containsExactly((byte) 0x01, (byte) 0x00, (byte) 0xff);
-        assertThat(vectors.get(2).bytes()).containsExactly((byte) 0x01);
+        assertThat(names(dir)).containsExactly("framing/x", "streams/b-one", "streams/a-two");
     }
 
     @Test
     void sameIdInDifferentFilesIsAllowed(@TempDir Path dir) throws IOException {
-        String json = "[{\"id\":\"a\",\"description\":\"d\",\"result\":\"valid\",\"bytes\":\"00\"}]";
-        Files.write(dir.resolve("one.json"), json.getBytes(StandardCharsets.UTF_8));
-        Files.write(dir.resolve("two.json"), json.getBytes(StandardCharsets.UTF_8));
+        writeFile(dir, "one.json", "a");
+        writeFile(dir, "two.json", "a");
 
-        List<String> names =
-                VectorSuite.dynamicTests(dir).map(DynamicTest::getDisplayName).collect(Collectors.toList());
-
-        assertThat(names).containsExactly("one.json/a", "two.json/a");
+        assertThat(names(dir)).containsExactly("one/a", "two/a");
     }
 
     @Test
-    void sampleVectorsLoadAndAreNamedByFileAndId() {
-        List<String> names = vectors().map(DynamicTest::getDisplayName).collect(Collectors.toList());
+    void addingAVectorFileDoesNotBreakExistingTests(@TempDir Path dir) throws IOException {
+        writeFile(dir, "one.json", "a");
+        List<String> before = names(dir);
 
-        assertThat(names)
-                .containsExactly("sample.json/empty-valid", "sample.json/ping-valid", "sample.json/truncated-invalid");
+        writeFile(dir, "two.json", "b");
+
+        assertThat(names(dir)).containsAll(before).hasSize(before.size() + 1);
+    }
+
+    @Test
+    void executionIsSkippedBecauseCoreIsNotImplemented(@TempDir Path dir) throws IOException {
+        writeFile(dir, "one.json", "a");
+        DynamicTest test = VectorSuite.dynamicTests(dir).findFirst().get();
+
+        assertThatThrownBy(() -> test.getExecutable().execute())
+                .isInstanceOf(TestAbortedException.class)
+                .hasMessageContaining("core 미구현");
+    }
+
+    @Test
+    void invalidVectorFileFailsInsteadOfBeingSkipped(@TempDir Path dir) throws IOException {
+        Files.write(dir.resolve("bad.json"), "[]".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> VectorSuite.dynamicTests(dir)).isInstanceOf(InvalidVectorException.class);
     }
 }
