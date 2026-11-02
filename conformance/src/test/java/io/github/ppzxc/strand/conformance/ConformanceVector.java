@@ -23,7 +23,7 @@ final class ConformanceVector {
         this.steps = frozen(steps, JsonObject::deepCopy);
     }
 
-    /** 원소를 복사해 담은, 수정할 수 없는 목록. 호출자가 넘긴 목록이나 원소를 나중에 바꿔도 영향받지 않는다. */
+    /** 원소를 복사해 담은, 수정할 수 없는 목록. 인자로 받은 목록이나 원소를 나중에 바꿔도 영향받지 않는다. */
     private static <T> List<T> frozen(List<T> items, UnaryOperator<T> copier) {
         List<T> copy = new ArrayList<>(items.size());
         for (T item : items) {
