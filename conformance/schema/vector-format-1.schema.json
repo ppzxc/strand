@@ -288,6 +288,16 @@
             "send": { "$ref": "#/$defs/expect_send" },
             "events": { "$ref": "#/$defs/expect_events" }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "send", "events"],
+          "properties": {
+            "kind": { "const": "disconnect" },
+            "send": { "$ref": "#/$defs/expect_send" },
+            "events": { "$ref": "#/$defs/expect_events" }
+          }
         }
       ]
     },

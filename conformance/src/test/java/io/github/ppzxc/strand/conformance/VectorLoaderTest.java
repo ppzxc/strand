@@ -94,7 +94,8 @@ class VectorLoaderTest {
                 + "{\"kind\":\"respond\",\"stream_id\":2147483649,\"status\":\"INTERNAL\",\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"cancel\",\"stream_id\":1,\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"close\",\"error_code\":\"NO_ERROR\",\"send\":[],\"events\":[]},"
-                + "{\"kind\":\"advance\",\"ms\":1,\"send\":[],\"events\":[]}]";
+                + "{\"kind\":\"advance\",\"ms\":1,\"send\":[],\"events\":[]},"
+                + "{\"kind\":\"disconnect\",\"send\":[],\"events\":[{\"event\":\"closed\"}]}]";
 
         assertThat(VectorLoader.parse("x.json", file(vector("a", "[\"2.4.2\",\"5.1\"]", setup, steps))))
                 .hasSize(1);
@@ -239,6 +240,16 @@ class VectorLoaderTest {
                 "a"));
         t.add(rejected(
                 "advance zero", fileWithStep("\"kind\":\"advance\",\"ms\":0,\"send\":[],\"events\":[]"), "ms", "a"));
+        t.add(rejected(
+                "disconnect unknown field",
+                fileWithStep("\"kind\":\"disconnect\",\"ms\":1,\"send\":[],\"events\":[]"),
+                "알 수 없는 필드",
+                "ms"));
+        t.add(rejected(
+                "disconnect missing events",
+                fileWithStep("\"kind\":\"disconnect\",\"send\":[]"),
+                "필수 필드 누락",
+                "events"));
         t.add(rejected(
                 "stream_id out of u32",
                 fileWithStep("\"kind\":\"cancel\",\"stream_id\":4294967296,\"send\":[],\"events\":[]"),
