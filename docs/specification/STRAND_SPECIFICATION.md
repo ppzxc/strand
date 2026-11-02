@@ -342,7 +342,7 @@ HELLO는 연결마다 한 번, 내가 받을 수 있는 한도와 지원하는 �
 
 | identifier | 이름 | 기본값 | 보내는 쪽 | 의미 |
 | --- | --- | --- | --- | --- |
-| `0x0001` | `max_frame_size` | 4,194,304 (4 MiB) | 양쪽 | 받을 수 있는 프레임의 최대 크기. 곧 메시지 최대 크기. 허용 범위 16 KiB\~16 MiB. 적용 시점은 3.3절 |
+| `0x0001` | `max_frame_size` | 4,194,304 (4 MiB) | 양쪽 | 받을 수 있는 프레임의 최대 크기. 곧 메시지 최대 크기. 허용 범위 16 KiB\~16 MiB(벗어나면 3.2.3절). 적용 시점은 3.3절 |
 | `0x0002` | `max_pending_bytes` | 16,777,216 (16 MiB) | 양쪽 | 아직 응답하지 않은 요청의 바이트 합계 한도(4.5절) |
 | `0x0003` | `max_concurrent_streams` | 100 | 양쪽 | 상대가 동시에 열 수 있는 스트림 수 |
 | `0x0004` | `capabilities` | 0 | 양쪽 | 기능 비트셋. 이 버전에서는 모든 비트가 예약 |
@@ -370,20 +370,22 @@ HELLO는 연결마다 한 번, 내가 받을 수 있는 한도와 지원하는 �
 
 payload 형식은 서버가 정한다. 서버는 클라이언트의 `content_types` 가운데 하나를 골라 `content_type`으로 알려 주고, 그 뒤로 연결의 애플리케이션 payload는 모두 이 형식을 따른다. 서버는 예약된 코드를 `content_type`으로 고르지 않는다(MUST NOT). `content_types`가 0이거나 예약 비트만 켜져 있으면 고를 것이 없는 경우다.
 
-**협상 실패 경로(서버)**: 협상이 실패하면 서버는 먼저 HELLO를 보내고, ACK 없이 곧바로 `CLOSE(PROTOCOL_ERROR)`를 보낸 뒤 연결을 닫는다(MUST). 협상 실패는 다음 두 경우다.
+**협상 실패 경로(서버)**: 협상이 실패하면 서버는 먼저 HELLO를 보내고, ACK 없이 곧바로 `CLOSE(PROTOCOL_ERROR)`를 보낸 뒤 연결을 닫는다(MUST). 협상 실패는 다음 세 경우다.
 
 * 고를 형식이 없다(클라이언트의 `content_types`에 서버가 지원하는 형식 코드가 없다).
 * 클라이언트 HELLO의 `max_frame_size`가 `max_pending_bytes`보다 크다.
+* 클라이언트 HELLO의 `max_frame_size`가 3.2.1절의 허용 범위(16 KiB\~16 MiB) 밖이다.
 
 이 경로로 서버가 보낸 HELLO를 받은 클라이언트의 처리는 다음과 같다.
 
-* 원칙: 이때 보내는 HELLO의 파라미터는 의미가 없으며 `content_type`을 생략해도 된다(MAY). 클라이언트는 이 HELLO의 내용을 3.2.3절 검증 대상으로 삼지 않고, 이어서 오는 CLOSE를 처리한다.
+* 원칙: 이때 서버는 자기 파라미터(`max_frame_size`, `max_pending_bytes`, `max_concurrent_streams`, `capabilities`)를 평소 HELLO와 같은 값으로 싣고 `content_type`은 싣지 않는다(MUST). 고른 형식이 없을 수 있기 때문이다. 이 파라미터는 의미가 없다. 클라이언트는 이 HELLO의 내용을 3.2.3절 검증 대상으로 삼지 않고, 이어서 오는 CLOSE를 처리한다.
 * 예외: 이 HELLO도 3.2.4절 첫 프레임 검사는 받는다. 첫 프레임 검사는 HELLO 하나만 허용하는 형태로 유지하므로, 이 경로에서도 서버 송신 순서는 HELLO 다음 CLOSE다.
 
 **서버 HELLO 검증(클라이언트)**: 클라이언트는 서버 HELLO의 payload를 읽고 다음 중 하나라도 해당하면 `CLOSE(PROTOCOL_ERROR)`를 보내고 닫는다(MUST).
 
 * `content_type`이 클라이언트가 `content_types`로 제시한 코드가 아니다. `content_type`을 생략하면 기본값 1이므로, 클라이언트가 형식 1을 제시하지 않았는데 서버가 생략하면 이 경우에 해당한다.
 * `max_frame_size`가 `max_pending_bytes`보다 크다.
+* `max_frame_size`가 3.2.1절의 허용 범위(16 KiB\~16 MiB) 밖이다.
 
 이 검증은 첫 프레임 검사(아무것도 보내지 않고 닫음)와 달리 payload 검사 단계라서 `CLOSE`를 보낸다. 클라이언트는 이 검증을 통과한 뒤에만 서버 HELLO에 ACK로 답한다.
 
@@ -407,6 +409,8 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 | ACK HELLO의 payload가 비어 있지 않음 | `CLOSE(FRAME_SIZE_ERROR)` |
 | 파라미터 HELLO를 두 번째로 받음 | `CLOSE(PROTOCOL_ERROR)` |
 | 내가 보낸 HELLO에 대한 ACK를 두 번째로 받음, 또는 HELLO를 보내기 전에 ACK를 받음 | `CLOSE(PROTOCOL_ERROR)` |
+
+한 프레임이 여러 행에 해당하면 표의 위 행부터 보고, 처음 해당하는 행의 오류 코드를 쓴다(MUST). 예를 들어 payload가 비어 있지 않은 ACK HELLO를 두 번째로 받으면 `CLOSE(FRAME_SIZE_ERROR)`다. `stream_id` 위반(2.2.5절)은 이 표보다 먼저 걸린다(5.1.1절 5번).
 
 ### 3.3 수립 순서
 
@@ -446,7 +450,7 @@ sequenceDiagram
             C->>S: CLOSE(PROTOCOL_ERROR)
         end
     else 협상 실패
-        S->>C: HELLO (flags=0: 내용 무의미, content_type 생략 가능)
+        S->>C: HELLO (flags=0: 서버 자기 한도, content_type 없음, 내용 무의미)
         S->>C: CLOSE(PROTOCOL_ERROR) (ACK 없음)
     end
 ```
@@ -715,6 +719,8 @@ payload 길이가 정확히 4바이트가 아니면 `CLOSE(FRAME_SIZE_ERROR)`로
 | 4 | 확장 영역 길이·형식 (2.2.6절, 2.4절, 제어 프레임은 2.4.4절) | 모든 프레임 | CLOSE | 예약 제어 타입(`0x0005`\~`0x00FF`, 2.2.2절)은 여기서 무시하고 끝낸다. 그 밖의 제어 프레임은 5번, 애플리케이션 프레임은 6번 |
 | 5 | 제어 프레임 형태: `stream_id`(2.2.5절), payload 크기(3.4절, 3.5절, 4.4절, RESET 포함), HELLO 형태(3.2.5절), CLOSE의 `last_stream_id`(3.5절) | 예약 타입을 뺀 제어 프레임 | CLOSE | RESET은 6번. HELLO·PING·CLOSE는 해당 처리(3.2절, 3.4절, 3.5절)로 끝낸다 |
 | 6 | `stream_id`: 일련번호 0 금지(2.2.5절), 새 스트림의 일련번호 역행, 유휴 스트림 참조(4.2.1절) | 애플리케이션 프레임, RESET | CLOSE | 7번 |
+
+5번 칸의 항목은 적힌 순서(`stream_id`, 제어 프레임 payload 크기, HELLO 형태, CLOSE의 `last_stream_id`)대로 검사하고, 처음 걸린 위반이 보낼 `CLOSE`의 코드를 정한다(MUST). 한 프레임이 둘 이상에 걸려도 오류 코드는 하나다.
 
 #### 5.1.2 스트림 오류 (7~9번)
 
@@ -994,6 +1000,9 @@ Strand의 서문 `C0 DE 53 54 52 30 00 00`은 다음 원칙으로 구성되었�
 | 27 | 5.1.1절의 연결 오류로 보내는 CLOSE는 `last_stream_id`를 그 시점의 `highest_peer_seq`로 적는다. 정상 종료 등 그 밖의 CLOSE는 `highest_peer_seq` 이하의 값을 자유롭게 적을 수 있다 (#64) | 원래는 `highest_peer_seq` 이하이면 무엇이든 허용해, 같은 입력에 CLOSE가 여럿 나올 수 있었다. 연결 오류 CLOSE는 처리 범위를 줄일 이유가 없어 값을 하나로 정해도 잃는 것이 없다 | 연결 오류 CLOSE는 더 작은 값을 쓰는 보수적 구현을 허용하지 않는다 |
 | 28 | 내가 보낸 요청이 RESET으로 끝나면(보냈든 받았든) 호출자에게 로컬 `status`를 정확히 한 번 넘긴다. `RESET(CANCEL)` 송신·수신은 `CANCELLED`, `RESET(REFUSED)` 수신은 `UNAVAILABLE`, 2.3.1절·2.3.2절 위반으로 보낸 `RESET(PROTOCOL_ERROR)`과 그 밖의 RESET 수신은 `INTERNAL` (#65) | 결과를 정하지 않으면 같은 사건에서 호출자 결과가 0개일 수도 여러 개일 수도 있어 벡터로 판정할 수 없다. `REFUSED`는 "다시 보내도 안전"이라 재시도 가능을 뜻하는 `UNAVAILABLE`과 맞는다 | 매핑 표가 하나 늘고, 그 밖의 RESET을 모두 `INTERNAL`로 뭉갠다 |
 | 29 | 송신 측의 미응답 바이트 반환도 MUST지만, 송신 측 한도 준수가 SHOULD라 반환 자체는 외부에서 관측되지 않는다. 적합성 벡터는 같은 사건이 일으키는 유예 전이(호출자 결과가 한 번, 같은 스트림의 늦은 프레임은 조용한 폐기)로만 확인한다 (#65) | 송신 측 반환을 직접 단언하려면 송신 측 한도 준수를 MUST로 올려야 하는데, 이는 20번 결정(SHOULD)을 뒤집는다. 반환 시점이 전이 시점과 같으므로 전이 확인으로 갈음한다 | 송신 측의 반환 누락·중복은 벡터로 잡지 못한다 |
+| 30 | 5.1.1절 5번의 항목과 3.2.5절의 행은 적힌 순서대로 검사하고, 한 프레임이 여럿에 걸리면 처음 걸린 위반이 `CLOSE` 코드를 정한다 (#63) | 두 번째로 받은 ACK HELLO에 payload가 있는 경우처럼 `FRAME_SIZE_ERROR`와 `PROTOCOL_ERROR`가 함께 해당하면 규격이 코드를 정하지 않아 벡터가 기대 결과를 하나로 적을 수 없었다. 이미 표와 칸에 있던 순서를 규칙으로 올렸다 | 구현은 이 순서로 검사해야 한다. 다른 순서로 코드를 고르는 구현은 부적합하다 |
+| 31 | 협상 실패 경로의 서버 HELLO는 서버 자기 파라미터를 평소 값으로 싣고 `content_type`은 싣지 않는다 (#63) | 파라미터를 서버 마음대로 정해도 되면 벡터가 이 HELLO의 기대 결과를 하나로 적을 수 없다. 평소 HELLO와 같은 값이면 서버 구현이 HELLO를 만드는 코드를 그대로 쓰고 `content_type`만 뺀다 | 이 HELLO를 읽는 쪽에서는 여전히 의미 없는 HELLO다 |
+| 32 | `max_frame_size`가 허용 범위(16 KiB\~16 MiB) 밖인 HELLO는 협상 실패다. 서버는 협상 실패 경로로, 클라이언트는 `CLOSE(PROTOCOL_ERROR)`로 처리한다 (#63) | 3.2.1절이 범위를 정해 놓고도 벗어난 값을 받았을 때의 동작을 정하지 않아 받는 쪽의 결과가 0개였다. 같은 HELLO의 `max_frame_size` ≤ `max_pending_bytes` 위반과 같은 경로를 쓴다 | 구현은 범위를 검사해야 한다 |
 
 ---
 
