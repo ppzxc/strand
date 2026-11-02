@@ -1576,6 +1576,61 @@
           ]
         }
       ]
+    },
+    {
+      "id": "own-no-error-close-then-idle-stream-error-closes-without-resend",
+      "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 CLOSE(NO_ERROR)를 보낸 뒤, 유휴 스트림(내 공간 번호 3, highest_local_seq=1보다 큼)을 가리키는 RESPONSE 프레임을 받으면 5.1.1절 6번 연결 오류다. 이미 CLOSE를 보냈으므로 두 번째 CLOSE(PROTOCOL_ERROR)는 보내지 않고 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 정확히 한 번 받고, 그 뒤에 closed 이벤트가 난다",
+      "spec": [
+        "3.5",
+        "5.1.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "flags": [
+                "END"
+              ],
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "last_stream_id": 0,
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010103000000000300000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
