@@ -86,7 +86,7 @@
 | `established` | 예 | 연결을 수립한 상태에서 시작하는지 | — |
 | `config` | 아니오 | 설정 항목(이 문서 8.2절) | 항목별 기본값 |
 
-`established`가 `true`이면 러너가 표준 수립 순서(연결 서문, HELLO, `ACK`, 3.3절)를 실행하고, 성공을 확인한 뒤 구현의 출력과 이벤트를 비운 다음 첫 단계를 시작한다. 이때 `local_hello`와 `peer_hello`로는 수립이 성공하는 값만 쓴다. `false`이면 연결이 막 열린 맨 바이트 상태에서 시작한다. 연결 서문과 첫 프레임 검사를 확인하는 벡터가 이 쪽이다. 이 경우 구현이 연결이 열리자마자 내보내는 출력(클라이언트 역할의 연결 서문 등)은 첫 단계의 `send`에 합쳐 비교한다.
+`established`가 `true`이면 러너가 표준 수립 순서(3.3절)를 실행하고, 성공을 확인한 뒤 구현의 출력과 이벤트를 비운 다음 첫 단계를 시작한다. 표준 수립 순서에서 서버 역할 구현은 연결 서문을 받은 즉시 HELLO를 보내고, 클라이언트 역할 구현은 연결 서문에 이어 HELLO를 보낸다. 러너는 상대 HELLO에 `ACK`를 보내고 구현의 `ACK`를 받아야 수립을 마친 것으로 본다. 이때 `local_hello`와 `peer_hello`로는 수립이 성공하는 값만 쓴다. `false`이면 연결이 막 열린 맨 바이트 상태에서 시작한다. 연결 서문과 첫 프레임 검사를 확인하는 벡터가 이 쪽이다. 이 경우 구현이 연결이 열리자마자 내보내는 출력(클라이언트 역할의 연결 서문 등)은 첫 단계의 `send`에 합쳐 비교한다.
 
 `peer_hello`는 필드 이름(식별자)이고, 가리키는 것은 용어집의 **엔드포인트** 중 테스트 대상이 아닌 쪽, 곧 러너가 흉내 내는 상대 엔드포인트가 보내는 HELLO다. `role`이 `server`이면 클라이언트 HELLO이고 `client`이면 서버 HELLO다. 반대로 `local_hello`는 테스트 대상 구현 자신의 HELLO다. 용어집은 "피어"의 단독 표기를 피하라고 하므로 이 문서의 설명문에서는 "상대 엔드포인트"라고 쓰고, `peer_hello`라는 이름만 형식 호환을 위해 유지한다.
 
@@ -159,9 +159,9 @@
 
 | 항목 | 위치 | 의미 | 기본값 |
 | --- | --- | --- | --- |
-| `max_frame_size`, `max_pending_bytes`, `max_concurrent_streams`, `capabilities`, `content_types`, `content_type` | `local_hello` | 3.2.1절의 파라미터 | 3.2.1절의 기본값 |
+| `max_frame_size`, `max_pending_bytes`, `max_concurrent_streams`, `capabilities` | `local_hello` | 3.2.1절의 파라미터 | 3.2.1절의 기본값 |
 | `draining_retention_limit` | `config` | 유예 보관 한도. 유예 상태로 최근 넘어간 스트림을 몇 개까지 보관하는지(스트림 개수). 넘치면 보관에서 빠진다. 보관에서 빠진 스트림은 "끝난 스트림"이다 | 1024 |
-| `hello_timeout_ms` | `config` | HELLO를 보내고 `ACK`를 기다리는 시간(`HELLO_TIMEOUT`, 3.3절) | 5000 |
+| `hello_timeout_ms` | `config` | HELLO를 보내고 `ACK`를 기다리는 시간(확인 대기, 3.3절). 규격은 값을 정하지 않으므로 이 기본값은 적합성 실행의 설정일 뿐이다 | 5000 |
 
 설정 값이 규격의 권고(예: 유예 보관 한도 1,024개 이상)보다 작아도, 적합성 실행 중에는 구현이 설정값을 따른다. 보관에서 가장 먼저 유예 상태로 넘어간 스트림부터 빠지는지(FIFO), 늦은 프레임이 닿으면 갱신되는지(LRU)에 따라 결과가 갈리는 벡터는 쓰지 않는다.
 
@@ -354,9 +354,9 @@
 }
 ```
 
-### 10.4 가상 시계와 `HELLO_TIMEOUT`
+### 10.4 가상 시계와 확인 대기 시간 초과
 
-서버 역할 구현이 자기 HELLO와 `ACK`를 보낸 뒤 상대의 `ACK`가 오지 않는다. 대기 시간(1,000밀리초) 직전에는 아무것도 보내지 않고, 지나면 `CLOSE(HELLO_TIMEOUT)`을 보낸다. CLOSE의 `last_stream_id` 0은 처리한 스트림이 없다는 뜻이다.
+서버 역할 구현은 연결 서문을 확인한 즉시 자기 HELLO를 보내고(클라이언트 HELLO를 기다리지 않는다), 클라이언트 HELLO를 받으면 `ACK`로 답한다. 이후 상대의 `ACK`가 오지 않는다. 대기 시간(1,000밀리초) 직전에는 아무것도 보내지 않고, 지나면 `CLOSE(PROTOCOL_ERROR)`를 보낸다. CLOSE의 `last_stream_id` 0은 처리한 스트림이 없다는 뜻이다.
 
 ```json
 {
@@ -364,7 +364,7 @@
   "vectors": [
     {
       "id": "hello-ack-timeout",
-      "description": "HELLO에 대한 ACK가 오지 않은 채 대기 시간이 지나면 CLOSE(HELLO_TIMEOUT)을 보내고 닫는다",
+      "description": "서버가 연결 서문을 확인한 즉시 HELLO를 보내고, 그 HELLO에 대한 ACK가 오지 않은 채 대기 시간이 지나면 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
       "spec": ["3.3"],
       "setup": {
         "role": "server",
@@ -374,11 +374,14 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "c0de5354 52300000 0000000c 00010000 00000000 00000000",
-          "send": [
-            { "type": "HELLO", "params": { "content_type": 1 } },
-            { "type": "HELLO", "flags": ["ACK"] }
-          ],
+          "hex": "c0de5354 52300000",
+          "send": [{ "type": "HELLO" }],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c 00010000 00000000 00000000",
+          "send": [{ "type": "HELLO", "flags": ["ACK"] }],
           "events": []
         },
         {
@@ -390,7 +393,7 @@
         {
           "kind": "advance",
           "ms": 2,
-          "send": [{ "type": "CLOSE", "last_stream_id": 0, "error_code": "HELLO_TIMEOUT" }],
+          "send": [{ "type": "CLOSE", "last_stream_id": 0, "error_code": "PROTOCOL_ERROR" }],
           "events": [{ "event": "closed" }]
         }
       ]

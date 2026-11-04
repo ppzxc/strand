@@ -52,7 +52,7 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 | **제어 프레임 (Control Frame)** | 연결 수명주기, 생존 확인, 정상 종료, 스트림 중단 등 세션 상태를 관리하는 프레임 (`type` < `0x0100`) |
 | **애플리케이션 프레임 (Application Frame)** | 실제 비즈니스 서비스의 요청 및 응답 데이터를 운반하는 프레임 (`type` ≥ `0x0100`) |
 | **확장 영역 (Extension Area)** | 헤더와 본문 사이에 위치하는 선택적 메타데이터 영역. TLV(`tag`, `length`, `value`) 구조로 인코딩 |
-| **본문 (Payload)** | 프레임에 실리는 실제 데이터 바이트열. 제어 프레임은 고정 바이너리 형식을, 애플리케이션 프레임은 협상된 직렬화 포맷을 따름 |
+| **본문 (Payload)** | 프레임에 실리는 실제 데이터 바이트열. 제어 프레임은 고정 바이너리 형식을, 애플리케이션 프레임은 Protocol Buffers 이진 인코딩을 따름 |
 | **기능 비트 (Capabilities Bitset)** | HELLO 프레임에서 교환하는 32비트 비트셋. 양 엔드포인트가 모두 켠 비트의 기능만 해당 연결에서 활성화 |
 | **배압 (Backpressure)** | 수신자의 버퍼 용량을 초과하지 않도록 송신량을 제어하는 메커니즘. 소켓을 블로킹하지 않고 미응답 바이트가 한도를 넘으면 그 요청을 즉시 거절 |
 | **유예 상태 (Draining State)** | 스트림이 응답이나 RESET을 보내거나 받아 끝난 직후, 지연 도착하는 프레임을 안전하게 폐기하려고 잠시 유지하는 상태(4.3절) |
@@ -60,7 +60,7 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 
 ### 1.4 표기 규칙
 
-- 연결 서문, 프레임 헤더, 확장 영역, 제어 프레임 payload에 들어가는 고정 길이 정수는 모두 big-endian, unsigned로 읽는다. 애플리케이션 payload는 협상한 형식의 인코딩 규칙을 따른다.
+- 연결 서문, 프레임 헤더, 확장 영역, 제어 프레임 payload에 들어가는 고정 길이 정수는 모두 big-endian, unsigned로 읽는다. 애플리케이션 payload는 Protocol Buffers 이진 인코딩 규칙을 따른다 [^PROTOBUF-ENCODING].
 - 필드와 파라미터 이름은 `snake_case`, 프레임 타입·플래그·코드 상수는 `UPPER_SNAKE_CASE`로 쓴다.
 - MUST, MUST NOT, SHOULD, SHOULD NOT, MAY는 대문자로 쓴 경우에만 요구 수준을 뜻한다 [^RFC2119] [^RFC8174].
 - `0x`가 붙은 수는 16진수이고, KiB·MiB는 1,024의 배수다.
@@ -109,12 +109,7 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 
 #### 2.2.1 length (4바이트)
 
-이 필드 바로 뒤부터 프레임 끝까지의 바이트 수다. 최솟값은 12이고, 최댓값은 받는 쪽이 알린 `max_frame_size`에서 4를 뺀 값이다. 범위를 벗어난 프레임이 오면 `CLOSE(FRAME_SIZE_ERROR)`를 보내고 연결을 닫는다(MUST). 알린 `max_frame_size`를 적용하는 시점은 다음과 같다.
-
-| 구분 | 시점 | 검사 기준 |
-| --- | --- | --- |
-| 원칙 | 자기 HELLO에 대한 상대의 ACK를 받은 뒤 | 알린 `max_frame_size` |
-| 예외 | ACK를 받기 전(3.3절) | 알린 값이 기본값(4 MiB)보다 크든 작든 `max_frame_size`가 기본값인 것처럼 |
+이 필드 바로 뒤부터 프레임 끝까지의 바이트 수다. 최솟값은 12이고, 최댓값은 받는 쪽이 알린 `max_frame_size`에서 4를 뺀 값이다. 받는 쪽은 언제나 자기가 알린 `max_frame_size`로 검사한다. 범위를 벗어난 프레임이 오면 `CLOSE(FRAME_SIZE_ERROR)`를 보내고 연결을 닫는다(MUST).
 
 #### 2.2.2 type (2바이트)
 
@@ -269,7 +264,7 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 | 16 | `UNAUTHENTICATED` | 신원을 확인할 수 없음 |
 | 17\~255 | 예약 | 받으면 `UNKNOWN`으로 취급 |
 
-`status`가 `OK`가 아닌 응답의 payload는 비워 두거나, 협상한 형식으로 인코딩한 오류 상세 메시지(`google.rpc.Status`)를 넣는다(MUST) [^GOOGLE-RPC]. 이때 메시지 안의 코드는 헤더의 `status`와 같아야 한다(MUST). 프로토콜 계층은 이 payload를 해석하지 않고 그대로 넘긴다.
+`status`가 `OK`가 아닌 응답의 payload는 비워 두거나, Protocol Buffers 이진 인코딩으로 만든 오류 상세 메시지(`google.rpc.Status`)를 넣는다(MUST) [^GOOGLE-RPC]. 이때 메시지 안의 코드는 헤더의 `status`와 같아야 한다(MUST). 프로토콜 계층은 이 payload를 해석하지 않고 그대로 넘긴다.
 
 #### 2.5.2 error\_code (세션/스트림 중단 사유)
 
@@ -318,71 +313,42 @@ HELLO는 연결마다 한 번, 내가 받을 수 있는 한도와 지원하는 �
 * **stream_id**: `0`
 * **payload**: `(identifier u16, value u32)`의 반복. 확인은 `ACK` 플래그 + 빈 payload (길이 0).
 
-한 연결에서 HELLO 프레임은 엔드포인트마다 파라미터 HELLO(`flags = 0`) 하나와 상대 HELLO를 확인하는 ACK HELLO(`flags = ACK`) 하나다. 파라미터 HELLO와 ACK HELLO는 서로 다른 프레임이다. 둘을 한 프레임으로 합칠 수 없다.
-
-서버의 HELLO 송신 규칙은 다음과 같다(모두 MUST).
-
-1. **독립 프레임**: 서버는 파라미터 `HELLO(flags=0)`와 확인용 `HELLO(flags=ACK, payload 길이 0)`를 서로 다른 두 프레임으로 보낸다. 둘을 합친 프레임(ACK이면서 payload가 비어 있지 않은 HELLO)은 허용하지 않으며, 받으면 3.2.5절에 따라 `CLOSE(FRAME_SIZE_ERROR)`로 처리한다.
-2. **순서**: 서버가 보내는 순서는 `HELLO` → `HELLO+ACK` → (이후 애플리케이션 프레임)로 고정이다.
-3. **송신 시점**: 서버는 클라이언트의 첫 프레임이 3.2.4절 검사를 통과하고 그 payload(`content_types`)를 읽은 뒤에만 자기 HELLO를 보낸다.
+한 연결에서 HELLO 프레임은 엔드포인트마다 파라미터 HELLO(`flags = 0`) 하나와 상대 HELLO를 확인하는 ACK HELLO(`flags = ACK`) 하나다.
 
 #### 3.2.1 파라미터 정의
 
 | identifier | 이름 | 기본값 | 보내는 쪽 | 의미 |
 | --- | --- | --- | --- | --- |
-| `0x0001` | `max_frame_size` | 4,194,304 (4 MiB) | 양쪽 | 받을 수 있는 프레임의 최대 크기. 곧 메시지 최대 크기. 허용 범위 16 KiB\~16 MiB(벗어나면 3.2.3절). 적용 시점은 3.3절 |
-| `0x0002` | `max_pending_bytes` | 16,777,216 (16 MiB) | 양쪽 | 아직 응답하지 않은 요청의 바이트 합계 한도(4.5절) |
-| `0x0003` | `max_concurrent_streams` | 100 | 양쪽 | 상대가 동시에 열 수 있는 스트림 수 |
-| `0x0004` | `capabilities` | 0 | 양쪽 | 기능 비트셋. 이 버전에서는 모든 비트가 예약 |
-| `0x0005` | `content_types` | `0x00000002` | 클라이언트 | 지원하는 payload 형식. 비트 *n*이 형식 코드 *n* (0-indexed LSB: `1 << n`) |
-| `0x0006` | `content_type` | 1 | 서버 | 서버가 고른 payload 형식 코드 |
+| `0x0001` | `max_frame_size` | 4,194,304 (4 MiB) | 양쪽 | 받을 수 있는 프레임의 최대 크기. 곧 메시지 최대 크기. 허용 범위 16 KiB\~16 MiB(벗어나면 3.2.3절) |
+| `0x0002` | `max_concurrent_streams` | 100 | 양쪽 | 상대가 동시에 열 수 있는 스트림 수. 범위 `0`\~`2^32-1` |
+| `0x0003` | `capabilities` | 0 | 양쪽 | 기능 비트셋. 이 버전에서는 모든 비트가 예약 |
 
-`content_types`의 비트 *n*은 형식 코드 *n*에 대응한다. 코드 *n*을 지원하면 `1 << n` 비트를 켠다. 기본값 `0x00000002`는 형식 1만 지원한다는 뜻이다. 3.2.2절에서 예약된 코드(0, 3\~31)의 비트가 켜져 있어도 받는 쪽은 무시하며 오류가 아니다. 이 규칙의 비트 번호 매김은 최하위 비트가 0번이다.
+#### 3.2.2 HELLO 송신
 
-#### 3.2.2 payload 형식 코드
+HELLO 송신 규칙은 다음과 같다(모두 MUST).
 
-| 코드 | 형식 |
-| --- | --- |
-| 0 | 예약 |
-| 1 | Protocol Buffers 이진 인코딩 [^PROTOBUF-ENCODING] |
-| 2 | Protocol Buffers JSON 매핑 [^PROTOJSON] |
-| 3\~31 | 예약 |
+1. **독립 프레임**: 엔드포인트는 파라미터 `HELLO(flags=0)`와 확인용 `HELLO(flags=ACK, payload 길이 0)`를 서로 다른 두 프레임으로 보낸다. 둘을 합친 프레임(ACK이면서 payload가 비어 있지 않은 HELLO)은 허용하지 않으며, 받으면 3.2.5절에 따라 `CLOSE(FRAME_SIZE_ERROR)`로 처리한다.
+2. **순서**: 파라미터 HELLO가 먼저이고 상대 HELLO에 대한 ACK HELLO가 나중이다.
+3. **송신 시점**: 서버는 연결 서문을 확인한 즉시(3.1절) 자기 파라미터 HELLO를 보낸다. 클라이언트 HELLO를 기다리지 않는다.
 
 #### 3.2.3 협상 규칙
 
-모르는 identifier는 무시한다(MUST). 같은 identifier가 두 번 나오면 뒤의 값을 쓴다.
+모르는 identifier는 무시한다(MUST). 같은 identifier가 두 번 나오면 모르는 identifier라도 연결 오류다. 확장 영역의 중복 tag 금지(2.4.1절)와 같은 규칙이며, 검증 실패(아래)로 처리한다.
 
-`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알려 준 한도를 넘지 않게 보내야 한다(MUST). `max_frame_size`는 3.3절의 적용 시점부터 지키면 된다. 또 `max_frame_size`는 `max_pending_bytes`보다 클 수 없다(MUST). 이 검증은 양쪽 엔드포인트가 모두 상대 HELLO에 대해 한다. 서버는 클라이언트 HELLO가 이를 어기면 아래 협상 실패 경로로 처리한다. 클라이언트는 서버 HELLO가 이를 어기면 `CLOSE(PROTOCOL_ERROR)`를 보내고 닫는다(MUST).
+`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알려 준 한도를 넘지 않게 보내야 한다(MUST). 상대 HELLO를 받기 전에 보내는 프레임은 상대의 `max_frame_size`를 허용 범위의 최솟값 16 KiB로 보고 보낸다(MUST).
+
+각 엔드포인트는 상대 HELLO가 첫 프레임 검사(3.2.4절)를 통과하면 payload를 검증한다(MUST). `max_frame_size`가 허용 범위(16 KiB\~16 MiB) 밖이거나 identifier가 중복되면 검증에 실패한 것이다. 통과하면 상대 HELLO에 ACK HELLO로 답하고, 실패하면 ACK 대신 `CLOSE(PROTOCOL_ERROR)`를 보내고 닫는다. 서버와 클라이언트가 같은 규칙을 쓴다.
 
 연결에서 실제로 쓸 수 있는 기능은 양쪽 `capabilities`에 공통으로 켜진 비트뿐이다.
-
-payload 형식은 서버가 정한다. 서버는 클라이언트의 `content_types` 가운데 하나를 골라 `content_type`으로 알려 주고, 그 뒤로 연결의 애플리케이션 payload는 모두 이 형식을 따른다. 서버는 예약된 코드를 `content_type`으로 고르지 않는다(MUST NOT). `content_types`가 0이거나 예약 비트만 켜져 있으면 고를 것이 없는 경우다.
-
-**협상 실패 경로(서버)**: 협상이 실패하면 서버는 먼저 HELLO를 보내고, ACK 없이 곧바로 `CLOSE(PROTOCOL_ERROR)`를 보낸 뒤 연결을 닫는다(MUST). 이때 보내는 HELLO는 서버 자기 파라미터(`max_frame_size`, `max_pending_bytes`, `max_concurrent_streams`, `capabilities`)를 평소 값으로 싣고 `content_type`은 싣지 않는다(MUST). 협상 실패는 다음 세 경우다.
-
-* 고를 형식이 없다(클라이언트의 `content_types`에 서버가 지원하는 형식 코드가 없다).
-* 클라이언트 HELLO의 `max_frame_size`가 `max_pending_bytes`보다 크다.
-* 클라이언트 HELLO의 `max_frame_size`가 3.2.1절의 허용 범위(16 KiB\~16 MiB) 밖이다.
-
-이 경로로 보낸 HELLO는 일반 서버 HELLO와 와이어에서 구별되지 않는다. 클라이언트는 받는 시점에 다음 프레임이 CLOSE인지 알 수 없으므로 이 HELLO도 3.2.4절 첫 프레임 검사와 아래 서버 HELLO 검증을 예외 없이 즉시 받는다. 이어서 오는 CLOSE는 3.5절의 일반 CLOSE로 처리한다. 첫 프레임 검사는 HELLO 하나만 허용하는 형태로 유지하므로, 이 경로에서도 서버 송신 순서는 HELLO 다음 CLOSE다.
-
-**서버 HELLO 검증(클라이언트)**: 클라이언트는 서버 HELLO의 payload를 읽고 다음 중 하나라도 해당하면 `CLOSE(PROTOCOL_ERROR)`를 보내고 닫는다(MUST).
-
-* `content_type`이 클라이언트가 `content_types`로 제시한 코드가 아니다. `content_type`을 생략하면 기본값 1이므로, 클라이언트가 형식 1을 제시하지 않았는데 서버가 생략하면 이 경우에 해당한다.
-* `max_frame_size`가 `max_pending_bytes`보다 크다.
-* `max_frame_size`가 3.2.1절의 허용 범위(16 KiB\~16 MiB) 밖이다.
-
-이 검증은 첫 프레임 검사(아무것도 보내지 않고 닫음)와 달리 payload 검사 단계라서 `CLOSE`를 보낸다. 클라이언트는 이 검증을 통과한 뒤에만 서버 HELLO에 ACK로 답한다.
 
 HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면 새 연결을 맺는다.
 
 #### 3.2.4 첫 프레임 검사
 
-각 엔드포인트는 상대에게서 처음 받는 프레임(첫 프레임)의 헤더만 읽은 상태에서, payload를 읽기 전에 아래를 확인한다(MUST). 하나라도 어긋나면 아무것도 보내지 않고 연결을 닫는다. 서버에게 첫 프레임은 연결 서문 다음에 오는 프레임이고, 클라이언트에게는 서버가 보낸 첫 프레임이다. 클라이언트가 서버 HELLO 전에 애플리케이션 프레임을 먼저 보냈더라도(3.3절 4단계) 검사 대상은 처음 **받은** 프레임이다.
+각 엔드포인트는 상대에게서 처음 받는 프레임(첫 프레임)의 헤더만 읽은 상태에서, payload를 읽기 전에 아래를 확인한다(MUST). 하나라도 어긋나면 아무것도 보내지 않고 연결을 닫는다. 서버에게 첫 프레임은 연결 서문 다음에 오는 프레임이고, 클라이언트에게는 서버가 보낸 첫 프레임이다. 서버는 연결 서문을 확인한 즉시 HELLO를 보내므로(3.2.2절), 첫 프레임 검사에 실패해 닫을 때 이미 보낸 HELLO가 있을 수 있다.
 
 1. `type`이 `0x0001`(HELLO)인가
 2. `stream_id`와 `flags`가 모두 0인가
-3. `length`가 12 + 6 × 64 이하인가. 협상이 끝나기 전에 큰 버퍼를 잡지 않게 하는 제한이다.
 
 #### 3.2.5 HELLO 형태 위반
 
@@ -393,22 +359,21 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 | 파라미터 HELLO의 payload 길이가 6의 배수가 아님 | `CLOSE(FRAME_SIZE_ERROR)` |
 | ACK HELLO의 payload가 비어 있지 않음 | `CLOSE(FRAME_SIZE_ERROR)` |
 | 파라미터 HELLO를 두 번째로 받음 | `CLOSE(PROTOCOL_ERROR)` |
-| 내가 보낸 HELLO에 대한 ACK를 두 번째로 받음, 또는 HELLO를 보내기 전에 ACK를 받음 | `CLOSE(PROTOCOL_ERROR)` |
+| 내가 보낸 HELLO에 대한 ACK를 두 번째로 받음 | `CLOSE(PROTOCOL_ERROR)` |
 
 한 프레임이 여러 행에 해당할 때 어느 행의 오류 코드를 쓰는지는 5.1.1절 5번 아래 규칙이 정한다(표의 위 행부터 본다). 예를 들어 payload가 비어 있지 않은 ACK HELLO를 두 번째로 받으면 `CLOSE(FRAME_SIZE_ERROR)`다. `stream_id` 위반(2.2.5절)은 이 표보다 먼저 걸린다.
 
 ### 3.3 수립 순서
 
 1. 클라이언트는 연결 서문을 보내고 곧바로 파라미터 HELLO를 이어 보낸다(MUST).
-2. 서버는 연결 서문과 첫 프레임을 3.1절, 3.2.4절 기준으로 확인하고, 클라이언트 HELLO의 payload(`content_types`)를 읽는다. 문제가 없으면 서버는 자기 파라미터 HELLO를 보낸 뒤 클라이언트 HELLO에 ACK HELLO로 답한다(MUST). 두 프레임은 이 순서로 서로 다른 프레임이다(3.2절). 협상이 실패하면 서버는 HELLO를 보낸 뒤 ACK 없이 `CLOSE(PROTOCOL_ERROR)`를 보낸다(3.2.3절).
-3. 클라이언트는 서버 HELLO를 받으면 3.2.4절과 3.2.3절 기준으로 즉시 검증하고, 통과하면 서버 HELLO에 ACK HELLO로 답한다(MUST). 검증에 실패하면 ACK 대신 3.2.3절대로 닫는다. 협상 실패 경로의 HELLO와 뒤따르는 CLOSE의 처리는 3.2.3절이 정한다.
-4. 상대의 HELLO를 받은 뒤부터는 애플리케이션 프레임을 보낼 수 있다. 클라이언트는 아래 조건을 지키면 서버 HELLO를 기다리지 않고 요청을 먼저 보내도 된다(MAY, 선송신).
-    * **서버의 길이 검사 기준.** 서버는 자기 HELLO에 대한 클라이언트의 ACK를 받기 전까지 프레임의 `length`를 항상 기본값(4 MiB) 기준으로 검사한다(MUST). 서버가 알린 `max_frame_size`가 기본값보다 크거나 작아도 같다. ACK를 받은 뒤부터는 자기가 알린 `max_frame_size`로 검사한다. 클라이언트 ACK는 서버 한도를 적용하기 시작하는 동기화 지점이다.
-    * **클라이언트의 의무.** 클라이언트는 서버 HELLO의 한도에 기댄 프레임을 서버 HELLO에 대한 ACK보다 먼저 보내지 않는다(MUST). 곧 ACK 전에 보내는 프레임은 기본값(4 MiB) 범위를 넘지 않는다. 서버가 알린 한도가 기본값보다 작아도 ACK 전에 보낸 기본값 범위의 프레임은 `FRAME_SIZE_ERROR`가 되지 않는다.
-    * **형식이 하나일 때만.** 선송신은 클라이언트가 `content_types`에 형식을 정확히 하나만 제시했을 때만 허용한다. 선송신 시점에는 서버가 고를 `content_type`을 알 수 없어서, 둘 이상을 제시하면 같은 바이트가 해석되기도 하고 `INVALID_ARGUMENT`가 되기도 하기 때문이다.
-    * **보관.** 선송신이 허용되지 않는 클라이언트의 애플리케이션이 서버 HELLO 전에 요청을 내면, 클라이언트는 그 요청을 보관했다가 서버 HELLO 검증과 서버 HELLO에 대한 ACK 송신 다음에 보낸다(MUST). 연결이 그 전에 끝나면 보관된 요청도 3.5절의 로컬 `UNAVAILABLE`로 끝난다. 이 요청은 전송된 적이 없어 상대가 처리하지 않았음이 확실하므로 다시 보내도 안전하다. 보관된 요청은 `stream_id`가 없으므로 적합성 벡터의 `result` 이벤트로 관측하지 않는다(3.5절의 CLOSE 뒤 새 요청 실패와 같은 취급).
-    * **그 밖의 한도.** 선송신 요청이 서버의 미응답 바이트 한도나 동시 스트림 수 한도를 넘으면 서버는 `RESET(REFUSED)`로 거절한다(4.5절, 5.1.2절 9번).
-5. HELLO를 보내고 정해 둔 시간 안에 `ACK`가 오지 않으면 `CLOSE(HELLO_TIMEOUT)`을 보내고 연결을 닫는다.
+2. 서버는 연결 서문을 3.1절 기준으로 확인한 즉시 자기 파라미터 HELLO를 보낸다(3.2.2절).
+3. 양쪽은 상대 HELLO를 받으면 3.2.4절 첫 프레임 검사와 3.2.3절 검증을 하고, 통과하면 ACK HELLO로 답한다. 실패하면 3.2.3절에 따라 닫는다.
+
+**송신 규칙.** HELLO·CLOSE 외 모든 프레임은 상대 HELLO에 ACK를 보낸 뒤에만 보낸다(MUST). 서버는 클라이언트 HELLO에 ACK를 보낸 직후부터 보낼 수 있고 클라이언트의 ACK를 기다리지 않는다. 클라이언트는 서버 HELLO를 검증하고 ACK를 보낸 뒤부터 보낼 수 있다. "수립 완료" 같은 별도 상태는 없다.
+
+**수신 규칙(ACK 관문).** 내가 보낸 HELLO에 대한 상대의 ACK를 받기 전에는 HELLO와 CLOSE만 받는다. 그 전에 PING·RESET·애플리케이션 프레임이 오면 연결 오류이며 `CLOSE(PROTOCOL_ERROR)`로 처리한다(MUST). 예약 제어 타입(2.2.2절)은 어느 때든 무시한다.
+
+**확인 대기.** HELLO나 PING을 보낸 때부터 정해 둔 시간이 지나도록 상대의 ACK가 오지 않으면 `CLOSE(PROTOCOL_ERROR)`를 보내고 닫는다(MUST). 대기 시간의 값은 로컬 설정이다.
 
 ```mermaid
 sequenceDiagram
@@ -418,25 +383,28 @@ sequenceDiagram
 
     Note over C,S: 바이트 스트림(TCP) 또는 WebSocket 연결 개설
     C->>S: 연결 서문 (8바이트: C0 DE 53 54 52 30 00 00)
-    C->>S: HELLO (flags=0: 클라이언트 한도 및 형식 후보 제시, 3.2절)
+    C->>S: HELLO (flags=0: 클라이언트 한도와 기능 비트, 3.2절)
 
-    Note over S: 연결 서문 확인, 첫 프레임 검사(3.2.4절), content_types 읽기
-    alt 협상 성공
-        S->>C: HELLO (flags=0: 서버 한도 및 최종 형식 결정, 독립 프레임)
-        S->>C: HELLO (flags=ACK: 클라이언트 HELLO 확인, payload=0, 독립 프레임)
+    Note over S: 연결 서문 확인 즉시 HELLO 송신 (클라이언트 HELLO를 기다리지 않음)
+    S->>C: HELLO (flags=0: 서버 한도와 기능 비트)
 
-        Note over C: 첫 프레임 검사(3.2.4절), 서버 HELLO 검증(3.2.3절)
-        alt 검증 통과
+    par 서버가 클라이언트 HELLO를 검증
+        Note over S: 첫 프레임 검사(3.2.4절), 값 검증(3.2.3절)
+        alt 통과
+            S->>C: HELLO (flags=ACK: 클라이언트 HELLO 확인, payload=0)
+        else 실패
+            S->>C: CLOSE(PROTOCOL_ERROR)
+        end
+    and 클라이언트가 서버 HELLO를 검증
+        Note over C: 첫 프레임 검사(3.2.4절), 값 검증(3.2.3절)
+        alt 통과
             C->>S: HELLO (flags=ACK: 서버 HELLO 확인, payload=0)
-            Note over C,S: 연결 수립 완료 (애플리케이션 요청/응답 스트림 개시 가능)
-        else 검증 실패
+        else 실패
             C->>S: CLOSE(PROTOCOL_ERROR)
         end
-    else 협상 실패
-        S->>C: HELLO (flags=0: 서버 파라미터는 평소 값, content_type 없음)
-        S->>C: CLOSE(PROTOCOL_ERROR) (ACK 없음)
-        Note over C: HELLO와 CLOSE의 처리는 3.2.3절
     end
+
+    Note over C,S: 각 엔드포인트는 상대 HELLO에 ACK를 보낸 뒤부터 HELLO·CLOSE 외 프레임을 보낼 수 있다
 ```
 
 ### 3.4 생존 확인: PING
@@ -446,7 +414,7 @@ PING은 어느 쪽이든 보낼 수 있다.
 * **stream_id**: `0`
 * **payload**: 정확히 8바이트 (임의의 바이트열)
 
-받은 쪽은 같은 8바이트에 `ACK` 플래그(`flags = 0x01`)를 붙여 즉시 돌려준다(MUST). payload 길이가 정확히 8바이트가 아니면 `CLOSE(FRAME_SIZE_ERROR)`로 처리한다. 일정 시간 안에 답이 없으면 연결이 끊긴 것으로 보고 닫는다.
+받은 쪽은 같은 8바이트에 `ACK` 플래그(`flags = 0x01`)를 붙여 즉시 돌려준다(MUST). payload 길이가 정확히 8바이트가 아니면 `CLOSE(FRAME_SIZE_ERROR)`로 처리한다. ACK를 기다리는 시간의 한도는 3.3절의 확인 대기 규칙을 따른다.
 
 서버는 한동안 아무 프레임도 오지 않는 연결을 `CLOSE(NO_ERROR)`로 정리해도 된다(MAY). PING이 지나치게 자주 오면 `CLOSE(OVERLOAD)`로 끊을 수도 있다(MAY).
 
@@ -507,7 +475,7 @@ CLOSE를 보낸 쪽이 그 뒤에 받은 새 요청(상대 공간 번호이고 `
 
 **연결이 끝날 때.** CLOSE를 보내거나 받아 닫을 때(`NO_ERROR`로 마저 끝내는 중에 5.1.1절 연결 오류나 받은 오류 CLOSE로 닫는 경우 포함), 5.1.1절 1번·2번처럼 CLOSE 없이 닫을 때, 상대가 CLOSE 없이 전송 계층을 끊었을 때(TCP EOF·RST, WebSocket close) 모두 연결이 끝난 것이다. 전송 계층이 끊기면 보낼 수 없으므로 아무것도 보내지 않는다. 연결이 끝날 때 응답도 RESET도 받지 못한 채 대기 중인 내 요청마다 애플리케이션에 로컬 `status` = `UNAVAILABLE` 결과를 정확히 한 번 넘기고(MUST), 그 뒤에 `closed` 이벤트를 낸다. `closed`는 연결당 정확히 한 번 낸다. 이미 닫힌 뒤에 전송 계층 끊김이 감지되어도 `closed`를 다시 내지 않고 아무것도 보내지 않는다. `NO_ERROR`로 마저 끝내고 대기 중인 스트림이 없어져 닫을 때도 `closed`는 마지막 스트림의 result(정상 응답 포함) 다음에 낸다(MUST). 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 상대가 연 스트림은 내 요청이 아니므로 결과를 넘기지 않는다. 이 결과는 재시도 가능 여부를 정하지 않는다. 다시 보내도 되는지는 위 `last_stream_id` 보장과 4.6절이 정한다.
 
-5.1.1절 1번·2번은 연결 확립 전(연결 서문·첫 프레임 단계)에 걸리므로 대기 중인 내 요청이 없는 것이 보통이다. 그 경우 `UNAVAILABLE` 결과는 없고 `closed` 이벤트만 난다. 3.3절의 선송신으로 서버 HELLO 전에 보낸 요청이 대기 중인 클라이언트가 2번에서 걸려 닫히면, 그 요청에도 위 `UNAVAILABLE` 결과를 넘기고 그 뒤에 `closed` 이벤트를 낸다. 3.3절 4번의 보관된 요청은 대기 중인 스트림이 아니고 `stream_id`가 없으므로 이 결과를 `stream_id`와 함께 넘기지 않는다(그 요청의 결과는 3.3절이 정한다).
+5.1.1절 1번·2번은 연결 서문·첫 프레임 단계에 걸리므로 대기 중인 내 요청이 없는 것이 보통이다. 그 경우 `UNAVAILABLE` 결과는 없고 `closed` 이벤트만 난다.
 
 ```mermaid
 sequenceDiagram
@@ -535,9 +503,9 @@ sequenceDiagram
 
 ### 4.1 애플리케이션 프레임
 
-애플리케이션 프레임의 `type`은 `0x0100` 이상의 값으로, 서비스 정의(`.proto`)의 메서드마다 하나씩 붙인다. payload에는 HELLO에서 정한 형식(3.2.2절)으로 만든 요청이나 응답 메시지가 들어간다.
+애플리케이션 프레임의 `type`은 `0x0100` 이상의 값으로, 서비스 정의(`.proto`)의 메서드마다 하나씩 붙인다. payload에는 Protocol Buffers 이진 인코딩 [^PROTOBUF-ENCODING]으로 만든 요청이나 응답 메시지가 들어간다.
 
-모르는 `type`으로 요청이 오면 연결은 그대로 두고 `status` = `UNIMPLEMENTED`로 답한다(MUST). 요청 payload를 협상된 형식(3.2.2절)으로 해석할 수 없으면 연결은 그대로 두고 `status` = `INVALID_ARGUMENT`로 답한다(MUST). 메시지 형식을 호환되지 않게 바꿔야 할 때는 기존 `type`을 고치지 말고 새 번호를 받는다.
+모르는 `type`으로 요청이 오면 연결은 그대로 두고 `status` = `UNIMPLEMENTED`로 답한다(MUST). 요청 payload를 Protocol Buffers 이진 인코딩으로 해석할 수 없으면 연결은 그대로 두고 `status` = `INVALID_ARGUMENT`로 답한다(MUST). 메시지 형식을 호환되지 않게 바꿔야 할 때는 기존 `type`을 고치지 말고 새 번호를 받는다.
 
 **응답 해석.** 요청한 쪽은 받은 응답이 해석 가능한지 아래 순서로 확인하고, 처음 걸린 하나만 쓴다. 응답 헤더의 `status`가 `OK`가 아니어도 이 확인이 먼저다.
 
@@ -545,7 +513,7 @@ sequenceDiagram
 | --- | --- | --- |
 | (1) | 응답 `type`이 요청 `type`과 같음(2.2.2절) | `INTERNAL` |
 | (2) | 모르는 필수 확장이 없음(2.4.2절) | `UNIMPLEMENTED` |
-| (3) | payload를 협상된 형식으로 해석 가능 | `INTERNAL` |
+| (3) | payload를 Protocol Buffers 이진 인코딩으로 해석 가능 | `INTERNAL` |
 
 하나라도 걸리면 와이어로는 아무것도 보내지 않는다(RESET도 CLOSE도 보내지 않는다). 해석에 실패한 응답도 정상 응답을 받은 것과 같게 다룬다(4.3절, 4.5절). 애플리케이션에는 받은 응답 대신 로컬에서 만든 `status` 결과를 넘기며, 응답의 원래 `status`와 payload는 버린다. 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과이며, 애플리케이션에 이를 구분해 보여 줄지는 구현이 정한다.
 
@@ -661,10 +629,7 @@ RESET이 아니라 연결이 끝나면서 끝나는 대기 중인 요청의 결�
 
 배압은 응답을 신호로 삼는다. 응답이 돌아오면 그만큼 더 보낼 수 있다. 소켓 읽기를 멈추지 않고, 한도를 넘는 요청은 받는 쪽이 `RESET(REFUSED)`으로 돌려보낸다.
 
-**미응답 바이트.** 요청 하나가 차지하는 크기는 `4 + length`바이트다. 길이 접두부(4바이트), 헤더, 확장 영역, payload를 모두 센 와이어 전체 크기이며 `max_frame_size`와 같은 기준이다. 미응답 바이트는 대기 상태인 스트림의 요청 크기를 모두 더한 값이다. 3.2.3절이 `max_frame_size` ≤ `max_pending_bytes`를 요구하므로, 미응답 바이트가 0이면 프레임 하나는 받아들여진다. 이에 대한 원칙과 예외는 다음과 같다.
-
-* 원칙: 미응답 바이트가 0이면 프레임 하나는 받아들여진다.
-* 예외: 3.3절의 선송신. 서버는 ACK 전에 기본값(4 MiB) 크기의 프레임을 받을 수 있으므로, 서버가 작은 `max_pending_bytes`를 알렸다면 미응답 바이트가 0이어도 그 프레임은 `REFUSED`될 수 있다.
+**미응답 바이트.** 요청 하나가 차지하는 크기는 `4 + length`바이트다. 길이 접두부(4바이트), 헤더, 확장 영역, payload를 모두 센 와이어 전체 크기이며 `max_frame_size`와 같은 기준이다. 미응답 바이트는 대기 상태인 스트림의 요청 크기를 모두 더한 값이다.
 
 **세는 대상.** 상대가 연 스트림에 도착한 애플리케이션 요청 프레임(`RESPONSE` = 0) 중 5.1.2절 9번 검사를 통과해 받아들인 것만 센다. 응답 프레임, 제어 프레임, 그 앞 검사(5.1.1절, 5.1.2절 7번·8번)에서 걸린 프레임은 세지 않는다.
 
@@ -683,7 +648,7 @@ RESET이 아니라 연결이 끝나면서 끝나는 대기 중인 요청의 결�
 
 **거절한 요청.** `RESET(REFUSED)`으로 거절한 요청은 미응답 바이트에도, 동시 스트림 수에도 넣지 않는다. 그 스트림은 대기 상태를 거치지 않고 바로 유예 상태로 들어간다. `stream_id`는 소비된 것으로 보아 5.1.1절 6번의 단조 증가 기준을 갱신한다.
 
-**송신 측 의무.** 보낸 요청 가운데 아직 끝나지 않은 것의 크기 합을 상대의 `max_pending_bytes` 아래로 유지한다(SHOULD). 클라이언트가 서버 HELLO를 받기 전에 먼저 요청을 보내는 경우(3.3절 4번)에도 수신 측은 한도를 넘는 요청을 `REFUSED`로 정당하게 처리한다. `max_frame_size`는 이와 다르다. 클라이언트는 서버 HELLO의 `max_frame_size`에 기댄 프레임을 ACK보다 먼저 보내지 않으며(MUST, 3.3절), ACK를 보낸 뒤에는 그 값을 넘는 프레임을 보내지 않는다(3.2.3절).
+**송신 측 의무.** 보낸 요청 가운데 아직 끝나지 않은 것의 크기 합을 상대의 `max_pending_bytes` 아래로 유지한다(SHOULD).
 
 > 비규범 설명: 송신 측의 반환은 수신 측과 달리 외부에서 직접 관측되지 않는다. 송신 측의 한도 준수가 SHOULD이기 때문이다. 적합성 검증은 같은 사건이 일으키는 유예 전이(4.3절)로 확인하며, 방법은 벡터 형식 문서 1절에 있다 [^STRAND-VECTORS].
 
@@ -709,7 +674,7 @@ RESET이 아니라 연결이 끝나면서 끝나는 대기 중인 요청의 결�
 
 #### 5.1.1 연결 오류 (1~6번)
 
-1번과 2번은 아무것도 보내지 않고 연결을 닫고, 3번~6번은 `CLOSE`를 보내고 닫는다. 이미 CLOSE를 보냈다면 다시 보내지 않고 닫는다(3.5절). 6번 통과 직후에는 CLOSE 이후의 새 요청 폐기(3.5절)가 있다. 1번·2번으로 닫을 때도 대기 중인 내 요청의 `UNAVAILABLE` 결과와 `closed` 이벤트는 3.5절 '연결이 끝날 때' 규칙을 따른다. 연결을 확립하기 전이라 대기 중인 요청이 없으면 해당 없다.
+1번과 2번은 아무것도 보내지 않고 연결을 닫고, 3번~6번은 `CLOSE`를 보내고 닫는다. 이미 CLOSE를 보냈다면 다시 보내지 않고 닫는다(3.5절). 6번 통과 직후에는 CLOSE 이후의 새 요청 폐기(3.5절)가 있다. 1번·2번으로 닫을 때도 대기 중인 내 요청의 `UNAVAILABLE` 결과와 `closed` 이벤트는 3.5절 '연결이 끝날 때' 규칙을 따른다. 연결 서문·첫 프레임 단계라 대기 중인 요청이 없으면 해당 없다.
 
 | 번호 | 검사 (원래 절) | 적용 대상 | 실패 시 | 통과 후 |
 | --- | --- | --- | --- | --- |
@@ -717,10 +682,12 @@ RESET이 아니라 연결이 끝나면서 끝나는 대기 중인 요청의 결�
 | 2 | 첫 프레임 (3.2.4절) | 양쪽 엔드포인트가 상대에게서 처음 받는 프레임 | 닫음 | 3번 |
 | 3 | `length` 범위 (2.2.1절) | 모든 프레임 | CLOSE | 4번 |
 | 4 | 확장 영역 길이·형식 (2.2.6절, 2.4절, 제어 프레임은 2.4.4절) | 모든 프레임 | CLOSE | 예약 제어 타입(`0x0005`\~`0x00FF`, 2.2.2절)은 여기서 무시하고 끝낸다. 그 밖의 제어 프레임은 5번, 애플리케이션 프레임은 6번 |
-| 5 | 제어 프레임 형태: `stream_id`(2.2.5절), payload 크기(3.4절, 3.5절, 4.4절, RESET 포함), HELLO 형태(3.2.5절), CLOSE의 `last_stream_id`(3.5절) | 예약 타입을 뺀 제어 프레임 | CLOSE | RESET은 6번. HELLO·PING·CLOSE는 해당 처리(3.2절, 3.4절, 3.5절)로 끝낸다 |
+| 5 | 제어 프레임 형태: `stream_id`(2.2.5절), payload 크기(3.4절, 3.5절, 4.4절, RESET 포함), HELLO 형태(3.2.5절), HELLO 값(3.2.3절), CLOSE의 `last_stream_id`(3.5절) | 예약 타입을 뺀 제어 프레임 | CLOSE | RESET은 6번. HELLO·PING·CLOSE는 해당 처리(3.2절, 3.4절, 3.5절)로 끝낸다 |
 | 6 | `stream_id`: 일련번호 0 금지(2.2.5절), 새 스트림의 일련번호 역행, 유휴 스트림 참조(4.2.1절) | 애플리케이션 프레임, RESET | CLOSE | 7번 |
 
-5번 칸의 항목은 적힌 순서(`stream_id`, 제어 프레임 payload 크기, HELLO 형태, CLOSE의 `last_stream_id`)대로 검사하고, HELLO 형태는 3.2.5절 표의 행 순서대로 검사한다. 처음 걸린 위반이 보낼 `CLOSE`의 코드를 정한다(MUST). 한 프레임이 둘 이상에 걸려도 오류 코드는 하나다.
+5번 칸의 항목은 적힌 순서(`stream_id`, 제어 프레임 payload 크기, HELLO 형태, HELLO 값, CLOSE의 `last_stream_id`)대로 검사하고, HELLO 형태는 3.2.5절 표의 행 순서대로 검사한다. 처음 걸린 위반이 보낼 `CLOSE`의 코드를 정한다(MUST). 한 프레임이 둘 이상에 걸려도 오류 코드는 하나다.
+
+ACK 관문(3.3절)은 4번을 통과한 프레임 중 HELLO·CLOSE를 뺀 것에 적용하며(예약 제어 타입은 4번에서 이미 끝났으므로 해당 없다) 5번 앞에서 검사한다. 위반하면 `CLOSE(PROTOCOL_ERROR)`다.
 
 #### 5.1.2 스트림 오류 (7~9번)
 
@@ -756,10 +723,7 @@ Strand 자체에는 기밀성, 무결성, 상대 인증 기능이 없다. 헤더
 
 ### 6.3 자원 소모
 
-받는 쪽은 HELLO로 알린 한도(`max_frame_size`, `max_pending_bytes`, `max_concurrent_streams`)와 확장 영역 한도를 넘는 입력을 받아들이지 않는다. 협상이 끝나기 전에는 첫 프레임 크기를 제한해(3.2.4절) 큰 버퍼를 잡지 않는다. `max_frame_size`의 적용 시점은 다음과 같다(2.2.1절, 3.3절).
-
-* 원칙: 상대의 ACK를 받은 뒤부터 알린 값을 적용한다.
-* 예외: 작은 한도를 알린 서버도 그 ACK 전에는 기본값(4 MiB) 크기의 프레임 하나를 받을 수 있다. 이때 쓰는 버퍼의 상한은 4 MiB이며 미응답 바이트와 동시 스트림 수 한도는 그대로 적용한다.
+받는 쪽은 HELLO로 알린 한도(`max_frame_size`, `max_concurrent_streams`)와 확장 영역 한도를 넘는 입력을 받아들이지 않는다.
 
 모르는 것은 무시하라는 규칙(예약 타입, 예약 플래그, 모르는 확장 항목)을 악용한 쓸데없는 트래픽이나 지나치게 잦은 PING은 `CLOSE(OVERLOAD)`로 끊을 수 있다.
 
@@ -776,7 +740,6 @@ CLOSE의 `reason`과 오류 상세 메시지는 상대에게 그대로 전달된
 [^RFC2119]: RFC 2119, *Key words for use in RFCs to Indicate Requirement Levels*
 [^RFC8174]: RFC 8174, *Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words*
 [^PROTOBUF-ENCODING]: Protocol Buffers, *Encoding*
-[^PROTOJSON]: Protocol Buffers, *ProtoJSON Format*
 [^GOOGLE-RPC]: googleapis, `google/rpc/code.proto`, `google/rpc/status.proto`
 [^W3C-TRACE-CONTEXT]: W3C, *Trace Context*
 [^RFC6455]: RFC 6455, *The WebSocket Protocol*
