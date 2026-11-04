@@ -330,7 +330,7 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 
 **수신 규칙(ACK 관문).** 내가 보낸 HELLO에 대한 상대의 ACK를 받기 전에는 HELLO와 CLOSE만 받는다. 그 전에 PING·RESET·애플리케이션 프레임이 오면 연결 오류이며 `CLOSE(PROTOCOL_ERROR)`로 처리한다(MUST). 예약 제어 타입(2.2.2절)은 어느 때든 무시한다.
 
-**확인 대기.** HELLO나 PING을 보낸 때부터 정해 둔 시간이 지나도록 상대의 ACK가 오지 않으면 `CLOSE(PROTOCOL_ERROR)`로 처리한다(MUST). 대기 시간의 값은 로컬 설정이다.
+**확인 대기.** HELLO나 PING을 보낸 때부터 정해 둔 시간이 지나도록 상대의 ACK가 오지 않으면 `CLOSE(PROTOCOL_ERROR)`로 처리한다(MUST). 이미 CLOSE를 보냈거나 받았다면 CLOSE 없이 닫는다(3.5절). 대기 시간의 값은 로컬 설정이다.
 
 ```mermaid
 sequenceDiagram
