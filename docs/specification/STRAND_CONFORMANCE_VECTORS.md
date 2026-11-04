@@ -117,7 +117,7 @@
 | `PREFACE` | 8바이트 연결 서문 전체 | — |
 | `HELLO` | `flags`(`ACK` 여부), `stream_id`(0), `params`(빠진 값은 규격 기본값으로 채워 비교. `ACK`이면 payload가 비어 있어야 함), 확장 영역(비어 있어야 함) | — |
 | `PING` | `flags`(`ACK` 여부), `stream_id`(0), `payload`(공백 없는 16자리 hex), 확장 영역(비어 있어야 함) | — |
-| `CLOSE` | `stream_id`(0), `last_stream_id`, `error_code`, `flags`(0), 확장 영역(비어 있어야 함) | `reason` |
+| `CLOSE` | `stream_id`(0), `error_code`, `flags`(0), 확장 영역(비어 있어야 함) | `reason` |
 | `RESET` | `stream_id`, `error_code`, `flags`(0), 확장 영역(비어 있어야 함) | — |
 | 애플리케이션 프레임 (`type` 256 이상 정수) | `type`, `flags`(0), `stream_id`, `status`(응답 프레임, 곧 `stream_id`가 상대 엔드포인트의 번호 공간인 프레임만. 생략하면 `OK`), `extensions`(tag별 값. 순서는 비교하지 않음), `payload`(생략하면 빈 값) | 요청 프레임의 `status` |
 
@@ -133,7 +133,7 @@
 
 `status`는 2.5.1절의 이름이다. 17~255의 예약 값은 정수로 쓴다.
 
-스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 받은 뒤의 새 요청, 3.5절)은 `stream_id`가 없으므로 `result` 이벤트가 아니다. 이런 단계의 `events`는 빈 목록이다.
+스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 보냈거나 받은 뒤의 새 요청, 3.5절)은 `stream_id`가 없으므로 `result` 이벤트가 아니다. 이런 단계의 `events`는 빈 목록이다.
 
 ## 7. 비교 규칙
 
@@ -265,7 +265,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
 
 ### 10.3 가상 시계와 확인 대기 시간 초과
 
-서버 역할 구현은 연결 서문을 확인한 즉시 자기 HELLO를 보내고(클라이언트 HELLO를 기다리지 않는다), 클라이언트 HELLO를 받으면 `ACK`로 답한다. 이후 상대의 `ACK`가 오지 않는다. 대기 시간(1,000밀리초) 직전에는 아무것도 보내지 않고, 지나면 `CLOSE(PROTOCOL_ERROR)`를 보낸다. CLOSE의 `last_stream_id` 0은 처리한 스트림이 없다는 뜻이다.
+서버 역할 구현은 연결 서문을 확인한 즉시 자기 HELLO를 보내고(클라이언트 HELLO를 기다리지 않는다), 클라이언트 HELLO를 받으면 `ACK`로 답한다. 이후 상대의 `ACK`가 오지 않는다. 대기 시간(1,000밀리초) 직전에는 아무것도 보내지 않고, 지나면 `CLOSE(PROTOCOL_ERROR)`를 보낸다.
 
 ```json
 {
@@ -302,7 +302,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
         {
           "kind": "advance",
           "ms": 2,
-          "send": [{ "type": "CLOSE", "last_stream_id": 0, "error_code": "PROTOCOL_ERROR" }],
+          "send": [{ "type": "CLOSE", "error_code": "PROTOCOL_ERROR" }],
           "events": [{ "event": "closed" }]
         }
       ]
