@@ -32,7 +32,7 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
    - 메시지 기반 사용 환경. 단일 WebSocket 바이너리 메시지(`Opcode 0x02`) 1개에 정확히 Strand 프레임 1개를 싣는다.
    - L7 로드밸런서, API 게이트웨이, 웹 브라우저 환경 통과에 권장된다.
    - 프레임 헤더(16바이트)와 payload 형식, 제어 프레임 및 상태 머신은 strand over TCP와 100% 동일하다.
-   - 연결 수립 시 첫 번째 바이너리 메시지로 연결 서문(Connection Preface) 8바이트(3.1절)를 전송하고, 연결을 닫을 때(3.5절)는 WebSocket 정상 종료(`Close Frame 0x08`, `1000 Normal Closure`)를 수행한다.
+   - 연결 수립 시 첫 번째 바이너리 메시지로 연결 서문(Connection Preface) 8바이트(3.1절)를 전송하고, 연결을 닫을 때(3.5절)는 WebSocket 닫기(`Close Frame 0x08`)를 수행하며, `NO_ERROR` 종료에는 `1000 Normal Closure`를 쓴다.
    - 메시지 경계 위반: 서문 메시지가 정확히 8바이트가 아니면 연결 서문 검사 실패로 보고 아무 응답 없이 조용히 닫는다(MUST). 서문 뒤에 텍스트 메시지가 오거나, 크기가 4 + `length`와 다른 바이너리 메시지가 오면 연결 오류다(MUST, 5.1.1절 3번).
 
 ### 1.3 용어
@@ -132,9 +132,8 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 
 새 스트림을 열 때는 자기 번호 공간에서 매번 이전보다 큰 `stream_id`를 쓴다(MUST). 첫 번호는 클라이언트가 1, 서버가 2다. 건너뛰는 것은 허용하며, 건너뛴 번호는 영원히 쓰이지 않는다. 같은 공간 안에서는 `stream_id`를 정수로 바로 비교한다.
 
-엔드포인트는 두 값을 유지한다.
-* `highest_peer_stream_id`: 상대 공간에서 지금까지 새 요청으로 인정한 가장 큰 `stream_id`(처음에는 0)
-* `highest_local_stream_id`: 내 공간에서 지금까지 쓴 가장 큰 `stream_id`(처음에는 0)
+엔드포인트는 상대 공간의 `highest_peer_stream_id`를 유지한다.
+* `highest_peer_stream_id`: 지금까지 새 요청으로 인정한 가장 큰 `stream_id`(처음에는 0)
 
 **번호 소진.** 내 공간에서 다음에 쓸 번호가 `2^31-1`을 넘으면, 그 요청은 프레임을 보내지 않고 애플리케이션에 로컬 `UNAVAILABLE`로 실패시킨다(MUST). 이 실패는 스트림을 열기 전의 로컬 결과라서 `stream_id`가 없다. 엔드포인트는 `CLOSE(NO_ERROR)`를 보낸다(MUST). 이미 CLOSE를 보냈거나 받았다면 3.5절에 따라 보내지 않는다.
 
@@ -418,7 +417,7 @@ sequenceDiagram
 
     par 대기 중인 스트림 마저 처리
         B->>A: 대기 중인 요청의 응답 프레임
-    and CLOSE와 엇갈려 보낸 B의 새 요청
+    and B가 CLOSE를 받기 전에 보낸 새 요청
         B->>A: 새 요청
         A->>B: RESET (REFUSED)
         Note over B: 로컬 UNAVAILABLE, REFUSED라서 다른 연결로 안전 재시도
@@ -463,7 +462,7 @@ service MessageService {
 
 ### 4.2 스트림 다중화 및 식별
 
-번호 할당 규칙과 `highest_peer_stream_id`·`highest_local_stream_id`는 2.2.5절에 있다.
+번호 할당 규칙과 `highest_peer_stream_id`는 2.2.5절에 있다.
 * **클라이언트 개시 스트림**: 홀수 (`stream_id` = 1, 3, 5...)
 * **서버 개시 스트림**: 짝수 (`stream_id` = 2, 4, 6...)
 
@@ -544,9 +543,7 @@ RESET이 아니라 연결이 끝나면서 끝나는 대기 중인 요청의 결�
 
 ### 4.6 다시 보내기 (Retry)
 
-`REFUSED`로 끝난 요청은 다시 보내도 안전하고, 나머지는 `idempotency-key`로 판단한다.
-
-`RESET(REFUSED)`를 받아 끝난 요청은 상대가 처리를 시작하지 않았다는 뜻이므로 새 연결로든 같은 연결로든 그대로 다시 보내면 된다. 그 밖의 요청은 처리됐는지 알 방법이 없다. 연결이 끝나 애플리케이션에 로컬 `UNAVAILABLE`로 알려진 요청(3.5절)도 마찬가지다. 한 번만 처리돼야 하는 요청이라면 `idempotency-key`를 붙여 보낸다(SHOULD). 같은 키로 다시 온 요청을 어떻게 다룰지는 애플리케이션이 정한다.
+`REFUSED`로 끝난 요청은 다시 보내도 안전하고, 나머지는 `idempotency-key`로 판단한다. `RESET(REFUSED)`를 받아 끝난 요청은 상대가 처리를 시작하지 않았다는 뜻이므로 그대로 다시 보내면 된다. 그 밖의 요청은 처리됐는지 알 방법이 없다. 연결이 끝나 애플리케이션에 로컬 `UNAVAILABLE`로 알려진 요청(3.5절)도 마찬가지다. 한 번만 처리돼야 하는 요청이라면 `idempotency-key`를 붙여 보낸다(SHOULD). 같은 키로 다시 온 요청을 어떻게 다룰지는 애플리케이션이 정한다.
 
 ---
 
