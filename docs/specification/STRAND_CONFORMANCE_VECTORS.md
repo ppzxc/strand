@@ -2,7 +2,7 @@
 
 * **문서 상태 (Status)**: 초안 (Draft)
 * **벡터 형식 버전 (Format version)**: 1
-* **작성일자 (Date)**: 2026-11-02
+* **작성일자 (Date)**: 2026-11-05
 * **편집자 (Editor)**: 조정하 (@ppzxc)
 * **저장소 (Repository)**: ppzxc/strand
 
