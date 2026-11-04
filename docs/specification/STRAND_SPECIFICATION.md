@@ -771,7 +771,7 @@ CLOSE의 `reason`과 오류 상세 메시지는 상대에게 그대로 전달된
 
 ## 7. 참고문헌
 
-구현할 때 반드시 필요한 문서다.
+이 규격이 규범으로 인용하는 문서다.
 
 [^RFC2119]: RFC 2119, *Key words for use in RFCs to Indicate Requirement Levels*
 [^RFC8174]: RFC 8174, *Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words*
