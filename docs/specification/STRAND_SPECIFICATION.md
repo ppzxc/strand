@@ -687,7 +687,7 @@ RESET이 아니라 연결이 끝나면서 끝나는 대기 중인 요청의 결�
 
 5번 칸의 항목은 적힌 순서(`stream_id`, 제어 프레임 payload 크기, HELLO 형태, HELLO 값, CLOSE의 `last_stream_id`)대로 검사하고, HELLO 형태는 3.2.5절 표의 행 순서대로 검사한다. 처음 걸린 위반이 보낼 `CLOSE`의 코드를 정한다(MUST). 한 프레임이 둘 이상에 걸려도 오류 코드는 하나다.
 
-ACK 관문(3.3절)은 4번을 통과한 프레임에 적용하고 5번 앞에서 검사한다. 위반하면 `CLOSE(PROTOCOL_ERROR)`다.
+ACK 관문(3.3절)은 4번을 통과한 프레임 중 HELLO·CLOSE를 뺀 것에 적용하고 5번 앞에서 검사한다. 위반하면 `CLOSE(PROTOCOL_ERROR)`다.
 
 #### 5.1.2 스트림 오류 (7~9번)
 
