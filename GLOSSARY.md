@@ -1,37 +1,39 @@
 # strand 도메인 용어집 (Domain Glossary)
 
-strand는 고성능 다중화 이진 메시지 교환 규격(Specification)과 그 규격을 구현한 Java 라이브러리다. 본 문서는 프로젝트 전반에서 통일되게 사용하는 공식 도메인 어휘를 규정한다.
+strand는 고성능 다중화 이진 메시지 교환 규격(Specification)과 그 규격을 구현한 Java 라이브러리다. 본 문서는 프로젝트 전반에서 통일되게 사용하는 어휘의 언어 규율을 규정한다.
+
+규격 용어의 정의는 규격 1.3절이 정본이고, 1.3절에 없는 규격 항목은 해당 절이 정본이다. 이 문서는 정의를 다시 쓰지 않고 정본으로 링크하며, 피해야 할 표현(`_Avoid_`)만 정한다. 규격 문서 자체와 규격에 없는 모듈 용어(`core`, 전송 모듈, 어댑터)만 여기서 정의한다.
 
 ---
 
 ## 1. 규격 및 프로토콜 핵심 (Specification & Protocol Core)
 
 **규격 (Specification)**:
-strand가 정의하는 바이트 인코딩·디코딩 및 통신 상태 규칙. 언어 중립적이며 특정 플랫폼에 종속되지 않는다. Java 구현체는 여러 가능한 구현 중 하나다.
+strand가 정의하는 바이트 인코딩·디코딩 및 통신 상태 규칙을 담은 문서(`docs/specification/STRAND_SPECIFICATION.md`). 언어 중립적이며 Java 구현체는 여러 가능한 구현 중 하나다.
 _Avoid_: 프로토콜 스펙, 와이어 프로토콜 스펙, 프로토콜 문서
 
 **연결 서문 (Connection Preface)**:
-클라이언트가 연결 수립 직후 단 1회 전송하는 8바이트 고정 식별자(`C0 DE 53 54 52 30 00 00`). 프로토콜의 와이어 식별과 메이저 버전 0을 불변으로 선언하고, 잘못된 프로토콜 오접속을 즉시 차단(Fail-Fast)한다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 핸드셰이크 매직, 프리페이스(단독 비표준 표기), 매직 쿠키
 
 **가닥 (Strand)**:
-단일 연결(Connection) 안에서 독립적으로 교환되는 하나의 요청(Request)과 그에 대한 단일 응답(Response)이 이루는 통신 단위. 프로토콜 이름의 어원이다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 스레드, 경량 스레드, 파이버
 
 **스트림 (Stream)**:
-양방향 전송 채널 위에서 동일한 `stream_id`를 공유하는 요청 프레임과 응답 프레임의 논리적 쌍. strand에서는 스트림당 단 1개의 요청과 1개의 응답만 허용된다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 채널, 소켓 세션, 파이프
 
 **엔드포인트 (Endpoint)**:
-통신 연결의 한쪽 끝단. 물리적 연결을 주도하여 개설한 쪽을 **클라이언트 (Client)**, 연결을 수신하여 수락한 쪽을 **서버 (Server)**로 정의한다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 피어(단독 표기), 노드(물리 장비와 혼동 주의)
 
 **개시자 (Initiator)**:
-특정 스트림의 요청 프레임을 먼저 전송하여 가닥(Strand)을 시작한 엔드포인트. strand에서는 클라이언트뿐 아니라 서버도 개시자가 될 수 있다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 요청자(문맥 불명확), 호출자
 
 **수신자 (Receiver)**:
-개시자가 보낸 요청 프레임을 수신하여 응답 프레임을 돌려주는 엔드포인트.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 피요청자, 피호출자
 
 ---
@@ -39,31 +41,31 @@ _Avoid_: 피요청자, 피호출자
 ## 2. 프레임 및 통신 계층 (Framing & Wire Elements)
 
 **프레임 (Frame)**:
-strand 전송의 기본 단위. 고정 16바이트 헤더(Header), 가변 확장 영역(Extension Area), 가변 본문(Payload)의 3단계로 구성된다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 패킷(L3/L4와 혼동 주의), 메시지(프레임과 페이로드를 구별할 것)
 
 **헤더 (Header)**:
-모든 프레임 맨 앞에 위치하는 16바이트 고정 영역. `length`, `type`, `flags`, `stream_id`, `extensions_length`, `status`, `reserved` 필드로 구성된다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 프레임 프리픽스, 메타 헤더
 
 **제어 프레임 (Control Frame)**:
-연결 수명주기, 생존 확인, 세션 종료, 스트림 중단 등 프로토콜 상태를 관리하기 위해 교환되는 프레임 (`type` < `0x0100`).
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 시스템 프레임, 관리 프레임
 
 **애플리케이션 프레임 (Application Frame)**:
-실제 비즈니스 서비스 요청 및 응답 데이터를 운반하는 프레임 (`type` ≥ `0x0100`).
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 데이터 프레임(HTTP/2와 혼동 주의), 비즈니스 프레임
 
 **확장 영역 (Extension Area)**:
-헤더와 본문 사이에 위치하는 가변 메타데이터 영역. `(tag u16, length u16, value bytes)` 형식의 TLV 구조로 인코딩된다. 요청에 덧붙이는 부가 정보를 담으며, 받는 쪽은 모르는 항목을 건너뛴다. 받는 쪽이 반드시 이해해야 하는 항목은 두지 않는다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 필수 확장, 헤더 옵션, 트레일러
 
 **번호 공간 (Stream ID Space)**:
-한 엔드포인트가 새 스트림에 쓸 수 있는 `stream_id`의 집합. 클라이언트는 홀수, 서버는 짝수를 쓴다. 두 엔드포인트가 서로 묻지 않고 동시에 스트림을 열어도 번호가 겹치지 않게 한다. 번호는 공간마다 1(서버는 2)부터 엄격히 증가하며, 크기 비교는 같은 공간 안에서만 한다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 개시자 비트, 일련번호, 방향 비트
 
 **본문 (Payload)**:
-프레임에 실리는 실제 데이터 바이트열. 제어 프레임은 고정 바이너리 형식을, 애플리케이션 프레임은 Protocol Buffers 이진 인코딩을 따른다. 형식은 하나로 고정이며 협상하지 않는다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 바디, 데이터
 
 ---
@@ -71,39 +73,39 @@ _Avoid_: 바디, 데이터
 ## 3. 수명주기 및 상태 관리 (Lifecycle & State Management)
 
 **파라미터 협상 (HELLO)**:
-연결 수립 직후 양 엔드포인트가 허용 가능한 버퍼 한도, 동시 스트림 수, 지원 기능 비트를 교환하고 확인(`ACK`)하는 제어 프레임.
+정의: [규격 3.2절](docs/specification/STRAND_SPECIFICATION.md#32-hello-및-파라미터-협상)
 _Avoid_: 핸드셰이크 프레임, 설정 프레임, SETTINGS
 
 **생존 확인 (PING)**:
-연결의 유휴(Idle) 상태를 방지하고 양방향 경로가 살아있는지 검증하기 위해 임의의 8바이트 페이로드를 실어 보내는 제어 프레임.
+정의: [규격 3.4절](docs/specification/STRAND_SPECIFICATION.md#34-생존-확인-ping)
 _Avoid_: 하트비트, 킵얼라이브
 
 **연결 종료 (CLOSE)**:
-연결 전체의 종료를 알리는 제어 프레임. `NO_ERROR`면 연결은 종료 중이 되어 대기 중인 스트림을 마저 끝낸 뒤 닫히고, 그 밖의 코드면 즉시 닫힌다. 엔드포인트는 CLOSE를 보냈거나 받은 뒤에는 CLOSE를 보내지 않는다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 정상 종료, GOAWAY, 세션 종료
 
 **종료 중인 연결 (Closing)**:
-`NO_ERROR` CLOSE를 보냈거나 받은 연결. 새 스트림을 열지 않고, 상대의 새 요청은 거절하며, 대기 중인 스트림이 모두 끝나면 닫힌다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: draining, 유예, graceful shutdown
 
 **스트림 중단 (RESET)**:
-특정 스트림 하나를 즉시 비정상 중단시키기 위해 보내는 제어 프레임. 다른 스트림이나 연결 전체에는 영향을 주지 않는다.
+정의: [규격 4.4절](docs/specification/STRAND_SPECIFICATION.md#44-스트림-중단-reset)
 _Avoid_: RST_STREAM, 취소 프레임
 
 **기능 비트 (Capabilities Bitset)**:
-HELLO 프레임에서 교환하는 32비트 비트셋. 양쪽 엔드포인트가 모두 1로 켠 비트의 기능만 해당 연결에서 활성화된다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 피처 플래그, 옵션 비트
 
 **배압 (Backpressure)**:
-수신자의 처리 용량을 초과하지 않도록 송신자의 전송량을 제어하는 메커니즘. strand는 소켓 읽기를 멈추지 않고, 동시 스트림 수 한도(`max_concurrent_streams`) 하나로만 제어한다. 한도에 닿은 상태에서 온 새 요청은 즉시 거절한다. 응답이 곧 더 보내도 된다는 신호다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 흐름 제어(Flow Control - 윈도우 기반과 구분), 스로틀링
 
 **동시 스트림 수 (Concurrent Streams)**:
-한 번호 공간에서 열렸지만 아직 응답이나 RESET으로 끝나지 않은 스트림(대기 중인 스트림)의 개수. 거절된 요청은 들어가지 않는다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 미응답 바이트, 크레딧, 윈도우
 
 **대기 중인 스트림 (Pending Stream)**:
-요청을 보냈거나 받아들였고, 아직 응답이나 RESET이 오가지 않은 스트림. 스트림의 상태는 대기와 끝남 두 가지뿐이다. 거절된 요청은 대기를 거치지 않고 곧바로 끝난다. 새 요청이 아닌 프레임이 대기 중인 스트림을 가리키지 않으면 조용히 버린다.
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 유휴 스트림, 유예 상태, 진행 중인 스트림
 
 ---
@@ -123,9 +125,9 @@ _Avoid_: 트랜스포트 어댑터, 전송 어댑터
 _Avoid_: 바인딩, 플러그인
 
 **사용 환경 (Usage Environment)**:
-사용자가 `core`를 배포하여 구동하는 외부 전송 맥락. strand 규격은 **'strand over TCP'**와 **'strand over WebSocket'**을 동등한 공식 1급 사용 환경으로 정의한다. 모듈이 아니다.
+정의: [규격 1.2절](docs/specification/STRAND_SPECIFICATION.md#12-공식-사용-환경). 모듈이 아니다
 _Avoid_: WebSocket 어댑터, TCP 어댑터, WebSocket 바인딩
 
 **적합성 벡터 (Conformance Vectors)**:
-초기 상태, 엔드포인트에 차례로 넣는 입력(수신 바이트와 애플리케이션 지시), 그리고 각 입력 뒤에 관측되어야 하는 송신 프레임과 애플리케이션 이벤트를 언어 중립 데이터로 고정한 시나리오 모음. 모든 언어의 strand 구현체는 동일한 적합성 벡터를 100% 통과해야 한다.
+정의: [적합성 벡터 형식](docs/specification/STRAND_CONFORMANCE_VECTORS.md)
 _Avoid_: conformance 벡터, 테스트 데이터, 픽스처, 골든 파일
