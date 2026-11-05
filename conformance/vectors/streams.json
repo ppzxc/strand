@@ -1,0 +1,259 @@
+{
+  "format": 1,
+  "vectors": [
+    {
+      "id": "sender-reset-received-refused",
+      "description": "보낸 요청이 RESET(REFUSED)로 끝나면 애플리케이션에 UNAVAILABLE 결과를 넘기고 RESET으로 답하지 않는다. 스트림이 끝났으므로 같은 스트림의 늦은 응답과 RESET은 조용히 버려진다. 결과는 정확히 한 번 나가고 늦은 프레임에는 결과가 다시 나가지 않는다",
+      "spec": [
+        "4.3",
+        "4.4"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000010000000000000003",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000010000000000000003",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "sender-reset-received-cancel",
+      "description": "보낸 요청이 상대의 RESET(CANCEL)으로 끝나면 애플리케이션에 CANCELLED 결과를 넘기고 RESET으로 답하지 않는다. 늦은 응답은 조용히 버려지고 결과가 다시 나가지 않는다",
+      "spec": [
+        "4.3",
+        "4.4"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000010000000000000004",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "CANCELLED"
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "sender-own-cancel-sent",
+      "description": "애플리케이션이 요청을 취소하면 RESET(CANCEL)을 보내고 애플리케이션에 CANCELLED 결과를 넘긴다. 취소와 엇갈려 온 늦은 응답과 RESET은 조용히 버려지고 결과가 다시 나가지 않는다",
+      "spec": [
+        "4.3",
+        "4.4"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "cancel",
+          "stream_id": 1,
+          "send": [
+            {
+              "type": "RESET",
+              "stream_id": 1,
+              "error_code": "CANCEL"
+            }
+          ],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "CANCELLED"
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000010000000000000004",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "sender-response-type-mismatch",
+      "description": "응답 type이 요청과 다르면 와이어로는 아무것도 보내지 않고 애플리케이션에 INTERNAL 결과를 넘긴다. 정상 응답을 받은 것과 같게 스트림이 끝나므로 같은 스트림의 늦은 응답과 RESET은 조용히 버려지고 결과가 다시 나가지 않는다",
+      "spec": [
+        "4.1",
+        "4.3",
+        "5.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010200000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "INTERNAL"
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000010000000000000004",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "concurrency-refused-stream-number-reuse-closes",
+      "description": "동시 스트림 한도(1)에 걸려 RESET(REFUSED)로 거절한 요청의 번호(3)도 쓰인 것으로 센다. 상대가 그 번호로 새 요청을 다시 보내면 번호 역행이라 연결 오류이고, CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 대기 중인 요청 1은 상대가 연 스트림이라 result 이벤트가 없다",
+      "spec": [
+        "4.2.1",
+        "4.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "local_hello": {
+          "max_concurrent_streams": 1
+        }
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [
+            {
+              "type": "RESET",
+              "stream_id": 3,
+              "error_code": "REFUSED"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
