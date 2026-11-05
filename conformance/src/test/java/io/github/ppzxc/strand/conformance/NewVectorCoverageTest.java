@@ -162,28 +162,35 @@ class NewVectorCoverageTest {
         assertThat(kinds).contains("ping", "advance");
     }
 
-    /** ack_timeout_ms를 쓰거나 id에 ack-timeout이 있는 모든 벡터는 확인 대기를 시작해야 하고, 한도에 정확히 닿지 않는다. */
+    /**
+     * 확인 대기를 시작하고 시간을 흘리는 모든 벡터는 한도(`ack_timeout_ms`, 없으면 5000)에 정확히 닿지 않는다(형식 문서 8.3절).
+     * `ack_timeout_ms`를 쓰거나 id에 ack-timeout이 있는 벡터는 확인 대기를 시작해야 한다.
+     */
     @Test
     void timeVectorsNeverReachTheLimitExactly() throws IOException {
-        int checked = 0;
+        int declared = 0;
+        int timed = 0;
         for (Map.Entry<String, JsonObject> entry : allVectors().entrySet()) {
             JsonObject vector = entry.getValue();
             JsonObject setup = vector.getAsJsonObject("setup");
-            boolean handlesAckTimeout =
+            boolean declaresAckTimeout =
                     (setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms"))
                             || entry.getKey().contains("ack-timeout");
-            if (!handlesAckTimeout) {
-                continue;
+            if (declaresAckTimeout) {
+                declared++;
+                assertThat(AckWaits.startsAnyWait(vector))
+                        .as("%s: 확인 대기 시작(HELLO/PING 송신)을 해석할 수 없다", entry.getKey())
+                        .isTrue();
             }
-            checked++;
-            assertThat(AckWaits.startsAnyWait(vector))
-                    .as("%s: 확인 대기 시작(HELLO/PING 송신)을 해석할 수 없다", entry.getKey())
-                    .isTrue();
-            assertThat(AckWaits.reachesLimitExactly(vector))
-                    .as("%s: 한도에 정확히 닿으면 안 된다", entry.getKey())
-                    .isFalse();
+            if (AckWaits.startsAnyWait(vector) && AckWaits.hasAdvance(vector)) {
+                timed++;
+                assertThat(AckWaits.reachesLimitExactly(vector))
+                        .as("%s: 한도에 정확히 닿으면 안 된다", entry.getKey())
+                        .isFalse();
+            }
         }
-        assertThat(checked).isGreaterThanOrEqualTo(11);
+        assertThat(declared).isGreaterThanOrEqualTo(11);
+        assertThat(timed).isGreaterThanOrEqualTo(declared);
     }
 
     /** 5.1절 5번 (가)→(나)→(다). 어느 검사가 먼저 걸리는지는 송신 프레임으로 본다. */
