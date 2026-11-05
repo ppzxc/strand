@@ -177,4 +177,31 @@ class AckWaitsTest {
 
         assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1L);
     }
+
+    @Test
+    void anAckReceivedInAStepDoesNotEndTheWaitThatTheSameStepStarts() {
+        String ackThenPing =
+                "{\"kind\":\"recv\",\"hex\":\"" + PING_ACK_0102 + "\",\"send\":[{\"type\":\"PING\"}],\"events\":[]}";
+        JsonObject v = limit1000(ackThenPing, advance(1000));
+
+        assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1000L);
+    }
+
+    @Test
+    void aClosedEventEndsTheOpenWaitsAfterItsStep() {
+        String closing = "{\"kind\":\"advance\",\"ms\":500,\"send\":[],\"events\":[{\"event\":\"closed\"}]}";
+        JsonObject v = limit1000(PING_START, closing, advance(500));
+
+        assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(500L);
+        assertThat(AckWaits.reachesLimitExactly(v)).isFalse();
+    }
+
+    @Test
+    void aDisconnectStartsANewByteStream() {
+        String disconnect = "{\"kind\":\"disconnect\",\"send\":[],\"events\":[]}";
+        String head = PING_ACK_0102.substring(0, 10);
+        JsonObject v = limit1000(recv(head), disconnect, PING_START, recv(PING_ACK_0102), advance(1000));
+
+        assertThat(AckWaits.elapsedAtEachAdvance(v)).isEmpty();
+    }
 }

@@ -77,9 +77,9 @@ final class AckWaits {
         Inbound stream = new Inbound();
         for (JsonElement element : vector.getAsJsonArray("steps")) {
             JsonObject step = element.getAsJsonObject();
-            if (kindOf(step).equals("disconnect")) {
-                // 전송 계층이 끊기면 구현은 타이머를 거둔다. close 단계는 CLOSE를 보낼 뿐이라 대기가 이어진다(규격 3.3절).
-                running.clear();
+            // 단계로 들어온 바이트의 ACK가 먼저이고, 이 단계에서 보낸 HELLO/PING의 대기는 그 뒤에 시작한다.
+            for (Ack ack : acknowledgedBy(step, stream)) {
+                endOldestMatching(running, ack);
             }
             running.addAll(startedBy(step));
             if (kindOf(step).equals("advance")) {
@@ -89,11 +89,28 @@ final class AckWaits {
                     result.add(wait.elapsed);
                 }
             }
-            for (Ack ack : acknowledgedBy(step, stream)) {
-                endOldestMatching(running, ack);
+            if (endsConnection(step)) {
+                // 연결이 끝나면 구현은 타이머를 거두고, 새 연결의 바이트는 새 흐름이다. close 단계는 CLOSE를 보낼 뿐이라
+                // 연결이 끝나지 않고 대기가 이어진다(규격 3.3절).
+                running.clear();
+                stream = new Inbound();
             }
         }
         return result;
+    }
+
+    /** 이 단계 뒤에 연결이 끝나는가: 상대가 끊었거나(disconnect) 연결이 닫혔음이 애플리케이션에 전달됐다(closed 이벤트). */
+    private static boolean endsConnection(JsonObject step) {
+        if (kindOf(step).equals("disconnect")) {
+            return true;
+        }
+        for (JsonElement event : step.getAsJsonArray("events")) {
+            JsonElement name = event.getAsJsonObject().get("event");
+            if (name != null && name.isJsonPrimitive() && name.getAsString().equals("closed")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String kindOf(JsonObject step) {
