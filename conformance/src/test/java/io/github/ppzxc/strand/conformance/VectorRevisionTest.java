@@ -85,18 +85,10 @@ class VectorRevisionTest {
         }
     }
 
-    private static List<Path> vectorFiles() {
-        return RawVectors.files();
-    }
-
-    private static List<JsonObject> vectors(Path file) {
-        return RawVectors.vectors(file);
-    }
-
     private static List<String> allIds() throws IOException {
         List<String> ids = new ArrayList<>();
-        for (Path file : vectorFiles()) {
-            for (JsonObject vector : vectors(file)) {
+        for (Path file : RawVectors.files()) {
+            for (JsonObject vector : RawVectors.vectors(file)) {
                 ids.add(vector.get("id").getAsString());
             }
         }
@@ -134,7 +126,7 @@ class VectorRevisionTest {
 
     @Test
     void removedConceptsDoNotAppearInVectorFiles() throws IOException {
-        for (Path file : vectorFiles()) {
+        for (Path file : RawVectors.files()) {
             try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
                 assertThat(removedConceptPaths(JsonParser.parseReader(reader)))
                         .as("%s", file.getFileName())
@@ -178,8 +170,8 @@ class VectorRevisionTest {
     void everySpecReferencePointsToAnExistingSection() throws IOException {
         List<String> sections = specSections();
         assertThat(sections).contains("5.1", "3.2.5", "2.2.5").doesNotContain("5.1.1", "5.1.2", "5.1.3");
-        for (Path file : vectorFiles()) {
-            for (JsonObject vector : vectors(file)) {
+        for (Path file : RawVectors.files()) {
+            for (JsonObject vector : RawVectors.vectors(file)) {
                 for (JsonElement ref : vector.getAsJsonArray("spec")) {
                     assertThat(sections)
                             .as(
@@ -194,7 +186,7 @@ class VectorRevisionTest {
     @Test
     void vectorFilesAreNamedByTheNewNames() throws IOException {
         List<String> names =
-                vectorFiles().stream().map(p -> p.getFileName().toString()).collect(Collectors.toList());
+                RawVectors.files().stream().map(p -> p.getFileName().toString()).collect(Collectors.toList());
 
         assertThat(names).contains("backpressure.json", "streams.json");
         assertThat(names).doesNotContain("pending-bytes.json", "stream-boundaries.json");

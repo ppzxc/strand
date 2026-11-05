@@ -15,7 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 로더를 거치지 않고 벡터 파일을 JSON 그대로 읽는 테스트 도구. 읽은 결과는 한 번만 만든다. */
+/** 로더를 거치지 않고 벡터 파일을 JSON 그대로 읽는 테스트 도구. `byKey()`의 결과만 벡터 디렉터리별로 한 번 만들어 둔다. */
 final class RawVectors {
 
     private static Path cachedDirectory;
@@ -30,14 +30,23 @@ final class RawVectors {
             Map<String, JsonObject> result = new LinkedHashMap<>();
             for (Path file : files()) {
                 for (JsonObject vector : vectors(file)) {
-                    result.put(
-                            VectorSuite.fileKey(file) + "/" + vector.get("id").getAsString(), vector);
+                    put(
+                            result,
+                            VectorSuite.fileKey(file) + "/" + vector.get("id").getAsString(),
+                            vector);
                 }
             }
             cachedDirectory = directory;
             byKey = Collections.unmodifiableMap(result);
         }
         return byKey;
+    }
+
+    /** 같은 키가 두 번 들어오면 앞의 벡터가 가려지므로 거부한다. */
+    static void put(Map<String, JsonObject> target, String key, JsonObject vector) {
+        if (target.put(key, vector) != null) {
+            throw new IllegalStateException("벡터 키가 겹친다: " + key);
+        }
     }
 
     static List<Path> files() {

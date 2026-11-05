@@ -77,6 +77,10 @@ final class AckWaits {
         Inbound stream = new Inbound();
         for (JsonElement element : vector.getAsJsonArray("steps")) {
             JsonObject step = element.getAsJsonObject();
+            if (kindOf(step).equals("disconnect")) {
+                // 전송 계층이 끊기면 구현은 타이머를 거둔다. close 단계는 CLOSE를 보낼 뿐이라 대기가 이어진다(규격 3.3절).
+                running.clear();
+            }
             running.addAll(startedBy(step));
             if (kindOf(step).equals("advance")) {
                 long ms = step.get("ms").getAsLong();
@@ -176,7 +180,7 @@ final class AckWaits {
             if (wait.type != type) {
                 return false;
             }
-            return type == HELLO || (payload != null && payload.equals(wait.payload));
+            return type == HELLO || wait.payload == null || (payload != null && payload.equals(wait.payload));
         }
     }
 

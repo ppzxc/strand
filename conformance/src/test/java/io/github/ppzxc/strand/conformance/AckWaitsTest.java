@@ -151,4 +151,30 @@ class AckWaitsTest {
 
         assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1000L);
     }
+
+    @Test
+    void aDisconnectCancelsTheOpenWaits() {
+        String disconnect = "{\"kind\":\"disconnect\",\"send\":[],\"events\":[]}";
+        JsonObject v = limit1000(PING_START, advance(600), disconnect, advance(400));
+
+        assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(600L);
+        assertThat(AckWaits.reachesLimitExactly(v)).isFalse();
+    }
+
+    @Test
+    void aCloseStepDoesNotCancelTheOpenWaits() {
+        // CLOSE를 보낸 뒤에도 확인 대기는 이어져 시간 초과로 닫힌다(규격 3.3절).
+        String close = "{\"kind\":\"close\",\"error_code\":\"NO_ERROR\",\"send\":[],\"events\":[]}";
+        JsonObject v = limit1000(PING_START, advance(600), close, advance(400));
+
+        assertThat(AckWaits.reachesLimitExactly(v)).isTrue();
+    }
+
+    @Test
+    void aPingWithAnUnknownPayloadIsEndedByAnyPingAck() {
+        String keepalive = "{\"kind\":\"advance\",\"ms\":1,\"send\":[{\"type\":\"PING\"}],\"events\":[]}";
+        JsonObject v = limit1000(keepalive, recv(PING_ACK_0102), advance(1000));
+
+        assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1L);
+    }
 }

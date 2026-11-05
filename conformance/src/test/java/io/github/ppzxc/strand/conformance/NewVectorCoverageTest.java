@@ -44,12 +44,8 @@ class NewVectorCoverageTest {
         return result;
     }
 
-    private static Map<String, JsonObject> allVectors() {
-        return RawVectors.byKey();
-    }
-
     private static JsonObject vector(String key) throws IOException {
-        JsonObject vector = allVectors().get(key);
+        JsonObject vector = RawVectors.byKey().get(key);
         assertThat(vector).as(key).isNotNull();
         return vector;
     }
@@ -67,7 +63,7 @@ class NewVectorCoverageTest {
 
     @Test
     void everyRequiredVectorExists() throws IOException {
-        Map<String, JsonObject> vectors = allVectors();
+        Map<String, JsonObject> vectors = RawVectors.byKey();
         for (Map.Entry<Integer, List<String>> entry : required().entrySet()) {
             for (String key : entry.getValue()) {
                 assertThat(vectors).as("B-%d의 %s", entry.getKey(), key).containsKey(key);
@@ -151,7 +147,7 @@ class NewVectorCoverageTest {
     void timeVectorsNeverReachTheLimitExactly() throws IOException {
         int declared = 0;
         int timed = 0;
-        for (Map.Entry<String, JsonObject> entry : allVectors().entrySet()) {
+        for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
             JsonObject vector = entry.getValue();
             JsonObject setup = vector.getAsJsonObject("setup");
             boolean declaresAckTimeout =
