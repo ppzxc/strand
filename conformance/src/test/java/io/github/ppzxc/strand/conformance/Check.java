@@ -278,6 +278,24 @@ final class Check {
         }
     }
 
+    /** 256 이상 u16 정수의 배열. 같은 값이 두 번 나오면 거부한다. */
+    void uniqueAppTypes(String path, JsonElement element) {
+        JsonArray array = array(path, element);
+        Set<BigInteger> seen = new HashSet<>();
+        for (int i = 0; i < array.size(); i++) {
+            FieldKind.APP_TYPE.check(this, item(path, i), array.get(i));
+            BigInteger value = integer(array.get(i));
+            if (!seen.add(value)) {
+                throw failAt(item(path, i), "중복 값: " + value);
+            }
+        }
+    }
+
+    /** 객체의 정수 필드 값. 값은 이미 검증됐다고 본다. */
+    long longOf(JsonObject object, String name) {
+        return integer(object.get(name)).longValueExact();
+    }
+
     void flags(String path, JsonElement element, List<String> allowed) {
         JsonArray array = array(path, element);
         Set<String> seen = new HashSet<>();

@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.conformance;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -17,7 +18,9 @@ final class VectorSchema {
     static final int KNOWN_FORMAT = 1;
 
     static final List<String> ROLES = Arrays.asList("client", "server");
-    static final List<String> APP_FLAGS = Arrays.asList("RESPONSE", "END");
+    static final String DEFAULT_TRANSPORT = "tcp";
+    static final List<String> TRANSPORTS = Arrays.asList("tcp", "websocket");
+    static final List<String> OPCODES = Arrays.asList("binary", "text");
     static final List<String> ACK_FLAGS = Arrays.asList("ACK");
 
     static final Shape FILE = Shape.EMPTY.require("format", FieldKind.FORMAT).require("vectors", FieldKind.ARRAY);
@@ -34,22 +37,20 @@ final class VectorSchema {
 
     static final Shape HELLO_PARAMS = Shape.EMPTY
             .allow("max_frame_size", FieldKind.U32)
-            .allow("max_pending_bytes", FieldKind.U32)
             .allow("max_concurrent_streams", FieldKind.U32)
-            .allow("capabilities", FieldKind.U32)
-            .allow("content_types", FieldKind.U32)
-            .allow("content_type", FieldKind.U32);
+            .allow("capabilities", FieldKind.U32);
 
-    static final Shape SETUP_CONFIG = Shape.EMPTY
-            .allow("draining_retention_limit", FieldKind.POSITIVE_U32)
-            .allow("hello_timeout_ms", FieldKind.POSITIVE_U32);
+    static final Shape SETUP_CONFIG = Shape.EMPTY.allow("ack_timeout_ms", FieldKind.POSITIVE_U32);
 
     private static final Shape SETUP = Shape.EMPTY
             .require("role", FieldKind.ROLE)
             .require("established", FieldKind.BOOLEAN)
             .allow("local_hello", FieldKind.HELLO_PARAMS)
             .allow("peer_hello", FieldKind.HELLO_PARAMS)
-            .allow("config", FieldKind.SETUP_CONFIG);
+            .allow("config", FieldKind.SETUP_CONFIG)
+            .allow("transport", FieldKind.TRANSPORT)
+            .allow("next_stream_id", FieldKind.STREAM_NUMBER)
+            .allow("known_types", FieldKind.KNOWN_TYPES);
 
     // ---- 단계: kind별 필드 ----
 
@@ -65,6 +66,9 @@ final class VectorSchema {
 
     static {
         STEPS_BY_KIND.put("recv", STEP_BASE.require("hex", FieldKind.HEX));
+        STEPS_BY_KIND.put(
+                "recv_message", STEP_BASE.require("opcode", FieldKind.OPCODE).require("hex", FieldKind.HEX));
+        STEPS_BY_KIND.put("ping", STEP_BASE.require("payload", FieldKind.PING_PAYLOAD));
         STEPS_BY_KIND.put(
                 "request",
                 STEP_BASE
@@ -95,7 +99,6 @@ final class VectorSchema {
 
     /** type이 256 이상의 정수인 애플리케이션 프레임. */
     private static final Shape APP_FRAME = FRAME_BASE
-            .require("flags", FieldKind.APP_FLAGS)
             .require("stream_id", FieldKind.U32)
             .allow("status", FieldKind.STATUS)
             .allow("extensions", FieldKind.EXTENSIONS)
@@ -116,11 +119,7 @@ final class VectorSchema {
                         .allow("flags", FieldKind.ACK_FLAGS)
                         .allow("stream_id", FieldKind.ZERO));
         FRAMES_BY_TYPE.put(
-                "CLOSE",
-                FRAME_BASE
-                        .require("last_stream_id", FieldKind.U32)
-                        .require("error_code", FieldKind.ERROR_CODE)
-                        .allow("stream_id", FieldKind.ZERO));
+                "CLOSE", FRAME_BASE.require("error_code", FieldKind.ERROR_CODE).allow("stream_id", FieldKind.ZERO));
         FRAMES_BY_TYPE.put(
                 "RESET",
                 FRAME_BASE.require("stream_id", FieldKind.POSITIVE_U32).require("error_code", FieldKind.ERROR_CODE));
@@ -146,8 +145,34 @@ final class VectorSchema {
 
     private VectorSchema() {}
 
+    /** 필드별 검사에 더해, 필드 사이의 관계(next_stream_id의 홀짝)를 본다. */
     static void setup(Check c, String path, JsonElement element) {
-        c.object(path, element, SETUP);
+        JsonObject setup = c.object(path, element, SETUP);
+        if (setup.has("next_stream_id")) {
+            boolean client = "client".equals(setup.get("role").getAsString());
+            long next = c.longOf(setup, "next_stream_id");
+            if ((next % 2 == 1) != client) {
+                throw c.failAt(
+                        Check.child(path, "next_stream_id"),
+                        "role이 " + (client ? "client이면 홀수" : "server이면 짝수") + "여야 한다: " + next);
+            }
+        }
+    }
+
+    /** 벡터 안에서 setup과 단계가 함께 정하는 규칙: transport가 tcp면 recv만, websocket이면 recv_message만 쓴다. */
+    static void crossCheck(Check c, JsonObject vector) {
+        JsonObject setup = vector.getAsJsonObject("setup");
+        String transport = setup.has("transport") ? setup.get("transport").getAsString() : DEFAULT_TRANSPORT;
+        String forbidden = transport.equals("tcp") ? "recv_message" : "recv";
+        JsonArray steps = vector.getAsJsonArray("steps");
+        for (int i = 0; i < steps.size(); i++) {
+            String kind = steps.get(i).getAsJsonObject().get(STEP_TAG).getAsString();
+            if (kind.equals(forbidden)) {
+                throw c.failAt(
+                        Check.child(Check.item("steps", i), STEP_TAG),
+                        "transport가 " + transport + "인 벡터에는 " + forbidden + " 단계를 쓸 수 없다");
+            }
+        }
     }
 
     static void steps(Check c, String path, JsonElement element) {

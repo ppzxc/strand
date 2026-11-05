@@ -3,8 +3,15 @@ package io.github.ppzxc.strand.conformance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
@@ -67,9 +74,9 @@ class VectorLoaderTest {
         // setup의 local_hello/peer_hello/config, request의 extensions/payload, 프레임의 flags/params 등을 생략한다.
         String steps = "[" + STEP
                 + ",{\"kind\":\"request\",\"type\":256,\"send\":[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"},"
-                + "{\"type\":\"CLOSE\",\"last_stream_id\":0,\"error_code\":\"NO_ERROR\"},"
+                + "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\"},"
                 + "{\"type\":\"RESET\",\"stream_id\":1,\"error_code\":\"CANCEL\"},"
-                + "{\"type\":256,\"flags\":[],\"stream_id\":1}],\"events\":[]},"
+                + "{\"type\":256,\"stream_id\":1}],\"events\":[]},"
                 + "{\"kind\":\"respond\",\"stream_id\":1,\"status\":\"OK\",\"send\":[],\"events\":[]}]";
 
         assertThat(VectorLoader.parse("x.json", file(vector("a", "[\"3.4\"]", SETUP, steps))))
@@ -79,22 +86,23 @@ class VectorLoaderTest {
     @Test
     void acceptsOptionalFieldsWhenPresent() {
         String setup = "{\"role\":\"client\",\"established\":false,"
-                + "\"local_hello\":{\"max_frame_size\":16384,\"max_pending_bytes\":16384,"
-                + "\"max_concurrent_streams\":1,\"capabilities\":0,\"content_types\":1,\"content_type\":1},"
-                + "\"peer_hello\":{},\"config\":{\"draining_retention_limit\":1,\"hello_timeout_ms\":5000}}";
+                + "\"local_hello\":{\"max_frame_size\":16384,\"max_concurrent_streams\":1,\"capabilities\":0},"
+                + "\"peer_hello\":{},\"config\":{\"ack_timeout_ms\":5000},"
+                + "\"transport\":\"tcp\",\"next_stream_id\":1,\"known_types\":[256,257]}";
         String steps = "["
                 + "{\"kind\":\"request\",\"type\":257,\"extensions\":[{\"tag\":1,\"value\":\"0a\"}],\"payload\":\"0b\","
-                + "\"send\":[{\"type\":\"PREFACE\"},{\"type\":257,\"flags\":[\"END\",\"RESPONSE\"],\"stream_id\":1,"
+                + "\"send\":[{\"type\":\"PREFACE\"},{\"type\":257,\"stream_id\":1,"
                 + "\"status\":17,\"extensions\":[{\"tag\":1,\"value\":\"\"}],\"payload\":\"\"},"
                 + "{\"type\":\"HELLO\",\"flags\":[\"ACK\"],\"stream_id\":0,\"params\":{\"max_frame_size\":1}},"
-                + "{\"type\":\"CLOSE\",\"stream_id\":0,\"last_stream_id\":0,\"error_code\":\"NO_ERROR\"},"
-                + "{\"type\":\"RESET\",\"stream_id\":1,\"error_code\":9}],"
+                + "{\"type\":\"CLOSE\",\"stream_id\":0,\"error_code\":\"NO_ERROR\"},"
+                + "{\"type\":\"RESET\",\"stream_id\":1,\"error_code\":6}],"
                 + "\"events\":[{\"event\":\"request_received\",\"stream_id\":1,\"type\":257},"
                 + "{\"event\":\"result\",\"stream_id\":1,\"status\":\"OK\"},{\"event\":\"closed\"}]},"
                 + "{\"kind\":\"respond\",\"stream_id\":2147483649,\"status\":\"INTERNAL\",\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"cancel\",\"stream_id\":1,\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"close\",\"error_code\":\"NO_ERROR\",\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"advance\",\"ms\":1,\"send\":[],\"events\":[]},"
+                + "{\"kind\":\"ping\",\"payload\":\"0102030405060708\",\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"disconnect\",\"send\":[],\"events\":[{\"event\":\"closed\"}]}]";
 
         assertThat(VectorLoader.parse("x.json", file(vector("a", "[\"2.4.2\",\"5.1\"]", setup, steps))))
@@ -193,8 +201,8 @@ class VectorLoaderTest {
                 "a"));
         t.add(rejected(
                 "config out of range",
-                fileWithSetup("{\"role\":\"client\",\"established\":true,\"config\":{\"hello_timeout_ms\":0}}"),
-                "hello_timeout_ms",
+                fileWithSetup("{\"role\":\"client\",\"established\":true,\"config\":{\"ack_timeout_ms\":0}}"),
+                "ack_timeout_ms",
                 "a"));
         return t.stream();
     }
@@ -299,21 +307,9 @@ class VectorLoaderTest {
     Stream<DynamicTest> rejectsBadExpectations() {
         List<DynamicTest> t = new ArrayList<>();
         t.add(rejected("unknown frame type name", recvWithSend("{\"type\":\"PONG\"}"), "type", "a"));
-        t.add(rejected(
-                "app frame type below 256", recvWithSend("{\"type\":3,\"flags\":[],\"stream_id\":1}"), "type", "a"));
-        t.add(rejected("app frame missing flags", recvWithSend("{\"type\":256,\"stream_id\":1}"), "flags", "a"));
-        t.add(rejected(
-                "app frame unknown flag",
-                recvWithSend("{\"type\":256,\"flags\":[\"ACK\"],\"stream_id\":1}"),
-                "flags",
-                "a"));
+        t.add(rejected("app frame type below 256", recvWithSend("{\"type\":3,\"stream_id\":1}"), "type", "a"));
         t.add(rejected("ping missing payload", recvWithSend("{\"type\":\"PING\"}"), "payload", "a"));
         t.add(rejected("ping short payload", recvWithSend("{\"type\":\"PING\",\"payload\":\"01\"}"), "payload", "a"));
-        t.add(rejected(
-                "close missing last_stream_id",
-                recvWithSend("{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\"}"),
-                "last_stream_id",
-                "a"));
         t.add(rejected(
                 "reset missing stream_id",
                 recvWithSend("{\"type\":\"RESET\",\"error_code\":\"NO_ERROR\"}"),
@@ -385,20 +381,13 @@ class VectorLoaderTest {
                 "payload"));
         t.add(rejected(
                 "close stream_id not zero",
-                recvWithSend("{\"type\":\"CLOSE\",\"stream_id\":1,\"last_stream_id\":0,\"error_code\":\"NO_ERROR\"}"),
+                recvWithSend("{\"type\":\"CLOSE\",\"stream_id\":1,\"error_code\":\"NO_ERROR\"}"),
                 "stream_id"));
         t.add(rejected(
                 "reset stream_id zero",
                 recvWithSend("{\"type\":\"RESET\",\"stream_id\":0,\"error_code\":\"CANCEL\"}"),
                 "stream_id"));
-        t.add(rejected(
-                "app frame duplicate flag",
-                recvWithSend("{\"type\":256,\"flags\":[\"END\",\"END\"],\"stream_id\":1}"),
-                "플래그 중복"));
-        t.add(rejected(
-                "app frame flags not strings", recvWithSend("{\"type\":256,\"flags\":[1],\"stream_id\":1}"), "flags"));
-        t.add(rejected(
-                "app frame missing stream_id", recvWithSend("{\"type\":256,\"flags\":[]}"), "필수 필드 누락", "stream_id"));
+        t.add(rejected("app frame missing stream_id", recvWithSend("{\"type\":256}"), "필수 필드 누락", "stream_id"));
         t.add(rejected("hello params unknown field", recvWithSend("{\"type\":\"HELLO\",\"params\":{\"x\":1}}"), "x"));
         t.add(rejected(
                 "hello params out of u32",
@@ -412,16 +401,16 @@ class VectorLoaderTest {
         return t.stream();
     }
 
-    /** 이름 대신 쓰는 정수의 예약 값 범위: status는 17~255, error_code는 9~2^32-1. */
+    /** 이름 대신 쓰는 정수의 예약 값 범위: status는 17~255, error_code는 6~2^32-1. */
     @Test
     void namedCodesAcceptOnlyTheReservedIntegerRange() {
         assertThat(parseStatus(17)).hasSize(1);
         assertThat(parseStatus(255)).hasSize(1);
         assertThatThrownBy(() -> parseStatus(16)).isInstanceOf(InvalidVectorException.class);
         assertThatThrownBy(() -> parseStatus(256)).isInstanceOf(InvalidVectorException.class);
-        assertThat(parseErrorCode("9")).hasSize(1);
+        assertThat(parseErrorCode("6")).hasSize(1);
         assertThat(parseErrorCode("4294967295")).hasSize(1);
-        assertThatThrownBy(() -> parseErrorCode("8")).isInstanceOf(InvalidVectorException.class);
+        assertThatThrownBy(() -> parseErrorCode("5")).isInstanceOf(InvalidVectorException.class);
         assertThatThrownBy(() -> parseErrorCode("4294967296")).isInstanceOf(InvalidVectorException.class);
     }
 
@@ -435,6 +424,202 @@ class VectorLoaderTest {
     private static List<ConformanceVector> parseErrorCode(String code) {
         return VectorLoader.parse(
                 "x.json", fileWithStep("\"kind\":\"close\",\"error_code\":" + code + ",\"send\":[],\"events\":[]"));
+    }
+
+    private static String setupWith(String extraFields) {
+        return fileWithSetup("{\"role\":\"server\",\"established\":true," + extraFields + "}");
+    }
+
+    private static String clientSetupWith(String extraFields) {
+        return fileWithSetup("{\"role\":\"client\",\"established\":true," + extraFields + "}");
+    }
+
+    private static final String RECV_STEP = "{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[],\"events\":[]}";
+    private static final String MESSAGE_STEP =
+            "{\"kind\":\"recv_message\",\"opcode\":\"binary\",\"hex\":\"00\",\"send\":[],\"events\":[]}";
+
+    private static String fileWithTransportAndStep(String transport, String step) {
+        return file(vector(
+                "a",
+                "[\"3.4\"]",
+                "{\"role\":\"server\",\"established\":true,\"transport\":\"" + transport + "\"}",
+                "[" + step + "]"));
+    }
+
+    @TestFactory
+    Stream<DynamicTest> rejectsFieldsRemovedInSpecification010() {
+        List<DynamicTest> t = new ArrayList<>();
+        for (String hello : new String[] {"max_pending_bytes", "content_types", "content_type"}) {
+            t.add(rejected(
+                    "local_hello." + hello, setupWith("\"local_hello\":{\"" + hello + "\":1}"), "알 수 없는 필드", hello));
+        }
+        t.add(rejected(
+                "config.draining_retention_limit",
+                setupWith("\"config\":{\"draining_retention_limit\":1}"),
+                "알 수 없는 필드",
+                "draining_retention_limit"));
+        t.add(rejected(
+                "config.hello_timeout_ms",
+                setupWith("\"config\":{\"hello_timeout_ms\":1000}"),
+                "알 수 없는 필드",
+                "hello_timeout_ms"));
+        t.add(rejected(
+                "CLOSE.last_stream_id",
+                recvWithSend("{\"type\":\"CLOSE\",\"last_stream_id\":0,\"error_code\":\"NO_ERROR\"}"),
+                "알 수 없는 필드",
+                "last_stream_id"));
+        for (String flag : new String[] {"RESPONSE", "END"}) {
+            t.add(rejected(
+                    "app frame flag " + flag,
+                    recvWithSend("{\"type\":256,\"flags\":[\"" + flag + "\"],\"stream_id\":1}"),
+                    "알 수 없는 필드",
+                    "flags"));
+        }
+        for (String name : new String[] {"FRAME_SIZE_ERROR", "HELLO_TIMEOUT", "STREAM_CLOSED"}) {
+            t.add(rejected(
+                    "error_code " + name,
+                    fileWithStep("\"kind\":\"close\",\"error_code\":\"" + name + "\",\"send\":[],\"events\":[]"),
+                    "알 수 없는 이름",
+                    name));
+        }
+        return t.stream();
+    }
+
+    @Test
+    void acceptsEveryErrorCodeNameOfSection252() {
+        for (String name :
+                new String[] {"NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "REFUSED", "CANCEL", "OVERLOAD"}) {
+            assertThat(VectorLoader.parse(
+                            "x.json",
+                            fileWithStep(
+                                    "\"kind\":\"close\",\"error_code\":\"" + name + "\",\"send\":[],\"events\":[]")))
+                    .hasSize(1);
+        }
+    }
+
+    @TestFactory
+    Stream<DynamicTest> rejectsPingStepViolations() {
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(rejected(
+                "ping step missing payload",
+                fileWithStep("\"kind\":\"ping\",\"send\":[],\"events\":[]"),
+                "필수 필드 누락",
+                "payload"));
+        for (String payload : new String[] {"0102", "010203040506070809", "010203040506070A", "01020304 05060708"}) {
+            t.add(rejected(
+                    "ping step payload '" + payload + "'",
+                    fileWithStep("\"kind\":\"ping\",\"payload\":\"" + payload + "\",\"send\":[],\"events\":[]"),
+                    "payload"));
+        }
+        return t.stream();
+    }
+
+    @TestFactory
+    Stream<DynamicTest> rejectsTransportViolations() {
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(rejected("unknown transport", setupWith("\"transport\":\"udp\""), "transport"));
+        t.add(rejected(
+                "recv step on websocket", fileWithTransportAndStep("websocket", RECV_STEP), "websocket", "recv"));
+        t.add(rejected(
+                "recv_message step on explicit tcp",
+                fileWithTransportAndStep("tcp", MESSAGE_STEP),
+                "tcp",
+                "recv_message"));
+        t.add(rejected(
+                "recv_message step on default transport",
+                file(vector("a", "[\"3.4\"]", SETUP, "[" + MESSAGE_STEP + "]")),
+                "tcp",
+                "recv_message"));
+        t.add(rejected(
+                "recv_message bad opcode",
+                fileWithTransportAndStep("websocket", MESSAGE_STEP.replace("\"binary\"", "\"ping\"")),
+                "opcode"));
+        t.add(rejected(
+                "recv_message missing opcode",
+                fileWithTransportAndStep("websocket", MESSAGE_STEP.replace("\"opcode\":\"binary\",", "")),
+                "필수 필드 누락",
+                "opcode"));
+        t.add(rejected(
+                "recv_message odd hex",
+                fileWithTransportAndStep("websocket", MESSAGE_STEP.replace("\"00\"", "\"0\"")),
+                "홀수"));
+        return t.stream();
+    }
+
+    @Test
+    void acceptsWebsocketMessagesAndTcpBytes() {
+        String text = MESSAGE_STEP.replace("binary", "text");
+        assertThat(VectorLoader.parse("x.json", fileWithTransportAndStep("websocket", MESSAGE_STEP)))
+                .hasSize(1);
+        assertThat(VectorLoader.parse("x.json", fileWithTransportAndStep("websocket", text)))
+                .hasSize(1);
+        assertThat(VectorLoader.parse("x.json", fileWithTransportAndStep("tcp", RECV_STEP)))
+                .hasSize(1);
+        assertThat(VectorLoader.parse(
+                        "x.json",
+                        fileWithTransportAndStep("websocket", "{\"kind\":\"disconnect\",\"send\":[],\"events\":[]}")))
+                .hasSize(1);
+    }
+
+    @TestFactory
+    Stream<DynamicTest> rejectsNextStreamIdViolations() {
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(rejected("zero", clientSetupWith("\"next_stream_id\":0"), "next_stream_id"));
+        t.add(rejected("above 2^31-1", clientSetupWith("\"next_stream_id\":2147483649"), "next_stream_id"));
+        t.add(rejected("2^31", setupWith("\"next_stream_id\":2147483648"), "next_stream_id"));
+        t.add(rejected("non-integer", clientSetupWith("\"next_stream_id\":\"1\""), "next_stream_id"));
+        t.add(rejected("even for client", clientSetupWith("\"next_stream_id\":2"), "next_stream_id", "client", "홀수"));
+        t.add(rejected("odd for server", setupWith("\"next_stream_id\":3"), "next_stream_id", "server", "짝수"));
+        return t.stream();
+    }
+
+    @Test
+    void acceptsNextStreamIdAtTheBoundaries() {
+        assertThat(VectorLoader.parse("x.json", clientSetupWith("\"next_stream_id\":1")))
+                .hasSize(1);
+        assertThat(VectorLoader.parse("x.json", clientSetupWith("\"next_stream_id\":2147483647")))
+                .hasSize(1);
+        assertThat(VectorLoader.parse("x.json", setupWith("\"next_stream_id\":2")))
+                .hasSize(1);
+        assertThat(VectorLoader.parse("x.json", setupWith("\"next_stream_id\":2147483646")))
+                .hasSize(1);
+    }
+
+    @TestFactory
+    Stream<DynamicTest> rejectsKnownTypesViolations() {
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(rejected("below 256", setupWith("\"known_types\":[256,255]"), "known_types"));
+        t.add(rejected("above u16", setupWith("\"known_types\":[65536]"), "known_types"));
+        t.add(rejected("non-integer element", setupWith("\"known_types\":[256.5]"), "known_types"));
+        t.add(rejected("string element", setupWith("\"known_types\":[\"256\"]"), "known_types"));
+        t.add(rejected("not an array", setupWith("\"known_types\":256"), "known_types", "배열"));
+        t.add(rejected("duplicate", setupWith("\"known_types\":[256,257,256]"), "known_types", "중복", "256"));
+        return t.stream();
+    }
+
+    @Test
+    void acceptsKnownTypes() {
+        assertThat(VectorLoader.parse("x.json", setupWith("\"known_types\":[]")))
+                .hasSize(1);
+        assertThat(VectorLoader.parse("x.json", setupWith("\"known_types\":[256,65535]")))
+                .hasSize(1);
+    }
+
+    /** 형식 문서의 JSON 예시가 모두 로더를 통과한다. */
+    @Test
+    void jsonExamplesInTheFormatDocumentPassTheLoader() throws IOException {
+        Path doc = Paths.get("..", "docs", "specification", "STRAND_CONFORMANCE_VECTORS.md")
+                .toAbsolutePath()
+                .normalize();
+        String text = new String(Files.readAllBytes(doc), StandardCharsets.UTF_8);
+        Matcher m = Pattern.compile("```json\\n(.*?)\\n```", Pattern.DOTALL).matcher(text);
+        int count = 0;
+        while (m.find()) {
+            count++;
+            assertThat(VectorLoader.parse("doc-example-" + count + ".json", m.group(1)))
+                    .isNotEmpty();
+        }
+        assertThat(count).isGreaterThanOrEqualTo(4);
     }
 
     @Test
