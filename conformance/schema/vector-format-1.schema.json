@@ -216,7 +216,7 @@
       "items": { "$ref": "#/$defs/event" }
     },
     "step": {
-      "description": "transport가 tcp이면 recv만, websocket이면 recv_message만 쓸 수 있다. 이 교차 규칙은 스키마로 표현할 수 없어 형식 문서에만 있다.",
+      "description": "transport가 tcp이면 recv만, websocket이면 recv_message만 쓸 수 있다. 이 교차 규칙과 `established`가 false인 벡터의 ping 단계 순서(형식 문서 8.1절 3번)는 스키마로 표현할 수 없어 형식 문서에만 있다.",
       "oneOf": [
         {
           "type": "object",
