@@ -73,10 +73,6 @@ class NewVectorCoverageTest {
         return vector;
     }
 
-    private static String text(String key) throws IOException {
-        return vector(key).toString();
-    }
-
     @Test
     void everyBItemExceptTheExcludedOnesHasVectors() throws IOException {
         TreeSet<Integer> expected = new TreeSet<>();
@@ -102,16 +98,46 @@ class NewVectorCoverageTest {
     void aVectorUsesKnownTypesAndExpectsUnimplementedWithoutClosing() throws IOException {
         JsonObject v = vector("request-checks/unknown-type-request-is-answered-unimplemented");
         assertThat(v.getAsJsonObject("setup").has("known_types")).isTrue();
-        String json = v.toString();
-        assertThat(json).contains("\"status\":\"UNIMPLEMENTED\"").doesNotContain("\"CLOSE\"");
-        assertThat(json).contains("request_received");
+        // 모르는 type(258)의 요청에는 UNIMPLEMENTED 응답만 나가고 CLOSE도 연결 종료 이벤트도 없다.
+        assertThat(sentFrames(v)).contains("258/UNIMPLEMENTED").noneMatch(f -> f.startsWith("CLOSE/"));
+        assertThat(eventNames(v)).doesNotContain("closed").contains("request_received");
+    }
+
+    /** 벡터 전체 단계에서 구현이 보낸 프레임을 `type/status|error_code` 꼴로 모은다. 애플리케이션 프레임은 type이 숫자다. */
+    private static List<String> sentFrames(JsonObject vector) {
+        List<String> frames = new ArrayList<>();
+        for (JsonElement step : vector.getAsJsonArray("steps")) {
+            for (JsonElement f : step.getAsJsonObject().getAsJsonArray("send")) {
+                JsonObject frame = f.getAsJsonObject();
+                String detail = frame.has("status")
+                        ? frame.get("status").getAsString()
+                        : frame.has("error_code") ? frame.get("error_code").getAsString() : "";
+                frames.add(frame.get("type").getAsString() + "/" + detail);
+            }
+        }
+        return frames;
+    }
+
+    private static List<String> eventNames(JsonObject vector) {
+        List<String> names = new ArrayList<>();
+        for (JsonElement step : vector.getAsJsonArray("steps")) {
+            for (JsonElement e : step.getAsJsonObject().getAsJsonArray("events")) {
+                names.add(e.getAsJsonObject().get("event").getAsString());
+            }
+        }
+        return names;
     }
 
     @Test
     void aVectorUsesTheWebSocketTransport() throws IOException {
         JsonObject setup = vector("websocket/established-ping-is-acknowledged").getAsJsonObject("setup");
         assertThat(setup.get("transport").getAsString()).isEqualTo("websocket");
-        assertThat(text("websocket/established-ping-is-acknowledged")).contains("recv_message");
+        List<String> kinds = new ArrayList<>();
+        for (JsonElement step :
+                vector("websocket/established-ping-is-acknowledged").getAsJsonArray("steps")) {
+            kinds.add(step.getAsJsonObject().get("kind").getAsString());
+        }
+        assertThat(kinds).contains("recv_message").doesNotContain("recv");
     }
 
     @Test
@@ -129,26 +155,95 @@ class NewVectorCoverageTest {
         JsonObject v = vector("ack-timeout/ping-ack-timeout-before-and-after-limit");
         assertThat(v.getAsJsonObject("setup").getAsJsonObject("config").has("ack_timeout_ms"))
                 .isTrue();
-        assertThat(v.toString()).contains("\"kind\":\"ping\"").contains("\"kind\":\"advance\"");
+        List<String> kinds = new ArrayList<>();
+        for (JsonElement step : v.getAsJsonArray("steps")) {
+            kinds.add(step.getAsJsonObject().get("kind").getAsString());
+        }
+        assertThat(kinds).contains("ping", "advance");
+    }
+
+    private static final long DEFAULT_ACK_TIMEOUT_MS = 5000;
+
+    /** 구조를 해석해 확인 대기 구간별로 센 경과 시간 중 한도에 정확히 닿는 것이 있는가. */
+    private static boolean reachesLimitExactly(JsonObject vector) {
+        JsonObject setup = vector.getAsJsonObject("setup");
+        long limit = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
+                ? setup.getAsJsonObject("config").get("ack_timeout_ms").getAsLong()
+                : DEFAULT_ACK_TIMEOUT_MS;
+        return AckWaits.elapsedAtEachAdvance(vector).contains(limit);
+    }
+
+    private static JsonObject parseVector(String json) {
+        return JsonParser.parseString(json).getAsJsonObject();
+    }
+
+    private static final String PING_START =
+            "{\"kind\":\"ping\",\"payload\":\"0102030405060708\"," + "\"send\":[{\"type\":\"PING\"}],\"events\":[]}";
+
+    private static String advance(long ms) {
+        return "{\"kind\":\"advance\",\"ms\":" + ms + ",\"send\":[],\"events\":[]}";
+    }
+
+    private static JsonObject limit1000(String... steps) {
+        return parseVector(
+                "{\"setup\":{\"config\":{\"ack_timeout_ms\":1000}},\"steps\":[" + String.join(",", steps) + "]}");
     }
 
     @Test
+    void ackWaitIsCountedFromTheStepThatStartsIt() {
+        // 대기 시작(PING 송신) 전의 advance 500은 세지 않는다. 구간은 500뿐이므로 한도 1000에 닿지 않는다.
+        JsonObject v = limit1000(advance(500), PING_START, advance(500));
+
+        assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(500L);
+        assertThat(reachesLimitExactly(v)).isFalse();
+    }
+
+    @Test
+    void ackWaitEndsWhenTheAckIsReceived() {
+        // ACK 수신 뒤의 advance는 같은 대기가 아니다.
+        String ack = "{\"kind\":\"recv\",\"hex\":\"000000140002010000000000000000000102030405060708\","
+                + "\"send\":[],\"events\":[]}";
+        JsonObject v = limit1000(PING_START, advance(999), ack, advance(1));
+
+        assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(999L);
+        assertThat(reachesLimitExactly(v)).isFalse();
+    }
+
+    @Test
+    void ackWaitReachingTheLimitExactlyIsDetected() {
+        assertThat(reachesLimitExactly(limit1000(PING_START, advance(600), advance(400))))
+                .isTrue();
+    }
+
+    @Test
+    void defaultLimitIsUsedWhenConfigIsOmitted() {
+        JsonObject v = parseVector("{\"setup\":{},\"steps\":[" + PING_START + "," + advance(5000) + "]}");
+
+        assertThat(reachesLimitExactly(v)).isTrue();
+    }
+
+    /** ack_timeout_ms를 쓰거나 id에 ack-timeout이 있는 모든 벡터는 확인 대기를 시작해야 하고, 한도에 정확히 닿지 않는다. */
+    @Test
     void timeVectorsNeverReachTheLimitExactly() throws IOException {
+        int checked = 0;
         for (Map.Entry<String, JsonObject> entry : allVectors().entrySet()) {
-            JsonObject setup = entry.getValue().getAsJsonObject("setup");
-            if (!entry.getKey().startsWith("ack-timeout/") || !setup.has("config")) {
+            JsonObject vector = entry.getValue();
+            JsonObject setup = vector.getAsJsonObject("setup");
+            boolean handlesAckTimeout =
+                    (setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms"))
+                            || entry.getKey().contains("ack-timeout");
+            if (!handlesAckTimeout) {
                 continue;
             }
-            long limit = setup.getAsJsonObject("config").get("ack_timeout_ms").getAsLong();
-            long clock = 0;
-            for (JsonElement step : entry.getValue().getAsJsonArray("steps")) {
-                JsonObject s = step.getAsJsonObject();
-                if (s.get("kind").getAsString().equals("advance")) {
-                    clock += s.get("ms").getAsLong();
-                    assertThat(clock).as("%s: 한도에 정확히 닿으면 안 된다", entry.getKey()).isNotEqualTo(limit);
-                }
-            }
+            checked++;
+            assertThat(AckWaits.startsAnyWait(vector))
+                    .as("%s: 확인 대기 시작(HELLO/PING 송신)을 해석할 수 없다", entry.getKey())
+                    .isTrue();
+            assertThat(reachesLimitExactly(vector))
+                    .as("%s: 한도에 정확히 닿으면 안 된다", entry.getKey())
+                    .isFalse();
         }
+        assertThat(checked).isGreaterThanOrEqualTo(11);
     }
 
     /** 5.1절 5번 (가)→(나)→(다). 어느 검사가 먼저 걸리는지는 송신 프레임으로 본다. */
@@ -160,17 +255,15 @@ class NewVectorCoverageTest {
                 "request-checks/closing-refuses-unknown-type-with-bad-extension-value",
                 "request-checks/limit-refusal-precedes-unknown-type",
                 "request-checks/limit-refusal-precedes-bad-extension-value")) {
-            assertThat(text(key)).as(key).contains("\"error_code\":\"REFUSED\"");
-            assertThat(text(key)).as(key).doesNotContain("UNIMPLEMENTED").doesNotContain("INVALID_ARGUMENT");
+            // (가) 거절만 나간다. (나)·(다)의 응답은 나가지 않는다.
+            assertThat(sentFrames(vector(key))).as(key).containsExactly("RESET/REFUSED");
         }
-        String nd = text("request-checks/unknown-type-precedes-bad-extension-value");
-        assertThat(nd)
-                .contains("UNIMPLEMENTED")
-                .doesNotContain("INVALID_ARGUMENT")
-                .doesNotContain("REFUSED");
+        // (나)가 (다)보다 먼저 걸린다.
+        assertThat(sentFrames(vector("request-checks/unknown-type-precedes-bad-extension-value")))
+                .containsExactly("258/UNIMPLEMENTED");
         // (다) 단독 사례도 있어야 순서가 의미를 가진다.
-        assertThat(text("request-checks/timeout-length-three-is-invalid-argument"))
-                .contains("INVALID_ARGUMENT");
+        assertThat(sentFrames(vector("request-checks/timeout-length-three-is-invalid-argument")))
+                .containsExactly("257/INVALID_ARGUMENT");
     }
 
     @Test
