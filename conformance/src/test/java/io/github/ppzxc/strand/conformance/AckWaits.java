@@ -13,7 +13,7 @@ import java.util.List;
  *
  * <p>ACK를 알아보지 못하면 대기를 끝내지 않은 것으로 본다(대기가 길어지는 쪽이라 한도 검사가 더 엄격해진다). 바이트는 `recv`
  * 단계에 걸쳐 이어 읽고(프레임 경계와 무관하게 잘려 올 수 있다), 완결된 프레임에서만 ACK를 찾는다. `recv_message`는 binary
- * 메시지 하나를 따로 읽고 text 메시지는 읽지 않는다. 프레임 길이가 3 미만이면 type과 flags를 읽을 수 없는 깨진 바이트이므로 그
+ * 메시지 하나를 따로 읽고 text 메시지는 읽지 않는다. 프레임 길이가 12 미만(규격 2.2.1절의 최솟값)이면 헤더를 읽을 수 없는 깨진 바이트이므로 그
  * 연결의 나머지는 읽지 않는다.
  */
 final class AckWaits {
@@ -130,7 +130,7 @@ final class AckWaits {
         return payload != null
                         && payload.isJsonPrimitive()
                         && payload.getAsJsonPrimitive().isString()
-                ? payload.getAsString().toLowerCase()
+                ? payload.getAsString().replaceAll("\\s", "").toLowerCase()
                 : null;
     }
 
@@ -162,7 +162,7 @@ final class AckWaits {
         }
     }
 
-    /** 받은 ACK 프레임. `payload`는 프레임 끝 8바이트이고, 프레임이 그보다 짧으면 null이다. */
+    /** 받은 ACK 프레임. `payload`는 헤더 16바이트와 확장 영역 뒤의 8바이트이고, 정확히 8바이트가 아니면 null이다. */
     private static final class Ack {
         final int type;
         final String payload;
