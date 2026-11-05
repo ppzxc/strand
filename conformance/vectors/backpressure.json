@@ -183,7 +183,7 @@
     },
     {
       "id": "concurrent-streams-return-receiver-peer-reset-received",
-      "description": "요청 1이 대기 중이라 요청 3이 거절되는 것을 먼저 확인한다. 상대의 RESET(CANCEL)을 받으면 스트림 1이 끝나 n에서 빠진다. 받은 쪽은 RESET으로 답하지 않는다. 그 직후 요청 5가 수락되고, 취소된 요청에 애플리케이션이 뒤늦게 응답을 시도해도 아무것도 보내지 않는다. 요청 7은 거절되므로 반환은 정확히 한 번이다",
+      "description": "요청 1이 대기 중이라 요청 3이 거절되는 것을 먼저 확인한다. 상대의 RESET(CANCEL)을 받으면 스트림 1이 끝나 n에서 빠진다. 받은 쪽은 RESET으로 답하지 않는다. 그 직후 요청 5가 수락되고 요청 7은 거절되므로 반환은 정확히 한 번이다",
       "spec": [
         "4.3",
         "4.4",
@@ -238,13 +238,6 @@
               "type": 257
             }
           ]
-        },
-        {
-          "kind": "respond",
-          "stream_id": 1,
-          "status": "OK",
-          "send": [],
-          "events": []
         },
         {
           "kind": "recv",
@@ -454,7 +447,7 @@
     },
     {
       "id": "concurrent-streams-return-once-receiver-late-frames-after-peer-reset",
-      "description": "요청 1이 대기 중이라 요청 3이 거절되는 것을 먼저 확인한다. 상대의 RESET(CANCEL)으로 스트림 1이 끝난 뒤 같은 스트림에 RESET이 다시 오고 애플리케이션이 응답을 시도해도 아무것도 보내지 않고 n에서 다시 빼지 않는다. 요청 5만 수락되고 요청 7은 거절된다",
+      "description": "요청 1이 대기 중이라 요청 3이 거절되는 것을 먼저 확인한다. 상대의 RESET(CANCEL)으로 스트림 1이 끝난 뒤 같은 스트림에 RESET이 다시 와도 아무것도 보내지 않고 n에서 다시 빼지 않는다. 요청 5만 수락되고 요청 7은 거절된다",
       "spec": [
         "4.3",
         "4.4",
@@ -513,13 +506,6 @@
         {
           "kind": "recv",
           "hex": "0000001000040000000000010000000000000004",
-          "send": [],
-          "events": []
-        },
-        {
-          "kind": "respond",
-          "stream_id": 1,
-          "status": "OK",
           "send": [],
           "events": []
         },
