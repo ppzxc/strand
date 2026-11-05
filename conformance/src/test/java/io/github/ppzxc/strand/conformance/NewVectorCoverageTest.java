@@ -116,10 +116,10 @@ class NewVectorCoverageTest {
 
     @Test
     void aVectorUsesNextStreamIdForNumberExhaustion() throws IOException {
-        JsonObject client = vector("stream-numbers/exhaustion-after-last-number-sends-close-client")
+        JsonObject client = vector("streams/exhaustion-after-last-number-sends-close-client")
                 .getAsJsonObject("setup");
         assertThat(client.get("next_stream_id").getAsLong()).isEqualTo(2147483647L);
-        JsonObject server = vector("stream-numbers/exhaustion-after-last-number-sends-close-server")
+        JsonObject server = vector("streams/exhaustion-after-last-number-sends-close-server")
                 .getAsJsonObject("setup");
         assertThat(server.get("next_stream_id").getAsLong()).isEqualTo(2147483646L);
     }
@@ -164,16 +164,20 @@ class NewVectorCoverageTest {
             assertThat(text(key)).as(key).doesNotContain("UNIMPLEMENTED").doesNotContain("INVALID_ARGUMENT");
         }
         String nd = text("request-checks/unknown-type-precedes-bad-extension-value");
-        assertThat(nd).contains("UNIMPLEMENTED").doesNotContain("INVALID_ARGUMENT").doesNotContain("REFUSED");
+        assertThat(nd)
+                .contains("UNIMPLEMENTED")
+                .doesNotContain("INVALID_ARGUMENT")
+                .doesNotContain("REFUSED");
         // (다) 단독 사례도 있어야 순서가 의미를 가진다.
-        assertThat(text("request-checks/timeout-length-three-is-invalid-argument")).contains("INVALID_ARGUMENT");
+        assertThat(text("request-checks/timeout-length-three-is-invalid-argument"))
+                .contains("INVALID_ARGUMENT");
     }
 
     @Test
     void applicationCloseAfterAnyCloseSendsNothing() throws IOException {
         for (String key : Arrays.asList(
-                "close-handling/application-close-after-close-sent-sends-nothing",
-                "close-handling/application-close-after-close-received-sends-nothing")) {
+                "close-races/application-close-after-close-sent-sends-nothing",
+                "close-races/application-close-after-close-received-sends-nothing")) {
             JsonArray steps = vector(key).getAsJsonArray("steps");
             JsonObject last = steps.get(steps.size() - 1).getAsJsonObject();
             assertThat(last.get("kind").getAsString()).isEqualTo("close");

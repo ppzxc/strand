@@ -254,6 +254,1190 @@
           ]
         }
       ]
+    },
+    {
+      "id": "exhaustion-after-last-number-sends-close-client",
+      "description": "클라이언트 역할 구현의 다음 번호가 2^31-1이면 그 번호로 요청을 보낼 수 있다. 응답을 받은 뒤 다음 요청은 번호가 2^31-1을 넘으므로 프레임을 보내지 않고 로컬 UNAVAILABLE로 실패하고(stream_id 없음, result 이벤트 아님), CLOSE(NO_ERROR)를 보낸다. 대기 중인 스트림이 없으므로 곧바로 닫힌다",
+      "spec": [
+        "2.2.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "next_stream_id": 2147483647
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2147483647
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100007fffffff00000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 2147483647,
+              "status": "OK"
+            }
+          ]
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "exhaustion-after-last-number-sends-close-server",
+      "description": "서버 역할 구현은 번호 공간의 마지막 번호가 2^31-2이다. 그 번호로 보낸 요청의 응답을 받은 뒤 다음 요청은 번호가 2^31-1을 넘으므로 로컬 UNAVAILABLE로 실패하고 CLOSE(NO_ERROR)를 보낸다",
+      "spec": [
+        "2.2.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "next_stream_id": 2147483646
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2147483646
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100007ffffffe00000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 2147483646,
+              "status": "OK"
+            }
+          ]
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "exhaustion-with-pending-stream-closes-after-it-ends",
+      "description": "번호가 소진되어 CLOSE(NO_ERROR)를 보냈어도 마지막 번호로 보낸 요청이 대기 중이면 연결은 종료 중이다. 그 응답을 받아 결과를 전달한 뒤 closed가 난다",
+      "spec": [
+        "2.2.5",
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "next_stream_id": 2147483647
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2147483647
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100007fffffff00000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 2147483647,
+              "status": "OK"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "exhaustion-after-close-received-sends-no-close",
+      "description": "이미 CLOSE를 받았다면 번호가 소진되어도 CLOSE를 보내지 않는다. 새 요청은 프레임 없이 로컬 UNAVAILABLE로 실패한다",
+      "spec": [
+        "2.2.5",
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "next_stream_id": 2147483647
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2147483647
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000030000000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "exhaustion-after-close-sent-sends-no-second-close",
+      "description": "이미 CLOSE를 보냈다면 번호가 소진되어도 두 번째 CLOSE를 보내지 않는다. 마지막 번호로 보낸 요청 뒤 애플리케이션이 CLOSE(NO_ERROR)를 지시해 보낸 다음, 다음 요청은 프레임 없이 로컬 UNAVAILABLE로 실패한다",
+      "spec": [
+        "2.2.5",
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "next_stream_id": 2147483647
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2147483647
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "regress-to-pending-number-closes",
+      "description": "상대 공간 번호가 highest_peer_stream_id 이하이면 대기 중인 스트림을 가리켜도 번호 역행이라 연결 오류다. 대기 중인 요청 1과 같은 번호의 새 프레임에 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "4.2.1",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "regress-to-ended-number-closes",
+      "description": "끝난 스트림의 번호로 새 요청이 오는 것도 번호 역행이라 연결 오류다. 조용히 버리지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "4.2.1",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "respond",
+          "stream_id": 1,
+          "status": "OK",
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1,
+              "status": "OK"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "regress-to-skipped-number-closes",
+      "description": "번호를 건너뛰어 5가 먼저 온 뒤 건너뛴 3이 나중에 오면 번호 역행이라 연결 오류다",
+      "spec": [
+        "2.2.5",
+        "4.2.1",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000500000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 5,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "limit-zero-refused-number-below-highest-closes",
+      "description": "max_concurrent_streams가 0이라 거절한 요청의 번호(5)도 highest_peer_stream_id에 반영된다. 그 뒤 더 작은 번호 3의 요청이 오면 번호 역행이라 연결 오류다",
+      "spec": [
+        "4.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "local_hello": {
+          "max_concurrent_streams": 0
+        }
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000500000000",
+          "send": [
+            {
+              "type": "RESET",
+              "stream_id": 5,
+              "error_code": "REFUSED"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing-refused-number-reuse-closes",
+      "description": "CLOSE 뒤라서 거절한 요청의 번호(3)도 쓰인 것으로 센다. 같은 번호가 다시 오면 번호 역행이라 연결 오류인데, 이미 종료 중이므로 CLOSE를 보내지 않고 닫는다",
+      "spec": [
+        "3.5",
+        "4.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000030000000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [
+            {
+              "type": "RESET",
+              "stream_id": 3,
+              "error_code": "REFUSED"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "unimplemented-number-is-used",
+      "description": "모르는 type이라 UNIMPLEMENTED로 답한 요청의 번호(5)도 쓰인 것으로 센다. 그 뒤 더 작은 번호 3의 요청이 오면 번호 역행이라 연결 오류다",
+      "spec": [
+        "4.2.1",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "known_types": [
+          257
+        ]
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010200000000000500000000",
+          "send": [
+            {
+              "type": 258,
+              "stream_id": 5,
+              "status": "UNIMPLEMENTED"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "invalid-argument-number-is-used",
+      "description": "확장 값 오류라서 INVALID_ARGUMENT로 답한 요청의 번호(5)도 쓰인 것으로 센다. 그 뒤 더 작은 번호 3의 요청이 오면 번호 역행이라 연결 오류다",
+      "spec": [
+        "4.2.1",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001301010000000000050007000000010003000001",
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 5,
+              "status": "INVALID_ARGUMENT"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "even-numbered-frame-at-server-is-dropped",
+      "description": "서버 역할 구현이 받은 짝수 번호(2)의 애플리케이션 프레임은 서버 자기 번호 공간이므로 응답으로 다룬다. 열지 않은 번호라 대기 중인 스트림이 아니므로 조용히 버리고, 그 번호는 쓰이지 않은 채라 다음 요청이 2번을 쓴다",
+      "spec": [
+        "2.2.5",
+        "4.2",
+        "4.3"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000200000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "odd-numbered-frame-at-client-is-dropped",
+      "description": "클라이언트 역할 구현이 받은 홀수 번호(1)의 애플리케이션 프레임은 클라이언트 자기 번호 공간이므로 응답으로 다룬다. 열지 않은 번호라 조용히 버리고, 다음 요청은 1번을 쓴다",
+      "spec": [
+        "2.2.5",
+        "4.2",
+        "4.3"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "application-frame-stream-id-zero-closes",
+      "description": "애플리케이션 프레임의 stream_id가 0이면 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "spec": [
+        "2.2.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000000000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "application-frame-stream-id-top-bit-closes",
+      "description": "애플리케이션 프레임의 stream_id 최상위 비트가 1이면 연결 오류다",
+      "spec": [
+        "2.2.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100008000000100000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-stream-id-zero-closes",
+      "description": "RESET의 stream_id가 0이면 연결 오류다",
+      "spec": [
+        "2.2.5",
+        "4.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000000000000000000004",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-stream-id-top-bit-closes",
+      "description": "RESET의 stream_id 최상위 비트가 1이면 연결 오류다",
+      "spec": [
+        "2.2.5",
+        "4.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000040000800000010000000000000004",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "request-with-largest-stream-id-is-accepted",
+      "description": "stream_id의 최댓값 2^31-1은 정상 번호다. 서버 역할 구현은 클라이언트 공간의 마지막 번호 2147483647 요청을 수락한다",
+      "spec": [
+        "2.2.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100007fffffff00000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 2147483647,
+              "type": 257
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "response-to-unopened-number-is-dropped",
+      "description": "서버 역할 구현이 열지 않은 자기 번호(4)의 응답을 받으면 대기 중인 스트림이 아니므로 조용히 버린다. RESET도 CLOSE도 보내지 않는다. 그 번호는 쓰인 것이 아니라서 다음 요청은 2번을 쓴다",
+      "spec": [
+        "4.3"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000400000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "response-and-reset-for-ended-own-stream-are-dropped",
+      "description": "응답으로 끝난 내 요청 2의 스트림으로 늦게 온 두 번째 응답과 RESET은 조용히 버린다. 결과가 다시 나가지 않는다",
+      "spec": [
+        "4.3"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000200000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 2,
+              "status": "OK"
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000200000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000020000000000000004",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "reset-for-unopened-peer-number-is-dropped",
+      "description": "상대 공간의 열리지 않은 번호(5)에 대한 RESET은 새 요청이 아니므로 조용히 버린다. highest_peer_stream_id도 올리지 않아 더 작은 번호 3의 새 요청은 수락한다",
+      "spec": [
+        "4.2.1",
+        "4.3"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000050000000000000004",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 3,
+              "type": 257
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-for-unopened-own-number-is-dropped",
+      "description": "내 공간의 열리지 않은 번호(4)에 대한 RESET도 조용히 버린다. RESET으로 답하지 않는다",
+      "spec": [
+        "4.3",
+        "4.4"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000040000000000000004",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140002000000000000000000000102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "flags": [
+                "ACK"
+              ],
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "reset-received-with-other-error-codes-gives-internal",
+      "description": "내 요청이 NO_ERROR, PROTOCOL_ERROR, INTERNAL_ERROR, OVERLOAD 코드의 RESET으로 끝나면 CANCEL도 REFUSED도 아니므로 애플리케이션에 로컬 INTERNAL을 넘긴다. RESET으로 답하지 않는다",
+      "spec": [
+        "4.4"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000010000000000000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "INTERNAL"
+            }
+          ]
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 3
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000030000000000000001",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 3,
+              "status": "INTERNAL"
+            }
+          ]
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 5
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000050000000000000002",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 5,
+              "status": "INTERNAL"
+            }
+          ]
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 7
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000070000000000000005",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 7,
+              "status": "INTERNAL"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-received-with-reserved-error-code-gives-internal",
+      "description": "예약 error_code(6 이상)의 RESET은 INTERNAL_ERROR로 취급하므로 내 요청의 결과는 로컬 INTERNAL이다",
+      "spec": [
+        "2.5.2",
+        "4.4"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000010000000000000006",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "INTERNAL"
+            }
+          ]
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 3
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "00000010000400000000000300000000ffffffff",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 3,
+              "status": "INTERNAL"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reserved-response-status-17-is-unknown",
+      "description": "응답의 status가 예약 값(17)이면 UNKNOWN으로 취급해 애플리케이션에 전달한다",
+      "spec": [
+        "2.5.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100110000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNKNOWN"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reserved-response-status-255-is-unknown",
+      "description": "응답의 status가 예약 값(255)이면 UNKNOWN으로 취급해 애플리케이션에 전달한다",
+      "spec": [
+        "2.5.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100ff0000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNKNOWN"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "response-flags-are-ignored",
+      "description": "응답 프레임의 flags에 어떤 비트가 켜져 있어도(0xFF) 무시하고 정상 응답으로 전달한다",
+      "spec": [
+        "2.3",
+        "4.2"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c0101ff000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "OK"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

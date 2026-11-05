@@ -1,0 +1,389 @@
+{
+  "format": 1,
+  "vectors": [
+    {
+      "id": "established-ping-is-acknowledged",
+      "description": "WebSocket 사용 환경에서도 프레임 하나를 바이너리 메시지 하나로 주고받는다. 수립을 마친 서버가 PING 메시지를 받으면 ACK PING 메시지 하나로 답한다",
+      "spec": [
+        "1.2",
+        "3.4"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "000000140002000000000000000000000102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "flags": [
+                "ACK"
+              ],
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "preface-seven-bytes-closes-silently",
+      "description": "WebSocket 서문 메시지가 8바이트가 아니면(7바이트) 서버는 아무것도 보내지 않고 연결을 닫는다. 서문 확인 전이므로 서버 HELLO도 보내지 않는다",
+      "spec": [
+        "1.2",
+        "3.1",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "c0de5354523000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "preface-nine-bytes-closes-silently",
+      "description": "서문 메시지가 8바이트보다 길어도(9바이트) 조용히 닫는다",
+      "spec": [
+        "1.2",
+        "3.1",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "c0de53545230000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "preface-text-message-closes-silently",
+      "description": "서문 메시지가 바이너리가 아니라 텍스트 메시지이면 내용이 서문과 같아도 조용히 닫는다",
+      "spec": [
+        "1.2",
+        "3.1",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "text",
+          "hex": "c0de535452300000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-frame-text-message-closes-silently",
+      "description": "서문 뒤 첫 프레임 메시지가 텍스트이면 헤더를 읽을 수 없는 것으로 보아 첫 프레임 검사에 실패한다. 서버 HELLO는 이미 나갔고, 그 뒤로는 아무것도 보내지 않고 닫는다",
+      "spec": [
+        "1.2",
+        "3.2.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "c0de535452300000",
+          "send": [
+            {
+              "type": "HELLO"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv_message",
+          "opcode": "text",
+          "hex": "0000000c000100000000000000000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-frame-shorter-than-header-closes-silently",
+      "description": "첫 프레임 메시지가 헤더 크기(16바이트)보다 짧으면(10바이트) 첫 프레임 검사에 실패한 것으로 보고 아무것도 보내지 않고 닫는다",
+      "spec": [
+        "1.2",
+        "3.2.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "c0de535452300000",
+          "send": [
+            {
+              "type": "HELLO"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "0000000c000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-frame-size-mismatch-closes-with-protocol-error",
+      "description": "첫 프레임 메시지의 헤더가 첫 프레임 검사를 통과하면(HELLO) 메시지 크기가 4 + length와 다른 것은 그 뒤 연결 오류다. 조용히 닫지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "1.2",
+        "3.2.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "c0de535452300000",
+          "send": [
+            {
+              "type": "HELLO"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "0000000c00010000000000000000000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "text-message-after-first-frame-closes",
+      "description": "첫 프레임 뒤에 텍스트 메시지가 오면 내용이 유효한 PING이어도 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "spec": [
+        "1.2",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "text",
+          "hex": "000000140002000000000000000000000102030405060708",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "message-longer-than-frame-closes",
+      "description": "바이너리 메시지의 크기가 4 + length보다 크면(PING 프레임 뒤에 1바이트) 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "1.2",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "00000014000200000000000000000000010203040506070800",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "message-shorter-than-frame-closes",
+      "description": "바이너리 메시지의 크기가 4 + length보다 작으면(PING 프레임에서 1바이트 모자람) 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "1.2",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "0000001400020000000000000000000001020304050607",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "client-first-frame-text-message-closes-silently",
+      "description": "클라이언트 역할 구현도 서버의 첫 프레임 메시지가 텍스트이면 첫 프레임 검사에 실패해 아무것도 더 보내지 않고 닫는다. 연결을 열 때 보낸 서문과 HELLO는 이미 나갔다",
+      "spec": [
+        "1.2",
+        "3.2.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": false,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "text",
+          "hex": "0000000c000100000000000000000000",
+          "send": [
+            {
+              "type": "PREFACE"
+            },
+            {
+              "type": "HELLO"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-message-size-mismatch-closes-silently",
+      "description": "type이 CLOSE인 메시지가 크기 4 + length를 어겨도(1바이트 초과) 받은 CLOSE로 보고 CLOSE 없이 조용히 닫는다. 예외는 없다",
+      "spec": [
+        "1.2",
+        "3.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "000000100003000000000000000000000000000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

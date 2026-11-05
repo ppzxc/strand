@@ -1,0 +1,358 @@
+{
+  "format": 1,
+  "vectors": [
+    {
+      "id": "ping-ack-timeout-before-and-after-limit",
+      "description": "PING을 보낸 뒤 상대의 ACK가 오지 않으면 대기 시간(1,000ms) 직전에는 아무것도 보내지 않고, 지나면 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "spec": [
+        "3.3",
+        "3.4"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "config": {
+          "ack_timeout_ms": 1000
+        }
+      },
+      "steps": [
+        {
+          "kind": "ping",
+          "payload": "0102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 999,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 2,
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "client-ping-ack-timeout-before-and-after-limit",
+      "description": "클라이언트 역할 구현도 보낸 PING에 ACK가 오지 않으면 대기 시간(1,000ms) 직전에는 조용하고 지나면 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "spec": [
+        "3.3",
+        "3.4"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "config": {
+          "ack_timeout_ms": 1000
+        }
+      },
+      "steps": [
+        {
+          "kind": "ping",
+          "payload": "0102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 999,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 2,
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ping-ack-timeout-is-cancelled-by-ack",
+      "description": "대기 시간 직전(999ms)에 같은 payload의 ACK PING이 도착하면 시계가 더 지나도 CLOSE를 보내지 않는다",
+      "spec": [
+        "3.3",
+        "3.4"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "config": {
+          "ack_timeout_ms": 1000
+        }
+      },
+      "steps": [
+        {
+          "kind": "ping",
+          "payload": "0102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 999,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140002010000000000000000000102030405060708",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 5000,
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "ping-ack-timeout-while-closing-closes-without-close-frame",
+      "description": "CLOSE(NO_ERROR)를 받아 종료 중일 때 PING의 확인 대기가 초과되면 CLOSE를 보내지 않고 닫는다. 대기 중인 내 요청 1은 로컬 UNAVAILABLE을 받고 그 뒤 closed가 난다",
+      "spec": [
+        "3.3",
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "config": {
+          "ack_timeout_ms": 1000
+        }
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "ping",
+          "payload": "0102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000030000000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 999,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 2,
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hello-ack-timeout-while-closing-closes-without-close-frame",
+      "description": "서버 HELLO에 대한 클라이언트 ACK가 오지 않은 채 종료 중이 되면(보낸 요청 2가 대기 중일 때 CLOSE(NO_ERROR) 수신), 대기 시간이 지나도 CLOSE를 보내지 않고 닫는다. 요청 2는 로컬 UNAVAILABLE을 받고 그 뒤 closed가 난다",
+      "spec": [
+        "3.3",
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false,
+        "config": {
+          "ack_timeout_ms": 1000
+        }
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "c0de535452300000",
+          "send": [
+            {
+              "type": "HELLO"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c000100000000000000000000",
+          "send": [
+            {
+              "type": "HELLO",
+              "flags": [
+                "ACK"
+              ]
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000030000000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 999,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 2,
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 2,
+              "status": "UNAVAILABLE"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ack-timeout-fails-pending-request-with-unavailable",
+      "description": "확인 대기 초과로 CLOSE(PROTOCOL_ERROR)를 보내고 닫을 때 대기 중인 내 요청 1은 로컬 UNAVAILABLE을 정확히 한 번 받고 그 뒤 closed가 난다",
+      "spec": [
+        "3.3",
+        "3.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "config": {
+          "ack_timeout_ms": 1000
+        }
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "ping",
+          "payload": "0102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 999,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 2,
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "UNAVAILABLE"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
