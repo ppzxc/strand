@@ -5,14 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -20,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -48,23 +44,8 @@ class NewVectorCoverageTest {
         return result;
     }
 
-    /** `파일명/id`에서 벡터 객체로. */
-    private static Map<String, JsonObject> allVectors() throws IOException {
-        Map<String, JsonObject> result = new LinkedHashMap<>();
-        List<Path> files;
-        try (Stream<Path> list = Files.list(VectorSuite.defaultDirectory())) {
-            files = list.filter(p -> p.toString().endsWith(".json")).sorted().collect(Collectors.toList());
-        }
-        for (Path file : files) {
-            String name = file.getFileName().toString().replace(".json", "");
-            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                for (JsonElement v :
-                        JsonParser.parseReader(reader).getAsJsonObject().getAsJsonArray("vectors")) {
-                    result.put(name + "/" + v.getAsJsonObject().get("id").getAsString(), v.getAsJsonObject());
-                }
-            }
-        }
-        return result;
+    private static Map<String, JsonObject> allVectors() {
+        return RawVectors.byKey();
     }
 
     private static JsonObject vector(String key) throws IOException {

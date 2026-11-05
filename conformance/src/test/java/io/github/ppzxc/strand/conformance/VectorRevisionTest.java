@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /** 규격 0.1.0에 맞춰 개정한 실제 벡터 디렉터리가 지킬 규칙(#97). 벡터 목록 자체는 단언하지 않는다. */
@@ -86,21 +85,12 @@ class VectorRevisionTest {
         }
     }
 
-    private static List<Path> vectorFiles() throws IOException {
-        try (Stream<Path> files = Files.list(VectorSuite.defaultDirectory())) {
-            return files.filter(p -> p.toString().endsWith(".json")).sorted().collect(Collectors.toList());
-        }
+    private static List<Path> vectorFiles() {
+        return RawVectors.files();
     }
 
-    private static List<JsonObject> vectors(Path file) throws IOException {
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            List<JsonObject> result = new ArrayList<>();
-            for (JsonElement v :
-                    JsonParser.parseReader(reader).getAsJsonObject().getAsJsonArray("vectors")) {
-                result.add(v.getAsJsonObject());
-            }
-            return result;
-        }
+    private static List<JsonObject> vectors(Path file) {
+        return RawVectors.vectors(file);
     }
 
     private static List<String> allIds() throws IOException {
