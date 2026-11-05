@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.conformance;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -165,14 +166,37 @@ final class VectorSchema {
         String transport = setup.has("transport") ? setup.get("transport").getAsString() : DEFAULT_TRANSPORT;
         String forbidden = transport.equals("tcp") ? "recv_message" : "recv";
         JsonArray steps = vector.getAsJsonArray("steps");
+        boolean helloAckSent = false;
         for (int i = 0; i < steps.size(); i++) {
-            String kind = steps.get(i).getAsJsonObject().get(STEP_TAG).getAsString();
+            JsonObject step = steps.get(i).getAsJsonObject();
+            String kind = step.get(STEP_TAG).getAsString();
             if (kind.equals(forbidden)) {
                 throw c.failAt(
                         Check.child(Check.item("steps", i), STEP_TAG),
                         "transport가 " + transport + "인 벡터에는 " + forbidden + " 단계를 쓸 수 없다");
             }
+            // 벡터 형식 문서 8.1절 3번: 확립 전 벡터는 상대 HELLO에 ACK를 보내기 전에 ping 단계를 쓰지 않는다.
+            if (kind.equals("ping") && !setup.get("established").getAsBoolean() && !helloAckSent) {
+                throw c.failAt(
+                        Check.child(Check.item("steps", i), STEP_TAG),
+                        "established가 false인 벡터는 상대 HELLO에 대한 ACK 송신(send의 HELLO ACK) 이전에 ping 단계를 쓸 수 없다");
+            }
+            helloAckSent |= sendsHelloAck(step);
         }
+    }
+
+    private static boolean sendsHelloAck(JsonObject step) {
+        for (JsonElement frame : step.getAsJsonArray("send")) {
+            JsonObject f = frame.getAsJsonObject();
+            if (f.get(FRAME_TAG).isJsonPrimitive()
+                    && f.get(FRAME_TAG).getAsJsonPrimitive().isString()
+                    && f.get(FRAME_TAG).getAsString().equals("HELLO")
+                    && f.has("flags")
+                    && f.getAsJsonArray("flags").contains(new JsonPrimitive("ACK"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static void steps(Check c, String path, JsonElement element) {

@@ -514,6 +514,44 @@ class VectorLoaderTest {
         return t.stream();
     }
 
+    private static final String PING_STEP =
+            "{\"kind\":\"ping\",\"payload\":\"0102030405060708\",\"send\":[],\"events\":[]}";
+    private static final String HELLO_ACK_STEP =
+            "{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[{\"type\":\"HELLO\",\"flags\":[\"ACK\"]}],\"events\":[]}";
+
+    private static String fileWithEstablished(boolean established, String... steps) {
+        return file(vector(
+                "a",
+                "[\"3.4\"]",
+                "{\"role\":\"server\",\"established\":" + established + "}",
+                "[" + String.join(",", steps) + "]"));
+    }
+
+    /** 벡터 형식 문서 8.1절 3번: 상대 HELLO에 ACK를 보내기 전에는 ping 단계를 쓰지 않는다. */
+    @TestFactory
+    Stream<DynamicTest> rejectsPingStepBeforeHelloAck() {
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(rejected(
+                "ping as first step before establishment", fileWithEstablished(false, PING_STEP), "ping", "ACK"));
+        t.add(rejected(
+                "ping before the HELLO ACK step",
+                fileWithEstablished(false, RECV_STEP, PING_STEP, HELLO_ACK_STEP),
+                "steps[1]",
+                "ACK"));
+        return t.stream();
+    }
+
+    @Test
+    void acceptsPingStepAfterHelloAckOrWhenEstablished() {
+        assertThat(VectorLoader.parse("x.json", fileWithEstablished(false, HELLO_ACK_STEP, PING_STEP)))
+                .hasSize(1);
+        assertThat(VectorLoader.parse("x.json", fileWithEstablished(true, PING_STEP)))
+                .hasSize(1);
+        // 확립 전이라도 ping 단계가 없으면 규칙과 무관하다.
+        assertThat(VectorLoader.parse("x.json", fileWithEstablished(false, RECV_STEP)))
+                .hasSize(1);
+    }
+
     @TestFactory
     Stream<DynamicTest> rejectsTransportViolations() {
         List<DynamicTest> t = new ArrayList<>();
