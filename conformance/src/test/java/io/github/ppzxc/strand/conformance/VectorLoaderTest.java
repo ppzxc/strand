@@ -7,7 +7,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -643,21 +642,39 @@ class VectorLoaderTest {
                 .hasSize(1);
     }
 
+    /** 마크다운 본문에서 ```json 코드 블록의 내용을 줄 끝 표기(LF, CRLF)와 관계없이 모은다. */
+    private static List<String> jsonBlocks(String markdown) {
+        Matcher m =
+                Pattern.compile("```json\\r?\\n(.*?)\\r?\\n```", Pattern.DOTALL).matcher(markdown);
+        List<String> blocks = new ArrayList<>();
+        while (m.find()) {
+            blocks.add(m.group(1));
+        }
+        return blocks;
+    }
+
+    @Test
+    void jsonBlocksAreFoundWithLfAndCrlfLineEndings() {
+        String lf = "text\n```json\n{\"a\":1}\n```\nmore\n```json\n[2]\n```\n";
+
+        assertThat(jsonBlocks(lf)).containsExactly("{\"a\":1}", "[2]");
+        assertThat(jsonBlocks(lf.replace("\n", "\r\n"))).containsExactly("{\"a\":1}", "[2]");
+    }
+
     /** 형식 문서의 JSON 예시가 모두 로더를 통과한다. */
     @Test
     void jsonExamplesInTheFormatDocumentPassTheLoader() throws IOException {
-        Path doc = Paths.get("..", "docs", "specification", "STRAND_CONFORMANCE_VECTORS.md")
+        // 벡터 디렉터리(conformance/vectors)에서 저장소 루트로 올라간 위치의 문서를 읽는다. 실행 위치와 무관하다.
+        Path doc = VectorSuite.defaultDirectory()
+                .resolve("../../docs/specification/STRAND_CONFORMANCE_VECTORS.md")
                 .toAbsolutePath()
                 .normalize();
-        String text = new String(Files.readAllBytes(doc), StandardCharsets.UTF_8);
-        Matcher m = Pattern.compile("```json\\n(.*?)\\n```", Pattern.DOTALL).matcher(text);
-        int count = 0;
-        while (m.find()) {
-            count++;
-            assertThat(VectorLoader.parse("doc-example-" + count + ".json", m.group(1)))
+        List<String> blocks = jsonBlocks(new String(Files.readAllBytes(doc), StandardCharsets.UTF_8));
+        for (int i = 0; i < blocks.size(); i++) {
+            assertThat(VectorLoader.parse("doc-example-" + (i + 1) + ".json", blocks.get(i)))
                     .isNotEmpty();
         }
-        assertThat(count).isGreaterThanOrEqualTo(4);
+        assertThat(blocks).hasSizeGreaterThanOrEqualTo(4);
     }
 
     @Test
