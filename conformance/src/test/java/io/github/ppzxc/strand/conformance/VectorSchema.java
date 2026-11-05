@@ -188,15 +188,27 @@ final class VectorSchema {
     private static boolean sendsHelloAck(JsonObject step) {
         for (JsonElement frame : step.getAsJsonArray("send")) {
             JsonObject f = frame.getAsJsonObject();
-            if (f.get(FRAME_TAG).isJsonPrimitive()
-                    && f.get(FRAME_TAG).getAsJsonPrimitive().isString()
-                    && f.get(FRAME_TAG).getAsString().equals("HELLO")
-                    && f.has("flags")
-                    && f.getAsJsonArray("flags").contains(new JsonPrimitive("ACK"))) {
+            if ("HELLO".equals(frameType(f)) && hasFlag(f, "ACK")) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** 프레임 항목의 `type`이 문자열 이름이면 그 이름, 아니면 null(숫자 type이거나 깨진 값). */
+    static String frameType(JsonObject frame) {
+        JsonElement type = frame.get(FRAME_TAG);
+        return type != null
+                        && type.isJsonPrimitive()
+                        && type.getAsJsonPrimitive().isString()
+                ? type.getAsString()
+                : null;
+    }
+
+    /** 프레임 항목의 `flags`에 이 이름이 있는가. `flags`가 없거나 배열이 아니면 false. */
+    static boolean hasFlag(JsonObject frame, String flag) {
+        JsonElement flags = frame.get("flags");
+        return flags != null && flags.isJsonArray() && flags.getAsJsonArray().contains(new JsonPrimitive(flag));
     }
 
     static void steps(Check c, String path, JsonElement element) {

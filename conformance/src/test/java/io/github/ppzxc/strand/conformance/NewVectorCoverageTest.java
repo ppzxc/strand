@@ -162,66 +162,6 @@ class NewVectorCoverageTest {
         assertThat(kinds).contains("ping", "advance");
     }
 
-    private static final long DEFAULT_ACK_TIMEOUT_MS = 5000;
-
-    /** 구조를 해석해 확인 대기 구간별로 센 경과 시간 중 한도에 정확히 닿는 것이 있는가. */
-    private static boolean reachesLimitExactly(JsonObject vector) {
-        JsonObject setup = vector.getAsJsonObject("setup");
-        long limit = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
-                ? setup.getAsJsonObject("config").get("ack_timeout_ms").getAsLong()
-                : DEFAULT_ACK_TIMEOUT_MS;
-        return AckWaits.elapsedAtEachAdvance(vector).contains(limit);
-    }
-
-    private static JsonObject parseVector(String json) {
-        return JsonParser.parseString(json).getAsJsonObject();
-    }
-
-    private static final String PING_START =
-            "{\"kind\":\"ping\",\"payload\":\"0102030405060708\"," + "\"send\":[{\"type\":\"PING\"}],\"events\":[]}";
-
-    private static String advance(long ms) {
-        return "{\"kind\":\"advance\",\"ms\":" + ms + ",\"send\":[],\"events\":[]}";
-    }
-
-    private static JsonObject limit1000(String... steps) {
-        return parseVector(
-                "{\"setup\":{\"config\":{\"ack_timeout_ms\":1000}},\"steps\":[" + String.join(",", steps) + "]}");
-    }
-
-    @Test
-    void ackWaitIsCountedFromTheStepThatStartsIt() {
-        // 대기 시작(PING 송신) 전의 advance 500은 세지 않는다. 구간은 500뿐이므로 한도 1000에 닿지 않는다.
-        JsonObject v = limit1000(advance(500), PING_START, advance(500));
-
-        assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(500L);
-        assertThat(reachesLimitExactly(v)).isFalse();
-    }
-
-    @Test
-    void ackWaitEndsWhenTheAckIsReceived() {
-        // ACK 수신 뒤의 advance는 같은 대기가 아니다.
-        String ack = "{\"kind\":\"recv\",\"hex\":\"000000140002010000000000000000000102030405060708\","
-                + "\"send\":[],\"events\":[]}";
-        JsonObject v = limit1000(PING_START, advance(999), ack, advance(1));
-
-        assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(999L);
-        assertThat(reachesLimitExactly(v)).isFalse();
-    }
-
-    @Test
-    void ackWaitReachingTheLimitExactlyIsDetected() {
-        assertThat(reachesLimitExactly(limit1000(PING_START, advance(600), advance(400))))
-                .isTrue();
-    }
-
-    @Test
-    void defaultLimitIsUsedWhenConfigIsOmitted() {
-        JsonObject v = parseVector("{\"setup\":{},\"steps\":[" + PING_START + "," + advance(5000) + "]}");
-
-        assertThat(reachesLimitExactly(v)).isTrue();
-    }
-
     /** ack_timeout_ms를 쓰거나 id에 ack-timeout이 있는 모든 벡터는 확인 대기를 시작해야 하고, 한도에 정확히 닿지 않는다. */
     @Test
     void timeVectorsNeverReachTheLimitExactly() throws IOException {
@@ -239,7 +179,7 @@ class NewVectorCoverageTest {
             assertThat(AckWaits.startsAnyWait(vector))
                     .as("%s: 확인 대기 시작(HELLO/PING 송신)을 해석할 수 없다", entry.getKey())
                     .isTrue();
-            assertThat(reachesLimitExactly(vector))
+            assertThat(AckWaits.reachesLimitExactly(vector))
                     .as("%s: 한도에 정확히 닿으면 안 된다", entry.getKey())
                     .isFalse();
         }
