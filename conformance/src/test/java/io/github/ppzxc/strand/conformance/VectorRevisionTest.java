@@ -28,22 +28,63 @@ class VectorRevisionTest {
             .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
             .normalize();
 
-    /** 삭제된 개념의 흔적. 벡터 JSON 어디에도 나오면 안 된다. */
-    private static final List<String> REMOVED_TERMS = Arrays.asList(
+    /** 삭제된 개념의 JSON 키 이름. 어느 깊이의 객체에도 나오면 안 된다. */
+    private static final List<String> REMOVED_KEYS = Arrays.asList(
             "last_stream_id",
             "content_type",
+            "content_types",
             "max_pending_bytes",
             "draining",
-            "hello_timeout_ms",
-            "\"END\"",
-            "\"RESPONSE\"",
-            "STREAM_CLOSED",
-            "FRAME_SIZE_ERROR",
-            "HELLO_TIMEOUT");
+            "draining_retention_limit",
+            "hello_timeout_ms");
+
+    /** 값이 열거형·플래그·오류 코드인 키. 자유 서술(description, id)과 달리 이 위치의 문자열만 삭제 이름과 비교한다. */
+    private static final List<String> ENUM_KEYS =
+            Arrays.asList("type", "kind", "event", "status", "error_code", "flags");
+
+    /** 삭제된 열거형·플래그·오류 코드 값. */
+    private static final List<String> REMOVED_ENUM_VALUES =
+            Arrays.asList("END", "RESPONSE", "STREAM_CLOSED", "FRAME_SIZE_ERROR", "HELLO_TIMEOUT");
 
     /** 삭제된 개념이 들어간 id 조각. 새 용어로 바꿔야 한다. */
-    private static final List<String> REMOVED_ID_WORDS =
-            Arrays.asList("frame-size-error", "hello-timeout", "pending-bytes", "pending-return", "last-stream-id");
+    private static final List<String> REMOVED_ID_WORDS = Arrays.asList(
+            "frame-size-error",
+            "hello-timeout",
+            "pending-bytes",
+            "pending-return",
+            "last-stream-id",
+            "draining",
+            "stream-closed",
+            "content-type");
+
+    /** JSON 트리에서 삭제된 개념이 나타나는 위치(경로 문자열)를 모은다. */
+    private static List<String> removedConceptPaths(JsonElement root) {
+        List<String> found = new ArrayList<>();
+        collectRemoved(root, "$", false, found);
+        return found;
+    }
+
+    private static void collectRemoved(JsonElement node, String path, boolean enumPosition, List<String> found) {
+        if (node.isJsonObject()) {
+            for (java.util.Map.Entry<String, JsonElement> member :
+                    node.getAsJsonObject().entrySet()) {
+                String child = path + "." + member.getKey();
+                if (REMOVED_KEYS.contains(member.getKey())) {
+                    found.add(child);
+                }
+                collectRemoved(member.getValue(), child, ENUM_KEYS.contains(member.getKey()), found);
+            }
+        } else if (node.isJsonArray()) {
+            int i = 0;
+            for (JsonElement item : node.getAsJsonArray()) {
+                collectRemoved(item, path + "[" + i++ + "]", enumPosition, found);
+            }
+        } else if (enumPosition
+                && node.getAsJsonPrimitive().isString()
+                && REMOVED_ENUM_VALUES.contains(node.getAsString())) {
+            found.add(path + "=" + node.getAsString());
+        }
+    }
 
     private static List<Path> vectorFiles() throws IOException {
         try (Stream<Path> files = Files.list(VectorSuite.defaultDirectory())) {
@@ -104,11 +145,43 @@ class VectorRevisionTest {
     @Test
     void removedConceptsDoNotAppearInVectorFiles() throws IOException {
         for (Path file : vectorFiles()) {
-            String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
-            for (String term : REMOVED_TERMS) {
-                assertThat(text).as("%s의 %s", file.getFileName(), term).doesNotContain(term);
+            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                assertThat(removedConceptPaths(JsonParser.parseReader(reader)))
+                        .as("%s", file.getFileName())
+                        .isEmpty();
             }
         }
+    }
+
+    @Test
+    void removedConceptCheckLooksAtKeysAndEnumPositionsOnly() {
+        // 자유 서술(description)과 id 안의 일반 단어는 오탐이 아니다.
+        assertThat(removedConceptPaths(JsonParser.parseString("{\"id\":\"draining-end\","
+                        + "\"description\":\"draining 상태와 END, RESPONSE, HELLO_TIMEOUT를 말로만 언급\","
+                        + "\"steps\":[{\"send\":[{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\"}]}]}")))
+                .isEmpty();
+        // 키 이름
+        assertThat(removedConceptPaths(
+                        JsonParser.parseString("{\"setup\":{\"local_hello\":{\"max_pending_bytes\":1}}}")))
+                .hasSize(1);
+        assertThat(removedConceptPaths(JsonParser.parseString("{\"send\":[{\"last_stream_id\":0}]}")))
+                .hasSize(1);
+        assertThat(removedConceptPaths(JsonParser.parseString("{\"setup\":{\"draining\":true}}")))
+                .hasSize(1);
+        // enum/flag/error_code 위치의 값
+        assertThat(removedConceptPaths(
+                        JsonParser.parseString("{\"send\":[{\"type\":\"RESET\",\"error_code\":\"STREAM_CLOSED\"}]}")))
+                .hasSize(1);
+        assertThat(removedConceptPaths(
+                        JsonParser.parseString("{\"send\":[{\"type\":\"CLOSE\",\"error_code\":\"HELLO_TIMEOUT\"}]}")))
+                .hasSize(1);
+        assertThat(removedConceptPaths(JsonParser.parseString("{\"send\":[{\"type\":256,\"flags\":[\"END\"]}]}")))
+                .hasSize(1);
+        assertThat(removedConceptPaths(JsonParser.parseString("{\"send\":[{\"type\":\"RESPONSE\"}]}")))
+                .hasSize(1);
+        assertThat(removedConceptPaths(
+                        JsonParser.parseString("{\"send\":[{\"type\":256,\"status\":\"FRAME_SIZE_ERROR\"}]}")))
+                .hasSize(1);
     }
 
     @Test
