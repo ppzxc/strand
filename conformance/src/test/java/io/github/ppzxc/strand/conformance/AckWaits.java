@@ -27,6 +27,12 @@ final class AckWaits {
     private static final int PREFACE_HEX_LENGTH = 16;
     private static final int LENGTH_HEX = 8;
     private static final int PING_PAYLOAD_HEX = 16;
+    /** 프레임 `length`의 최솟값 12(규격 2.2.1절). 이보다 짧으면 헤더를 읽을 수 없는 깨진 바이트다. */
+    private static final int MIN_FRAME_LENGTH = 12;
+    /** 헤더 16바이트 가운데 `extensions_length`가 있는 hex 위치(바이트 12~13, 규격 2.1절). */
+    private static final int EXTENSIONS_LENGTH_AT = 24;
+
+    private static final int HEADER_HEX = 32;
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000;
 
     private AckWaits() {}
@@ -191,7 +197,7 @@ final class AckWaits {
             }
             while (!broken && buffer.length() >= LENGTH_HEX) {
                 long length = Long.parseLong(buffer.substring(0, LENGTH_HEX), 16);
-                if (length < 3) {
+                if (length < MIN_FRAME_LENGTH) {
                     broken = true;
                     break;
                 }
@@ -228,10 +234,15 @@ final class AckWaits {
             if ((flags & ACK_FLAG) == 0 || (type != HELLO && type != PING)) {
                 return;
             }
-            String payload = frame.length() >= LENGTH_HEX + 6 + PING_PAYLOAD_HEX
-                    ? frame.substring(frame.length() - PING_PAYLOAD_HEX)
-                    : null;
-            acks.add(new Ack(type, payload));
+            acks.add(new Ack(type, payloadOf(frame)));
+        }
+
+        /** 헤더 16바이트와 확장 영역 뒤의 payload. 정확히 8바이트가 아니면 null이다(PING 말고는 payload를 맞춰 보지 않는다). */
+        private static String payloadOf(String frame) {
+            int extensionsHex =
+                    Integer.parseInt(frame.substring(EXTENSIONS_LENGTH_AT, EXTENSIONS_LENGTH_AT + 4), 16) * 2;
+            int from = HEADER_HEX + extensionsHex;
+            return frame.length() - from == PING_PAYLOAD_HEX ? frame.substring(from) : null;
         }
     }
 }

@@ -77,8 +77,8 @@ class AckWaitsTest {
 
     @Test
     void aFrameLengthThatOverflowsAnIntDoesNotCrashOrHang() {
-        // 길이 0xC0DE5354(서문 예약 바이트가 ffff인 경우를 프레임으로 읽은 것)와 0x7FFFFFFC. 한 번 읽은 뒤 멈춰야 한다.
-        for (String hex : new String[] {"c0de5354" + "5230ffff", "7ffffffc" + "00020100"}) {
+        // 길이 0xC1DE5354와 0x7FFFFFFC(서문이 아닌 바이트를 프레임으로 읽은 것). 완결되지 않은 프레임으로 기다려야 한다.
+        for (String hex : new String[] {"c1de5354" + "5230ffff", "7ffffffc" + "00020100"}) {
             JsonObject v = limit1000(PING_START, recv(hex), advance(1000));
 
             assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1000L);
@@ -87,7 +87,7 @@ class AckWaitsTest {
 
     @Test
     void aPrefaceWithReservedBytesIsSkippedAndTheFramesAfterItAreRead() {
-        String helloAck = "00000003" + "000101";
+        String helloAck = "0000000c" + "0001" + "01" + "00" + "00000000" + "0000" + "0000";
         String helloStart = "{\"kind\":\"recv\",\"hex\":\"\",\"send\":[{\"type\":\"HELLO\"}],\"events\":[]}";
         JsonObject v = limit1000(helloStart, advance(999), recv("c0de53545230ffff" + helloAck), advance(1));
 
@@ -108,7 +108,7 @@ class AckWaitsTest {
     void bytesInsideAPayloadAreNotReadAsAFrameHeader() {
         // 첫 recv는 프레임 하나의 앞부분이고, 둘째 recv의 앞 14자리는 ACK PING 모양이지만 같은 프레임의 payload다.
         String fakeAck = "0002010000000000";
-        String frame = "0000000c" + "0063" + "00" + "00" + fakeAck + "0000";
+        String frame = "00000014" + "0063" + "00" + "00" + "00000000" + "0000" + "0000" + fakeAck;
         JsonObject v = limit1000(PING_START, recv(frame.substring(0, 12)), recv(frame.substring(12)), advance(1000));
 
         assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1000L);
@@ -139,6 +139,15 @@ class AckWaitsTest {
     @Test
     void aPingAckEndsOnlyTheWaitWithTheSamePayload() {
         JsonObject v = limit1000(PING_START, pingStart("1111111111111111"), recv(PING_ACK_0102), advance(1000));
+
+        assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1000L);
+    }
+
+    @Test
+    void aPingAckShorterThanARealPingFrameDoesNotEndTheWait() {
+        // length 0x10인 짧은 프레임은 payload가 8바이트가 아니라 payload를 맞춰 볼 수 없다.
+        String shortAck = "00000010" + "0002" + "01" + "00" + "00000000" + "0000" + "0000" + "01020304";
+        JsonObject v = limit1000(PING_START, recv(shortAck), advance(1000));
 
         assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1000L);
     }

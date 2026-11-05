@@ -18,13 +18,15 @@ import java.util.Map;
 /** 로더를 거치지 않고 벡터 파일을 JSON 그대로 읽는 테스트 도구. 읽은 결과는 한 번만 만든다. */
 final class RawVectors {
 
+    private static Path cachedDirectory;
     private static Map<String, JsonObject> byKey;
 
     private RawVectors() {}
 
     /** `파일명/id`에서 벡터 객체로. 파일 순서와 파일 안 순서를 지킨다. */
     static synchronized Map<String, JsonObject> byKey() {
-        if (byKey == null) {
+        Path directory = VectorSuite.defaultDirectory();
+        if (byKey == null || !directory.equals(cachedDirectory)) {
             Map<String, JsonObject> result = new LinkedHashMap<>();
             for (Path file : files()) {
                 for (JsonObject vector : vectors(file)) {
@@ -32,6 +34,7 @@ final class RawVectors {
                             VectorSuite.fileKey(file) + "/" + vector.get("id").getAsString(), vector);
                 }
             }
+            cachedDirectory = directory;
             byKey = Collections.unmodifiableMap(result);
         }
         return byKey;
