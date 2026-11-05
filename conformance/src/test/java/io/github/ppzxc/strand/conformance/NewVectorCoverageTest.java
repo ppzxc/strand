@@ -146,7 +146,6 @@ class NewVectorCoverageTest {
     @Test
     void timeVectorsNeverReachTheLimitExactly() throws IOException {
         int declared = 0;
-        int timed = 0;
         for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
             JsonObject vector = entry.getValue();
             JsonObject setup = vector.getAsJsonObject("setup");
@@ -158,16 +157,17 @@ class NewVectorCoverageTest {
                 assertThat(AckWaits.startsAnyWait(vector))
                         .as("%s: 확인 대기 시작(HELLO/PING 송신)을 해석할 수 없다", entry.getKey())
                         .isTrue();
+                assertThat(AckWaits.hasAdvance(vector))
+                        .as("%s: 확인 대기 한도를 보려면 advance 단계가 있어야 한다", entry.getKey())
+                        .isTrue();
             }
             if (AckWaits.startsAnyWait(vector) && AckWaits.hasAdvance(vector)) {
-                timed++;
                 assertThat(AckWaits.reachesLimitExactly(vector))
                         .as("%s: 한도에 정확히 닿으면 안 된다", entry.getKey())
                         .isFalse();
             }
         }
         assertThat(declared).isGreaterThanOrEqualTo(11);
-        assertThat(timed).isGreaterThanOrEqualTo(declared);
     }
 
     /** 5.1절 5번 (가)→(나)→(다). 어느 검사가 먼저 걸리는지는 송신 프레임으로 본다. */
