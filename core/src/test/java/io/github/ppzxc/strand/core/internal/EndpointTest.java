@@ -1606,4 +1606,62 @@ class EndpointTest {
 
         assertOpenAndSilent(client);
     }
+
+    @Test
+    void closeFrameWithLengthBelowMinimumClosesSilently() {
+        Endpoint server = established();
+
+        server.receive(bytes("0000000b0003000000000000000000"));
+
+        assertThat(sent(server)).isEmpty();
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void closeFrameWithLengthAboveMaxFrameSizeClosesSilently() {
+        Endpoint server = established();
+
+        server.receive(bytes("00400001" + "0003000000000000" + "00000000"));
+
+        assertThat(sent(server)).isEmpty();
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void nonCloseFrameWithLengthBelowMinimumStillGetsProtocolError() {
+        Endpoint server = established();
+
+        server.receive(bytes("0000000b0004000000000000000000"));
+
+        assertClosedWithProtocolError(server);
+    }
+
+    @Test
+    void disconnectFailsPendingRequestsAndClosesOnce() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.drainOutput();
+
+        client.disconnect();
+        client.disconnect();
+
+        assertThat(client.drainOutput()).isEmpty();
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+        assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void disconnectAfterClosedEmitsNothing() {
+        Endpoint client = establishedClient();
+        client.close(1);
+        client.drainOutput();
+        client.drainEvents();
+
+        client.disconnect();
+
+        assertOpenAndSilent(client);
+    }
 }

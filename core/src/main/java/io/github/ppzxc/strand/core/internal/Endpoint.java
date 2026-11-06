@@ -25,6 +25,9 @@ public final class Endpoint {
     private static final int FIRST_CLIENT_STREAM_ID = 1;
     private static final int MIN_FRAME_LENGTH = 12;
     private static final int LENGTH_SIZE = 4;
+    /** type 필드가 끝나는 위치. 길이가 어긋난 프레임도 여기까지는 읽어 type을 본다. */
+    private static final int TYPE_END = 6;
+
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int PARAM_SIZE = 6;
     private static final int RESET_PAYLOAD_SIZE = 4;
@@ -213,6 +216,11 @@ public final class Endpoint {
         terminateUnlessClosing(errorCode);
     }
 
+    /** 전송 계층이 CLOSE 없이 끊겼다. 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다. 이미 닫혔다면 아무것도 하지 않는다(규격 3.5절). */
+    public void disconnect() {
+        terminate();
+    }
+
     /**
      * 지금까지 쌓인, 상대에게 보낼 바이트를 꺼낸다.
      *
@@ -278,7 +286,13 @@ public final class Endpoint {
             firstFrameChecked = true;
         }
         if (length < MIN_FRAME_LENGTH || length > config.maxFrameSize() - LENGTH_SIZE) {
-            connectionError();
+            if (inbound.length >= TYPE_END && Frames.typeOf(inbound) == Frames.CLOSE) {
+                // 길이가 어긋나도 type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫는다(규격 3.5절).
+                closeSeen = true;
+                terminate();
+            } else {
+                connectionError();
+            }
             return false;
         }
         int frameSize = (int) (LENGTH_SIZE + length);

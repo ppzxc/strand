@@ -32,8 +32,8 @@ final class VectorRunner {
     private static final Map<Integer, String> HELLO_PARAMS = new LinkedHashMap<>();
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(Arrays.asList(
             "role", "established", "local_hello", "peer_hello", "config", "known_types", "next_stream_id"));
-    private static final Set<String> SUPPORTED_STEPS =
-            new HashSet<>(Arrays.asList("recv", "advance", "ping", "request", "close", "cancel", "respond"));
+    private static final Set<String> SUPPORTED_STEPS = new HashSet<>(
+            Arrays.asList("recv", "advance", "ping", "request", "close", "cancel", "respond", "disconnect"));
     private static final Set<String> SUPPORTED_FRAMES =
             new HashSet<>(Arrays.asList("PREFACE", "HELLO", "PING", "CLOSE", "RESET"));
     private static final Set<String> SUPPORTED_EVENTS =
@@ -201,6 +201,9 @@ final class VectorRunner {
                 break;
             case "respond":
                 endpoint.respond(step.get("stream_id").getAsInt(), statusCode(step.get("status")));
+                break;
+            case "disconnect":
+                endpoint.disconnect();
                 break;
             default:
                 endpoint.close(errorCode(step.get("error_code")));
