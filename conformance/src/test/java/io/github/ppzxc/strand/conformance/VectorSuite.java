@@ -12,7 +12,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DynamicTest;
 
 /** 벡터 디렉터리를 읽어 벡터마다 동적 테스트를 만든다. */
@@ -39,7 +38,7 @@ final class VectorSuite {
             // 테스트 이름은 `파일명/id`(벡터 형식 문서 3절).
             String name = fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
-                tests.add(DynamicTest.dynamicTest(name + "/" + vector.id(), () -> run(vector)));
+                tests.add(DynamicTest.dynamicTest(name + "/" + vector.id(), () -> VectorRunner.run(vector)));
             }
         }
         return tests.stream();
@@ -61,12 +60,5 @@ final class VectorSuite {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-    }
-
-    // 로드와 구조 검증은 이미 끝났다(dynamicTests가 로더를 부르는 시점에 실패로 드러난다).
-    // core에 규격 구현이 없으므로 실행 단계는 통과로 위장하지 않고 skipped로 보인다.
-    // 규격 구현이 들어오면 여기서 vector.setup()과 vector.steps()를 core에 실행한다.
-    private static void run(ConformanceVector vector) {
-        Assumptions.abort("core 미구현: 벡터 실행 단계를 건너뛴다 (" + vector.id() + ")");
     }
 }

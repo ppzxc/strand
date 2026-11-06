@@ -14,7 +14,6 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 import org.junit.jupiter.api.io.TempDir;
-import org.opentest4j.TestAbortedException;
 
 /** 벡터 디렉터리의 모든 벡터 파일을 읽어 벡터마다 동적 테스트 하나를 만든다. 이름은 {@code 파일명/id}(파일명의 {@code .json}은 뺀다). */
 class VectorConformanceTest {
@@ -72,13 +71,18 @@ class VectorConformanceTest {
     }
 
     @Test
-    void executionIsSkippedBecauseCoreIsNotImplemented(@TempDir Path dir) throws IOException {
-        writeFile(dir, "one.json", "a");
+    void vectorsAreExecutedAndMismatchesFail(@TempDir Path dir) throws IOException {
+        // 아무것도 보내지 않을 입력에 closed를 기대하면 실패해야 한다.
+        String vector = "{\"id\":\"x\",\"description\":\"d\",\"spec\":[\"3.4\"],"
+                + "\"setup\":{\"role\":\"server\",\"established\":true},"
+                + "\"steps\":[{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[],"
+                + "\"events\":[{\"event\":\"closed\"}]}]}";
+        Files.write(
+                dir.resolve("sample.json"),
+                ("{\"format\":1,\"vectors\":[" + vector + "]}").getBytes(StandardCharsets.UTF_8));
         DynamicTest test = VectorSuite.dynamicTests(dir).findFirst().get();
 
-        assertThatThrownBy(() -> test.getExecutable().execute())
-                .isInstanceOf(TestAbortedException.class)
-                .hasMessageContaining("core 미구현");
+        assertThatThrownBy(() -> test.getExecutable().execute()).isInstanceOf(AssertionError.class);
     }
 
     @Test
