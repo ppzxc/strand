@@ -7,10 +7,10 @@ public final class Event {
     public static final int UNAVAILABLE = 14;
 
     /** 규격 2.5.1절의 {@code UNKNOWN}. 예약된 status는 이 값으로 취급한다. */
-    static final int UNKNOWN = 2;
+    private static final int UNKNOWN = 2;
 
     /** 규격 2.5.1절에 정의된 마지막 status({@code UNAUTHENTICATED}). */
-    static final int UNAUTHENTICATED = 16;
+    private static final int UNAUTHENTICATED = 16;
 
     /** 이벤트 종류. */
     public enum Kind {
@@ -40,6 +40,11 @@ public final class Event {
 
     static Event result(int streamId, int status) {
         return new Event(Kind.RESULT, streamId, status, 0);
+    }
+
+    /** 받은 status를 애플리케이션에 넘길 값으로 바꾼다. 예약된 값(17~255)은 {@code UNKNOWN}으로 취급한다(규격 2.5.1절). */
+    static int normalizeStatus(int status) {
+        return status > UNAUTHENTICATED ? UNKNOWN : status;
     }
 
     static Event requestReceived(int streamId, int type) {

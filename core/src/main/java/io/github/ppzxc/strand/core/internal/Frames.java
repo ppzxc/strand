@@ -104,6 +104,11 @@ final class Frames {
         return frame[6] & 0xFF;
     }
 
+    /** 응답 프레임의 {@code status}(바이트 7). */
+    static int statusOf(byte[] frame) {
+        return frame[7] & 0xFF;
+    }
+
     /** 프레임의 {@code stream_id}(바이트 8~11). */
     static long streamIdOf(byte[] frame) {
         return readUnsignedInt(frame, 8);

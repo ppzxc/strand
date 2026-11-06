@@ -29,7 +29,6 @@ public final class Endpoint {
     /** extensions_length의 한도(규격 2.4절). */
     private static final int MAX_EXTENSIONS_LENGTH = 8192;
 
-    private static final int STATUS_OFFSET = 7;
     private static final int MAX_FRAME_SIZE_ID = 0x0001;
     private static final long MIN_MAX_FRAME_SIZE = 16384L;
     private static final long MAX_MAX_FRAME_SIZE = 16_777_216L;
@@ -301,8 +300,8 @@ public final class Endpoint {
      * 애플리케이션 프레임. 확장 영역 형식 위반은 요청인지 응답인지, type을 아는지와 상관없이 연결 오류다(규격 2.4.1절). 내 번호 공간의
      * 프레임은 응답이고 상대 공간의 프레임은 새 요청이다(규격 4.2절).
      */
-    private void handleApplication(byte[] frame, int type, int extensions, long streamId) {
-        if (extensions > MAX_EXTENSIONS_LENGTH || !validExtensions(frame, extensions)) {
+    private void handleApplication(byte[] frame, int type, int extensionsLength, long streamId) {
+        if (extensionsLength > MAX_EXTENSIONS_LENGTH || !validExtensions(frame, extensionsLength)) {
             connectionError();
         } else if (!peerAckReceived) {
             // 상대 ACK 전의 애플리케이션 프레임은 연결 오류다(규격 3.3절).
@@ -315,10 +314,10 @@ public final class Endpoint {
     }
 
     /** 확장 영역 형식 검사(규격 2.4.1절): 항목 길이의 합이 {@code extensions_length}와 같고 같은 tag가 없다. */
-    private static boolean validExtensions(byte[] frame, int extensions) {
+    private static boolean validExtensions(byte[] frame, int extensionsLength) {
         Set<Integer> tags = new HashSet<>();
         int at = Frames.HEADER_SIZE;
-        int end = at + extensions;
+        int end = at + extensionsLength;
         while (at < end) {
             if (end - at < TLV_HEADER_SIZE) {
                 return false;
@@ -337,8 +336,7 @@ public final class Endpoint {
         if (!pendingStreams.remove(Integer.valueOf(streamId))) {
             return;
         }
-        int status = frame[STATUS_OFFSET] & 0xFF;
-        events.add(Event.result(streamId, status > Event.UNAUTHENTICATED ? Event.UNKNOWN : status));
+        events.add(Event.result(streamId, Event.normalizeStatus(Frames.statusOf(frame))));
         if (closeSeen && pendingStreams.isEmpty()) {
             terminate();
         }

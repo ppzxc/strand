@@ -11,6 +11,9 @@ class EndpointTest {
 
     private static final String PREFACE = "c0de535452300000";
     private static final String HELLO = "0000000c000100000000000000000000";
+    /** extensions_length의 한도(규격 2.4절). */
+    private static final int MAX_EXTENSIONS = 8192;
+
     private static final String HELLO_ACK = "0000000c000101000000000000000000";
     private static final String PING = "00000014 00020000 00000000 00000000 0102030405060708";
     private static final String PING_ACK = "00000014000201000000000000000000" + "0102030405060708";
@@ -1107,7 +1110,7 @@ class EndpointTest {
         client.request(257, new byte[0]);
 
         // timeout의 길이가 4가 아니어도 응답에서는 값을 해석하지 않는다.
-        client.receive(bytes(appFrame(1, 0, "0001000300000" + "1")));
+        client.receive(bytes(appFrame(1, 0, "00010003000001")));
 
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT);
     }
@@ -1118,7 +1121,7 @@ class EndpointTest {
         client.request(257, new byte[0]);
         client.drainOutput();
 
-        client.receive(bytes(appFrame(1, 0, "000900016100090001" + "62")));
+        client.receive(bytes(appFrame(1, 0, "00090001610009000162")));
 
         assertThat(sent(client)).isEqualTo(CLOSE_PROTOCOL_ERROR);
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
@@ -1147,7 +1150,7 @@ class EndpointTest {
 
     @Test
     void requestWithUnknownExtensionTagIsDeliveredEvenWhenItFillsTheLimit() {
-        for (int valueLength : new int[] {3, 8192 - 4}) {
+        for (int valueLength : new int[] {3, MAX_EXTENSIONS - 4}) {
             Endpoint server = established();
 
             server.receive(bytes(appFrame(1, 0, unknownTlv(valueLength))));
@@ -1159,7 +1162,7 @@ class EndpointTest {
     @Test
     void malformedRequestExtensionsCloseWithProtocolError() {
         String[] malformed = {
-            unknownTlv(8192 - 3), // 한도 8192 초과
+            unknownTlv(MAX_EXTENSIONS - 3), // 한도 8192 초과
             "0004000000090008", // 항목이 자기 길이만큼 value를 갖지 못함
             "000900000000", // 항목 뒤에 2바이트가 남음
             "7777000161" + "7777000162", // 모르는 tag 중복
