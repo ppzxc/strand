@@ -158,3 +158,4 @@ _Avoid_: conformance 벡터, 테스트 데이터, 픽스처, 골든 파일
 - **`message`**: 식별자의 `message`는 바이트 스트림 전송에서는 프레임 하나, WebSocket 전송에서는 WebSocket 메시지 하나(또는 WebSocket Close)다([규격 1.2절](docs/specification/STRAND_SPECIFICATION.md#12-공식-사용-환경)). 문서 서술에서 프레임과 메시지를 구별하는 규칙은 그대로다.
 - **규격 필드 이름은 규격 의미로만 쓴다**: `type`, `status`, `error_code`, `stream_id`를 코드 내부 분류의 이름으로 쓰지 않는다. 내부 분류에는 `kind` 등 다른 이름을 쓴다.
 - **상수는 규격 표의 이름 그대로 쓴다**: status는 규격 2.5.1절, error_code는 2.5.2절, 프레임 type은 2.2.2절, HELLO 파라미터는 3.2절의 표. 번호 공간이 다른 값은 클래스로 나눈다(`Status`, `ErrorCode`, `FrameType`, `HelloParams`). 표에 이름이 없는 값(파라미터 크기, 허용 범위 등)은 `_ID`, `_LIMIT`, `_SIZE` 같은 접미사로 의미를 드러내고, 규격 값의 별칭은 표의 클래스가 아니라 쓰는 쪽에 둔다.
+- **`Draft`**: 불변 객체의 복사본을 만들 때 한 필드만 고치려고 쓰는 가변 값 모음이다(`EndpointConfig`의 `ConfigDraft`). 도메인 개념이 아니라 구현 관용어이며 `internal` 패키지 밖으로 내보내지 않는다.
