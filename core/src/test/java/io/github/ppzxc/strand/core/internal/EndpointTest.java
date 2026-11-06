@@ -13,6 +13,11 @@ import org.junit.jupiter.api.Test;
 /** 엔드포인트의 외부 동작만 본다: 받은 바이트와 애플리케이션 호출에 대해 보낸 바이트와 애플리케이션 이벤트. */
 class EndpointTest {
 
+    /** 규격 3.2.3절이 허용하는 {@code max_frame_size}의 최솟값(16 KiB). */
+    private static final int MIN_MAX_FRAME_SIZE = 16384;
+    /** 길이 필드(4B)와 헤더·확장 영역 길이를 포함한, payload 없는 프레임의 크기. */
+    private static final int EMPTY_FRAME_SIZE = 16;
+
     private static final String PREFACE = "c0de535452300000";
     private static final String HELLO = "0000000c000100000000000000000000";
     /** extensions_length의 한도(규격 2.4절). */
@@ -107,6 +112,15 @@ class EndpointTest {
         client.receive(bytes(HELLO_ACK));
         client.drainMessages();
         assertThat(client.drainEvents()).isEmpty();
+        return client;
+    }
+
+    private static Endpoint establishedClientWithPeerFrameSize(int maxFrameSize) {
+        Endpoint client = client();
+        client.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+        client.drainEvents();
         return client;
     }
 
@@ -1546,18 +1560,18 @@ class EndpointTest {
 
     @Test
     void respondPayloadUpToThePeerMaxFrameSizeIsSent() {
-        Endpoint server = establishedServerWithPeerFrameSize(16384);
+        Endpoint server = establishedServerWithPeerFrameSize(MIN_MAX_FRAME_SIZE);
 
-        server.respond(1, 0, new byte[16384 - 16]);
+        server.respond(1, 0, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE]);
 
-        assertThat(concat(server.drainMessages())).hasSize(16384);
+        assertThat(concat(server.drainMessages())).hasSize(MIN_MAX_FRAME_SIZE);
     }
 
     @Test
     void respondPayloadOverThePeerMaxFrameSizeIsRejectedWithoutSendingOrFreeingTheStream() {
-        Endpoint server = establishedServerWithPeerFrameSize(16384);
+        Endpoint server = establishedServerWithPeerFrameSize(MIN_MAX_FRAME_SIZE);
 
-        assertThatThrownBy(() -> server.respond(1, 0, new byte[16384 - 16 + 1]))
+        assertThatThrownBy(() -> server.respond(1, 0, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE + 1]))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(sent(server)).isEmpty();
@@ -1565,29 +1579,20 @@ class EndpointTest {
         assertThat(sent(server)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
     }
 
-    private static Endpoint establishedClientWithPeerFrameSize(int maxFrameSize) {
-        Endpoint client = client();
-        client.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
-        client.receive(bytes(HELLO_ACK));
-        client.drainMessages();
-        client.drainEvents();
-        return client;
-    }
-
     @Test
     void requestPayloadUpToThePeerMaxFrameSizeIsSent() {
-        Endpoint client = establishedClientWithPeerFrameSize(16384);
+        Endpoint client = establishedClientWithPeerFrameSize(MIN_MAX_FRAME_SIZE);
 
-        client.request(257, new byte[16384 - 16]);
+        client.request(257, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE]);
 
-        assertThat(concat(client.drainMessages())).hasSize(16384);
+        assertThat(concat(client.drainMessages())).hasSize(MIN_MAX_FRAME_SIZE);
     }
 
     @Test
     void requestPayloadOverThePeerMaxFrameSizeIsRejectedWithoutSendingOrUsingTheNumber() {
-        Endpoint client = establishedClientWithPeerFrameSize(16384);
+        Endpoint client = establishedClientWithPeerFrameSize(MIN_MAX_FRAME_SIZE);
 
-        assertThatThrownBy(() -> client.request(257, new byte[16384 - 16 + 1]))
+        assertThatThrownBy(() -> client.request(257, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE + 1]))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(sent(client)).isEmpty();
@@ -1600,17 +1605,13 @@ class EndpointTest {
     void requestDeferredBeforeTheAckFailsLocallyWhenItsFrameIsOverThePeerMaxFrameSize() {
         Endpoint client = client();
         client.drainMessages();
-        client.request(257, new byte[16384 - 16 + 1]);
+        client.request(257, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE + 1]);
         assertThat(client.drainEvents()).isEmpty();
 
-        client.receive(bytes(helloWith("0001" + String.format("%08x", 16384))));
+        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
 
         assertThat(sent(client)).isEqualTo(HELLO_ACK);
-        List<Event> events = client.drainEvents();
-        assertThat(events).hasSize(1);
-        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
-        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
-        assertThat(events.get(0).streamId()).isZero();
+        assertLocalUnavailableEvents(client.drainEvents());
         client.receive(bytes(HELLO_ACK));
         client.request(257, new byte[0]);
         assertThat(sent(client)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
@@ -1618,17 +1619,14 @@ class EndpointTest {
 
     @Test
     void oversizeRequestAfterCloseFailsLocallyInsteadOfThrowing() {
-        Endpoint client = establishedClientWithPeerFrameSize(16384);
+        Endpoint client = establishedClientWithPeerFrameSize(MIN_MAX_FRAME_SIZE);
         client.close(Frames.NO_ERROR);
         client.drainMessages();
         client.drainEvents();
 
-        client.request(257, new byte[16384]);
+        client.request(257, new byte[MIN_MAX_FRAME_SIZE]);
 
-        assertThat(sent(client)).isEmpty();
-        List<Event> events = client.drainEvents();
-        assertThat(events).hasSize(1);
-        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+        assertFailedLocally(client);
     }
 
     @Test

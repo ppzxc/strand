@@ -212,11 +212,15 @@ public final class Endpoint {
             failLocally();
             return;
         }
-        if (helloAcknowledged) {
-            sendRequest(type, payload, true);
-        } else {
-            deferredSends.add(DeferredSend.request(() -> sendRequest(type, payload, false)));
-        }
+        boolean callerWaits = helloAcknowledged;
+        sendAfterAck(DeferredSend.request(() -> {
+            if (!trySendRequest(type, payload)) {
+                if (callerWaits) {
+                    throw new IllegalArgumentException("요청 프레임이 상대의 max_frame_size(" + peerMaxFrameSize + ")를 넘는다");
+                }
+                failLocally();
+            }
+        }));
     }
 
     /**
@@ -234,7 +238,7 @@ public final class Endpoint {
             return;
         }
         byte[] frame = Frames.response(type, streamId, status, payload);
-        if (frame.length > peerMaxFrameSize) {
+        if (exceedsPeerFrameSize(frame)) {
             throw new IllegalArgumentException("응답 프레임이 상대의 max_frame_size를 넘는다: " + frame.length);
         }
         incomingStreams.remove(streamId);
@@ -740,36 +744,49 @@ public final class Endpoint {
         }
     }
 
-    private void sendRequest(int type, byte[] payload, boolean rejectOversize) {
-        if (closeSeen) {
-            // CLOSE를 보냈거나 받았다(규격 3.5절). 대기시키지 않고 번호도 쓰지 않는다.
-            failLocally();
-            return;
-        }
-        if (nextStreamId > MAX_STREAM_ID) {
-            // 번호가 소진됐다. 상대가 알린 한도보다 먼저 본다. 프레임 없이 요청을 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
-            failLocally();
-            close(Frames.NO_ERROR);
-            return;
-        }
-        if (pendingStreams.size() >= peerMaxConcurrentStreams) {
-            // 상대가 알린 한도에 닿았다(규격 3.2.1절). 대기시키지 않고 번호도 쓰지 않는다.
-            failLocally();
-            return;
+    /**
+     * 요청을 보낸다. 보냈거나 로컬에서 실패시켰으면 {@code true}를 돌려준다. 프레임이 상대의 {@code max_frame_size}를 넘어 아무것도 하지
+     * 않았다면(규격 3.2.1절: 보내지 않고 번호도 쓰지 않는다) {@code false}를 돌려주고, 처리는 호출자가 정한다.
+     */
+    private boolean trySendRequest(int type, byte[] payload) {
+        if (refuseRequestLocally()) {
+            return true;
         }
         int streamId = (int) nextStreamId;
         byte[] frame = Frames.request(type, streamId, payload);
-        if (frame.length > peerMaxFrameSize) {
-            // 상대가 알린 max_frame_size를 넘는다(규격 3.2.1절). 보내지 않고 번호도 쓰지 않는다.
-            if (rejectOversize) {
-                throw new IllegalArgumentException("요청 프레임이 상대의 max_frame_size를 넘는다: " + frame.length);
-            }
-            failLocally();
-            return;
+        if (exceedsPeerFrameSize(frame)) {
+            return false;
         }
         nextStreamId += 2;
         pendingStreams.put(streamId, type);
         send(frame);
+        return true;
+    }
+
+    /** 프레임을 열지 못하는 요청을 로컬에서 실패시킨다. 실패시켰으면 {@code true}. 실패한 요청은 대기시키지 않고 번호도 쓰지 않는다. */
+    private boolean refuseRequestLocally() {
+        if (closeSeen) {
+            // CLOSE를 보냈거나 받았다(규격 3.5절).
+            failLocally();
+            return true;
+        }
+        if (nextStreamId > MAX_STREAM_ID) {
+            // 번호가 소진됐다. 상대가 알린 한도보다 먼저 본다. 프레임 없이 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
+            failLocally();
+            close(Frames.NO_ERROR);
+            return true;
+        }
+        if (pendingStreams.size() >= peerMaxConcurrentStreams) {
+            // 상대가 알린 한도에 닿았다(규격 3.2.1절).
+            failLocally();
+            return true;
+        }
+        return false;
+    }
+
+    /** 프레임이 상대가 알린 {@code max_frame_size}를 넘는다(규격 3.2.1절). */
+    private boolean exceedsPeerFrameSize(byte[] frame) {
+        return frame.length > peerMaxFrameSize;
     }
 
     /** 스트림을 열기 전에 요청이 로컬에서 실패했다. 스트림 번호 없는 UNAVAILABLE 결과를 넘긴다. */
