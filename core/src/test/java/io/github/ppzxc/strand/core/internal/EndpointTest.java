@@ -1022,4 +1022,31 @@ class EndpointTest {
 
         assertClosedWithProtocolError(server);
     }
+
+    @Test
+    void firstFrameOfAPeerStreamIsReportedAsAReceivedRequestOnce() {
+        Endpoint server = established();
+
+        server.receive(bytes("0000000c010100000000000100000000"));
+        server.receive(bytes("0000000c010100000000000100000000"));
+
+        List<Event> events = server.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.REQUEST_RECEIVED);
+        assertThat(events.get(0).streamId()).isEqualTo(1);
+        assertThat(events.get(0).type()).isEqualTo(257);
+    }
+
+    @Test
+    void resetWithAnyFlagsFreesThePeerStreamSoItCanBeOpenedAgain() {
+        Endpoint server = established();
+        server.receive(bytes("0000000c010100000000000100000000"));
+        server.drainEvents();
+
+        server.receive(bytes("000000100004ff00000000010000000000000004"));
+        assertThat(server.drainEvents()).isEmpty();
+        server.receive(bytes("0000000c010100000000000100000000"));
+
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+    }
 }

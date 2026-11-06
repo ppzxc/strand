@@ -33,6 +33,8 @@ public final class Endpoint {
     private final ByteArrayOutputStream output = new ByteArrayOutputStream();
     private final List<Event> events = new ArrayList<>();
     private final List<Integer> pendingStreams = new ArrayList<>();
+    /** 상대가 열었고 아직 끝나지 않은 스트림. */
+    private final Set<Long> incomingStreams = new HashSet<>();
     /** 상대 HELLO에 ACK를 보내기 전이라 미뤄 둔 송신(규격 3.3절). */
     private final List<Runnable> deferredSends = new ArrayList<>();
 
@@ -252,6 +254,8 @@ public final class Endpoint {
             // 상대 ACK 전의 애플리케이션 프레임은 연결 오류다(규격 3.3절). 그 뒤의 처리는 이후 단계에서 다룬다.
             if (!peerAckReceived) {
                 connectionError();
+            } else if (incomingStreams.add(streamId)) {
+                events.add(Event.requestReceived((int) streamId, type));
             }
             return;
         }
@@ -276,6 +280,9 @@ public final class Endpoint {
             handleHello(ack, payload);
         } else if (type == Frames.PING) {
             handlePing(ack, payload);
+        } else {
+            // RESET: 스트림 자리를 돌려준다. flags는 모두 미정의라 보지 않는다(규격 2.4.3절).
+            incomingStreams.remove(streamId);
         }
     }
 

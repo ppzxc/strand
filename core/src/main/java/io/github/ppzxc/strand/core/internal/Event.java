@@ -11,25 +11,33 @@ public final class Event {
         /** 자기가 보낸 요청의 결과가 애플리케이션에 전달됨. */
         RESULT,
         /** 연결이 닫혔음이 애플리케이션에 전달됨. */
-        CLOSED
+        CLOSED,
+        /** 상대가 연 스트림의 요청을 받음. */
+        REQUEST_RECEIVED
     }
 
     private final Kind kind;
     private final int streamId;
     private final int status;
+    private final int type;
 
-    private Event(Kind kind, int streamId, int status) {
+    private Event(Kind kind, int streamId, int status, int type) {
         this.kind = kind;
         this.streamId = streamId;
         this.status = status;
+        this.type = type;
     }
 
     static Event closed() {
-        return new Event(Kind.CLOSED, 0, 0);
+        return new Event(Kind.CLOSED, 0, 0, 0);
     }
 
     static Event result(int streamId, int status) {
-        return new Event(Kind.RESULT, streamId, status);
+        return new Event(Kind.RESULT, streamId, status, 0);
+    }
+
+    static Event requestReceived(int streamId, int type) {
+        return new Event(Kind.REQUEST_RECEIVED, streamId, 0, type);
     }
 
     /**
@@ -42,7 +50,7 @@ public final class Event {
     }
 
     /**
-     * {@link Kind#RESULT}의 스트림 번호. 다른 종류에서는 0이다.
+     * {@link Kind#RESULT}와 {@link Kind#REQUEST_RECEIVED}의 스트림 번호. 다른 종류에서는 0이다.
      *
      * @return 스트림 번호
      */
@@ -57,5 +65,14 @@ public final class Event {
      */
     public int status() {
         return status;
+    }
+
+    /**
+     * {@link Kind#REQUEST_RECEIVED}의 애플리케이션 {@code type}. 다른 종류에서는 0이다.
+     *
+     * @return type 값
+     */
+    public int type() {
+        return type;
     }
 }

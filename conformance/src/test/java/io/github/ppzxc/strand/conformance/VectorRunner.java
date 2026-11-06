@@ -36,7 +36,8 @@ final class VectorRunner {
             new HashSet<>(Arrays.asList("recv", "advance", "ping", "request", "close"));
     private static final Set<String> SUPPORTED_FRAMES =
             new HashSet<>(Arrays.asList("PREFACE", "HELLO", "PING", "CLOSE"));
-    private static final Set<String> SUPPORTED_EVENTS = new HashSet<>(Arrays.asList("closed", "result"));
+    private static final Set<String> SUPPORTED_EVENTS =
+            new HashSet<>(Arrays.asList("closed", "result", "request_received"));
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
     private static final int FIRST_APPLICATION_TYPE = 256;
 
@@ -249,6 +250,10 @@ final class VectorRunner {
             if (event.get("event").getAsString().equals("result")) {
                 result.add("result stream_id=" + event.get("stream_id").getAsInt() + " status="
                         + nameOfStatus(event.get("status")));
+            } else if (event.get("event").getAsString().equals("request_received")) {
+                result.add(
+                        "request_received stream_id=" + event.get("stream_id").getAsInt() + " type="
+                                + event.get("type").getAsInt());
             } else {
                 result.add("closed");
             }
@@ -261,6 +266,8 @@ final class VectorRunner {
         for (Event event : events) {
             if (event.kind() == Event.Kind.RESULT) {
                 result.add("result stream_id=" + event.streamId() + " status=" + nameOfStatus(event.status()));
+            } else if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
+                result.add("request_received stream_id=" + event.streamId() + " type=" + event.type());
             } else {
                 result.add(event.kind().name().toLowerCase(Locale.ROOT));
             }
