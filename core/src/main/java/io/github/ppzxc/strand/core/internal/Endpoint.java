@@ -60,7 +60,6 @@ public final class Endpoint {
     private boolean helloAcknowledged;
     /** 내가 보낸 HELLO에 대한 상대의 ACK를 받았다. */
     private boolean peerAckReceived;
-
     /** 상대가 HELLO로 알린 {@code max_concurrent_streams}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
     /** CLOSE를 보냈거나 받았다(규격 3.5절). */
@@ -477,7 +476,7 @@ public final class Endpoint {
             return;
         }
         helloAcknowledged = true;
-        peerMaxConcurrentStreams = concurrentStreamsOf(payload);
+        peerMaxConcurrentStreams = peerMaxConcurrentStreamsFrom(payload);
         send(Frames.control(Frames.HELLO, Frames.ACK, new byte[0]));
         for (Runnable deferred : deferredSends) {
             if (closed || closeSeen) {
@@ -488,7 +487,7 @@ public final class Endpoint {
         deferredSends.clear();
     }
 
-    private static long concurrentStreamsOf(byte[] payload) {
+    private static long peerMaxConcurrentStreamsFrom(byte[] payload) {
         for (int at = 0; at < payload.length; at += PARAM_SIZE) {
             if (Frames.readUnsignedShort(payload, at) == MAX_CONCURRENT_STREAMS_ID) {
                 return Frames.readUnsignedInt(payload, at + 2);
