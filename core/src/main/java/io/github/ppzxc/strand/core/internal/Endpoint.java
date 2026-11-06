@@ -30,6 +30,9 @@ public final class Endpoint {
 
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int PARAM_SIZE = 6;
+    /** 유효하지 않은 HELLO를 나타내는 표지. 파라미터 값은 부호 없는 32비트라 음수가 될 수 없다. */
+    private static final long INVALID_HELLO = -1;
+
     private static final int RESET_PAYLOAD_SIZE = 4;
     private static final long MAX_STREAM_ID = Integer.MAX_VALUE;
     private static final int TLV_HEADER_SIZE = 4;
@@ -458,15 +461,15 @@ public final class Endpoint {
      */
     private void handleApplication(byte[] frame, int type, int extensionsLength, long streamId) {
         // 연결 오류 집합은 검사 순서가 없다(규격 5.1절 3번). 확장 영역 형식, 상대 ACK 전의 프레임(3.3절), 잘못된 stream_id.
-        if (extensionsLength > MAX_EXTENSIONS_LENGTH
-                || !validExtensions(frame, extensionsLength)
-                || !peerAckReceived
-                || isInvalidStreamId(streamId)) {
+        Extensions extensions = extensionsLength > MAX_EXTENSIONS_LENGTH
+                ? Extensions.MALFORMED
+                : scanExtensions(frame, extensionsLength);
+        if (extensions == Extensions.MALFORMED || !peerAckReceived || isInvalidStreamId(streamId)) {
             connectionError();
         } else if (isOwnSpace(streamId)) {
             handleResponse(frame, (int) streamId);
         } else {
-            handleRequest(frame, type, extensionsLength, (int) streamId);
+            handleRequest(type, extensions, (int) streamId);
         }
     }
 
@@ -474,7 +477,7 @@ public final class Endpoint {
      * 상대의 새 요청(규격 5.1절 5번). (가) 거절, (나) 모르는 type, (다) 확장 값 오류 순서로 보고, 모두 지나면 애플리케이션에 넘긴다.
      * 거절한 요청과 오류로 답한 요청은 대기 스트림에 넣지 않지만 번호는 쓰인 것으로 센다(규격 4.5절, 5.1절).
      */
-    private void handleRequest(byte[] frame, int type, int extensionsLength, int streamId) {
+    private void handleRequest(int type, Extensions extensions, int streamId) {
         if (streamId <= highestPeerStreamId) {
             // 번호 역행: 재사용한 번호, 건너뛰고 나중에 온 번호, 대기 중인 스트림의 번호 모두 연결 오류다(규격 4.2.1절).
             connectionError();
@@ -485,7 +488,7 @@ public final class Endpoint {
             send(Frames.reset(streamId, Frames.ERROR_REFUSED));
         } else if (!config.knows(type)) {
             send(Frames.response(type, streamId, Frames.STATUS_UNIMPLEMENTED));
-        } else if (!validExtensionValues(frame, extensionsLength)) {
+        } else if (extensions == Extensions.INVALID_VALUE) {
             send(Frames.response(type, streamId, Frames.STATUS_INVALID_ARGUMENT));
         } else {
             incomingStreams.put(streamId, type);
@@ -493,38 +496,38 @@ public final class Endpoint {
         }
     }
 
-    /** 정의된 확장 항목의 값 검사(규격 2.4.2절): timeout은 4바이트, idempotency-key는 1~64바이트. 형식은 이미 검사했다. */
-    private static boolean validExtensionValues(byte[] frame, int extensionsLength) {
-        int at = Frames.HEADER_SIZE;
-        int end = at + extensionsLength;
-        while (at < end) {
-            int tag = Frames.readUnsignedShort(frame, at);
-            int length = Frames.readUnsignedShort(frame, at + 2);
-            if ((tag == TIMEOUT_TAG && length != TIMEOUT_LENGTH)
-                    || (tag == IDEMPOTENCY_KEY_TAG && (length < 1 || length > MAX_IDEMPOTENCY_KEY_LENGTH))) {
-                return false;
-            }
-            at += TLV_HEADER_SIZE + length;
-        }
-        return true;
+    /** 확장 영역 검사 결과. 형식 위반이 값 위반보다 우선한다. */
+    private enum Extensions {
+        MALFORMED,
+        INVALID_VALUE,
+        VALID
     }
 
-    /** 확장 영역 형식 검사(규격 2.4.1절): 항목 길이의 합이 {@code extensions_length}와 같고 같은 tag가 없다. */
-    private static boolean validExtensions(byte[] frame, int extensionsLength) {
+    /**
+     * 확장 영역을 한 번 훑어 검사한다. 형식(규격 2.4.1절)은 항목 길이의 합이 {@code extensions_length}와 같고 같은 tag가 없는 것이고, 값(규격
+     * 2.4.2절)은 timeout이 4바이트, idempotency-key가 1~64바이트인 것이다.
+     */
+    private static Extensions scanExtensions(byte[] frame, int extensionsLength) {
         Set<Integer> tags = new HashSet<>();
+        boolean valuesValid = true;
         int at = Frames.HEADER_SIZE;
         int end = at + extensionsLength;
         while (at < end) {
             if (end - at < TLV_HEADER_SIZE) {
-                return false;
+                return Extensions.MALFORMED;
             }
             int tag = Frames.readUnsignedShort(frame, at);
-            at += TLV_HEADER_SIZE + Frames.readUnsignedShort(frame, at + 2);
+            int length = Frames.readUnsignedShort(frame, at + 2);
+            at += TLV_HEADER_SIZE + length;
             if (at > end || !tags.add(tag)) {
-                return false;
+                return Extensions.MALFORMED;
+            }
+            if ((tag == TIMEOUT_TAG && length != TIMEOUT_LENGTH)
+                    || (tag == IDEMPOTENCY_KEY_TAG && (length < 1 || length > MAX_IDEMPOTENCY_KEY_LENGTH))) {
+                valuesValid = false;
             }
         }
-        return true;
+        return valuesValid ? Extensions.VALID : Extensions.INVALID_VALUE;
     }
 
     /** 내 요청의 응답. 대기 중인 요청이면 결과를 애플리케이션에 넘긴다. 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). */
@@ -560,12 +563,13 @@ public final class Endpoint {
             endOldestWait(null);
             return;
         }
-        if (helloAcknowledged || !validParameters(payload)) {
+        long peerMax = helloAcknowledged ? INVALID_HELLO : peerMaxConcurrentStreamsOf(payload);
+        if (peerMax == INVALID_HELLO) {
             connectionError();
             return;
         }
         helloAcknowledged = true;
-        peerMaxConcurrentStreams = peerMaxConcurrentStreamsFrom(payload);
+        peerMaxConcurrentStreams = peerMax;
         send(Frames.control(Frames.HELLO, Frames.ACK, new byte[0]));
         // 보내다가 닫히면 terminate가 남은 요청을 closed 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
         while (!deferredSends.isEmpty()) {
@@ -576,32 +580,30 @@ public final class Endpoint {
         }
     }
 
-    private static long peerMaxConcurrentStreamsFrom(byte[] payload) {
-        for (int at = 0; at < payload.length; at += PARAM_SIZE) {
-            if (Frames.readUnsignedShort(payload, at) == MAX_CONCURRENT_STREAMS_ID) {
-                return Frames.readUnsignedInt(payload, at + 2);
-            }
-        }
-        return DEFAULT_MAX_CONCURRENT_STREAMS;
-    }
-
-    /** HELLO payload 검증(규격 3.2.3절, 3.2.5절): 6의 배수, identifier 중복 없음, max_frame_size 범위. */
-    private static boolean validParameters(byte[] payload) {
+    /**
+     * HELLO payload를 한 번 훑는다(규격 3.2.3절, 3.2.5절). 6의 배수, identifier 중복 없음, max_frame_size 범위를 검증하고, 유효하면 상대가 알린
+     * {@code max_concurrent_streams}(없으면 기본값)를, 아니면 {@link #INVALID_HELLO}를 돌려준다.
+     */
+    private static long peerMaxConcurrentStreamsOf(byte[] payload) {
         if (payload.length % PARAM_SIZE != 0) {
-            return false;
+            return INVALID_HELLO;
         }
+        long maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
         Set<Integer> seen = new HashSet<>();
         for (int at = 0; at < payload.length; at += PARAM_SIZE) {
             int identifier = Frames.readUnsignedShort(payload, at);
             if (!seen.add(identifier)) {
-                return false;
+                return INVALID_HELLO;
             }
             long value = Frames.readUnsignedInt(payload, at + 2);
             if (identifier == MAX_FRAME_SIZE_ID && (value < MIN_MAX_FRAME_SIZE || value > MAX_MAX_FRAME_SIZE)) {
-                return false;
+                return INVALID_HELLO;
+            }
+            if (identifier == MAX_CONCURRENT_STREAMS_ID) {
+                maxConcurrentStreams = value;
             }
         }
-        return true;
+        return maxConcurrentStreams;
     }
 
     private void handlePing(boolean ack, byte[] payload) {
