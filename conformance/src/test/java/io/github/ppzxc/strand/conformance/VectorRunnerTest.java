@@ -185,4 +185,58 @@ class VectorRunnerTest {
 
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }
+
+    private static final String WEBSOCKET_ESTABLISHED =
+            "{\"role\":\"server\",\"established\":true,\"transport\":\"websocket\"}";
+    private static final String WEBSOCKET_CLOSE_1000 = "{\"type\":\"WEBSOCKET_CLOSE\",\"code\":1000}";
+    private static final String CLOSE_NO_ERROR = "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\"}";
+    private static final String CLOSE_STEP_NO_ERROR = "\"error_code\":\"NO_ERROR\",";
+
+    @Test
+    void webSocketCloseItemIsComparedAfterTheCloseFrame() {
+        ConformanceVector v = vector(
+                WEBSOCKET_ESTABLISHED,
+                step(
+                        "close",
+                        CLOSE_STEP_NO_ERROR,
+                        "[" + CLOSE_NO_ERROR + "," + WEBSOCKET_CLOSE_1000 + "]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void aMissingWebSocketCloseItemFails() {
+        ConformanceVector v = vector(
+                WEBSOCKET_ESTABLISHED,
+                step("close", CLOSE_STEP_NO_ERROR, "[" + CLOSE_NO_ERROR + "]", "[{\"event\":\"closed\"}]"));
+
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void aWebSocketCloseItemBeforeTheCloseFrameFails() {
+        ConformanceVector v = vector(
+                WEBSOCKET_ESTABLISHED,
+                step(
+                        "close",
+                        CLOSE_STEP_NO_ERROR,
+                        "[" + WEBSOCKET_CLOSE_1000 + "," + CLOSE_NO_ERROR + "]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void aByteStreamEndpointExpectedToSendAWebSocketCloseFails() {
+        ConformanceVector v = vector(
+                ESTABLISHED,
+                step(
+                        "close",
+                        CLOSE_STEP_NO_ERROR,
+                        "[" + CLOSE_NO_ERROR + "," + WEBSOCKET_CLOSE_1000 + "]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
 }

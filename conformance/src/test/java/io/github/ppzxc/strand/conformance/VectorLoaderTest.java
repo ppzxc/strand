@@ -583,6 +583,32 @@ class VectorLoaderTest {
         return t.stream();
     }
 
+    private static String disconnectWithSend(String send) {
+        return "{\"kind\":\"disconnect\",\"send\":[" + send + "],\"events\":[]}";
+    }
+
+    @TestFactory
+    Stream<DynamicTest> checksWebSocketCloseItems() {
+        String close = "{\"type\":\"WEBSOCKET_CLOSE\",\"code\":1000}";
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(DynamicTest.dynamicTest(
+                "accepted on websocket",
+                () -> assertThat(VectorLoader.parse(
+                                "x.json", fileWithTransportAndStep("websocket", disconnectWithSend(close))))
+                        .hasSize(1)));
+        t.add(rejected("on tcp", fileWithTransportAndStep("tcp", disconnectWithSend(close)), "tcp", "WEBSOCKET_CLOSE"));
+        t.add(rejected(
+                "code other than 1000",
+                fileWithTransportAndStep("websocket", disconnectWithSend(close.replace("1000", "1001"))),
+                "code"));
+        t.add(rejected(
+                "missing code",
+                fileWithTransportAndStep("websocket", disconnectWithSend("{\"type\":\"WEBSOCKET_CLOSE\"}")),
+                "필수 필드 누락",
+                "code"));
+        return t.stream();
+    }
+
     @Test
     void acceptsWebsocketMessagesAndTcpBytes() {
         String text = MESSAGE_STEP.replace("binary", "text");

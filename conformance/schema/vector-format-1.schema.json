@@ -155,6 +155,16 @@
         "error_code": { "$ref": "#/$defs/error_code" }
       }
     },
+    "frame_websocket_close": {
+      "description": "WebSocket Close(Close Frame 0x08) 출력 항목. transport가 websocket인 벡터에서만 쓴다(스키마로 표현할 수 없는 규칙은 벡터 형식 문서 6.1절).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "code"],
+      "properties": {
+        "type": { "const": "WEBSOCKET_CLOSE" },
+        "code": { "const": 1000 }
+      }
+    },
     "frame_app": {
       "type": "object",
       "additionalProperties": false,
@@ -174,6 +184,7 @@
         { "$ref": "#/$defs/frame_ping" },
         { "$ref": "#/$defs/frame_close" },
         { "$ref": "#/$defs/frame_reset" },
+        { "$ref": "#/$defs/frame_websocket_close" },
         { "$ref": "#/$defs/frame_app" }
       ]
     },

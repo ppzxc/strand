@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.core.internal;
 
-import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -14,7 +13,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * 엔드포인트(서버 또는 클라이언트 역할). 입출력을 하지 않는 순수 상태 기계다. 받은 바이트는 {@link #receive}, 애플리케이션의 호출은
  * {@link #request}·{@link #ping}·{@link #close}, 시간은 {@link #advance}로 넣는다. 그러면 보낼 바이트와 애플리케이션 이벤트가
- * 쌓이고, {@link #drainOutput}과 {@link #drainEvents}로 한 번씩 꺼낸다. 스레드·소켓·실제 시계에 접근하지 않는다.
+ * 쌓이고, {@link #drainMessages}와 {@link #drainEvents}로 한 번씩 꺼낸다. 스레드·소켓·실제 시계에 접근하지 않는다.
  */
 public final class Endpoint {
 
@@ -49,7 +48,7 @@ public final class Endpoint {
     private static final long MAX_MAX_FRAME_SIZE = 16_777_216L;
 
     private final EndpointConfig config;
-    private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+    private final List<OutboundMessage> output = new ArrayList<>();
     private final List<Event> events = new ArrayList<>();
     /** 결과를 기다리는 내 요청의 스트림 번호와 요청 type. 보낸 순서대로다. */
     private final Map<Integer, Integer> pendingStreams = new LinkedHashMap<>();
@@ -71,6 +70,8 @@ public final class Endpoint {
     private long peerMaxFrameSize = DEFAULT_MAX_FRAME_SIZE;
     /** CLOSE를 보냈거나 받았다(규격 3.5절). */
     private boolean closeSeen;
+    /** {@code NO_ERROR} CLOSE를 보냈다. WebSocket에서는 연결이 끝날 때 WebSocket Close(1000)가 따른다(규격 1.2절). */
+    private boolean noErrorCloseSent;
 
     private boolean closed;
     private long now;
@@ -273,6 +274,7 @@ public final class Endpoint {
         }
         send(Frames.close(errorCode));
         closeSeen = true;
+        noErrorCloseSent = errorCode == Frames.NO_ERROR;
         terminateUnlessClosing(errorCode);
     }
 
@@ -282,14 +284,15 @@ public final class Endpoint {
     }
 
     /**
-     * 지금까지 쌓인, 상대에게 보낼 바이트를 꺼낸다.
+     * 지금까지 쌓인, 상대에게 보낼 메시지를 보낸 순서대로 꺼낸다. 프레임 하나가 메시지 하나다. 바이트 스트림 전송은 메시지를 이어 붙여 보내면
+     * 된다.
      *
-     * @return 보낼 바이트. 없으면 빈 배열
+     * @return 보낼 메시지. 없으면 빈 목록
      */
-    public byte[] drainOutput() {
-        byte[] bytes = output.toByteArray();
-        output.reset();
-        return bytes;
+    public List<OutboundMessage> drainMessages() {
+        List<OutboundMessage> drained = new ArrayList<>(output);
+        output.clear();
+        return drained;
     }
 
     /**
@@ -559,7 +562,7 @@ public final class Endpoint {
     /** CLOSE를 보냈거나 받아 종료 중인데 대기 중인 스트림이 모두 끝났으면 닫는다(규격 3.5절). */
     private void terminateIfDrained() {
         if (closeSeen && pendingStreams.isEmpty() && incomingStreams.isEmpty()) {
-            terminate();
+            finishNormally();
         }
     }
 
@@ -651,9 +654,22 @@ public final class Endpoint {
 
     /** 오류 CLOSE이거나 대기 중인 스트림이 없으면 닫고, 아니면 대기 중인 스트림이 끝날 때까지 종료 중으로 둔다(규격 3.5절). */
     private void terminateUnlessClosing(long errorCode) {
-        if (errorCode != Frames.NO_ERROR || (pendingStreams.isEmpty() && incomingStreams.isEmpty())) {
+        if (errorCode != Frames.NO_ERROR) {
             terminate();
+        } else if (pendingStreams.isEmpty() && incomingStreams.isEmpty()) {
+            finishNormally();
         }
+    }
+
+    /**
+     * {@code NO_ERROR}로 끝나는 연결을 닫는다. WebSocket에서 {@code NO_ERROR} CLOSE를 내가 보냈다면 마지막 프레임 뒤에 WebSocket
+     * Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket 상태 코드는 규격이 정하지 않아 모델링하지 않는다.
+     */
+    private void finishNormally() {
+        if (!closed && noErrorCloseSent && config.isWebSocket()) {
+            output.add(OutboundMessage.normalWebSocketClose());
+        }
+        terminate();
     }
 
     /** 연결 오류: CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절, 5.1절). */
@@ -743,7 +759,7 @@ public final class Endpoint {
     }
 
     private void send(byte[] frame) {
-        output.write(frame, 0, frame.length);
+        output.add(OutboundMessage.binary(frame));
     }
 
     /** 상대 HELLO에 ACK를 보낼 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
