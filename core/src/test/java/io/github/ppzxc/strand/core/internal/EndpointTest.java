@@ -3,7 +3,10 @@ package io.github.ppzxc.strand.core.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /** 엔드포인트의 외부 동작만 본다: 받은 바이트와 애플리케이션 호출에 대해 보낸 바이트와 애플리케이션 이벤트. */
@@ -1176,5 +1179,171 @@ class EndpointTest {
 
             assertClosedWithProtocolError(server);
         }
+    }
+
+    /** 요청 프레임 hex: 확장 영역은 {@code extHex}, payload 없음. */
+    private static String requestFrame(int type, int streamId, String extHex) {
+        return String.format(
+                "%08x%04x0000%08x%04x0000%s", 12 + extHex.length() / 2, type, streamId, extHex.length() / 2, extHex);
+    }
+
+    private static final String RESET_REFUSED_1 = "000000100004000000000001" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_3 = "000000100004000000000003" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_5 = "000000100004000000000005" + "0000" + "0000" + "00000003";
+
+    private static String keyBytes(int count) {
+        StringBuilder hex = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            hex.append("6b");
+        }
+        return hex.toString();
+    }
+
+    private static Endpoint establishedKnowing(int... types) {
+        Set<Integer> known = new HashSet<>();
+        for (int type : types) {
+            known.add(type);
+        }
+        return establishedWith(EndpointConfig.defaults().knownTypes(known));
+    }
+
+    @Test
+    void requestOfAnUnknownTypeIsAnsweredUnimplementedWithTheSameType() {
+        Endpoint server = establishedKnowing(257);
+
+        server.receive(bytes(requestFrame(258, 1, "")));
+
+        assertThat(sent(server)).isEqualTo("0000000c0102000c000000010000" + "0000");
+        assertOpenAndSilent(server);
+        server.receive(bytes(requestFrame(257, 3, "")));
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+    }
+
+    @Test
+    void clientAlsoAnswersAnUnknownTypeRequestFromTheServer() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().knownTypes(Collections.singleton(257)));
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainOutput();
+
+        client.receive(bytes(requestFrame(258, 2, "")));
+
+        assertThat(sent(client)).isEqualTo("0000000c0102000c000000020000" + "0000");
+    }
+
+    @Test
+    void invalidDefinedExtensionValuesAreAnsweredInvalidArgumentAndNotDelivered() {
+        String[] invalid = {
+            "00010003000001", // timeout 길이 3
+            "000100050000000001", // timeout 길이 5
+            "00030000", // idempotency-key 길이 0
+            "00030041" + keyBytes(65) // idempotency-key 길이 65
+        };
+        for (String extensions : invalid) {
+            Endpoint server = established();
+
+            server.receive(bytes(requestFrame(257, 1, extensions)));
+
+            assertThat(sent(server)).isEqualTo("0000000c0101000300000001" + "0000" + "0000");
+            assertOpenAndSilent(server);
+        }
+    }
+
+    @Test
+    void definedExtensionValuesOnTheBoundariesAreDelivered() {
+        String[] valid = {"000100040000" + "0001", "00030001" + "6b", "00030040" + keyBytes(64), "0002000161"};
+        int streamId = 1;
+        Endpoint server = established();
+        for (String extensions : valid) {
+            server.receive(bytes(requestFrame(257, streamId, extensions)));
+            streamId += 2;
+        }
+
+        assertThat(kinds(server)).hasSize(valid.length);
+    }
+
+    @Test
+    void unknownTypeIsCheckedBeforeExtensionValues() {
+        Endpoint server = establishedKnowing(257);
+
+        server.receive(bytes(requestFrame(258, 1, "00010003000001")));
+
+        assertThat(sent(server)).isEqualTo("0000000c0102000c000000010000" + "0000");
+    }
+
+    @Test
+    void requestOverTheConcurrentStreamLimitIsRefusedBeforeItsTypeOrExtensionValuesAreSeen() {
+        Endpoint server = establishedWith(
+                EndpointConfig.defaults().maxConcurrentStreams(1).knownTypes(Collections.singleton(257)));
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.drainEvents();
+
+        server.receive(bytes(requestFrame(258, 3, "")));
+        server.receive(bytes(requestFrame(257, 5, "00010003000001")));
+
+        assertThat(sent(server)).isEqualTo(RESET_REFUSED_3 + RESET_REFUSED_5);
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void everyRequestIsRefusedWhenTheLimitIsZero() {
+        Endpoint server = establishedWith(EndpointConfig.defaults().maxConcurrentStreams(0));
+
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        assertThat(sent(server)).isEqualTo(RESET_REFUSED_1);
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void requestAfterReceivingCloseIsRefusedWhileAPeerStreamKeepsTheConnectionOpen() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.drainEvents();
+        server.receive(bytes("00000010000300000000000000000000" + "00000000"));
+
+        server.receive(bytes(requestFrame(258, 3, "00010003000001")));
+
+        assertThat(sent(server)).isEqualTo(RESET_REFUSED_3);
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void requestAfterSendingCloseIsRefused() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.drainEvents();
+        server.close(0);
+        server.drainOutput();
+
+        server.receive(bytes(requestFrame(257, 3, "")));
+
+        assertThat(sent(server)).isEqualTo(RESET_REFUSED_3);
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void connectionClosesWhenTheLastPeerStreamEndsWhileClosing() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.drainEvents();
+        server.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        assertThat(server.drainEvents()).isEmpty();
+
+        server.receive(bytes("000000100004000000000001000000000000" + "0004"));
+
+        assertThat(sent(server)).isEmpty();
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void repeatedRequestOnAPendingPeerStreamIsNotDeliveredTwice() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.drainEvents();
+
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        assertOpenAndSilent(server);
     }
 }

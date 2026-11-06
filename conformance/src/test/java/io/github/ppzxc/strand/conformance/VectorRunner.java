@@ -30,13 +30,12 @@ final class VectorRunner {
     private static final String ACK_HELLO_HEX = "0000000c000101000000000000000000";
     private static final Map<String, Long> HELLO_DEFAULTS = new LinkedHashMap<>();
     private static final Map<Integer, String> HELLO_PARAMS = new LinkedHashMap<>();
-    // known_types는 모르는 type의 요청에 UNIMPLEMENTED로 답할 때만 의미가 있다. 그 동작은 request-checks 티켓에서 구현한다.
     private static final Set<String> SUPPORTED_SETUP =
             new HashSet<>(Arrays.asList("role", "established", "local_hello", "peer_hello", "config", "known_types"));
     private static final Set<String> SUPPORTED_STEPS =
             new HashSet<>(Arrays.asList("recv", "advance", "ping", "request", "close"));
     private static final Set<String> SUPPORTED_FRAMES =
-            new HashSet<>(Arrays.asList("PREFACE", "HELLO", "PING", "CLOSE"));
+            new HashSet<>(Arrays.asList("PREFACE", "HELLO", "PING", "CLOSE", "RESET"));
     private static final Set<String> SUPPORTED_EVENTS =
             new HashSet<>(Arrays.asList("closed", "result", "request_received"));
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
@@ -133,9 +132,7 @@ final class VectorRunner {
 
     /** 숫자 type의 애플리케이션 프레임 가운데 아직 비교할 수 있는 것: status·확장 영역을 쓰지 않은 프레임. */
     private static boolean isSupportedApplicationFrame(JsonObject frame) {
-        return !frame.has("status")
-                && (!frame.has("extensions")
-                        || frame.getAsJsonArray("extensions").size() == 0)
+        return (!frame.has("extensions") || frame.getAsJsonArray("extensions").size() == 0)
                 && frame.get("type").getAsInt() >= FIRST_APPLICATION_TYPE;
     }
 
@@ -148,11 +145,19 @@ final class VectorRunner {
         long ackTimeout = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
                 ? setup.getAsJsonObject("config").get("ack_timeout_ms").getAsLong()
                 : DEFAULT_ACK_TIMEOUT_MS;
-        return EndpointConfig.defaults()
+        EndpointConfig config = EndpointConfig.defaults()
                 .maxFrameSize(hello.get("max_frame_size"))
                 .maxConcurrentStreams(hello.get("max_concurrent_streams"))
                 .capabilities(hello.get("capabilities"))
                 .ackTimeoutMs(ackTimeout);
+        if (setup.has("known_types")) {
+            Set<Integer> known = new HashSet<>();
+            for (JsonElement type : setup.getAsJsonArray("known_types")) {
+                known.add(type.getAsInt());
+            }
+            config = config.knownTypes(known);
+        }
+        return config;
     }
 
     /** 규격 3.3절 표준 수립 순서를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. */
@@ -227,7 +232,8 @@ final class VectorRunner {
             String flags = ack ? "ACK" : "-";
             if (type == null) {
                 result.add("APP type=" + frame.get("type").getAsInt() + " flags=- stream_id="
-                        + frame.get("stream_id").getAsInt() + " payload="
+                        + frame.get("stream_id").getAsInt()
+                        + (frame.has("status") ? " status=" + nameOfStatus(frame.get("status")) : "") + " payload="
                         + (frame.has("payload") ? frame.get("payload").getAsString() : ""));
             } else if (type.equals("PREFACE")) {
                 result.add("PREFACE");
@@ -237,6 +243,9 @@ final class VectorRunner {
             } else if (type.equals("PING")) {
                 result.add("PING flags=" + flags + " stream_id=0 payload="
                         + frame.get("payload").getAsString());
+            } else if (type.equals("RESET")) {
+                result.add("RESET flags=- stream_id=" + frame.get("stream_id").getAsInt() + " error_code="
+                        + nameOfError(frame.get("error_code")));
             } else {
                 result.add("CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code")));
             }
@@ -302,10 +311,13 @@ final class VectorRunner {
             } else if (type == 3 && payload.length >= 4) {
                 result.add(
                         "CLOSE" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));
+            } else if (type == 4 && payload.length == 4) {
+                result.add(
+                        "RESET" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));
             } else if (type >= FIRST_APPLICATION_TYPE) {
                 // 자기 번호 공간(클라이언트는 홀수, 서버는 짝수)의 프레임은 요청이라 status를 비교하지 않는다.
                 boolean ownSpace = streamId % 2 == (client ? 1 : 0);
-                String status = ownSpace ? "" : " status=" + (frame[7] & 0xFF);
+                String status = ownSpace ? "" : " status=" + nameOfStatus(frame[7] & 0xFF);
                 result.add("APP type=" + type + head + ext + status + " payload=" + Bytes.toHex(payload));
             } else {
                 result.add(String.format("type=0x%04x", type) + head + ext + " payload=" + Bytes.toHex(payload));

@@ -67,8 +67,14 @@ final class VectorSuite {
     }
 
     /** 러너가 실행하는 벡터 파일. 규격 구현이 들어올 때마다 해당 파일을 여기에 더한다. 나머지는 skipped로 보인다. */
-    private static final Set<String> IMPLEMENTED_FILES = new HashSet<>(
-            Arrays.asList("sample", "handshake", "hello-establishment", "ack-timeout", "control-frames", "extensions"));
+    private static final Set<String> IMPLEMENTED_FILES = new HashSet<>(Arrays.asList(
+            "sample",
+            "handshake",
+            "hello-establishment",
+            "ack-timeout",
+            "control-frames",
+            "extensions",
+            "request-checks"));
 
     // 로드와 구조 검증은 이미 끝났다(dynamicTests가 로더를 부르는 시점에 실패로 드러난다).
     // 구현이 아직 없는 파일의 벡터는 통과로 위장하지 않고 skipped로 보인다.

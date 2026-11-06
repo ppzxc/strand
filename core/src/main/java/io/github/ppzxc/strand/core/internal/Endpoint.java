@@ -26,6 +26,10 @@ public final class Endpoint {
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int PARAM_SIZE = 6;
     private static final int TLV_HEADER_SIZE = 4;
+    private static final int TIMEOUT_TAG = 0x0001;
+    private static final int TIMEOUT_LENGTH = 4;
+    private static final int IDEMPOTENCY_KEY_TAG = 0x0003;
+    private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 64;
     /** extensions_length의 한도(규격 2.4절). */
     private static final int MAX_EXTENSIONS_LENGTH = 8192;
 
@@ -294,6 +298,7 @@ public final class Endpoint {
             return;
         }
         incomingStreams.remove(streamId);
+        terminateIfDrained();
     }
 
     /**
@@ -308,9 +313,45 @@ public final class Endpoint {
             connectionError();
         } else if ((streamId & 1) == (nextStreamId & 1)) {
             handleResponse(frame, (int) streamId);
-        } else if (incomingStreams.add(streamId)) {
-            events.add(Event.requestReceived((int) streamId, type));
+        } else {
+            handleRequest(frame, type, extensionsLength, (int) streamId);
         }
+    }
+
+    /**
+     * 상대의 새 요청(규격 5.1절 5번). (가) 거절, (나) 모르는 type, (다) 확장 값 오류 순서로 보고, 모두 지나면 애플리케이션에 넘긴다.
+     * 거절한 요청과 오류로 답한 요청은 대기 스트림에 넣지 않는다(규격 4.5절).
+     */
+    private void handleRequest(byte[] frame, int type, int extensionsLength, int streamId) {
+        if (incomingStreams.contains((long) streamId)) {
+            return;
+        }
+        if (closeSeen || incomingStreams.size() + 1 > config.maxConcurrentStreams()) {
+            send(Frames.reset(streamId, Frames.REFUSED));
+        } else if (!config.knows(type)) {
+            send(Frames.response(type, streamId, Frames.UNIMPLEMENTED));
+        } else if (!validExtensionValues(frame, extensionsLength)) {
+            send(Frames.response(type, streamId, Frames.INVALID_ARGUMENT));
+        } else {
+            incomingStreams.add((long) streamId);
+            events.add(Event.requestReceived(streamId, type));
+        }
+    }
+
+    /** 정의된 확장 항목의 값 검사(규격 2.4.2절): timeout은 4바이트, idempotency-key는 1~64바이트. 형식은 이미 검사했다. */
+    private static boolean validExtensionValues(byte[] frame, int extensionsLength) {
+        int at = Frames.HEADER_SIZE;
+        int end = at + extensionsLength;
+        while (at < end) {
+            int tag = Frames.readUnsignedShort(frame, at);
+            int length = Frames.readUnsignedShort(frame, at + 2);
+            if ((tag == TIMEOUT_TAG && length != TIMEOUT_LENGTH)
+                    || (tag == IDEMPOTENCY_KEY_TAG && (length < 1 || length > MAX_IDEMPOTENCY_KEY_LENGTH))) {
+                return false;
+            }
+            at += TLV_HEADER_SIZE + length;
+        }
+        return true;
     }
 
     /** 확장 영역 형식 검사(규격 2.4.1절): 항목 길이의 합이 {@code extensions_length}와 같고 같은 tag가 없다. */
@@ -337,7 +378,12 @@ public final class Endpoint {
             return;
         }
         events.add(Event.result(streamId, Event.normalizeStatus(Frames.statusOf(frame))));
-        if (closeSeen && pendingStreams.isEmpty()) {
+        terminateIfDrained();
+    }
+
+    /** CLOSE를 보냈거나 받아 종료 중인데 대기 중인 스트림이 모두 끝났으면 닫는다(규격 3.5절). */
+    private void terminateIfDrained() {
+        if (closeSeen && pendingStreams.isEmpty() && incomingStreams.isEmpty()) {
             terminate();
         }
     }
@@ -411,7 +457,7 @@ public final class Endpoint {
 
     /** 오류 CLOSE이거나 대기 중인 스트림이 없으면 닫고, 아니면 대기 중인 스트림이 끝날 때까지 종료 중으로 둔다(규격 3.5절). */
     private void terminateUnlessClosing(long errorCode) {
-        if (errorCode != Frames.NO_ERROR || pendingStreams.isEmpty()) {
+        if (errorCode != Frames.NO_ERROR || (pendingStreams.isEmpty() && incomingStreams.isEmpty())) {
             terminate();
         }
     }
@@ -441,6 +487,7 @@ public final class Endpoint {
             events.add(Event.result(streamId, Event.UNAVAILABLE));
         }
         pendingStreams.clear();
+        incomingStreams.clear();
         events.add(Event.closed());
     }
 

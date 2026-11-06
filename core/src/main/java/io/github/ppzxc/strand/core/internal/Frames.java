@@ -13,6 +13,11 @@ final class Frames {
     static final int ACK = 0x01;
     static final int NO_ERROR = 0;
     static final int PROTOCOL_ERROR = 1;
+    static final int REFUSED = 3;
+    /** 규격 2.5.1절의 status 값. */
+    static final int INVALID_ARGUMENT = 3;
+
+    static final int UNIMPLEMENTED = 12;
     static final int RESET = 0x0004;
     /** 이 값부터 애플리케이션 프레임이다(규격 2.2.2절). */
     static final int FIRST_APPLICATION_TYPE = 0x0100;
@@ -21,21 +26,33 @@ final class Frames {
 
     /** 확장 영역이 없고 status·stream_id가 0인 제어 프레임. */
     static byte[] control(int type, int flags, byte[] payload) {
-        return frame(type, flags, 0, payload);
+        return frame(type, flags, 0, 0, payload);
     }
 
     /** 확장 영역이 없는 애플리케이션 요청 프레임. */
     static byte[] request(int type, int streamId, byte[] payload) {
-        return frame(type, 0, streamId, payload);
+        return frame(type, 0, 0, streamId, payload);
     }
 
-    private static byte[] frame(int type, int flags, int streamId, byte[] payload) {
+    /** 확장 영역과 payload가 없는 응답 프레임. 오류 응답에 쓴다(규격 4.1절). */
+    static byte[] response(int type, int streamId, int status) {
+        return frame(type, 0, status, streamId, new byte[0]);
+    }
+
+    /** 스트림 하나를 중단하는 RESET(규격 4.4절). */
+    static byte[] reset(int streamId, int errorCode) {
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        writeInt(payload, errorCode);
+        return frame(RESET, 0, 0, streamId, payload.toByteArray());
+    }
+
+    private static byte[] frame(int type, int flags, int status, int streamId, byte[] payload) {
         ByteArrayOutputStream out = new ByteArrayOutputStream(HEADER_SIZE + payload.length);
         writeInt(out, 12 + payload.length);
         out.write(type >>> 8);
         out.write(type);
         out.write(flags);
-        out.write(0); // status
+        out.write(status);
         writeInt(out, streamId);
         out.write(0); // extensions_length
         out.write(0);
