@@ -72,13 +72,28 @@ class VectorConformanceTest {
     }
 
     @Test
-    void executionIsSkippedBecauseCoreIsNotImplemented(@TempDir Path dir) throws IOException {
+    void filesNotYetImplementedAreSkippedNotPassed(@TempDir Path dir) throws IOException {
         writeFile(dir, "one.json", "a");
         DynamicTest test = VectorSuite.dynamicTests(dir).findFirst().get();
 
         assertThatThrownBy(() -> test.getExecutable().execute())
                 .isInstanceOf(TestAbortedException.class)
                 .hasMessageContaining("core 미구현");
+    }
+
+    @Test
+    void implementedFilesAreExecutedAndMismatchesFail(@TempDir Path dir) throws IOException {
+        // sample.json은 구현된 파일이다. 아무것도 보내지 않을 입력에 closed를 기대하면 실패해야 한다.
+        String vector = "{\"id\":\"x\",\"description\":\"d\",\"spec\":[\"3.4\"],"
+                + "\"setup\":{\"role\":\"server\",\"established\":true},"
+                + "\"steps\":[{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[],"
+                + "\"events\":[{\"event\":\"closed\"}]}]}";
+        Files.write(
+                dir.resolve("sample.json"),
+                ("{\"format\":1,\"vectors\":[" + vector + "]}").getBytes(StandardCharsets.UTF_8));
+        DynamicTest test = VectorSuite.dynamicTests(dir).findFirst().get();
+
+        assertThatThrownBy(() -> test.getExecutable().execute()).isInstanceOf(AssertionError.class);
     }
 
     @Test

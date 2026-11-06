@@ -8,8 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Assumptions;
@@ -39,7 +42,7 @@ final class VectorSuite {
             // 테스트 이름은 `파일명/id`(벡터 형식 문서 3절).
             String name = fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
-                tests.add(DynamicTest.dynamicTest(name + "/" + vector.id(), () -> run(vector)));
+                tests.add(DynamicTest.dynamicTest(name + "/" + vector.id(), () -> run(name, vector)));
             }
         }
         return tests.stream();
@@ -63,10 +66,15 @@ final class VectorSuite {
         }
     }
 
+    /** 러너가 실행하는 벡터 파일. 규격 구현이 들어올 때마다 해당 파일을 여기에 더한다. 나머지는 skipped로 보인다. */
+    private static final Set<String> IMPLEMENTED_FILES = new HashSet<>(Arrays.asList("sample", "handshake"));
+
     // 로드와 구조 검증은 이미 끝났다(dynamicTests가 로더를 부르는 시점에 실패로 드러난다).
-    // core에 규격 구현이 없으므로 실행 단계는 통과로 위장하지 않고 skipped로 보인다.
-    // 규격 구현이 들어오면 여기서 vector.setup()과 vector.steps()를 core에 실행한다.
-    private static void run(ConformanceVector vector) {
-        Assumptions.abort("core 미구현: 벡터 실행 단계를 건너뛴다 (" + vector.id() + ")");
+    // 구현이 아직 없는 파일의 벡터는 통과로 위장하지 않고 skipped로 보인다.
+    private static void run(String fileKey, ConformanceVector vector) {
+        if (!IMPLEMENTED_FILES.contains(fileKey)) {
+            Assumptions.abort("core 미구현: " + fileKey + " 벡터 실행을 건너뛴다 (" + vector.id() + ")");
+        }
+        VectorRunner.run(vector);
     }
 }
