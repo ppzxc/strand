@@ -263,6 +263,88 @@
       ]
     },
     {
+      "id": "text-close-message-after-first-frame-closes",
+      "description": "첫 프레임 뒤에 텍스트 메시지로 온 CLOSE도 연결 오류다. 내용이 유효한 CLOSE(NO_ERROR)여도 받은 CLOSE로 보지 않고 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "spec": [
+        "1.2",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "text",
+          "hex": "0000001000030000000000000000000000000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "text-close-message-after-close-sent-closes-without-resend",
+      "description": "이미 CLOSE를 보낸 연결에서 텍스트 메시지가 오면 연결 오류로 닫되 CLOSE를 다시 보내지 않는다",
+      "spec": [
+        "1.2",
+        "3.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv_message",
+          "opcode": "text",
+          "hex": "0000001000030000000000000000000000000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "message-longer-than-frame-closes",
       "description": "바이너리 메시지의 크기가 4 + length보다 크면(PING 프레임 뒤에 1바이트) 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보낸다",
       "spec": [

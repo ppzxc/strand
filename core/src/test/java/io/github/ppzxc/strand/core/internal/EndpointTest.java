@@ -1850,6 +1850,45 @@ class EndpointTest {
     }
 
     @Test
+    void webSocketCloseCarriedInATextMessageIsAProtocolError() {
+        Endpoint noError = establishedWebSocket();
+        noError.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        assertClosedWithProtocolError(noError);
+
+        Endpoint protocolError = establishedWebSocket();
+        protocolError.receiveMessage(false, bytes(CLOSE_PROTOCOL_ERROR));
+        assertClosedWithProtocolError(protocolError);
+    }
+
+    @Test
+    void webSocketTextCloseSendsNoSecondCloseAfterOneWasSentOrReceived() {
+        Endpoint sentClose = establishedWebSocket();
+        sentClose.request(257, new byte[0]);
+        sentClose.close(Frames.NO_ERROR);
+        sentClose.drainOutput();
+        sentClose.drainEvents();
+        sentClose.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        assertThat(sentClose.drainOutput()).isEmpty();
+        assertThat(kinds(sentClose)).contains(Event.Kind.CLOSED);
+
+        Endpoint receivedClose = establishedWebSocket();
+        receivedClose.request(257, new byte[0]);
+        receivedClose.receiveMessage(true, bytes(CLOSE_NO_ERROR));
+        receivedClose.drainOutput();
+        receivedClose.drainEvents();
+        receivedClose.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        assertThat(receivedClose.drainOutput()).isEmpty();
+        assertThat(kinds(receivedClose)).contains(Event.Kind.CLOSED);
+
+        Endpoint closed = establishedWebSocket();
+        closed.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        closed.drainOutput();
+        closed.drainEvents();
+        closed.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        assertOpenAndSilent(closed);
+    }
+
+    @Test
     void webSocketMessageOfTheWrongSizeIsAProtocolError() {
         Endpoint longer = establishedWebSocket();
         longer.receiveMessage(true, bytes(PING_MESSAGE + "00"));
