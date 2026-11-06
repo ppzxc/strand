@@ -1897,6 +1897,62 @@ class EndpointTest {
     }
 
     @Test
+    void webSocketReceivedNoErrorCloseIsFollowedByWebSocketCloseNormalClosure() {
+        Endpoint server = establishedWebSocket();
+
+        server.receiveMessage(MessageKind.BINARY, bytes(CLOSE_NO_ERROR));
+
+        List<OutboundMessage> messages = server.drainMessages();
+        assertThat(messageTypes(messages)).containsExactly(OutboundMessage.Type.WEBSOCKET_CLOSE);
+        assertThat(messages.get(0).statusCode()).isEqualTo(1000);
+    }
+
+    @Test
+    void webSocketCloseWaitsForTheLastStreamWhenReceivedNoErrorCloseIsDraining() {
+        Endpoint server = establishedWebSocket();
+        server.receiveMessage(MessageKind.BINARY, bytes("0000000c010100000000000100000000"));
+        server.drainEvents();
+        server.receiveMessage(MessageKind.BINARY, bytes(CLOSE_NO_ERROR));
+        assertThat(server.drainMessages()).isEmpty();
+
+        server.respond(1, 0, new byte[0]);
+
+        assertThat(messageTypes(server.drainMessages()))
+                .containsExactly(OutboundMessage.Type.BINARY, OutboundMessage.Type.WEBSOCKET_CLOSE);
+    }
+
+    @Test
+    void byteStreamReceivedNoErrorCloseHasNoWebSocketClose() {
+        Endpoint server = established();
+
+        server.receive(bytes(CLOSE_NO_ERROR));
+
+        assertThat(server.drainMessages()).isEmpty();
+    }
+
+    @Test
+    void webSocketReceivedErrorCloseHasNoWebSocketCloseItem() {
+        Endpoint server = establishedWebSocket();
+
+        server.receiveMessage(MessageKind.BINARY, bytes(CLOSE_PROTOCOL_ERROR));
+
+        assertThat(server.drainMessages()).isEmpty();
+    }
+
+    @Test
+    void webSocketErrorCloseReceivedWhileDrainingHasNoWebSocketCloseItem() {
+        Endpoint server = establishedWebSocket();
+        server.receiveMessage(MessageKind.BINARY, bytes("0000000c010100000000000100000000"));
+        server.drainEvents();
+        server.close(Frames.NO_ERROR);
+        server.drainMessages();
+
+        server.receiveMessage(MessageKind.BINARY, bytes(CLOSE_PROTOCOL_ERROR));
+
+        assertThat(server.drainMessages()).isEmpty();
+    }
+
+    @Test
     void byteStreamNoErrorCloseHasNoWebSocketClose() {
         Endpoint server = established();
 

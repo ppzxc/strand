@@ -69,8 +69,6 @@ public final class Endpoint {
     private long peerMaxFrameSize = DEFAULT_MAX_FRAME_SIZE;
     /** CLOSE를 보냈거나 받았다(규격 3.5절). */
     private boolean closeSeen;
-    /** {@code NO_ERROR} CLOSE를 보냈다. WebSocket에서는 연결이 끝날 때 WebSocket Close(1000)가 따른다(규격 1.2절). */
-    private boolean noErrorCloseSent;
 
     private boolean closed;
     private long now;
@@ -273,7 +271,6 @@ public final class Endpoint {
         }
         send(Frames.close(errorCode));
         closeSeen = true;
-        noErrorCloseSent = errorCode == Frames.NO_ERROR;
         terminateUnlessClosing(errorCode);
     }
 
@@ -661,11 +658,12 @@ public final class Endpoint {
     }
 
     /**
-     * {@code NO_ERROR}로 끝나는 연결을 닫는다. WebSocket에서 {@code NO_ERROR} CLOSE를 내가 보냈다면 마지막 프레임 뒤에 WebSocket
-     * Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket 상태 코드는 규격이 정하지 않아 모델링하지 않는다.
+     * {@code NO_ERROR} CLOSE를 보냈거나 받아 끝나는 연결을 닫는다. 호출부는 이 경우에만 이 메서드를 부른다(오류 CLOSE는 곧바로 {@link
+     * #terminate()}로 닫는다). WebSocket이면 마지막 프레임 뒤에 WebSocket Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket
+     * 상태 코드는 규격이 정하지 않아 모델링하지 않는다.
      */
     private void finishNormally() {
-        if (!closed && noErrorCloseSent && config.isWebSocket()) {
+        if (!closed && config.isWebSocket()) {
             output.add(OutboundMessage.normalWebSocketClose());
         }
         terminate();
