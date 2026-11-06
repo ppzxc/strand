@@ -286,10 +286,13 @@ public final class Endpoint {
             firstFrameChecked = true;
         }
         if (length < MIN_FRAME_LENGTH || length > config.maxFrameSize() - LENGTH_SIZE) {
-            if (inbound.length >= TYPE_END && Frames.typeOf(inbound) == Frames.CLOSE) {
+            if (inbound.length < TYPE_END) {
+                // type을 읽을 때까지 기다린다. CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫아야 하므로 도착 단위에 따라 결과가 달라지면 안 된다.
+                return false;
+            }
+            if (Frames.typeOf(inbound) == Frames.CLOSE) {
                 // 길이가 어긋나도 type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫는다(규격 3.5절).
-                closeSeen = true;
-                terminate();
+                closeReceivedMalformed();
             } else {
                 connectionError();
             }
@@ -542,13 +545,19 @@ public final class Endpoint {
 
     /** 받은 CLOSE(규격 3.5절). 형태가 잘못돼도 받은 CLOSE로 치고, 그때는 오류 CLOSE처럼 CLOSE 없이 닫는다. */
     private void handleClose(byte[] frame, int extensions, long streamId) {
-        closeSeen = true;
         int payloadSize = frame.length - Frames.HEADER_SIZE - extensions;
         if (extensions != 0 || streamId != 0 || payloadSize < 4) {
-            terminate();
+            closeReceivedMalformed();
             return;
         }
+        closeSeen = true;
         terminateUnlessClosing(Frames.readUnsignedInt(frame, Frames.HEADER_SIZE));
+    }
+
+    /** 형태가 잘못된 CLOSE를 받았다. 받은 CLOSE로 치고 CLOSE를 보내지 않은 채 닫는다(규격 3.5절). */
+    private void closeReceivedMalformed() {
+        closeSeen = true;
+        terminate();
     }
 
     /** 오류 CLOSE이거나 대기 중인 스트림이 없으면 닫고, 아니면 대기 중인 스트림이 끝날 때까지 종료 중으로 둔다(규격 3.5절). */

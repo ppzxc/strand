@@ -440,8 +440,8 @@ class EndpointTest {
         server.receive(bytes(HELLO_ACK));
         server.drainOutput();
 
-        // 본문이 다 오기 전에 헤더 앞 4바이트만으로 판정한다.
-        server.receive(bytes("00003ffd"));
+        // 본문이 다 오기 전에 length와 type까지만으로 판정한다.
+        server.receive(bytes("00003ffd0002"));
 
         assertClosedWithProtocolError(server);
     }
@@ -462,7 +462,7 @@ class EndpointTest {
     void frameLengthBelowTheMinimumClosesWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000b"));
+        server.receive(bytes("0000000b0002"));
 
         assertClosedWithProtocolError(server);
     }
@@ -470,7 +470,7 @@ class EndpointTest {
     @Test
     void nothingIsHandledOnceClosed() {
         Endpoint server = established();
-        server.receive(bytes("0000000b"));
+        server.receive(bytes("0000000b0002"));
         server.drainOutput();
         server.drainEvents();
 
@@ -1663,5 +1663,17 @@ class EndpointTest {
         client.disconnect();
 
         assertOpenAndSilent(client);
+    }
+
+    @Test
+    void closeFrameWithBadLengthIsSilentEvenWhenTheTypeArrivesLater() {
+        Endpoint server = established();
+
+        server.receive(bytes("0000000b"));
+        assertOpenAndSilent(server);
+        server.receive(bytes("0003"));
+
+        assertThat(sent(server)).isEmpty();
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 }
