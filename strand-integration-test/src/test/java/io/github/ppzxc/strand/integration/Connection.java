@@ -121,11 +121,20 @@ final class Connection implements AutoCloseable {
                 }
             }
         } catch (IOException e) {
-            withEndpoint(Endpoint::disconnect);
+            recordingFailure(() -> withEndpoint(Endpoint::disconnect));
         } catch (RuntimeException e) {
             readerFailure = e;
         } finally {
             closeSocket();
+        }
+    }
+
+    /** 읽기 스레드의 마무리 동작이 던진 예외도 {@link #readerFailure}에 남겨, 조용히 죽은 스레드가 정상 종료로 보이지 않게 한다. */
+    private void recordingFailure(Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException e) {
+            readerFailure = e;
         }
     }
 
