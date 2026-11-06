@@ -7,8 +7,6 @@ import org.jspecify.annotations.Nullable;
 /** 엔드포인트의 설정: 보내는 HELLO의 파라미터(규격 3.2.1절)와 확인 대기 시간. 값을 바꾼 복사본을 돌려주는 불변 객체다. */
 public final class EndpointConfig {
 
-    private static final long DEFAULT_MAX_FRAME_SIZE = 4_194_304L;
-    private static final long DEFAULT_MAX_CONCURRENT_STREAMS = 100L;
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
 
     private final long maxFrameSize;
@@ -22,20 +20,20 @@ public final class EndpointConfig {
     /** WebSocket 위에서 쓴다(규격 1.2절). */
     private final boolean webSocket;
 
-    private EndpointConfig(Values values) {
-        this.maxFrameSize = values.maxFrameSize;
-        this.maxConcurrentStreams = values.maxConcurrentStreams;
-        this.capabilities = values.capabilities;
-        this.ackTimeoutMs = values.ackTimeoutMs;
-        this.knownTypes = values.knownTypes;
-        this.nextStreamId = values.nextStreamId;
-        this.webSocket = values.webSocket;
+    private EndpointConfig(ConfigDraft draft) {
+        this.maxFrameSize = draft.maxFrameSize;
+        this.maxConcurrentStreams = draft.maxConcurrentStreams;
+        this.capabilities = draft.capabilities;
+        this.ackTimeoutMs = draft.ackTimeoutMs;
+        this.knownTypes = draft.knownTypes;
+        this.nextStreamId = draft.nextStreamId;
+        this.webSocket = draft.webSocket;
     }
 
     /** 설정 값의 모음. 복사본을 만들 때 한 필드만 고치는 데 쓴다. 필드를 더해도 생성자 인자 나열은 늘지 않는다. */
-    private static final class Values {
-        long maxFrameSize = DEFAULT_MAX_FRAME_SIZE;
-        long maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
+    private static final class ConfigDraft {
+        long maxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
+        long maxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
         long capabilities;
         long ackTimeoutMs = DEFAULT_ACK_TIMEOUT_MS;
 
@@ -48,16 +46,16 @@ public final class EndpointConfig {
         boolean webSocket;
     }
 
-    private Values values() {
-        Values values = new Values();
-        values.maxFrameSize = maxFrameSize;
-        values.maxConcurrentStreams = maxConcurrentStreams;
-        values.capabilities = capabilities;
-        values.ackTimeoutMs = ackTimeoutMs;
-        values.knownTypes = knownTypes;
-        values.nextStreamId = nextStreamId;
-        values.webSocket = webSocket;
-        return values;
+    private ConfigDraft draft() {
+        ConfigDraft draft = new ConfigDraft();
+        draft.maxFrameSize = maxFrameSize;
+        draft.maxConcurrentStreams = maxConcurrentStreams;
+        draft.capabilities = capabilities;
+        draft.ackTimeoutMs = ackTimeoutMs;
+        draft.knownTypes = knownTypes;
+        draft.nextStreamId = nextStreamId;
+        draft.webSocket = webSocket;
+        return draft;
     }
 
     /**
@@ -66,7 +64,7 @@ public final class EndpointConfig {
      * @return 기본 설정
      */
     public static EndpointConfig defaults() {
-        return new EndpointConfig(new Values());
+        return new EndpointConfig(new ConfigDraft());
     }
 
     /**
@@ -76,9 +74,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig maxFrameSize(long value) {
-        Values values = values();
-        values.maxFrameSize = value;
-        return new EndpointConfig(values);
+        ConfigDraft draft = draft();
+        draft.maxFrameSize = value;
+        return new EndpointConfig(draft);
     }
 
     /**
@@ -88,9 +86,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig maxConcurrentStreams(long value) {
-        Values values = values();
-        values.maxConcurrentStreams = value;
-        return new EndpointConfig(values);
+        ConfigDraft draft = draft();
+        draft.maxConcurrentStreams = value;
+        return new EndpointConfig(draft);
     }
 
     /**
@@ -100,9 +98,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig capabilities(long value) {
-        Values values = values();
-        values.capabilities = value;
-        return new EndpointConfig(values);
+        ConfigDraft draft = draft();
+        draft.capabilities = value;
+        return new EndpointConfig(draft);
     }
 
     /**
@@ -112,9 +110,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig ackTimeoutMs(long value) {
-        Values values = values();
-        values.ackTimeoutMs = value;
-        return new EndpointConfig(values);
+        ConfigDraft draft = draft();
+        draft.ackTimeoutMs = value;
+        return new EndpointConfig(draft);
     }
 
     /**
@@ -125,9 +123,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig knownTypes(Set<Integer> types) {
-        Values values = values();
-        values.knownTypes = new HashSet<>(types);
-        return new EndpointConfig(values);
+        ConfigDraft draft = draft();
+        draft.knownTypes = new HashSet<>(types);
+        return new EndpointConfig(draft);
     }
 
     /**
@@ -138,9 +136,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig nextStreamId(long value) {
-        Values values = values();
-        values.nextStreamId = value;
-        return new EndpointConfig(values);
+        ConfigDraft draft = draft();
+        draft.nextStreamId = value;
+        return new EndpointConfig(draft);
     }
 
     /**
@@ -150,9 +148,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig webSocket() {
-        Values values = values();
-        values.webSocket = true;
-        return new EndpointConfig(values);
+        ConfigDraft draft = draft();
+        draft.webSocket = true;
+        return new EndpointConfig(draft);
     }
 
     boolean isWebSocket() {

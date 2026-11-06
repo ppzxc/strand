@@ -24,7 +24,7 @@ final class AckWaits {
     private static final int PING = 0x0002;
     private static final int ACK_FLAG = 0x01;
     /** 연결 서문의 식별자 6바이트. 뒤의 2바이트는 예약이라 값을 보지 않는다(규격 3.1절). */
-    private static final String PREFACE_MAGIC_HEX = "c0de53545230";
+    private static final String PREFACE_PREFIX_HEX = "c0de53545230";
 
     private static final int PREFACE_HEX_LENGTH = 16;
     private static final int LENGTH_HEX = 8;
@@ -242,8 +242,8 @@ final class AckWaits {
 
         /** 흐름 맨 앞이 연결 서문이면 8바이트를 건너뛴다. 서문인지 알 만큼 바이트가 모였으면 true. */
         private boolean skipPreface() {
-            int compared = Math.min(buffer.length(), PREFACE_MAGIC_HEX.length());
-            if (!buffer.substring(0, compared).equals(PREFACE_MAGIC_HEX.substring(0, compared))) {
+            int compared = Math.min(buffer.length(), PREFACE_PREFIX_HEX.length());
+            if (!buffer.substring(0, compared).equals(PREFACE_PREFIX_HEX.substring(0, compared))) {
                 prefaceChecked = true;
                 return true;
             }

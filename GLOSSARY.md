@@ -14,7 +14,7 @@ _Avoid_: 프로토콜 스펙, 와이어 프로토콜 스펙, 프로토콜 문서
 
 **연결 서문 (Connection Preface)**:
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
-_Avoid_: 핸드셰이크 매직, 프리페이스(단독 비표준 표기), 매직 쿠키
+_Avoid_: 핸드셰이크 매직, 프리페이스(단독 비표준 표기), 매직 쿠키, `magic`(식별자). 서버가 비교하는 앞 6바이트는 `prefix`로 부른다. 규격 3.1절의 "식별값"은 `C0 DE` 2바이트의 이름이다
 
 **가닥 (Strand)**:
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
@@ -92,6 +92,18 @@ _Avoid_: 정상 종료, GOAWAY, 세션 종료
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: draining, 유예, graceful shutdown
 
+**CLOSE 교환 (Close Exchanged)**:
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
+_Avoid_: 종료 요청, 종료 핸드셰이크
+
+**연결이 끝남 (Connection End)**:
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
+_Avoid_: terminate, 세션 종료
+
+**확인 대기 (Ack Wait)**:
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
+_Avoid_: 타임아웃(단독), 하트비트 타이머
+
 **스트림 중단 (RESET)**:
 정의: [규격 4.4절](docs/specification/STRAND_SPECIFICATION.md#44-스트림-중단-reset)
 _Avoid_: RST_STREAM, 취소 프레임
@@ -135,3 +147,15 @@ _Avoid_: WebSocket 어댑터, TCP 어댑터, WebSocket 바인딩
 **적합성 벡터 (Conformance Vectors)**:
 정의: [적합성 벡터 형식](docs/specification/STRAND_CONFORMANCE_VECTORS.md)
 _Avoid_: conformance 벡터, 테스트 데이터, 픽스처, 골든 파일
+
+---
+
+## 5. 코드 식별자 (Identifiers)
+
+영어 식별자(클래스·필드·메서드·상수)에 적용하는 규칙이다. 1~4절의 `_Avoid_`는 한국어 용어와 문서 서술에 적용하고, 식별자에는 이 절이 우선한다.
+
+- **`own` / `peer`**: `own`은 내 엔드포인트, `peer`는 상대 엔드포인트다. 규격이 `highest_peer_stream_id`로 쓰는 어휘다. 한국어 서술에서는 "상대"를 쓴다.
+- **`message`**: 식별자의 `message`는 바이트 스트림 전송에서는 프레임 하나, WebSocket 전송에서는 WebSocket 메시지 하나(또는 WebSocket Close)다([규격 1.2절](docs/specification/STRAND_SPECIFICATION.md#12-공식-사용-환경)). 문서 서술에서 프레임과 메시지를 구별하는 규칙은 그대로다.
+- **규격 필드 이름은 규격 의미로만 쓴다**: `type`, `status`, `error_code`, `stream_id`를 코드 내부 분류의 이름으로 쓰지 않는다. 내부 분류에는 `kind` 등 다른 이름을 쓴다.
+- **상수는 규격 표의 이름 그대로 쓴다**: status는 규격 2.5.1절, error_code는 2.5.2절, 프레임 type은 2.2.2절, HELLO 파라미터는 3.2절의 표. 번호 공간이 다른 값은 클래스로 나눈다(`Status`, `ErrorCode`, `FrameType`, `HelloParams`). 표에 이름이 없는 값(파라미터 크기, 허용 범위 등)은 `_ID`, `_LIMIT`, `_SIZE` 같은 접미사로 의미를 드러내고, 규격 값의 별칭은 표의 클래스가 아니라 쓰는 쪽에 둔다.
+- **`Draft`**: 불변 객체의 복사본을 만들 때 한 필드만 고치려고 쓰는 가변 값 모음이다(`EndpointConfig`의 `ConfigDraft`). 도메인 개념이 아니라 구현 관용어이며 `internal` 패키지 밖으로 내보내지 않는다.

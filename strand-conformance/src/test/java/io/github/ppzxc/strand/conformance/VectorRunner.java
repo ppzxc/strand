@@ -7,8 +7,8 @@ import com.google.gson.JsonObject;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.Event;
-import io.github.ppzxc.strand.core.internal.MessageKind;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
+import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -68,7 +68,9 @@ final class VectorRunner {
         STEPS.put(
                 "recv_message",
                 (runner, step) -> runner.endpoint.receiveMessage(
-                        step.get("opcode").getAsString().equals("binary") ? MessageKind.BINARY : MessageKind.TEXT,
+                        step.get("opcode").getAsString().equals("binary")
+                                ? WebSocketMessageKind.BINARY
+                                : WebSocketMessageKind.TEXT,
                         Bytes.fromHex(step.get("hex").getAsString())));
         STEPS.put(
                 "advance",
@@ -268,7 +270,7 @@ final class VectorRunner {
     /** 수립에 쓰는 입력 하나를 전송 방식에 맞게 넣는다. WebSocket이면 메시지 하나로, 바이트 스트림이면 바이트로 넣는다. */
     private void deliver(byte[] bytes) {
         if (webSocket) {
-            endpoint.receiveMessage(MessageKind.BINARY, bytes);
+            endpoint.receiveMessage(WebSocketMessageKind.BINARY, bytes);
         } else {
             endpoint.receive(bytes);
         }
@@ -356,16 +358,17 @@ final class VectorRunner {
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         boolean first = true;
         for (OutboundMessage message : messages) {
-            if (message.type() == OutboundMessage.Type.WEBSOCKET_CLOSE && message.statusCode() != NORMAL_CLOSURE) {
+            if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE
+                    && message.webSocketCloseCode() != NORMAL_CLOSURE) {
                 // 1000이 아닌 상태 코드는 규격이 정하지 않아 관측하지 않는다(벡터 형식 6.1절).
                 continue;
             }
             boolean withPreface = startsWithPreface && first;
             first = false;
-            if (message.type() == OutboundMessage.Type.WEBSOCKET_CLOSE) {
+            if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE) {
                 result.addAll(describe(stream.toByteArray(), startsWithPreface && result.isEmpty()));
                 stream.reset();
-                result.add("WEBSOCKET_CLOSE code=" + message.statusCode());
+                result.add("WEBSOCKET_CLOSE code=" + message.webSocketCloseCode());
             } else if (webSocket) {
                 List<String> frames = describe(message.bytes(), withPreface);
                 assertThat(frames).as("WebSocket 메시지마다 프레임이 하나").hasSize(1);
