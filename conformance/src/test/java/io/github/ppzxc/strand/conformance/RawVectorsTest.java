@@ -5,9 +5,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class RawVectorsTest {
 
@@ -24,5 +30,38 @@ class RawVectorsTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("f/a");
         assertThat(target).hasSize(1);
+    }
+
+    @Test
+    void filesAreServedFromTheCachePerVectorDirectory() {
+        assertThat(RawVectors.files()).isSameAs(RawVectors.files());
+    }
+
+    @Test
+    void vectorsOfAFileAreServedFromTheCache() {
+        assertThat(RawVectors.files()).isNotEmpty();
+        Path file = RawVectors.files().get(0);
+
+        assertThat(RawVectors.vectors(file)).isSameAs(RawVectors.vectors(file));
+    }
+
+    @Test
+    void aChangedVectorDirectoryIsReadAgain(@TempDir Path other) throws IOException {
+        Files.write(other.resolve("only.json"), "{\"vectors\":[{\"id\":\"x\"}]}".getBytes(StandardCharsets.UTF_8));
+        String original = System.getProperty(VectorSuite.VECTORS_DIR_PROPERTY);
+        List<Path> before = RawVectors.files();
+        try {
+            System.setProperty(VectorSuite.VECTORS_DIR_PROPERTY, other.toString());
+
+            assertThat(RawVectors.files()).isNotEqualTo(before).hasSize(1);
+            assertThat(RawVectors.byKey()).containsOnlyKeys("only/x");
+        } finally {
+            if (original == null) {
+                System.clearProperty(VectorSuite.VECTORS_DIR_PROPERTY);
+            } else {
+                System.setProperty(VectorSuite.VECTORS_DIR_PROPERTY, original);
+            }
+        }
+        assertThat(RawVectors.files()).isEqualTo(before);
     }
 }

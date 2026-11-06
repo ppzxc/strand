@@ -44,7 +44,7 @@ class NewVectorCoverageTest {
         return result;
     }
 
-    private static JsonObject vector(String key) throws IOException {
+    private static JsonObject vector(String key) {
         JsonObject vector = RawVectors.byKey().get(key);
         assertThat(vector).as(key).isNotNull();
         return vector;
@@ -72,7 +72,7 @@ class NewVectorCoverageTest {
     }
 
     @Test
-    void aVectorUsesKnownTypesAndExpectsUnimplementedWithoutClosing() throws IOException {
+    void aVectorUsesKnownTypesAndExpectsUnimplementedWithoutClosing() {
         JsonObject v = vector("request-checks/unknown-type-request-is-answered-unimplemented");
         assertThat(v.getAsJsonObject("setup").has("known_types")).isTrue();
         // 모르는 type(258)의 요청에는 UNIMPLEMENTED 응답만 나가고 CLOSE도 연결 종료 이벤트도 없다.
@@ -106,7 +106,7 @@ class NewVectorCoverageTest {
     }
 
     @Test
-    void aVectorUsesTheWebSocketTransport() throws IOException {
+    void aVectorUsesTheWebSocketTransport() {
         JsonObject setup = vector("websocket/established-ping-is-acknowledged").getAsJsonObject("setup");
         assertThat(setup.get("transport").getAsString()).isEqualTo("websocket");
         List<String> kinds = new ArrayList<>();
@@ -118,7 +118,7 @@ class NewVectorCoverageTest {
     }
 
     @Test
-    void aVectorUsesNextStreamIdForNumberExhaustion() throws IOException {
+    void aVectorUsesNextStreamIdForNumberExhaustion() {
         JsonObject client = vector("streams/exhaustion-after-last-number-sends-close-client")
                 .getAsJsonObject("setup");
         assertThat(client.get("next_stream_id").getAsLong()).isEqualTo(2147483647L);
@@ -128,7 +128,7 @@ class NewVectorCoverageTest {
     }
 
     @Test
-    void aVectorUsesPingStepWithAckTimeout() throws IOException {
+    void aVectorUsesPingStepWithAckTimeout() {
         JsonObject v = vector("ack-timeout/ping-ack-timeout-before-and-after-limit");
         assertThat(v.getAsJsonObject("setup").getAsJsonObject("config").has("ack_timeout_ms"))
                 .isTrue();
@@ -144,7 +144,7 @@ class NewVectorCoverageTest {
      * `ack_timeout_ms`를 쓰거나 id에 ack-timeout이 있는 벡터는 확인 대기를 시작해야 한다.
      */
     @Test
-    void timeVectorsNeverReachTheLimitExactly() throws IOException {
+    void timeVectorsNeverReachTheLimitExactly() {
         int declared = 0;
         for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
             JsonObject vector = entry.getValue();
@@ -172,7 +172,7 @@ class NewVectorCoverageTest {
 
     /** 5.1절 5번 (가)→(나)→(다). 어느 검사가 먼저 걸리는지는 송신 프레임으로 본다. */
     @Test
-    void requestCheckOrderIsRefusedThenUnimplementedThenInvalidArgument() throws IOException {
+    void requestCheckOrderIsRefusedThenUnimplementedThenInvalidArgument() {
         for (String key : Arrays.asList(
                 "request-checks/closing-refuses-unknown-type-request",
                 "request-checks/closing-refuses-bad-extension-value-request",
@@ -191,7 +191,7 @@ class NewVectorCoverageTest {
     }
 
     @Test
-    void applicationCloseAfterAnyCloseSendsNothing() throws IOException {
+    void applicationCloseAfterAnyCloseSendsNothing() {
         for (String key : Arrays.asList(
                 "close-races/application-close-after-close-sent-sends-nothing",
                 "close-races/application-close-after-close-received-sends-nothing")) {
