@@ -129,7 +129,7 @@ final class VectorRunner {
     private final boolean webSocket;
     private final Endpoint endpoint;
 
-    private VectorRunner(boolean client, boolean webSocket, Endpoint endpoint) {
+    VectorRunner(boolean client, boolean webSocket, Endpoint endpoint) {
         this.client = client;
         this.webSocket = webSocket;
         this.endpoint = endpoint;
@@ -351,17 +351,17 @@ final class VectorRunner {
      * 엔드포인트가 보낸 메시지를 벡터의 `send`와 같은 표기로 바꾼다. WebSocket에서는 바이너리 메시지마다 프레임이 정확히 하나여야 하고
      * (벡터 형식 6.1절), WebSocket Close는 자기 항목이다. 바이트 스트림에서는 메시지를 이어 붙여 프레임으로 푼다.
      */
-    private List<String> describeMessages(List<OutboundMessage> messages, boolean startsWithPreface) {
+    List<String> describeMessages(List<OutboundMessage> messages, boolean startsWithPreface) {
         List<String> result = new ArrayList<>();
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         boolean first = true;
         for (OutboundMessage message : messages) {
-            boolean withPreface = startsWithPreface && first;
-            first = false;
             if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE && message.statusCode() != NORMAL_CLOSURE) {
                 // 1000이 아닌 상태 코드는 규격이 정하지 않아 관측하지 않는다(벡터 형식 6.1절).
                 continue;
             }
+            boolean withPreface = startsWithPreface && first;
+            first = false;
             if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE) {
                 result.addAll(describe(stream.toByteArray(), startsWithPreface && result.isEmpty()));
                 stream.reset();
