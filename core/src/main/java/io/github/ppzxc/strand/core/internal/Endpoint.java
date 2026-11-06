@@ -179,7 +179,7 @@ public final class Endpoint {
             return;
         }
         send(Frames.reset(streamId, Frames.ERROR_CANCEL));
-        events.add(Event.result(streamId, Event.LOCAL_CANCEL));
+        events.add(Event.result(streamId, Event.CANCELLED));
         terminateIfDrained();
     }
 

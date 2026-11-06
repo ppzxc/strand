@@ -6,11 +6,16 @@ public final class Event {
     /** 규격 2.5.1절의 {@code UNAVAILABLE}. */
     public static final int UNAVAILABLE = 14;
 
-    /** 규격 2.5.1절의 {@code UNKNOWN}. 예약된 status는 이 값으로 취급한다. */
-    private static final int CANCELLED = 1;
+    /** 규격 2.5.1절의 {@code CANCELLED}. 내가 취소한 요청의 로컬 결과다(규격 4.4절). */
+    static final int CANCELLED = 1;
 
+    /** 규격 2.5.1절의 {@code UNKNOWN}. 예약된 status는 이 값으로 취급한다. */
     private static final int UNKNOWN = 2;
+
     private static final int INTERNAL = 13;
+
+    /** 응답 {@code type}이 요청과 다를 때 애플리케이션에 넘기는 로컬 status(규격 4.1절). */
+    static final int RESPONSE_TYPE_MISMATCH = INTERNAL;
 
     /** 규격 2.5.1절에 정의된 마지막 status({@code UNAUTHENTICATED}). */
     private static final int UNAUTHENTICATED = 16;
@@ -44,12 +49,6 @@ public final class Event {
     static Event result(int streamId, int status) {
         return new Event(Kind.RESULT, streamId, status, 0);
     }
-
-    /** 응답 {@code type}이 요청과 다를 때 애플리케이션에 넘기는 로컬 status(규격 4.1절). */
-    static final int RESPONSE_TYPE_MISMATCH = INTERNAL;
-
-    /** 내가 취소한 요청의 로컬 status(규격 4.4절). */
-    static final int LOCAL_CANCEL = CANCELLED;
 
     /** 내 요청이 받은 RESET으로 끝났을 때 애플리케이션에 넘기는 로컬 status(규격 4.4절). 예약 error_code는 INTERNAL_ERROR로 본다. */
     static int statusForReset(long errorCode) {
