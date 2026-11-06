@@ -129,7 +129,7 @@
 | `WEBSOCKET_CLOSE` | `code`(`1000`만 쓴다) | — |
 | 애플리케이션 프레임 (`type` 256 이상 정수) | `type`, `flags`(0), `stream_id`, `status`(응답 프레임, 곧 `stream_id`가 상대 엔드포인트의 번호 공간인 프레임만. 생략하면 `OK`), `extensions`(tag별 값. 순서는 비교하지 않음), `payload`(생략하면 빈 값) | 요청 프레임의 `status` |
 
-`WEBSOCKET_CLOSE`는 WebSocket Close(`Close Frame 0x08`)를 관측하는 항목이고 `transport`가 `websocket`인 벡터에서만 쓴다. 구현이 `NO_ERROR` CLOSE를 보내 연결을 끝낼 때(규격 1.2절, 3.5절) 마지막 프레임 메시지 뒤에 나온다. `NO_ERROR`가 아닌 CLOSE로 끝낼 때의 WebSocket Close와 상태 1000이 아닌 WebSocket Close는 이 형식으로 관측하지 않으며, 러너는 비교에서 뺀다.
+`WEBSOCKET_CLOSE`는 WebSocket Close(`Close Frame 0x08`)를 관측하는 항목이고 `transport`가 `websocket`인 벡터에서만 쓴다. 구현이 `NO_ERROR` CLOSE를 보냈거나 받아 연결을 끝낼 때(규격 1.2절, 3.5절) 마지막 프레임 메시지 뒤에 나온다(받아서 끝나면 보낸 프레임이 없을 수 있다). `NO_ERROR`가 아닌 CLOSE로 끝낼 때의 WebSocket Close와 상태 1000이 아닌 WebSocket Close는 이 형식으로 관측하지 않으며, 러너는 비교에서 뺀다.
 
 모든 프레임에서 `length`와 `reserved`는 비교하지 않는다. 비교 대상이지만 쓰지 않은 필드는 위 표의 기본값(빈 `flags`, 빈 확장 영역, 빈 `payload`)과 비교한다.
 
