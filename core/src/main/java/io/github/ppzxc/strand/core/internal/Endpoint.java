@@ -567,9 +567,12 @@ public final class Endpoint {
         helloAcknowledged = true;
         peerMaxConcurrentStreams = peerMaxConcurrentStreamsFrom(payload);
         send(Frames.control(Frames.HELLO, Frames.ACK, new byte[0]));
-        // 보내다가 닫히면 terminate가 남은 요청을 closed 이전에 실패시키고 목록을 비운다.
+        // 보내다가 닫히면 terminate가 남은 요청을 closed 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
         while (!deferredSends.isEmpty()) {
-            deferredSends.remove(0).sending.run();
+            DeferredSend deferred = deferredSends.remove(0);
+            if (deferred.request || !closeSeen) {
+                deferred.sending.run();
+            }
         }
     }
 

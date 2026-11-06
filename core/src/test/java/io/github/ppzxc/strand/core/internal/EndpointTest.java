@@ -795,6 +795,7 @@ class EndpointTest {
         client.request(257, new byte[0]);
         client.request(257, new byte[0]);
         client.request(257, new byte[0]);
+        client.ping(bytes("0102030405060708"));
 
         client.receive(bytes(HELLO));
 
