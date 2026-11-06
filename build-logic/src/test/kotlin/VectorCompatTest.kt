@@ -47,7 +47,7 @@ class VectorCompatTest {
         }
         tasks.test {
           useJUnitPlatform()
-          systemProperty("strand.conformance.vectors.dir", "${'$'}projectDir/conformance/vectors")
+          systemProperty("strand.conformance.vectors.dir", "${'$'}projectDir/strand-conformance/vectors")
         }
         """.trimIndent()
 
@@ -55,15 +55,15 @@ class VectorCompatTest {
     File(dir, "build/test-results/baselineVectorTest").listFiles()!!.single { it.extension == "xml" }.readText()
 
   private fun baselineVectors(f: BuildFixture, content: String, working: String = "ok") {
-    f.write("conformance/vectors/v.json", content)
+    f.write("strand-conformance/vectors/v.json", content)
     f.commitAndTag("0.0.1")
-    f.write("conformance/vectors/v.json", working)
+    f.write("strand-conformance/vectors/v.json", working)
   }
 
   @Test
   fun `기준선 태그가 없으면 벡터 재실행을 건너뛴다`() {
     val f = fixture("0.0.2")
-    f.write("conformance/vectors/v.json", "ok")
+    f.write("strand-conformance/vectors/v.json", "ok")
 
     val result = f.run("check")
 
@@ -119,9 +119,9 @@ class VectorCompatTest {
     val f = fixture("0.0.3")
     baselineVectors(f, "ok")
     f.run("baselineVectorTest")
-    f.write("conformance/vectors/v.json", "FAIL")
+    f.write("strand-conformance/vectors/v.json", "FAIL")
     f.commitAndTag("0.0.2")
-    f.write("conformance/vectors/v.json", "ok")
+    f.write("strand-conformance/vectors/v.json", "ok")
 
     val result = f.fail("baselineVectorTest")
 
@@ -156,9 +156,9 @@ class VectorCompatTest {
     val f = BuildFixture(dir, "strand.vector-compat-conventions", projectDir = File(dir, "sub").also { it.mkdirs() })
     f.buildScript("0.0.2", fixtureBuildExtra)
     f.write("src/test/java/VectorConformanceTest.java", runnerTest)
-    f.writeAtRepoRoot("conformance/vectors/v.json", "ok")
+    f.writeAtRepoRoot("strand-conformance/vectors/v.json", "ok")
     f.commitAndTag("0.0.1")
-    f.writeAtRepoRoot("conformance/vectors/v.json", "FAIL") // 작업 트리 벡터는 실패지만 기준선은 통과
+    f.writeAtRepoRoot("strand-conformance/vectors/v.json", "FAIL") // 작업 트리 벡터는 실패지만 기준선은 통과
 
     val result = f.run("baselineVectorTest")
 

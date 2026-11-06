@@ -21,7 +21,7 @@ STUB
 }
 
 @test "gradle 로그에서 deployment id를 뽑는다" {
-  log=$'> Task :core:publishToMavenCentral\nUploaded bundle to Central Portal as USER_MANAGED, deployment id: 1b2c3d4e-0000-4aaa-bbbb-123456789abc\nBUILD SUCCESSFUL'
+  log=$'> Task :strand-core:publishToMavenCentral\nUploaded bundle to Central Portal as USER_MANAGED, deployment id: 1b2c3d4e-0000-4aaa-bbbb-123456789abc\nBUILD SUCCESSFUL'
   run "$scripts/parse-deployment-id.sh" <<<"$log"
   [ "$status" -eq 0 ]
   [ "$output" = "1b2c3d4e-0000-4aaa-bbbb-123456789abc" ]

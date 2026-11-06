@@ -4,11 +4,11 @@ plugins {
 }
 
 dependencies {
-  testImplementation(project(":core"))
+  testImplementation(project(":strand-core"))
   testImplementation(libs.gson)
 }
 
-// 규격이 명시한 외부 소비자 계약: conformance/vectors/ 를 test 리소스 디렉터리로 둔다.
+// 규격이 명시한 외부 소비자 계약: strand-conformance/vectors/ 를 test 리소스 디렉터리로 둔다.
 sourceSets.test {
   resources.srcDir("vectors")
 }

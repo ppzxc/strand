@@ -16,8 +16,8 @@ plugins {
 }
 
 private val catalog = libsCatalog
-private val artifactName = "strand-${project.name}"
-private val moduleName = "io.github.ppzxc.strand.${project.name}"
+private val artifactName = project.name
+private val moduleName = "io.github.ppzxc.strand.${project.name.removePrefix("strand-")}"
 private val minimumCoverage = "0.90".toBigDecimal()
 
 dependencies {
@@ -128,7 +128,7 @@ tasks.check {
 mavenPublishing {
   publishToMavenCentral(automaticRelease = false)
   configure(JavaLibrary(javadocJar = JavadocJar.Javadoc(), sourcesJar = SourcesJar.Sources()))
-  // artifactId 기본값은 프로젝트 이름("core")이라 좌표를 명시한다.
+  // 좌표를 명시적으로 지정한다.
   coordinates(project.group.toString(), artifactName, project.version.toString())
 
   // 서명 키(in-memory, CI의 ORG_GRADLE_PROJECT_signingInMemoryKey)가 비어 있지 않을 때만 서명한다.
@@ -167,7 +167,7 @@ mavenPublishing {
 // SBOM: CycloneDX JSON만 만든다(릴리스 워크플로가 서명해 GitHub Release에 붙인다. Central에는 올리지 않는다).
 tasks.cyclonedxBom {
   xmlOutput.unsetConvention()
-  // 프로젝트 이름("core") 대신 배포 좌표 io.github.ppzxc:strand-core:<version>으로 기록한다.
+  // 배포 좌표 io.github.ppzxc:strand-core:<version>으로 기록한다.
   componentName.set(artifactName)
   componentGroup.set(project.group.toString())
   componentVersion.set(project.version.toString())

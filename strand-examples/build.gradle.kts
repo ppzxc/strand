@@ -3,7 +3,7 @@ plugins {
 }
 
 dependencies {
-  implementation(project(":core"))
+  implementation(project(":strand-core"))
 }
 
 // JDK 11 java.net.http를 쓰므로 core와 달리 release 11. 배포하지 않고 컴파일만 확인한다.
