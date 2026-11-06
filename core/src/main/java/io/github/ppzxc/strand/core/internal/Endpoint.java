@@ -4,8 +4,10 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 엔드포인트(서버 또는 클라이언트 역할). 입출력을 하지 않는 순수 상태 기계다. 받은 바이트는 {@link #receive}, 애플리케이션의 호출은
@@ -46,8 +48,9 @@ public final class Endpoint {
 
     private boolean closed;
     private long now;
-    private boolean waitingForAck;
-    private long ackDeadline;
+    /** ACK를 기다리는 HELLO와 PING들. 보낸 순서대로다(규격 3.3절). */
+    private final List<AckWait> ackWaits = new ArrayList<>();
+
     private int nextStreamId;
 
     private Endpoint(boolean server, EndpointConfig config) {
@@ -107,8 +110,11 @@ public final class Endpoint {
             return;
         }
         now += ms;
-        if (waitingForAck && now > ackDeadline) {
-            connectionError();
+        for (AckWait wait : ackWaits) {
+            if (now > wait.deadline) {
+                connectionError();
+                return;
+            }
         }
     }
 
@@ -133,7 +139,7 @@ public final class Endpoint {
      */
     public void ping(byte[] payload) {
         if (!closed) {
-            sendAfterAck(() -> send(Frames.control(Frames.PING, 0, payload)));
+            sendAfterAck(() -> sendPing(payload));
         }
     }
 
@@ -280,7 +286,7 @@ public final class Endpoint {
                 return;
             }
             peerAckReceived = true;
-            waitingForAck = false;
+            endOldestWait(null);
             return;
         }
         if (helloAcknowledged || !validParameters(payload)) {
@@ -320,7 +326,10 @@ public final class Endpoint {
     private void handlePing(boolean ack, byte[] payload) {
         if (payload.length != PING_PAYLOAD_SIZE) {
             connectionError();
-        } else if (!ack) {
+        } else if (ack) {
+            // 보낸 PING과 맞춰 보는 일은 로컬 몫이고, 맞지 않는 ACK는 무시한다(규격 3.4절).
+            endOldestWait(payload);
+        } else {
             send(Frames.control(Frames.PING, Frames.ACK, payload));
         }
     }
@@ -362,7 +371,7 @@ public final class Endpoint {
         }
         closed = true;
         inbound = new byte[0];
-        waitingForAck = false;
+        ackWaits.clear();
         deferredSends.clear();
         for (int streamId : pendingStreams) {
             events.add(Event.result(streamId, Event.UNAVAILABLE));
@@ -373,8 +382,22 @@ public final class Endpoint {
 
     private void sendHello() {
         send(Frames.hello(config));
-        waitingForAck = true;
-        ackDeadline = now + config.ackTimeoutMs();
+        ackWaits.add(new AckWait(null, now + config.ackTimeoutMs()));
+    }
+
+    private void sendPing(byte[] payload) {
+        send(Frames.control(Frames.PING, 0, payload));
+        ackWaits.add(new AckWait(payload, now + config.ackTimeoutMs()));
+    }
+
+    /** ACK 하나가 끝내는 대기는 가장 먼저 시작한 것 하나다. HELLO 대기는 payload가 null이다. */
+    private void endOldestWait(byte @Nullable [] payload) {
+        for (Iterator<AckWait> it = ackWaits.iterator(); it.hasNext(); ) {
+            if (Arrays.equals(it.next().payload, payload)) {
+                it.remove();
+                return;
+            }
+        }
     }
 
     /** 상대 HELLO에 ACK를 보낸 뒤면 바로, 아니면 ACK를 보낼 때까지 미뤄서 보낸다. */
@@ -395,5 +418,16 @@ public final class Endpoint {
 
     private void send(byte[] frame) {
         output.write(frame, 0, frame.length);
+    }
+
+    /** 확인 대기 하나. {@code payload}는 PING이면 보낸 8바이트, HELLO이면 null이다. */
+    private static final class AckWait {
+        final byte @Nullable [] payload;
+        final long deadline;
+
+        AckWait(byte @Nullable [] payload, long deadline) {
+            this.payload = payload;
+            this.deadline = deadline;
+        }
     }
 }

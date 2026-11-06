@@ -69,6 +69,14 @@ class EndpointTest {
         return server;
     }
 
+    private static Endpoint establishedWith(EndpointConfig config) {
+        Endpoint server = serverAfterPreface(config);
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainOutput();
+        return server;
+    }
+
     private static Endpoint client() {
         return Endpoint.client(EndpointConfig.defaults());
     }
@@ -882,5 +890,137 @@ class EndpointTest {
         client.close(Frames.NO_ERROR);
 
         assertThat(sent(client)).isEqualTo(CLOSE_NO_ERROR);
+    }
+
+    // ---- PING의 확인 대기(3.3절, 3.4절) ----
+
+    private static final String PING_PAYLOAD = "0102030405060708";
+    private static final EndpointConfig ONE_SECOND = EndpointConfig.defaults().ackTimeoutMs(1000);
+
+    @Test
+    void pingWithoutAnAckClosesWithProtocolErrorAfterTheWait() {
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
+        server.drainOutput();
+
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedWithProtocolError(server);
+    }
+
+    @Test
+    void clientPingWithoutAnAckClosesWithProtocolErrorAfterTheWait() {
+        Endpoint client = Endpoint.client(ONE_SECOND);
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.ping(bytes(PING_PAYLOAD));
+        client.drainOutput();
+
+        client.advance(1001);
+
+        assertClosedWithProtocolError(client);
+    }
+
+    @Test
+    void anAckPingWithTheSamePayloadCancelsTheWait() {
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
+        server.advance(999);
+        server.receive(bytes(PING_ACK));
+        server.drainOutput();
+
+        server.advance(5000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void anAckPingWithAnotherPayloadIsIgnoredAndTheWaitContinues() {
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes("ffffffffffffffff"));
+        server.drainOutput();
+
+        server.receive(bytes(PING_ACK));
+        assertOpenAndSilent(server);
+        server.advance(1001);
+
+        assertClosedWithProtocolError(server);
+    }
+
+    @Test
+    void anUnsolicitedAckPingIsIgnored() {
+        Endpoint server = establishedWith(ONE_SECOND);
+
+        server.receive(bytes(PING_ACK));
+        server.advance(5000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void overlappingPingsAreWaitedOnSeparately() {
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
+        server.advance(600);
+        server.ping(bytes("ffffffffffffffff"));
+        server.receive(bytes(PING_ACK));
+        server.drainOutput();
+
+        server.advance(500);
+        assertOpenAndSilent(server);
+        server.advance(600);
+
+        assertClosedWithProtocolError(server);
+    }
+
+    @Test
+    void oneAckEndsOnlyOneOfTwoPingsWithTheSamePayload() {
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
+        server.advance(500);
+        server.ping(bytes(PING_PAYLOAD));
+        server.receive(bytes(PING_ACK));
+        server.drainOutput();
+
+        server.advance(501);
+        assertOpenAndSilent(server);
+        server.advance(500);
+
+        assertClosedWithProtocolError(server);
+    }
+
+    @Test
+    void pingWaitExpiringWhileClosingClosesWithoutAClosePendingRequestsFail() {
+        Endpoint client = Endpoint.client(ONE_SECOND);
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.request(257, new byte[0]);
+        client.ping(bytes(PING_PAYLOAD));
+        client.receive(bytes(CLOSE_NO_ERROR));
+        client.drainOutput();
+        assertThat(client.drainEvents()).isEmpty();
+
+        client.advance(1001);
+
+        assertThat(client.drainOutput()).isEmpty();
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+    }
+
+    @Test
+    void helloAndPingWaitsAreIndependent() {
+        Endpoint server = serverAfterPreface(ONE_SECOND);
+        server.receive(bytes(HELLO));
+        server.advance(500);
+        server.ping(bytes(PING_PAYLOAD));
+        server.receive(bytes(HELLO_ACK));
+        server.drainOutput();
+
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedWithProtocolError(server);
     }
 }
