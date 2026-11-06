@@ -1422,7 +1422,7 @@ class EndpointTest {
 
         Endpoint ended = established();
         ended.receive(bytes(requestFrame(257, 1, "")));
-        ended.respond(1, 0);
+        ended.respond(1, 0, new byte[0]);
         ended.drainOutput();
         ended.drainEvents();
         ended.receive(bytes(requestFrame(257, 1, "")));
@@ -1483,8 +1483,8 @@ class EndpointTest {
         server.receive(bytes(requestFrame(258, 1, "")));
         server.drainEvents();
 
-        server.respond(1, 0);
-        server.respond(1, 0);
+        server.respond(1, 0, new byte[0]);
+        server.respond(1, 0, new byte[0]);
 
         assertThat(sent(server)).isEqualTo("0000000c0102000000000001" + "0000" + "0000");
         server.receive(bytes(requestFrame(257, 3, "")));
@@ -1499,7 +1499,7 @@ class EndpointTest {
         server.close(0);
         server.drainOutput();
 
-        server.respond(1, 0);
+        server.respond(1, 0, new byte[0]);
 
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
@@ -1508,9 +1508,51 @@ class EndpointTest {
     void respondToAnUnknownStreamDoesNothing() {
         Endpoint server = established();
 
-        server.respond(1, 0);
+        server.respond(1, 0, new byte[0]);
 
         assertOpenAndSilent(server);
+    }
+
+    @Test
+    void respondCarriesThePayloadInTheResponseFrame() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(258, 1, "")));
+        server.drainEvents();
+
+        server.respond(1, 0, bytes("cafe01"));
+
+        assertThat(sent(server)).isEqualTo("0000000f0102000000000001" + "0000" + "0000" + "cafe01");
+    }
+
+    private static Endpoint establishedServerWithPeerFrameSize(int maxFrameSize) {
+        Endpoint server = serverAfterPreface();
+        server.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
+        server.receive(bytes(HELLO_ACK));
+        server.drainOutput();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.drainEvents();
+        return server;
+    }
+
+    @Test
+    void respondPayloadUpToThePeerMaxFrameSizeIsSent() {
+        Endpoint server = establishedServerWithPeerFrameSize(16384);
+
+        server.respond(1, 0, new byte[16384 - 16]);
+
+        assertThat(server.drainOutput()).hasSize(16384);
+    }
+
+    @Test
+    void respondPayloadOverThePeerMaxFrameSizeIsRejectedWithoutSendingOrFreeingTheStream() {
+        Endpoint server = establishedServerWithPeerFrameSize(16384);
+
+        assertThatThrownBy(() -> server.respond(1, 0, new byte[16384 - 16 + 1]))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(sent(server)).isEmpty();
+        server.respond(1, 0, new byte[0]);
+        assertThat(sent(server)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
     }
 
     @Test

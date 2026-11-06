@@ -30,8 +30,6 @@ public final class Endpoint {
 
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int PARAM_SIZE = 6;
-    /** 유효하지 않은 HELLO를 나타내는 표지. 파라미터 값은 부호 없는 32비트라 음수가 될 수 없다. */
-    private static final long INVALID_HELLO = -1;
 
     private static final int RESET_PAYLOAD_SIZE = 4;
     private static final long MAX_STREAM_ID = Integer.MAX_VALUE;
@@ -46,6 +44,7 @@ public final class Endpoint {
     private static final int MAX_FRAME_SIZE_ID = 0x0001;
     private static final int MAX_CONCURRENT_STREAMS_ID = 0x0002;
     private static final long DEFAULT_MAX_CONCURRENT_STREAMS = 100;
+    private static final long DEFAULT_MAX_FRAME_SIZE = 4_194_304L;
     private static final long MIN_MAX_FRAME_SIZE = 16384L;
     private static final long MAX_MAX_FRAME_SIZE = 16_777_216L;
 
@@ -68,6 +67,8 @@ public final class Endpoint {
     private boolean peerAckReceived;
     /** 상대가 HELLO로 알린 {@code max_concurrent_streams}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
+    /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
+    private long peerMaxFrameSize = DEFAULT_MAX_FRAME_SIZE;
     /** CLOSE를 보냈거나 받았다(규격 3.5절). */
     private boolean closeSeen;
 
@@ -215,13 +216,21 @@ public final class Endpoint {
      *
      * @param streamId 상대가 연 스트림 번호
      * @param status 규격 2.5.1절의 status 값
+     * @param payload 본문
+     * @throws IllegalArgumentException 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런 프레임을 보내지 못하게 하고
+     *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
-    public void respond(int streamId, int status) {
-        Integer type = closed ? null : incomingStreams.remove(streamId);
+    public void respond(int streamId, int status, byte[] payload) {
+        Integer type = closed ? null : incomingStreams.get(streamId);
         if (type == null) {
             return;
         }
-        send(Frames.response(type, streamId, status));
+        byte[] frame = Frames.response(type, streamId, status, payload);
+        if (frame.length > peerMaxFrameSize) {
+            throw new IllegalArgumentException("응답 프레임이 상대의 max_frame_size를 넘는다: " + frame.length);
+        }
+        incomingStreams.remove(streamId);
+        send(frame);
         terminateIfDrained();
     }
 
@@ -563,13 +572,14 @@ public final class Endpoint {
             endOldestWait(null);
             return;
         }
-        long peerMax = helloAcknowledged ? INVALID_HELLO : peerMaxConcurrentStreamsOf(payload);
-        if (peerMax == INVALID_HELLO) {
+        long @Nullable [] peer = helloAcknowledged ? null : peerLimitsOf(payload);
+        if (peer == null) {
             connectionError();
             return;
         }
         helloAcknowledged = true;
-        peerMaxConcurrentStreams = peerMax;
+        peerMaxConcurrentStreams = peer[0];
+        peerMaxFrameSize = peer[1];
         send(Frames.control(Frames.HELLO, Frames.ACK, new byte[0]));
         // 보내다가 닫히면 terminate가 남은 요청을 closed 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
         while (!deferredSends.isEmpty()) {
@@ -582,28 +592,31 @@ public final class Endpoint {
 
     /**
      * HELLO payload를 한 번 훑는다(규격 3.2.3절, 3.2.5절). 6의 배수, identifier 중복 없음, max_frame_size 범위를 검증하고, 유효하면 상대가 알린
-     * {@code max_concurrent_streams}(없으면 기본값)를, 아니면 {@link #INVALID_HELLO}를 돌려준다.
+     * {@code max_concurrent_streams}와 {@code max_frame_size}(없으면 각 기본값)를 이 순서로 돌려주고, 유효하지 않으면 null을 돌려준다.
      */
-    private static long peerMaxConcurrentStreamsOf(byte[] payload) {
+    private static long @Nullable [] peerLimitsOf(byte[] payload) {
         if (payload.length % PARAM_SIZE != 0) {
-            return INVALID_HELLO;
+            return null;
         }
         long maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
+        long maxFrameSize = DEFAULT_MAX_FRAME_SIZE;
         Set<Integer> seen = new HashSet<>();
         for (int at = 0; at < payload.length; at += PARAM_SIZE) {
             int identifier = Frames.readUnsignedShort(payload, at);
             if (!seen.add(identifier)) {
-                return INVALID_HELLO;
+                return null;
             }
             long value = Frames.readUnsignedInt(payload, at + 2);
             if (identifier == MAX_FRAME_SIZE_ID && (value < MIN_MAX_FRAME_SIZE || value > MAX_MAX_FRAME_SIZE)) {
-                return INVALID_HELLO;
+                return null;
             }
-            if (identifier == MAX_CONCURRENT_STREAMS_ID) {
+            if (identifier == MAX_FRAME_SIZE_ID) {
+                maxFrameSize = value;
+            } else if (identifier == MAX_CONCURRENT_STREAMS_ID) {
                 maxConcurrentStreams = value;
             }
         }
-        return maxConcurrentStreams;
+        return new long[] {maxConcurrentStreams, maxFrameSize};
     }
 
     private void handlePing(boolean ack, byte[] payload) {

@@ -84,8 +84,10 @@ final class VectorRunner {
                 (runner, step) -> runner.endpoint.cancel(step.get("stream_id").getAsInt()));
         STEPS.put(
                 "respond",
-                (runner, step) ->
-                        runner.endpoint.respond(step.get("stream_id").getAsInt(), statusCode(step.get("status"))));
+                (runner, step) -> runner.endpoint.respond(
+                        step.get("stream_id").getAsInt(),
+                        statusCode(step.get("status")),
+                        Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
         STEPS.put("disconnect", (runner, step) -> runner.endpoint.disconnect());
         STEPS.put("close", (runner, step) -> runner.endpoint.close(errorCode(step.get("error_code"))));
 
