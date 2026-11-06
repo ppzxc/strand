@@ -16,13 +16,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import org.junit.jupiter.api.Assumptions;
 
 /**
  * 벡터 하나를 엔드포인트에 실행한다. `setup`으로 엔드포인트를 만들고 단계마다 입력을 넣어, 보낸 바이트를 프레임으로 풀어 `send`와,
  * 애플리케이션 이벤트를 `events`와 순서까지 비교한다(벡터 형식 문서 6절, 7절). 엔드포인트의 외부 동작만 본다.
  *
- * <p>아직 실행할 수 없는 설정·단계·프레임이 하나라도 있으면 아무것도 실행하지 않고 건너뛴다. 통과로 위장하지 않기 위해서다.
+ * <p>실행할 수 없는 설정·단계·프레임이 하나라도 있으면 아무것도 실행하지 않고 실패한다. 건너뛰거나 통과로 위장하지 않으므로 skipped는 늘 0이다.
  */
 final class VectorRunner {
 
@@ -102,17 +101,17 @@ final class VectorRunner {
     /** 실행하지 못하는 부분이 있으면 벡터를 건너뛴다. 한 단계도 실행하기 전에 판정한다. */
     private static void requireSupported(ConformanceVector vector, JsonObject setup) {
         for (String key : setup.keySet()) {
-            skipUnless(SUPPORTED_SETUP.contains(key), vector, "setup." + key);
+            requireSupportedPart(SUPPORTED_SETUP.contains(key), vector, "setup." + key);
         }
         if (setup.has("config")) {
             for (String key : setup.getAsJsonObject("config").keySet()) {
-                skipUnless(key.equals("ack_timeout_ms"), vector, "config." + key);
+                requireSupportedPart(key.equals("ack_timeout_ms"), vector, "config." + key);
             }
         }
         for (JsonObject step : vector.steps()) {
             String kind = step.get("kind").getAsString();
-            skipUnless(SUPPORTED_STEPS.contains(kind), vector, "단계 " + kind);
-            skipUnless(
+            requireSupportedPart(SUPPORTED_STEPS.contains(kind), vector, "단계 " + kind);
+            requireSupportedPart(
                     !kind.equals("request")
                             || !step.has("extensions")
                             || step.getAsJsonArray("extensions").size() == 0,
@@ -121,11 +120,11 @@ final class VectorRunner {
             for (JsonElement element : step.getAsJsonArray("send")) {
                 JsonObject frame = element.getAsJsonObject();
                 String type = VectorSchema.frameType(frame);
-                skipUnless(
+                requireSupportedPart(
                         type != null ? SUPPORTED_FRAMES.contains(type) : isSupportedApplicationFrame(frame),
                         vector,
                         "프레임 " + frame.get("type"));
-                skipUnless(
+                requireSupportedPart(
                         !frame.has("flags")
                                 || frame.getAsJsonArray("flags").size() == 0
                                 || VectorSchema.hasFlag(frame, "ACK"),
@@ -133,7 +132,7 @@ final class VectorRunner {
                         "프레임 flags");
             }
             for (JsonElement event : step.getAsJsonArray("events")) {
-                skipUnless(
+                requireSupportedPart(
                         SUPPORTED_EVENTS.contains(
                                 event.getAsJsonObject().get("event").getAsString()),
                         vector,
@@ -148,8 +147,8 @@ final class VectorRunner {
                 && frame.get("type").getAsInt() >= FIRST_APPLICATION_TYPE;
     }
 
-    private static void skipUnless(boolean supported, ConformanceVector vector, String what) {
-        Assumptions.assumeTrue(supported, "러너 미지원: " + what + " (" + vector.id() + ")");
+    private static void requireSupportedPart(boolean supported, ConformanceVector vector, String what) {
+        assertThat(supported).as("러너 미지원: %s (%s)", what, vector.id()).isTrue();
     }
 
     private static boolean isWebSocket(JsonObject setup) {

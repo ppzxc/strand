@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.opentest4j.TestAbortedException;
 
 /** 러너가 기대와 다른 동작을 놓치지 않는지 본다. 벡터를 직접 만들어 일부러 어긋나게 한다. */
 class VectorRunnerTest {
@@ -172,18 +171,18 @@ class VectorRunnerTest {
     }
 
     @Test
-    void unsupportedSetupIsSkippedNotPassed() {
+    void unsupportedSetupFailsInsteadOfBeingSkipped() {
         ConformanceVector v = vector(
                 "{\"role\":\"server\",\"established\":true,\"config\":{\"unknown_key\":1}}", recv(PING, "[]", "[]"));
 
-        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(TestAbortedException.class);
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }
 
     @Test
-    void unsupportedStepIsSkippedNotPassed() {
+    void unsupportedStepFailsInsteadOfBeingSkipped() {
         ConformanceVector v =
                 vector(ESTABLISHED, step("request", "\"type\":257,\"extensions\":[{\"tag\":1}],", "[]", "[]"));
 
-        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(TestAbortedException.class);
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }
 }
