@@ -1565,6 +1565,72 @@ class EndpointTest {
         assertThat(sent(server)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
     }
 
+    private static Endpoint establishedClientWithPeerFrameSize(int maxFrameSize) {
+        Endpoint client = client();
+        client.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+        client.drainEvents();
+        return client;
+    }
+
+    @Test
+    void requestPayloadUpToThePeerMaxFrameSizeIsSent() {
+        Endpoint client = establishedClientWithPeerFrameSize(16384);
+
+        client.request(257, new byte[16384 - 16]);
+
+        assertThat(concat(client.drainMessages())).hasSize(16384);
+    }
+
+    @Test
+    void requestPayloadOverThePeerMaxFrameSizeIsRejectedWithoutSendingOrUsingTheNumber() {
+        Endpoint client = establishedClientWithPeerFrameSize(16384);
+
+        assertThatThrownBy(() -> client.request(257, new byte[16384 - 16 + 1]))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(sent(client)).isEmpty();
+        assertThat(client.drainEvents()).isEmpty();
+        client.request(257, new byte[0]);
+        assertThat(sent(client)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
+    }
+
+    @Test
+    void requestDeferredBeforeTheAckFailsLocallyWhenItsFrameIsOverThePeerMaxFrameSize() {
+        Endpoint client = client();
+        client.drainMessages();
+        client.request(257, new byte[16384 - 16 + 1]);
+        assertThat(client.drainEvents()).isEmpty();
+
+        client.receive(bytes(helloWith("0001" + String.format("%08x", 16384))));
+
+        assertThat(sent(client)).isEqualTo(HELLO_ACK);
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+        assertThat(events.get(0).streamId()).isZero();
+        client.receive(bytes(HELLO_ACK));
+        client.request(257, new byte[0]);
+        assertThat(sent(client)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
+    }
+
+    @Test
+    void oversizeRequestAfterCloseFailsLocallyInsteadOfThrowing() {
+        Endpoint client = establishedClientWithPeerFrameSize(16384);
+        client.close(Frames.NO_ERROR);
+        client.drainMessages();
+        client.drainEvents();
+
+        client.request(257, new byte[16384]);
+
+        assertThat(sent(client)).isEmpty();
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+    }
+
     @Test
     void cancelSendsResetCancelAndReportsCancelledOnce() {
         Endpoint client = establishedClient();
