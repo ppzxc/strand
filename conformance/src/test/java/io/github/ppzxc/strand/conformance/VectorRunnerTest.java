@@ -174,14 +174,15 @@ class VectorRunnerTest {
     @Test
     void unsupportedSetupIsSkippedNotPassed() {
         ConformanceVector v = vector(
-                "{\"role\":\"server\",\"established\":true,\"transport\":\"websocket\"}", recv(PING, "[]", "[]"));
+                "{\"role\":\"server\",\"established\":true,\"config\":{\"unknown_key\":1}}", recv(PING, "[]", "[]"));
 
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(TestAbortedException.class);
     }
 
     @Test
     void unsupportedStepIsSkippedNotPassed() {
-        ConformanceVector v = vector(ESTABLISHED, step("recv_message", "", "[]", "[]"));
+        ConformanceVector v =
+                vector(ESTABLISHED, step("request", "\"type\":257,\"extensions\":[{\"tag\":1}],", "[]", "[]"));
 
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(TestAbortedException.class);
     }

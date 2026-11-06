@@ -31,9 +31,16 @@ final class VectorRunner {
     private static final Map<String, Long> HELLO_DEFAULTS = new LinkedHashMap<>();
     private static final Map<Integer, String> HELLO_PARAMS = new LinkedHashMap<>();
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(Arrays.asList(
-            "role", "established", "local_hello", "peer_hello", "config", "known_types", "next_stream_id"));
-    private static final Set<String> SUPPORTED_STEPS = new HashSet<>(
-            Arrays.asList("recv", "advance", "ping", "request", "close", "cancel", "respond", "disconnect"));
+            "role",
+            "established",
+            "local_hello",
+            "peer_hello",
+            "config",
+            "known_types",
+            "next_stream_id",
+            "transport"));
+    private static final Set<String> SUPPORTED_STEPS = new HashSet<>(Arrays.asList(
+            "recv", "advance", "ping", "request", "close", "cancel", "respond", "disconnect", "recv_message"));
     private static final Set<String> SUPPORTED_FRAMES =
             new HashSet<>(Arrays.asList("PREFACE", "HELLO", "PING", "CLOSE", "RESET"));
     private static final Set<String> SUPPORTED_EVENTS =
@@ -51,10 +58,12 @@ final class VectorRunner {
     }
 
     private final boolean client;
+    private final boolean webSocket;
     private final Endpoint endpoint;
 
-    private VectorRunner(boolean client, Endpoint endpoint) {
+    private VectorRunner(boolean client, boolean webSocket, Endpoint endpoint) {
         this.client = client;
+        this.webSocket = webSocket;
         this.endpoint = endpoint;
     }
 
@@ -64,7 +73,10 @@ final class VectorRunner {
 
         boolean client = setup.get("role").getAsString().equals("client");
         EndpointConfig config = configOf(setup);
-        VectorRunner runner = new VectorRunner(client, client ? Endpoint.client(config) : Endpoint.server(config));
+        boolean webSocket =
+                setup.has("transport") && setup.get("transport").getAsString().equals("websocket");
+        VectorRunner runner =
+                new VectorRunner(client, webSocket, client ? Endpoint.client(config) : Endpoint.server(config));
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
         byte[] opening = runner.endpoint.drainOutput();
         if (setup.get("established").getAsBoolean()) {
@@ -150,6 +162,9 @@ final class VectorRunner {
                 .maxConcurrentStreams(hello.get("max_concurrent_streams"))
                 .capabilities(hello.get("capabilities"))
                 .ackTimeoutMs(ackTimeout);
+        if (setup.has("transport") && setup.get("transport").getAsString().equals("websocket")) {
+            config = config.webSocket();
+        }
         if (setup.has("next_stream_id")) {
             config = config.nextStreamId(setup.get("next_stream_id").getAsLong());
         }
@@ -167,23 +182,37 @@ final class VectorRunner {
     private void establish(byte[] opening, JsonObject peerHello) {
         byte[] hello = opening;
         if (!client) {
-            endpoint.receive(Bytes.fromHex(PREFACE_HEX));
+            deliver(Bytes.fromHex(PREFACE_HEX));
             hello = endpoint.drainOutput();
         }
         assertThat(describe(hello, client)).as("수립: 연결을 연 뒤의 출력").hasSize(client ? 2 : 1);
-        endpoint.receive(encodeHello(helloParams(peerHello)));
+        deliver(encodeHello(helloParams(peerHello)));
         assertThat(describe(endpoint.drainOutput(), false))
                 .as("수립: 상대 HELLO에 대한 ACK")
                 .containsExactly("HELLO flags=ACK stream_id=0 params=-");
-        endpoint.receive(Bytes.fromHex(ACK_HELLO_HEX));
+        deliver(Bytes.fromHex(ACK_HELLO_HEX));
         assertThat(endpoint.drainOutput()).as("수립: ACK 뒤의 출력").isEmpty();
         assertThat(endpoint.drainEvents()).as("수립: 이벤트").isEmpty();
+    }
+
+    /** 수립에 쓰는 입력 하나를 전송 방식에 맞게 넣는다. WebSocket이면 메시지 하나로, 바이트 스트림이면 바이트로 넣는다. */
+    private void deliver(byte[] bytes) {
+        if (webSocket) {
+            endpoint.receiveMessage(true, bytes);
+        } else {
+            endpoint.receive(bytes);
+        }
     }
 
     private void apply(JsonObject step) {
         switch (step.get("kind").getAsString()) {
             case "recv":
                 endpoint.receive(Bytes.fromHex(step.get("hex").getAsString()));
+                break;
+            case "recv_message":
+                endpoint.receiveMessage(
+                        step.get("opcode").getAsString().equals("binary"),
+                        Bytes.fromHex(step.get("hex").getAsString()));
                 break;
             case "advance":
                 endpoint.advance(step.get("ms").getAsLong());

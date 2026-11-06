@@ -115,6 +115,9 @@ public final class Endpoint {
      * @param bytes 받은 바이트
      */
     public void receive(byte[] bytes) {
+        if (config.isWebSocket()) {
+            throw new IllegalStateException("WebSocket 엔드포인트는 receiveMessage로 입력한다");
+        }
         if (closed) {
             return;
         }
@@ -125,6 +128,47 @@ public final class Endpoint {
         while (!closed && readFrame()) {
             // 한 프레임씩 처리한다.
         }
+    }
+
+    /**
+     * WebSocket 메시지 하나를 넣는다. 서문은 첫 바이너리 메시지, 그 뒤로는 메시지 하나가 프레임 하나다(규격 1.2절). 바이너리가 아닌
+     * 메시지, 크기가 {@code 4 + length}가 아닌 메시지는 연결 오류다. type이 CLOSE이면 크기가 어긋나도 받은 CLOSE로 본다.
+     *
+     * @param binary 바이너리 메시지이면 true, 텍스트 메시지이면 false
+     * @param message 메시지 내용
+     */
+    public void receiveMessage(boolean binary, byte[] message) {
+        if (!config.isWebSocket()) {
+            throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
+        }
+        if (closed) {
+            return;
+        }
+        if (!prefaceChecked) {
+            if (binary && message.length == Frames.preface().length && matchesPrefaceMagic(message)) {
+                prefaceChecked = true;
+                sendHello();
+            } else {
+                terminate();
+            }
+            return;
+        }
+        if (!firstFrameChecked && !firstMessageValid(binary, message)) {
+            terminate();
+            return;
+        }
+        if (!binary || message.length < TYPE_END) {
+            connectionError();
+            return;
+        }
+        long length = Frames.readUnsignedInt(message, 0);
+        if (length < MIN_FRAME_LENGTH
+                || length > config.maxFrameSize() - LENGTH_SIZE
+                || message.length != LENGTH_SIZE + length) {
+            rejectBadLength(message);
+            return;
+        }
+        handle(message);
     }
 
     /**
@@ -246,12 +290,9 @@ public final class Endpoint {
     /** 서문의 앞 6바이트를 비교한다(규격 3.1절). 판정할 만큼 모였으면 true. 서문은 8바이트를 모두 받은 뒤 건너뛴다. */
     private boolean checkPreface() {
         byte[] preface = Frames.preface();
-        int compared = Math.min(inbound.length, PREFACE_MAGIC_LENGTH);
-        for (int i = 0; i < compared; i++) {
-            if (inbound[i] != preface[i]) {
-                terminate();
-                return false;
-            }
+        if (!matchesPrefaceMagic(inbound)) {
+            terminate();
+            return false;
         }
         if (inbound.length < preface.length) {
             return false;
@@ -260,6 +301,42 @@ public final class Endpoint {
         prefaceChecked = true;
         sendHello();
         return true;
+    }
+
+    /** 서문의 앞 6바이트와, 받은 만큼의 앞부분이 일치하는가. */
+    private static boolean matchesPrefaceMagic(byte[] bytes) {
+        byte[] preface = Frames.preface();
+        int compared = Math.min(bytes.length, PREFACE_MAGIC_LENGTH);
+        for (int i = 0; i < compared; i++) {
+            if (bytes[i] != preface[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 첫 프레임의 헤더가 첫 프레임 검사(규격 3.2.4절)를 통과하는가: HELLO이고 stream_id 0, flags 0. */
+    private static boolean isFirstFrameHeader(byte[] bytes) {
+        return Frames.typeOf(bytes) == Frames.HELLO && Frames.streamIdOf(bytes) == 0 && Frames.flagsOf(bytes) == 0;
+    }
+
+    /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. */
+    private boolean firstMessageValid(boolean binary, byte[] message) {
+        boolean valid = binary
+                && message.length >= Frames.HEADER_SIZE
+                && Frames.readUnsignedInt(message, 0) >= MIN_FRAME_LENGTH
+                && isFirstFrameHeader(message);
+        firstFrameChecked = valid;
+        return valid;
+    }
+
+    /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */
+    private void rejectBadLength(byte[] bytes) {
+        if (Frames.typeOf(bytes) == Frames.CLOSE) {
+            closeReceivedMalformed();
+        } else {
+            connectionError();
+        }
     }
 
     /** 프레임 하나를 읽어 처리한다. 더 읽을 수 있으면 true. */
@@ -277,9 +354,7 @@ public final class Endpoint {
             if (inbound.length < Frames.HEADER_SIZE) {
                 return false;
             }
-            if (Frames.typeOf(inbound) != Frames.HELLO
-                    || Frames.streamIdOf(inbound) != 0
-                    || Frames.flagsOf(inbound) != 0) {
+            if (!isFirstFrameHeader(inbound)) {
                 terminate();
                 return false;
             }
@@ -290,12 +365,7 @@ public final class Endpoint {
                 // type을 읽을 때까지 기다린다. CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫아야 하므로 도착 단위에 따라 결과가 달라지면 안 된다.
                 return false;
             }
-            if (Frames.typeOf(inbound) == Frames.CLOSE) {
-                // 길이가 어긋나도 type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫는다(규격 3.5절).
-                closeReceivedMalformed();
-            } else {
-                connectionError();
-            }
+            rejectBadLength(inbound);
             return false;
         }
         int frameSize = (int) (LENGTH_SIZE + length);

@@ -19,6 +19,8 @@ public final class EndpointConfig {
     private final @Nullable Set<Integer> knownTypes;
     /** 다음에 쓸 스트림 번호. null이면 역할의 첫 번호다(규격 2.2.5절). */
     private final @Nullable Long nextStreamId;
+    /** WebSocket 위에서 쓴다(규격 1.2절). */
+    private final boolean webSocket;
 
     private EndpointConfig(Values values) {
         this.maxFrameSize = values.maxFrameSize;
@@ -27,6 +29,7 @@ public final class EndpointConfig {
         this.ackTimeoutMs = values.ackTimeoutMs;
         this.knownTypes = values.knownTypes;
         this.nextStreamId = values.nextStreamId;
+        this.webSocket = values.webSocket;
     }
 
     /** 설정 값의 모음. 복사본을 만들 때 한 필드만 고치는 데 쓴다. 필드를 더해도 생성자 인자 나열은 늘지 않는다. */
@@ -41,6 +44,8 @@ public final class EndpointConfig {
 
         @Nullable
         Long nextStreamId;
+
+        boolean webSocket;
     }
 
     private Values values() {
@@ -51,6 +56,7 @@ public final class EndpointConfig {
         values.ackTimeoutMs = ackTimeoutMs;
         values.knownTypes = knownTypes;
         values.nextStreamId = nextStreamId;
+        values.webSocket = webSocket;
         return values;
     }
 
@@ -135,6 +141,22 @@ public final class EndpointConfig {
         Values values = values();
         values.nextStreamId = value;
         return new EndpointConfig(values);
+    }
+
+    /**
+     * WebSocket 위에서 쓰는 복사본. 바이트 스트림이 아니라 메시지 하나가 프레임 하나이며, 입력은 {@link Endpoint#receiveMessage}로
+     * 넣는다(규격 1.2절).
+     *
+     * @return 새 설정
+     */
+    public EndpointConfig webSocket() {
+        Values values = values();
+        values.webSocket = true;
+        return new EndpointConfig(values);
+    }
+
+    boolean isWebSocket() {
+        return webSocket;
     }
 
     boolean knows(int type) {

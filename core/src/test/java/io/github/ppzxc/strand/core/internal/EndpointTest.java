@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -1675,5 +1676,164 @@ class EndpointTest {
 
         assertThat(sent(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    private static final String PING_MESSAGE = "000000140002000000000000000000000102030405060708";
+
+    private static Endpoint webSocketServer() {
+        return Endpoint.server(EndpointConfig.defaults().webSocket());
+    }
+
+    private static Endpoint webSocketServerAfterPreface() {
+        Endpoint server = webSocketServer();
+        server.receiveMessage(true, bytes(PREFACE));
+        server.drainOutput();
+        return server;
+    }
+
+    private static Endpoint establishedWebSocket() {
+        Endpoint server = webSocketServerAfterPreface();
+        server.receiveMessage(true, bytes(HELLO));
+        server.receiveMessage(true, bytes(HELLO_ACK));
+        server.drainOutput();
+        return server;
+    }
+
+    @Test
+    void webSocketMessageIsOneFrame() {
+        Endpoint server = establishedWebSocket();
+
+        server.receiveMessage(true, bytes(PING_MESSAGE));
+
+        assertThat(sent(server)).isEqualTo("000000140002010000000000000000000102030405060708");
+    }
+
+    @Test
+    void webSocketPrefaceMessageGetsTheServerHello() {
+        Endpoint server = webSocketServer();
+
+        server.receiveMessage(true, bytes(PREFACE));
+
+        assertThat(sent(server)).startsWith("00000");
+        assertThat(server.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void webSocketPrefaceOfTheWrongSizeOrOpcodeClosesSilently() {
+        for (String hex : new String[] {"c0de5354523000", "c0de53545230000000"}) {
+            Endpoint server = webSocketServer();
+            server.receiveMessage(true, bytes(hex));
+            assertClosedSilently(server);
+        }
+        Endpoint text = webSocketServer();
+        text.receiveMessage(false, bytes(PREFACE));
+        assertClosedSilently(text);
+    }
+
+    @Test
+    void webSocketFirstFrameThatIsTextOrShortClosesSilently() {
+        Endpoint text = webSocketServerAfterPreface();
+        text.receiveMessage(false, bytes(HELLO));
+        assertClosedSilently(text);
+
+        Endpoint shortFrame = webSocketServerAfterPreface();
+        shortFrame.receiveMessage(true, bytes("0000000c000100000000"));
+        assertClosedSilently(shortFrame);
+    }
+
+    @Test
+    void webSocketFirstFrameThatIsNotHelloClosesSilently() {
+        Endpoint server = webSocketServerAfterPreface();
+
+        server.receiveMessage(true, bytes(PING_MESSAGE));
+
+        assertClosedSilently(server);
+    }
+
+    @Test
+    void webSocketFirstFrameSizeMismatchIsAProtocolError() {
+        Endpoint server = webSocketServerAfterPreface();
+
+        server.receiveMessage(true, bytes(HELLO + "00"));
+
+        assertClosedWithProtocolError(server);
+    }
+
+    @Test
+    void webSocketTextMessageAfterTheFirstFrameIsAProtocolError() {
+        Endpoint server = establishedWebSocket();
+
+        server.receiveMessage(false, bytes(PING_MESSAGE));
+
+        assertClosedWithProtocolError(server);
+    }
+
+    @Test
+    void webSocketMessageOfTheWrongSizeIsAProtocolError() {
+        Endpoint longer = establishedWebSocket();
+        longer.receiveMessage(true, bytes(PING_MESSAGE + "00"));
+        assertClosedWithProtocolError(longer);
+
+        Endpoint shorter = establishedWebSocket();
+        shorter.receiveMessage(true, bytes(PING_MESSAGE.substring(0, PING_MESSAGE.length() - 2)));
+        assertClosedWithProtocolError(shorter);
+
+        Endpoint tiny = establishedWebSocket();
+        tiny.receiveMessage(true, bytes("0000"));
+        assertClosedWithProtocolError(tiny);
+    }
+
+    @Test
+    void webSocketMessageAboveTheMaxFrameSizeIsAProtocolError() {
+        Endpoint server = Endpoint.server(EndpointConfig.defaults().webSocket().maxFrameSize(16384));
+        server.receiveMessage(true, bytes(PREFACE));
+        server.receiveMessage(true, bytes(HELLO));
+        server.receiveMessage(true, bytes(HELLO_ACK));
+        server.drainOutput();
+        String payload = new String(new char[16384 - 12 - 4 + 1]).replace("\0", "00");
+
+        server.receiveMessage(
+                true,
+                bytes(String.format("%08x", 12 + payload.length() / 2) + "00020000" + "00000000" + "00000000"
+                        + payload));
+
+        assertClosedWithProtocolError(server);
+    }
+
+    @Test
+    void webSocketCloseMessageWithTheWrongSizeClosesSilently() {
+        Endpoint server = establishedWebSocket();
+
+        server.receiveMessage(true, bytes("000000100003000000000000000000000000000000"));
+
+        assertClosedSilently(server);
+    }
+
+    @Test
+    void webSocketClientFirstFrameThatIsTextClosesSilently() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().webSocket());
+        client.drainOutput();
+
+        client.receiveMessage(false, bytes(HELLO));
+
+        assertClosedSilently(client);
+    }
+
+    @Test
+    void messagesAfterClosedAreIgnored() {
+        Endpoint server = webSocketServer();
+        server.receiveMessage(false, bytes(PREFACE));
+        server.drainEvents();
+
+        server.receiveMessage(true, bytes(PREFACE));
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void webSocketEndpointRejectsByteInputAndStreamEndpointRejectsMessages() {
+        assertThatThrownBy(() -> webSocketServer().receive(bytes(PREFACE))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> server().receiveMessage(true, bytes(PREFACE)))
+                .isInstanceOf(IllegalStateException.class);
     }
 }
