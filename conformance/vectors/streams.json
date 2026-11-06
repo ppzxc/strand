@@ -490,6 +490,61 @@
       ]
     },
     {
+      "id": "exhaustion-takes-precedence-over-peer-limit",
+      "description": "번호가 소진됐고 상대가 알린 max_concurrent_streams(1)에도 닿은 경우, 요청은 프레임 없이 로컬 UNAVAILABLE로 실패하고 CLOSE(NO_ERROR)도 보낸다. 마지막 번호의 요청이 대기 중이므로 연결은 종료 중이고 그 응답을 받은 뒤 closed가 난다",
+      "spec": [
+        "2.2.5",
+        "3.2.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "next_stream_id": 2147483647,
+        "peer_hello": {
+          "max_concurrent_streams": 1
+        }
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2147483647
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100007fffffff00000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 2147483647,
+              "status": "OK"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "exhaustion-after-close-sent-sends-no-second-close",
       "description": "이미 CLOSE를 보냈다면 번호가 소진되어도 두 번째 CLOSE를 보내지 않는다. 마지막 번호로 보낸 요청 뒤 애플리케이션이 CLOSE(NO_ERROR)를 지시해 보낸 다음, 다음 요청은 프레임 없이 로컬 UNAVAILABLE로 실패한다",
       "spec": [

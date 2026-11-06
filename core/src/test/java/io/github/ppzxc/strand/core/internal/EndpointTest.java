@@ -57,7 +57,7 @@ class EndpointTest {
     private static byte[] concat(List<OutboundMessage> messages) {
         java.io.ByteArrayOutputStream joined = new java.io.ByteArrayOutputStream();
         for (OutboundMessage message : messages) {
-            assertThat(message.kind()).isEqualTo(OutboundMessage.Kind.BINARY);
+            assertThat(message.type()).isEqualTo(OutboundMessage.Type.BINARY);
             joined.write(message.bytes(), 0, message.bytes().length);
         }
         return joined.toByteArray();
@@ -1674,6 +1674,21 @@ class EndpointTest {
     }
 
     @Test
+    void exhaustionTakesPrecedenceOverReachingThePeerConcurrentStreamLimit() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        client.receive(bytes(helloWith("0002" + String.format("%08x", 1L))));
+        client.receive(bytes(HELLO_ACK));
+        client.request(257, new byte[0]);
+        client.drainMessages();
+        client.drainEvents();
+
+        client.request(257, new byte[0]);
+
+        assertThat(sent(client)).isEqualTo("00000010000300000000000000000000" + "00000000");
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT);
+    }
+
+    @Test
     void largestStreamNumberIsAccepted() {
         Endpoint server = established();
 
@@ -1845,12 +1860,12 @@ class EndpointTest {
         assertThat(client.drainMessages()).isEmpty();
     }
 
-    private static List<OutboundMessage.Kind> messageKinds(List<OutboundMessage> messages) {
-        List<OutboundMessage.Kind> kinds = new ArrayList<>();
+    private static List<OutboundMessage.Type> messageTypes(List<OutboundMessage> messages) {
+        List<OutboundMessage.Type> types = new ArrayList<>();
         for (OutboundMessage message : messages) {
-            kinds.add(message.kind());
+            types.add(message.type());
         }
-        return kinds;
+        return types;
     }
 
     @Test
@@ -1860,8 +1875,8 @@ class EndpointTest {
         server.close(Frames.NO_ERROR);
 
         List<OutboundMessage> messages = server.drainMessages();
-        assertThat(messageKinds(messages))
-                .containsExactly(OutboundMessage.Kind.BINARY, OutboundMessage.Kind.WEBSOCKET_CLOSE);
+        assertThat(messageTypes(messages))
+                .containsExactly(OutboundMessage.Type.BINARY, OutboundMessage.Type.WEBSOCKET_CLOSE);
         assertThat(hex(messages.get(0).bytes())).isEqualTo(CLOSE_NO_ERROR);
         assertThat(messages.get(1).statusCode()).isEqualTo(1000);
         assertThat(messages.get(1).bytes()).isEmpty();
@@ -1873,12 +1888,12 @@ class EndpointTest {
         server.receiveMessage(MessageKind.BINARY, bytes("0000000c010100000000000100000000"));
         server.drainEvents();
         server.close(Frames.NO_ERROR);
-        assertThat(messageKinds(server.drainMessages())).containsExactly(OutboundMessage.Kind.BINARY);
+        assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Type.BINARY);
 
         server.respond(1, 0, new byte[0]);
 
-        assertThat(messageKinds(server.drainMessages()))
-                .containsExactly(OutboundMessage.Kind.BINARY, OutboundMessage.Kind.WEBSOCKET_CLOSE);
+        assertThat(messageTypes(server.drainMessages()))
+                .containsExactly(OutboundMessage.Type.BINARY, OutboundMessage.Type.WEBSOCKET_CLOSE);
     }
 
     @Test
@@ -1887,7 +1902,7 @@ class EndpointTest {
 
         server.close(Frames.NO_ERROR);
 
-        assertThat(messageKinds(server.drainMessages())).containsExactly(OutboundMessage.Kind.BINARY);
+        assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Type.BINARY);
     }
 
     @Test
@@ -1896,7 +1911,7 @@ class EndpointTest {
 
         server.close(Frames.PROTOCOL_ERROR);
 
-        assertThat(messageKinds(server.drainMessages())).containsExactly(OutboundMessage.Kind.BINARY);
+        assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Type.BINARY);
     }
 
     @Test

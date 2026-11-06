@@ -129,7 +129,7 @@
 | `WEBSOCKET_CLOSE` | `code`(`1000`만 쓴다) | — |
 | 애플리케이션 프레임 (`type` 256 이상 정수) | `type`, `flags`(0), `stream_id`, `status`(응답 프레임, 곧 `stream_id`가 상대 엔드포인트의 번호 공간인 프레임만. 생략하면 `OK`), `extensions`(tag별 값. 순서는 비교하지 않음), `payload`(생략하면 빈 값) | 요청 프레임의 `status` |
 
-`WEBSOCKET_CLOSE`는 WebSocket Close(`Close Frame 0x08`, 1.2절)를 관측하는 항목이다. `transport`가 `websocket`인 벡터에서만 쓴다(`tcp`이면 벡터가 잘못된 것이다). 구현이 `NO_ERROR` CLOSE를 보내 연결을 끝낼 때(1.2절, 3.5절) 마지막 프레임 메시지 뒤에 `code` 1000으로 나온다. `NO_ERROR`가 아닌 CLOSE로 끝낼 때의 WebSocket Close는 이 형식으로 관측하지 않는다. `code`는 1000만 쓰며, 러너는 상태 1000이 아닌 WebSocket Close를 비교에서 뺀다.
+`WEBSOCKET_CLOSE`는 WebSocket Close(`Close Frame 0x08`)를 관측하는 항목이고 `transport`가 `websocket`인 벡터에서만 쓴다. 구현이 `NO_ERROR` CLOSE를 보내 연결을 끝낼 때(규격 1.2절, 3.5절) 마지막 프레임 메시지 뒤에 나온다. `NO_ERROR`가 아닌 CLOSE로 끝낼 때의 WebSocket Close와 상태 1000이 아닌 WebSocket Close는 이 형식으로 관측하지 않으며, 러너는 비교에서 뺀다.
 
 모든 프레임에서 `length`와 `reserved`는 비교하지 않는다. 비교 대상이지만 쓰지 않은 필드는 위 표의 기본값(빈 `flags`, 빈 확장 영역, 빈 `payload`)과 비교한다.
 
@@ -143,7 +143,7 @@
 
 `status`는 2.5.1절의 이름이다. 17~255의 예약 값은 정수로 쓴다.
 
-스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 보냈거나 받은 뒤의 새 요청, 3.5절)은 `stream_id`가 없으므로 `result` 이벤트가 아니다. 이런 단계의 `events`는 빈 목록이다.
+스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 보냈거나 받은 뒤의 새 요청, 3.5절)은 `stream_id`가 없으므로 `result` 이벤트가 아니다. 이런 실패는 `events`에 항목을 만들지 않는다. 같은 단계에서 나오는 다른 이벤트(보류된 요청의 `result`, `closed`)는 그대로 쓴다.
 
 ## 7. 비교 규칙
 

@@ -29,7 +29,6 @@ public final class Endpoint {
 
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int PARAM_SIZE = 6;
-
     private static final int RESET_PAYLOAD_SIZE = 4;
     private static final long MAX_STREAM_ID = Integer.MAX_VALUE;
     private static final int TLV_HEADER_SIZE = 4;
@@ -211,7 +210,7 @@ public final class Endpoint {
             failLocally();
             return;
         }
-        sendAfterAck(new DeferredSend(true, () -> sendRequest(type, payload)));
+        sendAfterAck(DeferredSend.request(() -> sendRequest(type, payload)));
     }
 
     /**
@@ -259,7 +258,7 @@ public final class Endpoint {
      */
     public void ping(byte[] payload) {
         if (!closed) {
-            sendAfterAck(new DeferredSend(false, () -> sendPing(payload)));
+            sendAfterAck(DeferredSend.ping(() -> sendPing(payload)));
         }
     }
 
@@ -577,14 +576,14 @@ public final class Endpoint {
             endOldestWait(null);
             return;
         }
-        long @Nullable [] peer = helloAcknowledged ? null : peerLimitsOf(payload);
+        PeerLimits peer = helloAcknowledged ? null : peerLimitsOf(payload);
         if (peer == null) {
             connectionError();
             return;
         }
         helloAcknowledged = true;
-        peerMaxConcurrentStreams = peer[0];
-        peerMaxFrameSize = peer[1];
+        peerMaxConcurrentStreams = peer.maxConcurrentStreams;
+        peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(Frames.HELLO, Frames.ACK, new byte[0]));
         // 보내다가 닫히면 terminate가 남은 요청을 closed 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
         while (!deferredSends.isEmpty()) {
@@ -597,9 +596,9 @@ public final class Endpoint {
 
     /**
      * HELLO payload를 한 번 훑는다(규격 3.2.3절, 3.2.5절). 6의 배수, identifier 중복 없음, max_frame_size 범위를 검증하고, 유효하면 상대가 알린
-     * {@code max_concurrent_streams}와 {@code max_frame_size}(없으면 각 기본값)를 이 순서로 돌려주고, 유효하지 않으면 null을 돌려준다.
+     * {@code max_concurrent_streams}와 {@code max_frame_size}(없으면 각 기본값)를 돌려주고, 유효하지 않으면 null을 돌려준다.
      */
-    private static long @Nullable [] peerLimitsOf(byte[] payload) {
+    private static @Nullable PeerLimits peerLimitsOf(byte[] payload) {
         if (payload.length % PARAM_SIZE != 0) {
             return null;
         }
@@ -621,7 +620,7 @@ public final class Endpoint {
                 maxConcurrentStreams = value;
             }
         }
-        return new long[] {maxConcurrentStreams, maxFrameSize};
+        return new PeerLimits(maxConcurrentStreams, maxFrameSize);
     }
 
     private void handlePing(boolean ack, byte[] payload) {
@@ -736,15 +735,20 @@ public final class Endpoint {
     }
 
     private void sendRequest(int type, byte[] payload) {
-        if (closeSeen || pendingStreams.size() >= peerMaxConcurrentStreams) {
-            // CLOSE를 보냈거나 받았다(규격 3.5절). 또는 상대가 알린 한도에 닿았다(규격 3.2.1절). 대기시키지 않고 번호도 쓰지 않는다.
+        if (closeSeen) {
+            // CLOSE를 보냈거나 받았다(규격 3.5절). 대기시키지 않고 번호도 쓰지 않는다.
             failLocally();
             return;
         }
         if (nextStreamId > MAX_STREAM_ID) {
-            // 번호가 소진됐다. 프레임 없이 요청을 로컬에서 실패시키고 연결을 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 2.2.5절).
+            // 번호가 소진됐다. 상대가 알린 한도보다 먼저 본다. 프레임 없이 요청을 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
             failLocally();
             close(Frames.NO_ERROR);
+            return;
+        }
+        if (pendingStreams.size() >= peerMaxConcurrentStreams) {
+            // 상대가 알린 한도에 닿았다(규격 3.2.1절). 대기시키지 않고 번호도 쓰지 않는다.
+            failLocally();
             return;
         }
         int streamId = (int) nextStreamId;
@@ -767,9 +771,28 @@ public final class Endpoint {
         final boolean request;
         final Runnable sending;
 
-        DeferredSend(boolean request, Runnable sending) {
+        private DeferredSend(boolean request, Runnable sending) {
             this.request = request;
             this.sending = sending;
+        }
+
+        static DeferredSend request(Runnable sending) {
+            return new DeferredSend(true, sending);
+        }
+
+        static DeferredSend ping(Runnable sending) {
+            return new DeferredSend(false, sending);
+        }
+    }
+
+    /** 상대 HELLO가 알린 한도. 없는 파라미터는 규격 기본값이다. */
+    private static final class PeerLimits {
+        final long maxConcurrentStreams;
+        final long maxFrameSize;
+
+        PeerLimits(long maxConcurrentStreams, long maxFrameSize) {
+            this.maxConcurrentStreams = maxConcurrentStreams;
+            this.maxFrameSize = maxFrameSize;
         }
     }
 
