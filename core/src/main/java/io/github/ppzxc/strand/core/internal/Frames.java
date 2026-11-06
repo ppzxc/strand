@@ -11,13 +11,15 @@ final class Frames {
     static final int PING = 0x0002;
     static final int CLOSE = 0x0003;
     static final int ACK = 0x01;
+    /** 규격 2.5.2절의 error_code 값(CLOSE·RESET). */
     static final int NO_ERROR = 0;
-    static final int PROTOCOL_ERROR = 1;
-    static final int REFUSED = 3;
-    /** 규격 2.5.1절의 status 값. */
-    static final int INVALID_ARGUMENT = 3;
 
-    static final int UNIMPLEMENTED = 12;
+    static final int PROTOCOL_ERROR = 1;
+    static final int ERROR_REFUSED = 3;
+    /** 규격 2.5.1절의 status 값(응답). error_code와 번호 공간이 다르다. */
+    static final int STATUS_INVALID_ARGUMENT = 3;
+
+    static final int STATUS_UNIMPLEMENTED = 12;
     static final int RESET = 0x0004;
     /** 이 값부터 애플리케이션 프레임이다(규격 2.2.2절). */
     static final int FIRST_APPLICATION_TYPE = 0x0100;

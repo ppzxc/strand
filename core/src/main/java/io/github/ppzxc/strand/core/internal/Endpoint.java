@@ -327,11 +327,11 @@ public final class Endpoint {
             return;
         }
         if (closeSeen || incomingStreams.size() + 1 > config.maxConcurrentStreams()) {
-            send(Frames.reset(streamId, Frames.REFUSED));
+            send(Frames.reset(streamId, Frames.ERROR_REFUSED));
         } else if (!config.knows(type)) {
-            send(Frames.response(type, streamId, Frames.UNIMPLEMENTED));
+            send(Frames.response(type, streamId, Frames.STATUS_UNIMPLEMENTED));
         } else if (!validExtensionValues(frame, extensionsLength)) {
-            send(Frames.response(type, streamId, Frames.INVALID_ARGUMENT));
+            send(Frames.response(type, streamId, Frames.STATUS_INVALID_ARGUMENT));
         } else {
             incomingStreams.add((long) streamId);
             events.add(Event.requestReceived(streamId, type));
