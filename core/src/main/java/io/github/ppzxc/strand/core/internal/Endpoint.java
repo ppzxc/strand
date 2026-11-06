@@ -202,13 +202,21 @@ public final class Endpoint {
      *
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param payload 본문
+     * @throws IllegalArgumentException 지금 보낼 수 있는 요청의 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런
+     *     프레임을 보내지 못하게 하고(MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림 번호도 쓰지 않는다.
+     *     상대 HELLO에 ACK하기 전이라 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고, 보낼 때 넘으면 로컬 {@code UNAVAILABLE}로
+     *     실패시킨다.
      */
     public void request(int type, byte[] payload) {
         if (closed) {
             failLocally();
             return;
         }
-        sendAfterAck(DeferredSend.request(() -> sendRequest(type, payload)));
+        if (helloAcknowledged) {
+            sendRequest(type, payload, true);
+        } else {
+            deferredSends.add(DeferredSend.request(() -> sendRequest(type, payload, false)));
+        }
     }
 
     /**
@@ -732,7 +740,7 @@ public final class Endpoint {
         }
     }
 
-    private void sendRequest(int type, byte[] payload) {
+    private void sendRequest(int type, byte[] payload, boolean rejectOversize) {
         if (closeSeen) {
             // CLOSE를 보냈거나 받았다(규격 3.5절). 대기시키지 않고 번호도 쓰지 않는다.
             failLocally();
@@ -750,9 +758,18 @@ public final class Endpoint {
             return;
         }
         int streamId = (int) nextStreamId;
+        byte[] frame = Frames.request(type, streamId, payload);
+        if (frame.length > peerMaxFrameSize) {
+            // 상대가 알린 max_frame_size를 넘는다(규격 3.2.1절). 보내지 않고 번호도 쓰지 않는다.
+            if (rejectOversize) {
+                throw new IllegalArgumentException("요청 프레임이 상대의 max_frame_size를 넘는다: " + frame.length);
+            }
+            failLocally();
+            return;
+        }
         nextStreamId += 2;
         pendingStreams.put(streamId, type);
-        send(Frames.request(type, streamId, payload));
+        send(frame);
     }
 
     /** 스트림을 열기 전에 요청이 로컬에서 실패했다. 스트림 번호 없는 UNAVAILABLE 결과를 넘긴다. */
