@@ -519,6 +519,174 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ping-status-is-ignored",
+      "description": "PING은 응답이 아니므로 status가 0이 아니어도(0xFF) 값을 보지 않는다. 오류로 취급하지 않고 같은 8바이트에 ACK를 붙여 돌려준다",
+      "spec": [
+        "2.2.4",
+        "3.4"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000014000200ff00000000000000000102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "flags": [
+                "ACK"
+              ],
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "ping-reserved-is-ignored",
+      "description": "수립 이후에도 PING의 reserved가 0이 아니면(0xFFFF) 무시한다. 오류로 취급하지 않고 ACK를 돌려준다",
+      "spec": [
+        "2.2.7",
+        "3.4"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001400020000000000000000ffff0102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "flags": [
+                "ACK"
+              ],
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "close-status-and-reserved-are-ignored",
+      "description": "CLOSE의 status(0xFF)와 reserved(0xFFFF)가 0이 아니어도 무시하고 일반 CLOSE(NO_ERROR)처럼 받는다. 대기 중인 스트림이 없으므로 아무것도 보내지 않고 닫는다",
+      "spec": [
+        "2.2.4",
+        "2.2.7",
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000010000300ff000000000000ffff00000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-status-and-reserved-are-ignored",
+      "description": "RESET의 status(0xFF)와 reserved(0xFFFF)가 0이 아니어도 무시하고 정상 RESET으로 받는다. max_concurrent_streams가 1일 때 요청 1을 이 RESET으로 끝내면 그 자리가 반환되어 요청 3을 다시 수락한다",
+      "spec": [
+        "2.2.4",
+        "2.2.7",
+        "4.4"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "local_hello": {
+          "max_concurrent_streams": 1
+        }
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "00000010000400ff000000010000ffff00000004",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 3,
+              "type": 257
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "request-status-and-reserved-are-ignored",
+      "description": "애플리케이션 요청은 응답이 아니므로 status가 0이 아니어도 값을 보지 않고, reserved도 무시한다. status와 reserved가 0이 아닌 새 요청을 오류 없이 요청으로 전달한다",
+      "spec": [
+        "2.2.4",
+        "2.2.7",
+        "4.2"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100ff0000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c01010000000000030000ffff",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 3,
+              "type": 257
+            }
+          ]
+        }
+      ]
     }
   ]
 }
