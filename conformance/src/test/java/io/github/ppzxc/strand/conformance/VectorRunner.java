@@ -58,7 +58,7 @@ final class VectorRunner {
         int number = 0;
         for (JsonObject step : vector.steps()) {
             number++;
-            endpoint.receive(bytes(step.get("hex").getAsString()));
+            endpoint.receive(Bytes.fromHex(step.get("hex").getAsString()));
             assertThat(describe(endpoint.drainOutput()))
                     .as("%d번째 단계의 send", number)
                     .isEqualTo(expectedFrames(step));
@@ -109,13 +109,13 @@ final class VectorRunner {
 
     /** 규격 3.3절 표준 수립 순서를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. */
     private static void establish(Endpoint endpoint, JsonObject peerHello) {
-        endpoint.receive(bytes(PREFACE_HEX));
+        endpoint.receive(Bytes.fromHex(PREFACE_HEX));
         assertThat(frames(endpoint.drainOutput())).as("수립: 서문에 대한 HELLO").hasSize(1);
         endpoint.receive(encodeHello(helloParams(peerHello)));
         assertThat(describe(endpoint.drainOutput()))
                 .as("수립: 상대 HELLO에 대한 ACK")
                 .containsExactly("HELLO flags=ACK stream_id=0 params=-");
-        endpoint.receive(bytes("0000000c000101000000000000000000"));
+        endpoint.receive(Bytes.fromHex("0000000c000101000000000000000000"));
         assertThat(endpoint.drainOutput()).as("수립: ACK 뒤의 출력").isEmpty();
         assertThat(endpoint.drainEvents()).as("수립: 이벤트").isEmpty();
     }
@@ -142,7 +142,7 @@ final class VectorRunner {
             }
         }
         byte[] body = payload.toByteArray();
-        return concat(bytes(String.format("%08x000100000000000000000000", 12 + body.length)), body);
+        return Bytes.concat(Bytes.fromHex(String.format("%08x000100000000000000000000", 12 + body.length)), body);
     }
 
     private static List<String> expectedFrames(JsonObject step) {
@@ -190,7 +190,7 @@ final class VectorRunner {
         for (byte[] frame : frames(output)) {
             int type = ((frame[4] & 0xFF) << 8) | (frame[5] & 0xFF);
             int flags = frame[6] & 0xFF;
-            long streamId = readInt(frame, 8);
+            long streamId = Bytes.readUnsignedInt(frame, 8);
             int extensions = ((frame[12] & 0xFF) << 8) | (frame[13] & 0xFF);
             byte[] payload = Arrays.copyOfRange(frame, 16 + extensions, frame.length);
             String head = " flags=" + flagsText(flags) + " stream_id=" + streamId;
@@ -198,13 +198,13 @@ final class VectorRunner {
             if (type == 1) {
                 result.add("HELLO" + head + ext + " params=" + (payload.length == 0 ? "-" : paramsText(payload)));
             } else if (type == 2) {
-                result.add("PING" + head + ext + " payload=" + hex(payload));
+                result.add("PING" + head + ext + " payload=" + Bytes.toHex(payload));
             } else if (type == 3 && payload.length >= 4) {
-                int code = (int) readInt(payload, 0);
+                int code = (int) Bytes.readUnsignedInt(payload, 0);
                 result.add(
                         "CLOSE" + head + ext + " error_code=" + (code < ERROR_CODES.length ? ERROR_CODES[code] : code));
             } else {
-                result.add(String.format("type=0x%04x", type) + head + ext + " payload=" + hex(payload));
+                result.add(String.format("type=0x%04x", type) + head + ext + " payload=" + Bytes.toHex(payload));
             }
         }
         return result;
@@ -226,7 +226,7 @@ final class VectorRunner {
         for (int at = 0; at + 6 <= payload.length; at += 6) {
             int id = ((payload[at] & 0xFF) << 8) | (payload[at + 1] & 0xFF);
             String name = HELLO_PARAMS.containsKey(id) ? HELLO_PARAMS.get(id) : String.format("0x%04x", id);
-            params.put(name, readInt(payload, at + 2));
+            params.put(name, Bytes.readUnsignedInt(payload, at + 2));
         }
         Map<String, Long> filled = new LinkedHashMap<>(HELLO_DEFAULTS);
         filled.putAll(params);
@@ -237,42 +237,12 @@ final class VectorRunner {
         List<byte[]> result = new ArrayList<>();
         int at = 0;
         while (at + 4 <= output.length) {
-            int size = (int) (4 + readInt(output, at));
+            int size = (int) (4 + Bytes.readUnsignedInt(output, at));
             assertThat(at + size).as("보낸 바이트가 프레임 경계에서 끝나야 한다").isLessThanOrEqualTo(output.length);
             result.add(Arrays.copyOfRange(output, at, at + size));
             at += size;
         }
         assertThat(at).as("보낸 바이트에 남는 조각이 없어야 한다").isEqualTo(output.length);
         return result;
-    }
-
-    private static long readInt(byte[] bytes, int at) {
-        return ((long) (bytes[at] & 0xFF) << 24)
-                | ((bytes[at + 1] & 0xFF) << 16)
-                | ((bytes[at + 2] & 0xFF) << 8)
-                | (bytes[at + 3] & 0xFF);
-    }
-
-    private static String hex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
-    }
-
-    private static byte[] bytes(String hex) {
-        String clean = hex.replaceAll("\\s", "");
-        byte[] out = new byte[clean.length() / 2];
-        for (int i = 0; i < out.length; i++) {
-            out[i] = (byte) Integer.parseInt(clean.substring(2 * i, 2 * i + 2), 16);
-        }
-        return out;
-    }
-
-    private static byte[] concat(byte[] a, byte[] b) {
-        byte[] out = Arrays.copyOf(a, a.length + b.length);
-        System.arraycopy(b, 0, out, a.length, b.length);
-        return out;
     }
 }

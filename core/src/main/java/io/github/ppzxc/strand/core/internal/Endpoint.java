@@ -46,12 +46,12 @@ public final class Endpoint {
         if (closed) {
             return;
         }
-        inbound = concat(inbound, bytes);
+        inbound = Frames.concat(inbound, bytes);
         if (!prefaceChecked && !checkPreface()) {
             return;
         }
         while (!closed && inbound.length >= 4) {
-            long length = readUnsignedInt(inbound, 0);
+            long length = Frames.readUnsignedInt(inbound, 0);
             if (length < MIN_FRAME_LENGTH || length > config.maxFrameSize() - 4) {
                 connectionError();
                 return;
@@ -135,18 +135,5 @@ public final class Endpoint {
 
     private void send(byte[] frame) {
         output.write(frame, 0, frame.length);
-    }
-
-    private static long readUnsignedInt(byte[] bytes, int at) {
-        return ((long) (bytes[at] & 0xFF) << 24)
-                | ((bytes[at + 1] & 0xFF) << 16)
-                | ((bytes[at + 2] & 0xFF) << 8)
-                | (bytes[at + 3] & 0xFF);
-    }
-
-    private static byte[] concat(byte[] a, byte[] b) {
-        byte[] out = Arrays.copyOf(a, a.length + b.length);
-        System.arraycopy(b, 0, out, a.length, b.length);
-        return out;
     }
 }

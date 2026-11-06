@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
 import java.io.ByteArrayOutputStream;
+import java.util.Arrays;
 
 /** 프레임 바이트 인코딩(규격 2.1절). */
 final class Frames {
@@ -56,5 +57,18 @@ final class Frames {
         out.write((int) (value >>> 16));
         out.write((int) (value >>> 8));
         out.write((int) value);
+    }
+
+    static long readUnsignedInt(byte[] bytes, int at) {
+        return ((long) (bytes[at] & 0xFF) << 24)
+                | ((bytes[at + 1] & 0xFF) << 16)
+                | ((bytes[at + 2] & 0xFF) << 8)
+                | (bytes[at + 3] & 0xFF);
+    }
+
+    static byte[] concat(byte[] a, byte[] b) {
+        byte[] out = Arrays.copyOf(a, a.length + b.length);
+        System.arraycopy(b, 0, out, a.length, b.length);
+        return out;
     }
 }
