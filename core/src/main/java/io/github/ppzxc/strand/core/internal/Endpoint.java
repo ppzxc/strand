@@ -212,15 +212,17 @@ public final class Endpoint {
             failLocally();
             return;
         }
-        boolean callerWaits = helloAcknowledged;
-        sendAfterAck(DeferredSend.request(() -> {
-            if (!trySendRequest(type, payload)) {
-                if (callerWaits) {
-                    throw new IllegalArgumentException("요청 프레임이 상대의 max_frame_size(" + peerMaxFrameSize + ")를 넘는다");
-                }
-                failLocally();
+        if (helloAcknowledged) {
+            if (sendRequest(type, payload) == RequestOutcome.OVERSIZE) {
+                throw oversizeFrame("요청");
             }
-        }));
+        } else {
+            deferredSends.add(DeferredSend.request(() -> {
+                if (sendRequest(type, payload) == RequestOutcome.OVERSIZE) {
+                    failLocally();
+                }
+            }));
+        }
     }
 
     /**
@@ -239,7 +241,7 @@ public final class Endpoint {
         }
         byte[] frame = Frames.response(type, streamId, status, payload);
         if (exceedsPeerFrameSize(frame)) {
-            throw new IllegalArgumentException("응답 프레임이 상대의 max_frame_size를 넘는다: " + frame.length);
+            throw oversizeFrame("응답");
         }
         incomingStreams.remove(streamId);
         send(frame);
@@ -738,33 +740,39 @@ public final class Endpoint {
     /** 상대 HELLO에 ACK를 보낸 뒤면 바로, 아니면 ACK를 보낼 때까지 미뤄서 보낸다. */
     private void sendAfterAck(DeferredSend sending) {
         if (helloAcknowledged) {
-            sending.sending.run();
+            sending.run();
         } else {
             deferredSends.add(sending);
         }
     }
 
-    /**
-     * 요청을 보낸다. 보냈거나 로컬에서 실패시켰으면 {@code true}를 돌려준다. 프레임이 상대의 {@code max_frame_size}를 넘어 아무것도 하지
-     * 않았다면(규격 3.2.1절: 보내지 않고 번호도 쓰지 않는다) {@code false}를 돌려주고, 처리는 호출자가 정한다.
-     */
-    private boolean trySendRequest(int type, byte[] payload) {
-        if (refuseRequestLocally()) {
-            return true;
+    /** 요청을 보낸 결과. */
+    private enum RequestOutcome {
+        /** 요청 프레임을 보냈다. */
+        SENT,
+        /** 프레임을 열지 못해 로컬에서 실패시켰다(이미 이벤트를 냈다). */
+        FAILED_LOCALLY,
+        /** 프레임이 상대의 {@code max_frame_size}를 넘어 아무것도 하지 않았다. 규격 3.2.1절: 보내지 않고 번호도 쓰지 않는다. */
+        OVERSIZE
+    }
+
+    private RequestOutcome sendRequest(int type, byte[] payload) {
+        if (failRequestIfRefused()) {
+            return RequestOutcome.FAILED_LOCALLY;
         }
         int streamId = (int) nextStreamId;
         byte[] frame = Frames.request(type, streamId, payload);
         if (exceedsPeerFrameSize(frame)) {
-            return false;
+            return RequestOutcome.OVERSIZE;
         }
         nextStreamId += 2;
         pendingStreams.put(streamId, type);
         send(frame);
-        return true;
+        return RequestOutcome.SENT;
     }
 
-    /** 프레임을 열지 못하는 요청을 로컬에서 실패시킨다. 실패시켰으면 {@code true}. 실패한 요청은 대기시키지 않고 번호도 쓰지 않는다. */
-    private boolean refuseRequestLocally() {
+    /** 프레임을 열지 못하는 요청이면 로컬에서 실패시키고 {@code true}를 돌려준다. 실패한 요청은 대기시키지 않고 번호도 쓰지 않는다. */
+    private boolean failRequestIfRefused() {
         if (closeSeen) {
             // CLOSE를 보냈거나 받았다(규격 3.5절).
             failLocally();
@@ -789,6 +797,10 @@ public final class Endpoint {
         return frame.length > peerMaxFrameSize;
     }
 
+    private IllegalArgumentException oversizeFrame(String kind) {
+        return new IllegalArgumentException(kind + " 프레임이 상대의 max_frame_size(" + peerMaxFrameSize + ")를 넘는다");
+    }
+
     /** 스트림을 열기 전에 요청이 로컬에서 실패했다. 스트림 번호 없는 UNAVAILABLE 결과를 넘긴다. */
     private void failLocally() {
         events.add(Event.localUnavailable());
@@ -806,6 +818,10 @@ public final class Endpoint {
         private DeferredSend(boolean request, Runnable sending) {
             this.request = request;
             this.sending = sending;
+        }
+
+        void run() {
+            sending.run();
         }
 
         static DeferredSend request(Runnable sending) {
