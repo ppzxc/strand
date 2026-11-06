@@ -683,8 +683,8 @@ public final class Endpoint {
     }
 
     /**
-     * 연결 오류: CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절, 5.1절). CLOSE를 보내지
-     * 않은 경우에도 {@code closeExchanged}를 세운다. 이 뒤로는 규격 3.5절에 따라 CLOSE를 보내지 않고 새 스트림도 열지 않기 때문이다.
+     * 연결 오류: CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절, 5.1절). 어느 쪽이든
+     * 이 호출 뒤에는 CLOSE 교환이 된 상태다.
      */
     private void connectionError() {
         if (!closeExchanged) {
