@@ -1030,10 +1030,9 @@ class EndpointTest {
     }
 
     @Test
-    void firstFrameOfAPeerStreamIsReportedAsAReceivedRequestOnce() {
+    void firstFrameOfAPeerStreamIsReportedAsAReceivedRequest() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000c010100000000000100000000"));
         server.receive(bytes("0000000c010100000000000100000000"));
 
         List<Event> events = server.drainEvents();
@@ -1337,13 +1336,221 @@ class EndpointTest {
     }
 
     @Test
-    void repeatedRequestOnAPendingPeerStreamIsNotDeliveredTwice() {
+    void streamNumberAtOrBelowTheHighestPeerNumberClosesWithProtocolError() {
+        // 대기 중인 번호, 응답으로 끝난 번호, 건너뛴 번호, 거절한 번호는 모두 쓰인 것으로 센다(규격 4.2.1절).
+        Endpoint pending = established();
+        pending.receive(bytes(requestFrame(257, 1, "")));
+        pending.drainEvents();
+        pending.receive(bytes(requestFrame(257, 1, "")));
+        assertClosedWithProtocolError(pending);
+
+        Endpoint ended = established();
+        ended.receive(bytes(requestFrame(257, 1, "")));
+        ended.respond(1, 0);
+        ended.drainOutput();
+        ended.drainEvents();
+        ended.receive(bytes(requestFrame(257, 1, "")));
+        assertClosedWithProtocolError(ended);
+
+        Endpoint skipped = established();
+        skipped.receive(bytes(requestFrame(257, 5, "")));
+        skipped.drainEvents();
+        skipped.receive(bytes(requestFrame(257, 3, "")));
+        assertClosedWithProtocolError(skipped);
+
+        Endpoint refused = establishedWith(EndpointConfig.defaults().maxConcurrentStreams(0));
+        refused.receive(bytes(requestFrame(257, 5, "")));
+        refused.drainOutput();
+        refused.receive(bytes(requestFrame(257, 3, "")));
+        assertClosedWithProtocolError(refused);
+    }
+
+    @Test
+    void repeatedNumberWhileClosingClosesWithoutSendingClose() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        server.receive(bytes(requestFrame(257, 3, "")));
+        server.drainOutput();
+        server.drainEvents();
+
+        server.receive(bytes(requestFrame(257, 3, "")));
+
+        assertClosedSilently(server);
+    }
+
+    @Test
+    void applicationFrameWithStreamIdZeroOrTopBitSetClosesWithProtocolError() {
+        for (int streamId : new int[] {0, 0x80000001}) {
+            Endpoint server = established();
+
+            server.receive(bytes(requestFrame(257, streamId, "")));
+
+            assertClosedWithProtocolError(server);
+        }
+    }
+
+    @Test
+    void resetPayloadOtherThanFourBytesClosesWithProtocolError() {
+        for (String payload : new String[] {"", "000000", "0000000000"}) {
+            Endpoint server = established();
+
+            server.receive(bytes(String.format("%08x00040000%08x00000000", 12 + payload.length() / 2, 1) + payload));
+
+            assertClosedWithProtocolError(server);
+        }
+    }
+
+    @Test
+    void respondSendsTheResponseWithTheRequestTypeAndFreesTheSlot() {
+        Endpoint server = establishedWith(EndpointConfig.defaults().maxConcurrentStreams(1));
+        server.receive(bytes(requestFrame(258, 1, "")));
+        server.drainEvents();
+
+        server.respond(1, 0);
+        server.respond(1, 0);
+
+        assertThat(sent(server)).isEqualTo("0000000c0102000000000001" + "0000" + "0000");
+        server.receive(bytes(requestFrame(257, 3, "")));
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+    }
+
+    @Test
+    void lastRespondWhileClosingClosesTheConnection() {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
+        server.close(0);
+        server.drainOutput();
 
-        server.receive(bytes(requestFrame(257, 1, "")));
+        server.respond(1, 0);
+
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void respondToAnUnknownStreamDoesNothing() {
+        Endpoint server = established();
+
+        server.respond(1, 0);
 
         assertOpenAndSilent(server);
+    }
+
+    @Test
+    void cancelSendsResetCancelAndReportsCancelledOnce() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.drainOutput();
+
+        client.cancel(1);
+        client.cancel(1);
+
+        assertThat(sent(client)).isEqualTo("000000100004000000000001" + "0000" + "0000" + "00000004");
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).status()).isEqualTo(1);
+        client.receive(bytes(appFrame(1, 0, "")));
+        assertOpenAndSilent(client);
+    }
+
+    @Test
+    void lastCancelWhileClosingClosesTheConnection() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.close(0);
+        client.drainOutput();
+
+        client.cancel(1);
+
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+    }
+
+    @Test
+    void receivedResetEndsTheRequestWithAStatusFromItsErrorCode() {
+        int[][] cases = {{4, 1}, {3, 14}, {0, 13}, {1, 13}, {2, 13}, {5, 13}, {6, 13}};
+        for (int[] c : cases) {
+            Endpoint client = establishedClient();
+            client.request(257, new byte[0]);
+            client.drainOutput();
+
+            client.receive(bytes(String.format("000000100004000000000001000000000000%04x", c[0])));
+
+            List<Event> events = client.drainEvents();
+            assertThat(events).hasSize(1);
+            assertThat(events.get(0).status()).as("error_code %d", c[0]).isEqualTo(c[1]);
+            assertThat(client.drainOutput()).isEmpty();
+        }
+    }
+
+    @Test
+    void resetOnAStreamThatIsNotPendingIsDropped() {
+        Endpoint server = established();
+
+        server.receive(bytes("000000100004000000000005" + "0000" + "0000" + "00000004"));
+        server.receive(bytes("000000100004000000000004" + "0000" + "0000" + "00000004"));
+        server.receive(bytes(requestFrame(257, 3, "")));
+
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+    }
+
+    @Test
+    void responseWithADifferentTypeEndsTheRequestWithInternalAndSendsNothing() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.drainOutput();
+
+        client.receive(bytes(requestFrame(258, 1, "")));
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).status()).isEqualTo(13);
+        assertThat(client.drainOutput()).isEmpty();
+    }
+
+    @Test
+    void streamNumbersAreExhaustedAfterTheLastNumberAndTheConnectionCloses() {
+        int[][] roles = {{1, 2147483647}, {0, 2147483646}};
+        for (int[] role : roles) {
+            EndpointConfig config = EndpointConfig.defaults().nextStreamId(role[1]);
+            Endpoint endpoint = role[0] == 1 ? Endpoint.client(config) : serverAfterPreface(config);
+            endpoint.receive(bytes(HELLO));
+            endpoint.receive(bytes(HELLO_ACK));
+            endpoint.drainOutput();
+            endpoint.request(257, new byte[0]);
+            endpoint.drainOutput();
+            endpoint.receive(bytes(appFrame(role[1], 0, "")));
+            endpoint.drainEvents();
+
+            endpoint.request(257, new byte[0]);
+
+            assertThat(sent(endpoint)).isEqualTo("00000010000300000000000000000000" + "00000000");
+            assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
+        }
+    }
+
+    @Test
+    void exhaustionWithAPendingRequestWaitsForItAndSendsNoSecondClose() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.request(257, new byte[0]);
+        client.close(0);
+        client.drainOutput();
+
+        client.request(257, new byte[0]);
+
+        assertOpenAndSilent(client);
+        client.receive(bytes(appFrame(2147483647, 0, "")));
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+    }
+
+    @Test
+    void largestStreamNumberIsAccepted() {
+        Endpoint server = established();
+
+        server.receive(bytes(requestFrame(257, 2147483647, "")));
+
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 }

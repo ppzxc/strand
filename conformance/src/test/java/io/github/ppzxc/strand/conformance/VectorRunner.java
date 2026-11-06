@@ -30,10 +30,10 @@ final class VectorRunner {
     private static final String ACK_HELLO_HEX = "0000000c000101000000000000000000";
     private static final Map<String, Long> HELLO_DEFAULTS = new LinkedHashMap<>();
     private static final Map<Integer, String> HELLO_PARAMS = new LinkedHashMap<>();
-    private static final Set<String> SUPPORTED_SETUP =
-            new HashSet<>(Arrays.asList("role", "established", "local_hello", "peer_hello", "config", "known_types"));
+    private static final Set<String> SUPPORTED_SETUP = new HashSet<>(Arrays.asList(
+            "role", "established", "local_hello", "peer_hello", "config", "known_types", "next_stream_id"));
     private static final Set<String> SUPPORTED_STEPS =
-            new HashSet<>(Arrays.asList("recv", "advance", "ping", "request", "close"));
+            new HashSet<>(Arrays.asList("recv", "advance", "ping", "request", "close", "cancel", "respond"));
     private static final Set<String> SUPPORTED_FRAMES =
             new HashSet<>(Arrays.asList("PREFACE", "HELLO", "PING", "CLOSE", "RESET"));
     private static final Set<String> SUPPORTED_EVENTS =
@@ -150,6 +150,9 @@ final class VectorRunner {
                 .maxConcurrentStreams(hello.get("max_concurrent_streams"))
                 .capabilities(hello.get("capabilities"))
                 .ackTimeoutMs(ackTimeout);
+        if (setup.has("next_stream_id")) {
+            config = config.nextStreamId(setup.get("next_stream_id").getAsLong());
+        }
         if (setup.has("known_types")) {
             Set<Integer> known = new HashSet<>();
             for (JsonElement type : setup.getAsJsonArray("known_types")) {
@@ -192,6 +195,12 @@ final class VectorRunner {
                 endpoint.request(
                         step.get("type").getAsInt(),
                         Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : ""));
+                break;
+            case "cancel":
+                endpoint.cancel(step.get("stream_id").getAsInt());
+                break;
+            case "respond":
+                endpoint.respond(step.get("stream_id").getAsInt(), statusCode(step.get("status")));
                 break;
             default:
                 endpoint.close(errorCode(step.get("error_code")));
@@ -373,6 +382,12 @@ final class VectorRunner {
 
     private static String nameOfError(int code) {
         return code < FieldKind.ERROR_CODE_NAMES.size() ? FieldKind.ERROR_CODE_NAMES.get(code) : String.valueOf(code);
+    }
+
+    private static int statusCode(JsonElement element) {
+        return element.getAsJsonPrimitive().isString()
+                ? FieldKind.STATUS_NAMES.indexOf(element.getAsString())
+                : element.getAsInt();
     }
 
     private static String nameOfStatus(JsonElement element) {

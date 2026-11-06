@@ -16,6 +16,7 @@ final class Frames {
 
     static final int PROTOCOL_ERROR = 1;
     static final int ERROR_REFUSED = 3;
+    static final int ERROR_CANCEL = 4;
     /** 규격 2.5.1절의 status 값(응답). error_code와 번호 공간이 다르다. */
     static final int STATUS_INVALID_ARGUMENT = 3;
 

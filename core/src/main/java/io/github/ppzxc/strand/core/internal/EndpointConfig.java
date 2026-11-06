@@ -11,24 +11,25 @@ public final class EndpointConfig {
     private static final long DEFAULT_MAX_CONCURRENT_STREAMS = 100L;
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
 
-    private final long maxFrameSize;
-    private final long maxConcurrentStreams;
-    private final long capabilities;
-    private final long ackTimeoutMs;
+    // 값을 바꾼 복사본은 복사한 뒤 한 필드만 고쳐 돌려준다. 만든 뒤에는 바깥에서 바꿀 수 없다.
+    private long maxFrameSize = DEFAULT_MAX_FRAME_SIZE;
+    private long maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
+    private long capabilities;
+    private long ackTimeoutMs = DEFAULT_ACK_TIMEOUT_MS;
     /** 구현이 아는 애플리케이션 {@code type}. null이면 모든 type을 안다(규격 4.1절). */
-    private final @Nullable Set<Integer> knownTypes;
+    private @Nullable Set<Integer> knownTypes;
+    /** 다음에 쓸 스트림 번호. null이면 역할의 첫 번호다(규격 2.2.5절). */
+    private @Nullable Long nextStreamId;
 
-    private EndpointConfig(
-            long maxFrameSize,
-            long maxConcurrentStreams,
-            long capabilities,
-            long ackTimeoutMs,
-            @Nullable Set<Integer> knownTypes) {
-        this.maxFrameSize = maxFrameSize;
-        this.maxConcurrentStreams = maxConcurrentStreams;
-        this.capabilities = capabilities;
-        this.ackTimeoutMs = ackTimeoutMs;
-        this.knownTypes = knownTypes;
+    private EndpointConfig() {}
+
+    private EndpointConfig(EndpointConfig other) {
+        this.maxFrameSize = other.maxFrameSize;
+        this.maxConcurrentStreams = other.maxConcurrentStreams;
+        this.capabilities = other.capabilities;
+        this.ackTimeoutMs = other.ackTimeoutMs;
+        this.knownTypes = other.knownTypes;
+        this.nextStreamId = other.nextStreamId;
     }
 
     /**
@@ -37,8 +38,7 @@ public final class EndpointConfig {
      * @return 기본 설정
      */
     public static EndpointConfig defaults() {
-        return new EndpointConfig(
-                DEFAULT_MAX_FRAME_SIZE, DEFAULT_MAX_CONCURRENT_STREAMS, 0L, DEFAULT_ACK_TIMEOUT_MS, null);
+        return new EndpointConfig();
     }
 
     /**
@@ -48,7 +48,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig maxFrameSize(long value) {
-        return new EndpointConfig(value, maxConcurrentStreams, capabilities, ackTimeoutMs, knownTypes);
+        EndpointConfig copy = new EndpointConfig(this);
+        copy.maxFrameSize = value;
+        return copy;
     }
 
     /**
@@ -58,7 +60,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig maxConcurrentStreams(long value) {
-        return new EndpointConfig(maxFrameSize, value, capabilities, ackTimeoutMs, knownTypes);
+        EndpointConfig copy = new EndpointConfig(this);
+        copy.maxConcurrentStreams = value;
+        return copy;
     }
 
     /**
@@ -68,7 +72,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig capabilities(long value) {
-        return new EndpointConfig(maxFrameSize, maxConcurrentStreams, value, ackTimeoutMs, knownTypes);
+        EndpointConfig copy = new EndpointConfig(this);
+        copy.capabilities = value;
+        return copy;
     }
 
     /**
@@ -78,7 +84,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig ackTimeoutMs(long value) {
-        return new EndpointConfig(maxFrameSize, maxConcurrentStreams, capabilities, value, knownTypes);
+        EndpointConfig copy = new EndpointConfig(this);
+        copy.ackTimeoutMs = value;
+        return copy;
     }
 
     /**
@@ -89,11 +97,30 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig knownTypes(Set<Integer> types) {
-        return new EndpointConfig(maxFrameSize, maxConcurrentStreams, capabilities, ackTimeoutMs, new HashSet<>(types));
+        EndpointConfig copy = new EndpointConfig(this);
+        copy.knownTypes = new HashSet<>(types);
+        return copy;
+    }
+
+    /**
+     * 내 번호 공간에서 다음에 쓸 스트림 번호를 정한 복사본. 번호가 소진되는 경우를 만들어 볼 때 쓴다. 정하지 않으면 클라이언트는 1,
+     * 서버는 2에서 시작한다(규격 2.2.5절).
+     *
+     * @param value 다음 스트림 번호. 역할의 번호 공간(클라이언트는 홀수, 서버는 짝수)에 속해야 한다
+     * @return 새 설정
+     */
+    public EndpointConfig nextStreamId(long value) {
+        EndpointConfig copy = new EndpointConfig(this);
+        copy.nextStreamId = value;
+        return copy;
     }
 
     boolean knows(int type) {
         return knownTypes == null || knownTypes.contains(type);
+    }
+
+    long firstStreamId(long roleDefault) {
+        return nextStreamId == null ? roleDefault : nextStreamId;
     }
 
     long ackTimeoutMs() {

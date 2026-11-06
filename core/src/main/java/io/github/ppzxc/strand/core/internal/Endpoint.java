@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
@@ -25,6 +27,8 @@ public final class Endpoint {
     private static final int LENGTH_SIZE = 4;
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int PARAM_SIZE = 6;
+    private static final int RESET_PAYLOAD_SIZE = 4;
+    private static final long MAX_STREAM_ID = Integer.MAX_VALUE;
     private static final int TLV_HEADER_SIZE = 4;
     private static final int TIMEOUT_TAG = 0x0001;
     private static final int TIMEOUT_LENGTH = 4;
@@ -40,9 +44,10 @@ public final class Endpoint {
     private final EndpointConfig config;
     private final ByteArrayOutputStream output = new ByteArrayOutputStream();
     private final List<Event> events = new ArrayList<>();
-    private final List<Integer> pendingStreams = new ArrayList<>();
-    /** 상대가 열었고 아직 끝나지 않은 스트림. */
-    private final Set<Long> incomingStreams = new HashSet<>();
+    /** 결과를 기다리는 내 요청의 스트림 번호와 요청 type. 보낸 순서대로다. */
+    private final Map<Integer, Integer> pendingStreams = new LinkedHashMap<>();
+    /** 상대가 열었고 아직 응답하지 않은 스트림 번호와 요청 type. 응답에 같은 type을 쓴다(규격 4.1절). */
+    private final Map<Integer, Integer> incomingStreams = new LinkedHashMap<>();
     /** 상대 HELLO에 ACK를 보내기 전이라 미뤄 둔 송신(규격 3.3절). */
     private final List<Runnable> deferredSends = new ArrayList<>();
 
@@ -61,11 +66,16 @@ public final class Endpoint {
     /** ACK를 기다리는 HELLO와 PING들. 보낸 순서대로다(규격 3.3절). */
     private final List<AckWait> ackWaits = new ArrayList<>();
 
-    private int nextStreamId;
+    private long nextStreamId;
+    /** 내 번호 공간의 홀짝: 클라이언트는 1, 서버는 0이다(규격 2.2.5절). */
+    private final int ownParity;
+    /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
+    private long highestPeerStreamId;
 
     private Endpoint(boolean server, EndpointConfig config) {
         this.config = config;
-        this.nextStreamId = server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID;
+        this.nextStreamId = config.firstStreamId(server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID);
+        this.ownParity = server ? 0 : 1;
     }
 
     /**
@@ -141,6 +151,36 @@ public final class Endpoint {
             return;
         }
         sendAfterAck(() -> sendRequest(type, payload));
+    }
+
+    /**
+     * 애플리케이션이 상대의 요청에 응답하게 한다. 스트림이 끝나고 종료 중이었다면 닫는다. 대기 중이 아닌 스트림이면 아무것도 하지 않는다.
+     *
+     * @param streamId 상대가 연 스트림 번호
+     * @param status 규격 2.5.1절의 status 값
+     */
+    public void respond(int streamId, int status) {
+        Integer type = closed ? null : incomingStreams.remove(streamId);
+        if (type == null) {
+            return;
+        }
+        send(Frames.response(type, streamId, status));
+        terminateIfDrained();
+    }
+
+    /**
+     * 애플리케이션이 자기 요청을 취소하게 한다. RESET(CANCEL)을 보내고 로컬 {@code CANCELLED} 결과를 넘긴다(규격 4.4절). 대기 중이
+     * 아닌 스트림이면 아무것도 하지 않는다.
+     *
+     * @param streamId 내가 연 스트림 번호
+     */
+    public void cancel(int streamId) {
+        if (closed || pendingStreams.remove(streamId) == null) {
+            return;
+        }
+        send(Frames.reset(streamId, Frames.ERROR_CANCEL));
+        events.add(Event.result(streamId, Event.LOCAL_CANCEL));
+        terminateIfDrained();
     }
 
     /**
@@ -284,21 +324,38 @@ public final class Endpoint {
         } else if (type == Frames.PING) {
             handlePing(ack, payload);
         } else {
-            handleReset(streamId);
+            handleReset(streamId, payload);
         }
     }
 
     /**
-     * 받은 RESET. {@code stream_id}가 0이거나 최상위 비트가 1이면 연결 오류이고(규격 2.2.5절), 아니면 스트림 자리를 돌려준다. flags는
-     * 모두 미정의라 보지 않는다(규격 2.3절). 번호 재사용과 대기 중이 아닌 스트림 판정은 스트림 티켓에서 다룬다.
+     * 받은 RESET(규격 4.4절). {@code stream_id}가 0이거나 최상위 비트가 1이거나 payload가 4바이트가 아니면 연결 오류다. 대기 중인
+     * 스트림이면 끝내고, 내 요청이었다면 로컬 결과를 넘긴다. 대기 중이 아니면 조용히 버린다(규격 4.3절). flags는 모두 미정의라 보지
+     * 않는다(규격 2.3절).
      */
-    private void handleReset(long streamId) {
-        if (streamId == 0 || streamId > Integer.MAX_VALUE) {
+    private void handleReset(long streamId, byte[] payload) {
+        if (isInvalidStreamId(streamId) || payload.length != RESET_PAYLOAD_SIZE) {
             connectionError();
             return;
         }
-        incomingStreams.remove(streamId);
+        int id = (int) streamId;
+        if (isOwnSpace(streamId)) {
+            if (pendingStreams.remove(id) != null) {
+                events.add(Event.result(id, Event.statusForReset(Frames.readUnsignedInt(payload, 0))));
+            }
+        } else {
+            incomingStreams.remove(id);
+        }
         terminateIfDrained();
+    }
+
+    /** {@code stream_id}가 0이거나 최상위 비트가 1이다(규격 2.2.5절). */
+    private static boolean isInvalidStreamId(long streamId) {
+        return streamId == 0 || streamId > MAX_STREAM_ID;
+    }
+
+    private boolean isOwnSpace(long streamId) {
+        return (streamId & 1) == ownParity;
     }
 
     /**
@@ -306,12 +363,13 @@ public final class Endpoint {
      * 프레임은 응답이고 상대 공간의 프레임은 새 요청이다(규격 4.2절).
      */
     private void handleApplication(byte[] frame, int type, int extensionsLength, long streamId) {
-        if (extensionsLength > MAX_EXTENSIONS_LENGTH || !validExtensions(frame, extensionsLength)) {
+        // 연결 오류 집합은 검사 순서가 없다(규격 5.1절 3번). 확장 영역 형식, 상대 ACK 전의 프레임(3.3절), 잘못된 stream_id.
+        if (extensionsLength > MAX_EXTENSIONS_LENGTH
+                || !validExtensions(frame, extensionsLength)
+                || !peerAckReceived
+                || isInvalidStreamId(streamId)) {
             connectionError();
-        } else if (!peerAckReceived) {
-            // 상대 ACK 전의 애플리케이션 프레임은 연결 오류다(규격 3.3절).
-            connectionError();
-        } else if ((streamId & 1) == (nextStreamId & 1)) {
+        } else if (isOwnSpace(streamId)) {
             handleResponse(frame, (int) streamId);
         } else {
             handleRequest(frame, type, extensionsLength, (int) streamId);
@@ -320,12 +378,15 @@ public final class Endpoint {
 
     /**
      * 상대의 새 요청(규격 5.1절 5번). (가) 거절, (나) 모르는 type, (다) 확장 값 오류 순서로 보고, 모두 지나면 애플리케이션에 넘긴다.
-     * 거절한 요청과 오류로 답한 요청은 대기 스트림에 넣지 않는다(규격 4.5절).
+     * 거절한 요청과 오류로 답한 요청은 대기 스트림에 넣지 않지만 번호는 쓰인 것으로 센다(규격 4.5절, 5.1절).
      */
     private void handleRequest(byte[] frame, int type, int extensionsLength, int streamId) {
-        if (incomingStreams.contains((long) streamId)) {
+        if (streamId <= highestPeerStreamId) {
+            // 번호 역행: 재사용한 번호, 건너뛰고 나중에 온 번호, 대기 중인 스트림의 번호 모두 연결 오류다(규격 4.2.1절).
+            connectionError();
             return;
         }
+        highestPeerStreamId = streamId;
         if (closeSeen || incomingStreams.size() + 1 > config.maxConcurrentStreams()) {
             send(Frames.reset(streamId, Frames.ERROR_REFUSED));
         } else if (!config.knows(type)) {
@@ -333,7 +394,7 @@ public final class Endpoint {
         } else if (!validExtensionValues(frame, extensionsLength)) {
             send(Frames.response(type, streamId, Frames.STATUS_INVALID_ARGUMENT));
         } else {
-            incomingStreams.add((long) streamId);
+            incomingStreams.put(streamId, type);
             events.add(Event.requestReceived(streamId, type));
         }
     }
@@ -374,10 +435,16 @@ public final class Endpoint {
 
     /** 내 요청의 응답. 대기 중인 요청이면 결과를 애플리케이션에 넘긴다. 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). */
     private void handleResponse(byte[] frame, int streamId) {
-        if (!pendingStreams.remove(Integer.valueOf(streamId))) {
+        Integer requestType = pendingStreams.remove(streamId);
+        if (requestType == null) {
+            // 대기 중이 아닌 스트림의 프레임은 조용히 버린다(규격 4.3절).
             return;
         }
-        events.add(Event.result(streamId, Event.normalizeStatus(Frames.statusOf(frame))));
+        // 응답 type이 요청과 다르면 status와 payload를 버리고 로컬 INTERNAL을 넘긴다. 와이어로는 아무것도 보내지 않는다(규격 4.1절).
+        int status = Frames.typeOf(frame) == requestType
+                ? Event.normalizeStatus(Frames.statusOf(frame))
+                : Event.RESPONSE_TYPE_MISMATCH;
+        events.add(Event.result(streamId, status));
         terminateIfDrained();
     }
 
@@ -483,7 +550,7 @@ public final class Endpoint {
         inbound = new byte[0];
         ackWaits.clear();
         deferredSends.clear();
-        for (int streamId : pendingStreams) {
+        for (int streamId : pendingStreams.keySet()) {
             events.add(Event.result(streamId, Event.UNAVAILABLE));
         }
         pendingStreams.clear();
@@ -521,9 +588,14 @@ public final class Endpoint {
     }
 
     private void sendRequest(int type, byte[] payload) {
-        int streamId = nextStreamId;
+        if (nextStreamId > MAX_STREAM_ID) {
+            // 번호가 소진됐다. 프레임 없이 요청을 로컬에서 실패시키고 연결을 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 2.2.5절).
+            close(Frames.NO_ERROR);
+            return;
+        }
+        int streamId = (int) nextStreamId;
         nextStreamId += 2;
-        pendingStreams.add(streamId);
+        pendingStreams.put(streamId, type);
         send(Frames.request(type, streamId, payload));
     }
 

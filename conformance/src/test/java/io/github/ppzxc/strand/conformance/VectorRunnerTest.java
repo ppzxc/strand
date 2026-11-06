@@ -181,7 +181,7 @@ class VectorRunnerTest {
 
     @Test
     void unsupportedStepIsSkippedNotPassed() {
-        ConformanceVector v = vector(ESTABLISHED, step("cancel", "\"stream_id\":2,", "[]", "[]"));
+        ConformanceVector v = vector(ESTABLISHED, step("disconnect", "", "[]", "[]"));
 
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(TestAbortedException.class);
     }
