@@ -658,8 +658,9 @@ public final class Endpoint {
     }
 
     /**
-     * {@code NO_ERROR}로 끝나는 연결을 닫는다. WebSocket에서 {@code NO_ERROR} CLOSE를 보냈거나 받았다면 마지막 프레임 뒤에 WebSocket
-     * Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket 상태 코드는 규격이 정하지 않아 모델링하지 않는다.
+     * {@code NO_ERROR} CLOSE를 보냈거나 받아 끝나는 연결을 닫는다. 호출부는 이 경우에만 이 메서드를 부른다(오류 CLOSE는 곧바로 {@link
+     * #terminate()}로 닫는다). WebSocket이면 마지막 프레임 뒤에 WebSocket Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket
+     * 상태 코드는 규격이 정하지 않아 모델링하지 않는다.
      */
     private void finishNormally() {
         if (!closed && config.isWebSocket()) {
