@@ -25,6 +25,11 @@ public final class Endpoint {
     private static final int LENGTH_SIZE = 4;
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int PARAM_SIZE = 6;
+    private static final int TLV_HEADER_SIZE = 4;
+    /** extensions_length의 한도(규격 2.4절). */
+    private static final int MAX_EXTENSIONS_LENGTH = 8192;
+
+    private static final int STATUS_OFFSET = 7;
     private static final int MAX_FRAME_SIZE_ID = 0x0001;
     private static final long MIN_MAX_FRAME_SIZE = 16384L;
     private static final long MAX_MAX_FRAME_SIZE = 16_777_216L;
@@ -251,12 +256,7 @@ public final class Endpoint {
             return;
         }
         if (type >= Frames.FIRST_APPLICATION_TYPE) {
-            // 상대 ACK 전의 애플리케이션 프레임은 연결 오류다(규격 3.3절). 그 뒤의 처리는 이후 단계에서 다룬다.
-            if (!peerAckReceived) {
-                connectionError();
-            } else if (incomingStreams.add(streamId)) {
-                events.add(Event.requestReceived((int) streamId, type));
-            }
+            handleApplication(frame, type, extensions, streamId);
             return;
         }
         if (type != Frames.HELLO && type != Frames.PING && type != Frames.RESET) {
@@ -295,6 +295,53 @@ public final class Endpoint {
             return;
         }
         incomingStreams.remove(streamId);
+    }
+
+    /**
+     * 애플리케이션 프레임. 확장 영역 형식 위반은 요청인지 응답인지, type을 아는지와 상관없이 연결 오류다(규격 2.4.1절). 내 번호 공간의
+     * 프레임은 응답이고 상대 공간의 프레임은 새 요청이다(규격 4.2절).
+     */
+    private void handleApplication(byte[] frame, int type, int extensions, long streamId) {
+        if (extensions > MAX_EXTENSIONS_LENGTH || !validExtensions(frame, extensions)) {
+            connectionError();
+        } else if (!peerAckReceived) {
+            // 상대 ACK 전의 애플리케이션 프레임은 연결 오류다(규격 3.3절).
+            connectionError();
+        } else if ((streamId & 1) == (nextStreamId & 1)) {
+            handleResponse(frame, (int) streamId);
+        } else if (incomingStreams.add(streamId)) {
+            events.add(Event.requestReceived((int) streamId, type));
+        }
+    }
+
+    /** 확장 영역 형식 검사(규격 2.4.1절): 항목 길이의 합이 {@code extensions_length}와 같고 같은 tag가 없다. */
+    private static boolean validExtensions(byte[] frame, int extensions) {
+        Set<Integer> tags = new HashSet<>();
+        int at = Frames.HEADER_SIZE;
+        int end = at + extensions;
+        while (at < end) {
+            if (end - at < TLV_HEADER_SIZE) {
+                return false;
+            }
+            int tag = Frames.readUnsignedShort(frame, at);
+            at += TLV_HEADER_SIZE + Frames.readUnsignedShort(frame, at + 2);
+            if (at > end || !tags.add(tag)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 내 요청의 응답. 대기 중인 요청이면 결과를 애플리케이션에 넘긴다. 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). */
+    private void handleResponse(byte[] frame, int streamId) {
+        if (!pendingStreams.remove(Integer.valueOf(streamId))) {
+            return;
+        }
+        int status = frame[STATUS_OFFSET] & 0xFF;
+        events.add(Event.result(streamId, status > Event.UNAUTHENTICATED ? Event.UNKNOWN : status));
+        if (closeSeen && pendingStreams.isEmpty()) {
+            terminate();
+        }
     }
 
     private void handleHello(boolean ack, byte[] payload) {

@@ -30,8 +30,9 @@ final class VectorRunner {
     private static final String ACK_HELLO_HEX = "0000000c000101000000000000000000";
     private static final Map<String, Long> HELLO_DEFAULTS = new LinkedHashMap<>();
     private static final Map<Integer, String> HELLO_PARAMS = new LinkedHashMap<>();
+    // known_types는 모르는 type의 요청에 UNIMPLEMENTED로 답할 때만 의미가 있다. 그 동작은 request-checks 티켓에서 구현한다.
     private static final Set<String> SUPPORTED_SETUP =
-            new HashSet<>(Arrays.asList("role", "established", "local_hello", "peer_hello", "config"));
+            new HashSet<>(Arrays.asList("role", "established", "local_hello", "peer_hello", "config", "known_types"));
     private static final Set<String> SUPPORTED_STEPS =
             new HashSet<>(Arrays.asList("recv", "advance", "ping", "request", "close"));
     private static final Set<String> SUPPORTED_FRAMES =

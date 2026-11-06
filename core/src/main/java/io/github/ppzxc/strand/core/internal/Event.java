@@ -6,6 +6,12 @@ public final class Event {
     /** 규격 2.5.1절의 {@code UNAVAILABLE}. */
     public static final int UNAVAILABLE = 14;
 
+    /** 규격 2.5.1절의 {@code UNKNOWN}. 예약된 status는 이 값으로 취급한다. */
+    static final int UNKNOWN = 2;
+
+    /** 규격 2.5.1절에 정의된 마지막 status({@code UNAUTHENTICATED}). */
+    static final int UNAUTHENTICATED = 16;
+
     /** 이벤트 종류. */
     public enum Kind {
         /** 자기가 보낸 요청의 결과가 애플리케이션에 전달됨. */

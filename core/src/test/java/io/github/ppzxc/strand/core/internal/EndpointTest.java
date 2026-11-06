@@ -1060,4 +1060,118 @@ class EndpointTest {
             assertClosedWithProtocolError(server);
         }
     }
+
+    /** 확장 영역이 {@code extHex}이고 payload가 없는 type 0x0101 프레임 hex. */
+    private static String appFrame(int streamId, int status, String extHex) {
+        return String.format(
+                "%08x0101%02x%02x%08x%04x0000%s",
+                12 + extHex.length() / 2, 0, status, streamId, extHex.length() / 2, extHex);
+    }
+
+    private static String unknownTlv(int valueLength) {
+        StringBuilder value = new StringBuilder();
+        for (int i = 0; i < valueLength; i++) {
+            value.append("00");
+        }
+        return String.format("7777%04x%s", valueLength, value);
+    }
+
+    @Test
+    void clientDeliversTheResponseStatusAsAResult() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.drainOutput();
+
+        client.receive(bytes(appFrame(1, 14, "")));
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).streamId()).isEqualTo(1);
+        assertThat(events.get(0).status()).isEqualTo(14);
+    }
+
+    @Test
+    void reservedResponseStatusIsDeliveredAsUnknown() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+
+        client.receive(bytes(appFrame(1, 200, "")));
+
+        assertThat(client.drainEvents().get(0).status()).isEqualTo(2);
+    }
+
+    @Test
+    void responseExtensionsAreOnlyFormatCheckedAndTheirContentIsIgnored() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+
+        // timeout의 길이가 4가 아니어도 응답에서는 값을 해석하지 않는다.
+        client.receive(bytes(appFrame(1, 0, "0001000300000" + "1")));
+
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT);
+    }
+
+    @Test
+    void responseWithMalformedExtensionsClosesAndFailsThePendingRequest() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.drainOutput();
+
+        client.receive(bytes(appFrame(1, 0, "000900016100090001" + "62")));
+
+        assertThat(sent(client)).isEqualTo(CLOSE_PROTOCOL_ERROR);
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+    }
+
+    @Test
+    void lastResponseWhileClosingCompletesTheClose() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        assertThat(client.drainEvents()).isEmpty();
+
+        client.receive(bytes(appFrame(1, 0, "")));
+
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+    }
+
+    @Test
+    void responseToAStreamThatIsNotPendingIsIgnored() {
+        Endpoint client = establishedClient();
+
+        client.receive(bytes(appFrame(1, 0, "")));
+
+        assertOpenAndSilent(client);
+    }
+
+    @Test
+    void requestWithUnknownExtensionTagIsDeliveredEvenWhenItFillsTheLimit() {
+        for (int valueLength : new int[] {3, 8192 - 4}) {
+            Endpoint server = established();
+
+            server.receive(bytes(appFrame(1, 0, unknownTlv(valueLength))));
+
+            assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+        }
+    }
+
+    @Test
+    void malformedRequestExtensionsCloseWithProtocolError() {
+        String[] malformed = {
+            unknownTlv(8192 - 3), // 한도 8192 초과
+            "0004000000090008", // 항목이 자기 길이만큼 value를 갖지 못함
+            "000900000000", // 항목 뒤에 2바이트가 남음
+            "7777000161" + "7777000162", // 모르는 tag 중복
+            "00010004000000010001000400000001", // 정의된 tag 중복
+            "00" // 항목 헤더보다 짧음
+        };
+        for (String extensions : malformed) {
+            Endpoint server = established();
+
+            server.receive(bytes(appFrame(1, 0, extensions)));
+
+            assertClosedWithProtocolError(server);
+        }
+    }
 }
