@@ -268,4 +268,36 @@ class VectorRunnerTest {
 
         assertThat(runner.describeMessages(messages, true)).containsExactly("PREFACE");
     }
+
+    private static final String PING_FRAME = "00000014000200000000000000000000" + "0102030405060708";
+
+    @Test
+    void aWebSocketMessageCarryingTwoFramesFails() throws ReflectiveOperationException {
+        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        List<OutboundMessage> messages = Arrays.asList(binaryMessage(Bytes.fromHex(PING_FRAME + PING_FRAME)));
+
+        assertThatThrownBy(() -> runner.describeMessages(messages, false)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void aFrameSplitAcrossTwoWebSocketMessagesFails() throws ReflectiveOperationException {
+        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        List<OutboundMessage> messages = Arrays.asList(
+                binaryMessage(Bytes.fromHex(PING_FRAME.substring(0, 20))),
+                binaryMessage(Bytes.fromHex(PING_FRAME.substring(20))));
+
+        assertThatThrownBy(() -> runner.describeMessages(messages, false)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void aByteStreamMayCarryTwoFramesInOneMessageOrSplitAcrossMessages() throws ReflectiveOperationException {
+        VectorRunner runner = new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()));
+        List<OutboundMessage> twoInOne = Arrays.asList(binaryMessage(Bytes.fromHex(PING_FRAME + PING_FRAME)));
+        List<OutboundMessage> split = Arrays.asList(
+                binaryMessage(Bytes.fromHex(PING_FRAME.substring(0, 20))),
+                binaryMessage(Bytes.fromHex(PING_FRAME.substring(20) + PING_FRAME)));
+
+        assertThat(runner.describeMessages(twoInOne, false)).hasSize(2);
+        assertThat(runner.describeMessages(split, false)).hasSize(2);
+    }
 }
