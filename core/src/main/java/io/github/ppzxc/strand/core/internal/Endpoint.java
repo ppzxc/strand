@@ -54,7 +54,7 @@ public final class Endpoint {
     /** 상대가 열었고 아직 응답하지 않은 스트림 번호와 요청 type. 응답에 같은 type을 쓴다(규격 4.1절). */
     private final Map<Integer, Integer> incomingStreams = new LinkedHashMap<>();
     /** 상대 HELLO에 ACK를 보내기 전이라 미뤄 둔 송신(규격 3.3절). */
-    private final List<Runnable> deferredSends = new ArrayList<>();
+    private final List<DeferredSend> deferredSends = new ArrayList<>();
 
     private byte[] inbound = new byte[0];
     private boolean prefaceChecked;
@@ -191,18 +191,20 @@ public final class Endpoint {
     }
 
     /**
-     * 애플리케이션이 요청을 보내게 한다. 상대 HELLO에 ACK를 보내기 전이면 그 뒤로 미룬다(규격 3.3절). CLOSE를 보냈거나 받은 뒤라면
-     * 프레임을 보내지 않고 로컬에서 실패시키며, 스트림이 없으므로 이벤트도 없다(규격 3.5절). 상대가 알린 {@code max_concurrent_streams}에
-     * 닿았을 때도 같다(규격 3.2.1절).
+     * 애플리케이션이 요청을 보내게 한다. 상대 HELLO에 ACK를 보내기 전이면 그 뒤로 미룬다(규격 3.3절). CLOSE를 보냈거나 받은 뒤,
+     * 번호 소진(규격 2.2.5절), 상대가 알린 {@code max_concurrent_streams} 도달(규격 3.2.1절)이면 프레임을 보내지 않고 로컬에서
+     * 실패시킨다. 이때 스트림 번호 없는 {@link Event.Kind#RESULT} 이벤트(status {@code UNAVAILABLE})가 한 번 나온다. 한도에 닿은
+     * 요청은 대기시키지 않고 즉시 실패시키며 스트림 번호를 쓰지 않는다.
      *
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param payload 본문
      */
     public void request(int type, byte[] payload) {
-        if (closed || closeSeen) {
+        if (closed) {
+            failLocally();
             return;
         }
-        sendAfterAck(() -> sendRequest(type, payload));
+        sendAfterAck(new DeferredSend(true, () -> sendRequest(type, payload)));
     }
 
     /**
@@ -242,7 +244,7 @@ public final class Endpoint {
      */
     public void ping(byte[] payload) {
         if (!closed) {
-            sendAfterAck(() -> sendPing(payload));
+            sendAfterAck(new DeferredSend(false, () -> sendPing(payload)));
         }
     }
 
@@ -565,13 +567,10 @@ public final class Endpoint {
         helloAcknowledged = true;
         peerMaxConcurrentStreams = peerMaxConcurrentStreamsFrom(payload);
         send(Frames.control(Frames.HELLO, Frames.ACK, new byte[0]));
-        for (Runnable deferred : deferredSends) {
-            if (closed || closeSeen) {
-                break;
-            }
-            deferred.run();
+        // 보내다가 닫히면 terminate가 남은 요청을 closed 이전에 실패시키고 목록을 비운다.
+        while (!deferredSends.isEmpty()) {
+            deferredSends.remove(0).sending.run();
         }
-        deferredSends.clear();
     }
 
     private static long peerMaxConcurrentStreamsFrom(byte[] payload) {
@@ -657,10 +656,15 @@ public final class Endpoint {
         closed = true;
         inbound = new byte[0];
         ackWaits.clear();
-        deferredSends.clear();
         for (int streamId : pendingStreams.keySet()) {
             events.add(Event.result(streamId, Event.UNAVAILABLE));
         }
+        for (DeferredSend deferred : deferredSends) {
+            if (deferred.request) {
+                failLocally();
+            }
+        }
+        deferredSends.clear();
         pendingStreams.clear();
         incomingStreams.clear();
         events.add(Event.closed());
@@ -687,21 +691,23 @@ public final class Endpoint {
     }
 
     /** 상대 HELLO에 ACK를 보낸 뒤면 바로, 아니면 ACK를 보낼 때까지 미뤄서 보낸다. */
-    private void sendAfterAck(Runnable sending) {
+    private void sendAfterAck(DeferredSend sending) {
         if (helloAcknowledged) {
-            sending.run();
+            sending.sending.run();
         } else {
             deferredSends.add(sending);
         }
     }
 
     private void sendRequest(int type, byte[] payload) {
-        if (pendingStreams.size() >= peerMaxConcurrentStreams) {
-            // 상대가 알린 한도에 닿았다. 새 요청은 보내지 않고 로컬에서 실패시킨다(규격 3.2.1절). 번호도 쓰지 않는다.
+        if (closeSeen || pendingStreams.size() >= peerMaxConcurrentStreams) {
+            // CLOSE를 보냈거나 받았다(규격 3.5절). 또는 상대가 알린 한도에 닿았다(규격 3.2.1절). 대기시키지 않고 번호도 쓰지 않는다.
+            failLocally();
             return;
         }
         if (nextStreamId > MAX_STREAM_ID) {
             // 번호가 소진됐다. 프레임 없이 요청을 로컬에서 실패시키고 연결을 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 2.2.5절).
+            failLocally();
             close(Frames.NO_ERROR);
             return;
         }
@@ -711,8 +717,24 @@ public final class Endpoint {
         send(Frames.request(type, streamId, payload));
     }
 
+    /** 스트림을 열기 전에 요청이 로컬에서 실패했다. 스트림 번호 없는 UNAVAILABLE 결과를 넘긴다. */
+    private void failLocally() {
+        events.add(Event.localUnavailable());
+    }
+
     private void send(byte[] frame) {
         output.write(frame, 0, frame.length);
+    }
+
+    /** 상대 HELLO에 ACK를 보낼 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
+    private static final class DeferredSend {
+        final boolean request;
+        final Runnable sending;
+
+        DeferredSend(boolean request, Runnable sending) {
+            this.request = request;
+            this.sending = sending;
+        }
     }
 
     /** 확인 대기 하나. {@code payload}는 PING이면 보낸 8바이트, HELLO이면 null이다. */
