@@ -33,7 +33,8 @@ class SpecCoverageTest {
             .normalize();
 
     private static final Pattern HEADING = Pattern.compile("^#{2,4} (\\d+(?:\\.\\d+)*)\\.?\\s");
-    private static final Pattern NORMATIVE = Pattern.compile("\\b(MUST|SHOULD)\\b");
+    /** {@code \b}는 JDK 19부터 한글을 단어 문자로 보지 않아 JDK마다 결과가 달랐다. 영문자 기준 lookaround로 고정한다. */
+    private static final Pattern NORMATIVE = Pattern.compile("(?<![A-Za-z])(MUST|SHOULD)(?![A-Za-z])");
     /** 용어 규칙을 설명하는 줄이라 규범 문장이 아니다. */
     private static final String KEYWORD_DEFINITION = "- MUST, MUST NOT";
 
