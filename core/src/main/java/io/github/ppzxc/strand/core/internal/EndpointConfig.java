@@ -11,25 +11,47 @@ public final class EndpointConfig {
     private static final long DEFAULT_MAX_CONCURRENT_STREAMS = 100L;
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
 
-    // 값을 바꾼 복사본은 복사한 뒤 한 필드만 고쳐 돌려준다. 만든 뒤에는 바깥에서 바꿀 수 없다.
-    private long maxFrameSize = DEFAULT_MAX_FRAME_SIZE;
-    private long maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
-    private long capabilities;
-    private long ackTimeoutMs = DEFAULT_ACK_TIMEOUT_MS;
+    private final long maxFrameSize;
+    private final long maxConcurrentStreams;
+    private final long capabilities;
+    private final long ackTimeoutMs;
     /** 구현이 아는 애플리케이션 {@code type}. null이면 모든 type을 안다(규격 4.1절). */
-    private @Nullable Set<Integer> knownTypes;
+    private final @Nullable Set<Integer> knownTypes;
     /** 다음에 쓸 스트림 번호. null이면 역할의 첫 번호다(규격 2.2.5절). */
-    private @Nullable Long nextStreamId;
+    private final @Nullable Long nextStreamId;
 
-    private EndpointConfig() {}
+    private EndpointConfig(Values values) {
+        this.maxFrameSize = values.maxFrameSize;
+        this.maxConcurrentStreams = values.maxConcurrentStreams;
+        this.capabilities = values.capabilities;
+        this.ackTimeoutMs = values.ackTimeoutMs;
+        this.knownTypes = values.knownTypes;
+        this.nextStreamId = values.nextStreamId;
+    }
 
-    private EndpointConfig(EndpointConfig other) {
-        this.maxFrameSize = other.maxFrameSize;
-        this.maxConcurrentStreams = other.maxConcurrentStreams;
-        this.capabilities = other.capabilities;
-        this.ackTimeoutMs = other.ackTimeoutMs;
-        this.knownTypes = other.knownTypes;
-        this.nextStreamId = other.nextStreamId;
+    /** 설정 값의 모음. 복사본을 만들 때 한 필드만 고치는 데 쓴다. 필드를 더해도 생성자 인자 나열은 늘지 않는다. */
+    private static final class Values {
+        long maxFrameSize = DEFAULT_MAX_FRAME_SIZE;
+        long maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
+        long capabilities;
+        long ackTimeoutMs = DEFAULT_ACK_TIMEOUT_MS;
+
+        @Nullable
+        Set<Integer> knownTypes;
+
+        @Nullable
+        Long nextStreamId;
+    }
+
+    private Values values() {
+        Values values = new Values();
+        values.maxFrameSize = maxFrameSize;
+        values.maxConcurrentStreams = maxConcurrentStreams;
+        values.capabilities = capabilities;
+        values.ackTimeoutMs = ackTimeoutMs;
+        values.knownTypes = knownTypes;
+        values.nextStreamId = nextStreamId;
+        return values;
     }
 
     /**
@@ -38,7 +60,7 @@ public final class EndpointConfig {
      * @return 기본 설정
      */
     public static EndpointConfig defaults() {
-        return new EndpointConfig();
+        return new EndpointConfig(new Values());
     }
 
     /**
@@ -48,9 +70,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig maxFrameSize(long value) {
-        EndpointConfig copy = new EndpointConfig(this);
-        copy.maxFrameSize = value;
-        return copy;
+        Values values = values();
+        values.maxFrameSize = value;
+        return new EndpointConfig(values);
     }
 
     /**
@@ -60,9 +82,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig maxConcurrentStreams(long value) {
-        EndpointConfig copy = new EndpointConfig(this);
-        copy.maxConcurrentStreams = value;
-        return copy;
+        Values values = values();
+        values.maxConcurrentStreams = value;
+        return new EndpointConfig(values);
     }
 
     /**
@@ -72,9 +94,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig capabilities(long value) {
-        EndpointConfig copy = new EndpointConfig(this);
-        copy.capabilities = value;
-        return copy;
+        Values values = values();
+        values.capabilities = value;
+        return new EndpointConfig(values);
     }
 
     /**
@@ -84,9 +106,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig ackTimeoutMs(long value) {
-        EndpointConfig copy = new EndpointConfig(this);
-        copy.ackTimeoutMs = value;
-        return copy;
+        Values values = values();
+        values.ackTimeoutMs = value;
+        return new EndpointConfig(values);
     }
 
     /**
@@ -97,9 +119,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig knownTypes(Set<Integer> types) {
-        EndpointConfig copy = new EndpointConfig(this);
-        copy.knownTypes = new HashSet<>(types);
-        return copy;
+        Values values = values();
+        values.knownTypes = new HashSet<>(types);
+        return new EndpointConfig(values);
     }
 
     /**
@@ -110,9 +132,9 @@ public final class EndpointConfig {
      * @return 새 설정
      */
     public EndpointConfig nextStreamId(long value) {
-        EndpointConfig copy = new EndpointConfig(this);
-        copy.nextStreamId = value;
-        return copy;
+        Values values = values();
+        values.nextStreamId = value;
+        return new EndpointConfig(values);
     }
 
     boolean knows(int type) {
