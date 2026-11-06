@@ -59,10 +59,12 @@ public final class Endpoint {
     private long peerMaxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
     /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
-    /** CLOSE를 보냈거나 받았다(규격 3.5절). */
-    private boolean closeSeen;
+    /** CLOSE 교환: CLOSE를 보냈거나 받았다(규격 1.3절, 3.5절). */
+    private boolean closeExchanged;
 
-    private boolean closed;
+    /** 전송 계층이 닫혀 연결이 끝났다(규격 1.3절 연결이 끝남). */
+    private boolean transportClosed;
+
     private long now;
     /** ACK를 기다리는 HELLO와 PING들. 보낸 순서대로다(규격 3.3절). */
     private final List<AckWait> ackWaits = new ArrayList<>();
@@ -112,14 +114,14 @@ public final class Endpoint {
         if (config.isWebSocket()) {
             throw new IllegalStateException("WebSocket 엔드포인트는 receiveMessage로 입력한다");
         }
-        if (closed) {
+        if (transportClosed) {
             return;
         }
         inbound = Frames.concat(inbound, bytes);
         if (!prefaceChecked && !checkPreface()) {
             return;
         }
-        while (!closed && readFrame()) {
+        while (!transportClosed && readFrame()) {
             // 한 프레임씩 처리한다.
         }
     }
@@ -135,7 +137,7 @@ public final class Endpoint {
         if (!config.isWebSocket()) {
             throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
         }
-        if (closed) {
+        if (transportClosed) {
             return;
         }
         if (!prefaceChecked) {
@@ -145,12 +147,12 @@ public final class Endpoint {
                 prefaceChecked = true;
                 sendHello();
             } else {
-                terminate();
+                closeTransport();
             }
             return;
         }
         if (!firstFrameChecked && !checkFirstMessage(kind, message)) {
-            terminate();
+            closeTransport();
             return;
         }
         if (kind != MessageKind.BINARY || message.length < TYPE_END) {
@@ -173,7 +175,7 @@ public final class Endpoint {
      * @param ms 밀리초
      */
     public void advance(long ms) {
-        if (closed) {
+        if (transportClosed) {
             return;
         }
         now += ms;
@@ -200,7 +202,7 @@ public final class Endpoint {
      *     실패시킨다.
      */
     public void request(int type, byte[] payload) {
-        if (closed) {
+        if (transportClosed) {
             failLocally();
             return;
         }
@@ -227,7 +229,7 @@ public final class Endpoint {
      *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
     public void respond(int streamId, int status, byte[] payload) {
-        Integer type = closed ? null : incomingStreams.get(streamId);
+        Integer type = transportClosed ? null : incomingStreams.get(streamId);
         if (type == null) {
             return;
         }
@@ -237,7 +239,7 @@ public final class Endpoint {
         }
         incomingStreams.remove(streamId);
         send(frame);
-        terminateIfDrained();
+        closeTransportIfNoPendingStreams();
     }
 
     /**
@@ -247,12 +249,12 @@ public final class Endpoint {
      * @param streamId 내가 연 스트림 번호
      */
     public void cancel(int streamId) {
-        if (closed || pendingStreams.remove(streamId) == null) {
+        if (transportClosed || pendingStreams.remove(streamId) == null) {
             return;
         }
         send(Frames.reset(streamId, ErrorCode.CANCEL));
         events.add(Event.result(streamId, Status.CANCELLED));
-        terminateIfDrained();
+        closeTransportIfNoPendingStreams();
     }
 
     /**
@@ -261,7 +263,7 @@ public final class Endpoint {
      * @param payload 정확히 8바이트
      */
     public void ping(byte[] payload) {
-        if (!closed) {
+        if (!transportClosed) {
             sendAfterAck(DeferredSend.ping(() -> sendPing(payload)));
         }
     }
@@ -272,17 +274,17 @@ public final class Endpoint {
      * @param errorCode 규격 2.5.2절의 error_code 값
      */
     public void close(int errorCode) {
-        if (closed || closeSeen) {
+        if (transportClosed || closeExchanged) {
             return;
         }
         send(Frames.close(errorCode));
-        closeSeen = true;
-        terminateUnlessClosing(errorCode);
+        closeExchanged = true;
+        closeTransportUnlessClosing(errorCode);
     }
 
     /** 전송 계층이 CLOSE 없이 끊겼다. 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다. 이미 닫혔다면 아무것도 하지 않는다(규격 3.5절). */
     public void disconnect() {
-        terminate();
+        closeTransport();
     }
 
     /**
@@ -312,7 +314,7 @@ public final class Endpoint {
     private boolean checkPreface() {
         byte[] preface = Frames.preface();
         if (!matchesPrefaceMagic(inbound)) {
-            terminate();
+            closeTransport();
             return false;
         }
         if (inbound.length < preface.length) {
@@ -369,14 +371,14 @@ public final class Endpoint {
         if (!firstFrameChecked) {
             // 첫 프레임 검사(규격 3.2.4절): 헤더를 읽을 수 없거나 HELLO가 아니면 아무것도 보내지 않고 닫는다.
             if (length < MIN_FRAME_LENGTH) {
-                terminate();
+                closeTransport();
                 return false;
             }
             if (inbound.length < Frames.HEADER_SIZE) {
                 return false;
             }
             if (!isFirstFrameHeader(inbound)) {
-                terminate();
+                closeTransport();
                 return false;
             }
             firstFrameChecked = true;
@@ -459,7 +461,7 @@ public final class Endpoint {
         } else {
             incomingStreams.remove(id);
         }
-        terminateIfDrained();
+        closeTransportIfNoPendingStreams();
     }
 
     /** {@code stream_id}가 0이거나 최상위 비트가 1이다(규격 2.2.5절). */
@@ -500,7 +502,7 @@ public final class Endpoint {
             return;
         }
         highestPeerStreamId = streamId;
-        if (closeSeen || incomingStreams.size() + 1 > config.maxConcurrentStreams()) {
+        if (closeExchanged || incomingStreams.size() + 1 > config.maxConcurrentStreams()) {
             send(Frames.reset(streamId, ErrorCode.REFUSED));
         } else if (!config.knows(type)) {
             send(Frames.response(type, streamId, Status.UNIMPLEMENTED));
@@ -558,13 +560,13 @@ public final class Endpoint {
                 ? Status.normalize(Frames.statusOf(frame))
                 : Status.RESPONSE_TYPE_MISMATCH;
         events.add(Event.result(streamId, status));
-        terminateIfDrained();
+        closeTransportIfNoPendingStreams();
     }
 
     /** CLOSE를 보냈거나 받아 종료 중인데 대기 중인 스트림이 모두 끝났으면 닫는다(규격 3.5절). */
-    private void terminateIfDrained() {
-        if (closeSeen && pendingStreams.isEmpty() && incomingStreams.isEmpty()) {
-            finishNormally();
+    private void closeTransportIfNoPendingStreams() {
+        if (closeExchanged && pendingStreams.isEmpty() && incomingStreams.isEmpty()) {
+            closeTransportAfterNoError();
         }
     }
 
@@ -588,10 +590,10 @@ public final class Endpoint {
         peerMaxConcurrentStreams = peer.maxConcurrentStreams;
         peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
-        // 보내다가 닫히면 terminate가 남은 요청을 closed 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
+        // 보내다가 닫히면 closeTransport가 남은 요청을 closed 이벤트 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
         while (!deferredSends.isEmpty()) {
             DeferredSend deferred = deferredSends.remove(0);
-            if (deferred.request || !closeSeen) {
+            if (deferred.request || !closeExchanged) {
                 deferred.sending.run();
             }
         }
@@ -646,55 +648,58 @@ public final class Endpoint {
             closeReceivedMalformed();
             return;
         }
-        closeSeen = true;
-        terminateUnlessClosing(Frames.readUnsignedInt(frame, Frames.HEADER_SIZE));
+        closeExchanged = true;
+        closeTransportUnlessClosing(Frames.readUnsignedInt(frame, Frames.HEADER_SIZE));
     }
 
     /** 형태가 잘못된 CLOSE를 받았다. 받은 CLOSE로 치고 CLOSE를 보내지 않은 채 닫는다(규격 3.5절). */
     private void closeReceivedMalformed() {
-        closeSeen = true;
-        terminate();
+        closeExchanged = true;
+        closeTransport();
     }
 
     /** 오류 CLOSE이거나 대기 중인 스트림이 없으면 닫고, 아니면 대기 중인 스트림이 끝날 때까지 종료 중으로 둔다(규격 3.5절). */
-    private void terminateUnlessClosing(long errorCode) {
+    private void closeTransportUnlessClosing(long errorCode) {
         if (errorCode != ErrorCode.NO_ERROR) {
-            terminate();
+            closeTransport();
         } else if (pendingStreams.isEmpty() && incomingStreams.isEmpty()) {
-            finishNormally();
+            closeTransportAfterNoError();
         }
     }
 
     /**
      * {@code NO_ERROR} CLOSE를 보냈거나 받아 끝나는 연결을 닫는다. 호출부는 이 경우에만 이 메서드를 부른다(오류 CLOSE는 곧바로 {@link
-     * #terminate()}로 닫는다). WebSocket이면 마지막 프레임 뒤에 WebSocket Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket
+     * #closeTransport()}로 닫는다). WebSocket이면 마지막 프레임 뒤에 WebSocket Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket
      * 상태 코드는 규격이 정하지 않아 모델링하지 않는다.
      */
-    private void finishNormally() {
-        if (!closed && config.isWebSocket()) {
+    private void closeTransportAfterNoError() {
+        if (!transportClosed && config.isWebSocket()) {
             output.add(OutboundMessage.normalWebSocketClose());
         }
-        terminate();
+        closeTransport();
     }
 
-    /** 연결 오류: CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절, 5.1절). */
+    /**
+     * 연결 오류: CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절, 5.1절). CLOSE를 보내지
+     * 않은 경우에도 {@code closeExchanged}를 세운다. 이 뒤로는 규격 3.5절에 따라 CLOSE를 보내지 않고 새 스트림도 열지 않기 때문이다.
+     */
     private void connectionError() {
-        if (!closeSeen) {
+        if (!closeExchanged) {
             send(Frames.close(ErrorCode.PROTOCOL_ERROR));
         }
-        closeSeen = true;
-        terminate();
+        closeExchanged = true;
+        closeTransport();
     }
 
     /**
      * 연결이 끝난다. 결과를 받지 못한 요청마다 로컬 UNAVAILABLE을 한 번씩 넘긴 뒤 closed를 낸다(규격 3.5절). 이후 받은 바이트와
      * 시간은 처리하지 않는다.
      */
-    private void terminate() {
-        if (closed) {
+    private void closeTransport() {
+        if (transportClosed) {
             return;
         }
-        closed = true;
+        transportClosed = true;
         inbound = new byte[0];
         ackWaits.clear();
         for (int streamId : pendingStreams.keySet()) {
@@ -767,7 +772,7 @@ public final class Endpoint {
 
     /** 프레임을 열지 못하는 요청이면 로컬에서 실패시키고 {@code true}를 돌려준다. 실패한 요청은 대기시키지 않고 번호도 쓰지 않는다. */
     private boolean failRequestIfRefused() {
-        if (closeSeen) {
+        if (closeExchanged) {
             // CLOSE를 보냈거나 받았다(규격 3.5절).
             failLocally();
             return true;
