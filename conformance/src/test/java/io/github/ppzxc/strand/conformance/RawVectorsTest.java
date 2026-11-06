@@ -33,12 +33,12 @@ class RawVectorsTest {
     }
 
     @Test
-    void filesAreReadOncePerVectorDirectory() {
+    void filesAreServedFromTheCachePerVectorDirectory() {
         assertThat(RawVectors.files()).isSameAs(RawVectors.files());
     }
 
     @Test
-    void vectorsOfAFileAreReadOnce() {
+    void vectorsOfAFileAreServedFromTheCache() {
         assertThat(RawVectors.files()).isNotEmpty();
         Path file = RawVectors.files().get(0);
 
@@ -56,7 +56,11 @@ class RawVectorsTest {
             assertThat(RawVectors.files()).isNotEqualTo(before).hasSize(1);
             assertThat(RawVectors.byKey()).containsOnlyKeys("only/x");
         } finally {
-            System.setProperty(VectorSuite.VECTORS_DIR_PROPERTY, original);
+            if (original == null) {
+                System.clearProperty(VectorSuite.VECTORS_DIR_PROPERTY);
+            } else {
+                System.setProperty(VectorSuite.VECTORS_DIR_PROPERTY, original);
+            }
         }
         assertThat(RawVectors.files()).isEqualTo(before);
     }

@@ -23,29 +23,26 @@ import java.util.Map;
  */
 final class RawVectors {
 
-    private static Path cachedDirectory;
-    private static List<Path> files;
-    private static Map<Path, List<JsonObject>> vectorsByFile;
-    private static Map<String, JsonObject> byKey;
+    private static Snapshot snapshot;
 
     private RawVectors() {}
 
     /** `파일명/id`에서 벡터 객체로. 파일 순서와 파일 안 순서를 지킨다. */
     static synchronized Map<String, JsonObject> byKey() {
-        refreshIfDirectoryChanged();
-        if (byKey == null) {
+        Snapshot current = current();
+        if (current.byKey == null) {
             Map<String, JsonObject> result = new LinkedHashMap<>();
-            for (Path file : files()) {
-                for (JsonObject vector : vectors(file)) {
+            for (Path file : current.files) {
+                for (JsonObject vector : current.vectors(file)) {
                     put(
                             result,
                             VectorSuite.fileKey(file) + "/" + vector.get("id").getAsString(),
                             vector);
                 }
             }
-            byKey = Collections.unmodifiableMap(result);
+            current.byKey = Collections.unmodifiableMap(result);
         }
-        return byKey;
+        return current.byKey;
     }
 
     /** 같은 키가 두 번 들어오면 앞의 벡터가 가려지므로 거부한다. */
@@ -56,25 +53,36 @@ final class RawVectors {
     }
 
     static synchronized List<Path> files() {
-        refreshIfDirectoryChanged();
-        if (files == null) {
-            files = Collections.unmodifiableList(VectorSuite.jsonFiles(cachedDirectory));
-        }
-        return files;
+        return current().files;
     }
 
     static synchronized List<JsonObject> vectors(Path file) {
-        refreshIfDirectoryChanged();
-        return vectorsByFile.computeIfAbsent(file, RawVectors::read);
+        return current().vectors(file);
     }
 
-    private static void refreshIfDirectoryChanged() {
+    /** 지금 벡터 디렉터리의 읽기 결과. 디렉터리가 바뀌었으면 통째로 새로 만든다. */
+    private static Snapshot current() {
         Path directory = VectorSuite.defaultDirectory();
-        if (!directory.equals(cachedDirectory)) {
-            cachedDirectory = directory;
-            files = null;
-            vectorsByFile = new HashMap<>();
-            byKey = null;
+        if (snapshot == null || !snapshot.directory.equals(directory)) {
+            snapshot = new Snapshot(directory);
+        }
+        return snapshot;
+    }
+
+    /** 한 벡터 디렉터리의 파일 목록과, 필요할 때 채우는 파일별 벡터와 `byKey()` 결과. */
+    private static final class Snapshot {
+        final Path directory;
+        final List<Path> files;
+        final Map<Path, List<JsonObject>> vectorsByFile = new HashMap<>();
+        Map<String, JsonObject> byKey;
+
+        Snapshot(Path directory) {
+            this.directory = directory;
+            this.files = Collections.unmodifiableList(VectorSuite.jsonFiles(directory));
+        }
+
+        List<JsonObject> vectors(Path file) {
+            return vectorsByFile.computeIfAbsent(file, RawVectors::read);
         }
     }
 
