@@ -1045,8 +1045,19 @@ class EndpointTest {
 
         server.receive(bytes("000000100004ff00000000010000000000000004"));
         assertThat(server.drainEvents()).isEmpty();
-        server.receive(bytes("0000000c010100000000000100000000"));
+        server.receive(bytes("0000000c010100000000000300000000"));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+    }
+
+    @Test
+    void resetWithStreamIdZeroOrTopBitSetClosesWithProtocolError() {
+        for (String streamId : new String[] {"00000000", "80000001"}) {
+            Endpoint server = established();
+
+            server.receive(bytes("00000010000400" + "00" + streamId + "0000" + "0000" + "00000004"));
+
+            assertClosedWithProtocolError(server);
+        }
     }
 }

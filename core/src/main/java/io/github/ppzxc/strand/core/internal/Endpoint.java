@@ -281,9 +281,20 @@ public final class Endpoint {
         } else if (type == Frames.PING) {
             handlePing(ack, payload);
         } else {
-            // RESET: 스트림 자리를 돌려준다. flags는 모두 미정의라 보지 않는다(규격 2.4.3절).
-            incomingStreams.remove(streamId);
+            handleReset(streamId);
         }
+    }
+
+    /**
+     * 받은 RESET. {@code stream_id}가 0이거나 최상위 비트가 1이면 연결 오류이고(규격 2.2.5절), 아니면 스트림 자리를 돌려준다. flags는
+     * 모두 미정의라 보지 않는다(규격 2.3절). 번호 재사용과 대기 중이 아닌 스트림 판정은 스트림 티켓에서 다룬다.
+     */
+    private void handleReset(long streamId) {
+        if (streamId == 0 || streamId > Integer.MAX_VALUE) {
+            connectionError();
+            return;
+        }
+        incomingStreams.remove(streamId);
     }
 
     private void handleHello(boolean ack, byte[] payload) {
