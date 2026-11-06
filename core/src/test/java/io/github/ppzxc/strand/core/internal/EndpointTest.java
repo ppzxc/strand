@@ -1553,4 +1553,57 @@ class EndpointTest {
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
+
+    private static Endpoint establishedClientWithPeerLimit(long maxConcurrentStreams) {
+        Endpoint client = client();
+        client.receive(bytes(helloWith("0002" + String.format("%08x", maxConcurrentStreams))));
+        client.receive(bytes(HELLO_ACK));
+        client.drainOutput();
+        return client;
+    }
+
+    @Test
+    void requestAtThePeerConcurrentStreamLimitIsNotSent() {
+        Endpoint client = establishedClientWithPeerLimit(1);
+        client.request(257, new byte[0]);
+        client.drainOutput();
+
+        client.request(257, new byte[0]);
+
+        assertOpenAndSilent(client);
+    }
+
+    @Test
+    void requestBelowThePeerConcurrentStreamLimitIsSent() {
+        Endpoint client = establishedClientWithPeerLimit(2);
+        client.request(257, new byte[0]);
+        client.drainOutput();
+
+        client.request(257, new byte[0]);
+
+        assertThat(sent(client)).isEqualTo(requestFrame(257, 3, ""));
+    }
+
+    @Test
+    void finishedStreamFreesRoomUnderThePeerLimitAndTheFailedRequestKeepsNoNumber() {
+        Endpoint client = establishedClientWithPeerLimit(1);
+        client.request(257, new byte[0]);
+        client.request(257, new byte[0]);
+        client.drainOutput();
+        client.receive(bytes(appFrame(1, 0, "")));
+        client.drainEvents();
+
+        client.request(257, new byte[0]);
+
+        assertThat(sent(client)).isEqualTo(requestFrame(257, 3, ""));
+    }
+
+    @Test
+    void peerLimitOfZeroSendsNoRequest() {
+        Endpoint client = establishedClientWithPeerLimit(0);
+
+        client.request(257, new byte[0]);
+
+        assertOpenAndSilent(client);
+    }
 }

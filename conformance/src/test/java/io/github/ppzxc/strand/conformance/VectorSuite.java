@@ -75,7 +75,8 @@ final class VectorSuite {
             "control-frames",
             "extensions",
             "request-checks",
-            "streams"));
+            "streams",
+            "backpressure"));
 
     // 로드와 구조 검증은 이미 끝났다(dynamicTests가 로더를 부르는 시점에 실패로 드러난다).
     // 구현이 아직 없는 파일의 벡터는 통과로 위장하지 않고 skipped로 보인다.

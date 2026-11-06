@@ -38,6 +38,8 @@ public final class Endpoint {
     private static final int MAX_EXTENSIONS_LENGTH = 8192;
 
     private static final int MAX_FRAME_SIZE_ID = 0x0001;
+    private static final int MAX_CONCURRENT_STREAMS_ID = 0x0002;
+    private static final long DEFAULT_MAX_CONCURRENT_STREAMS = 100;
     private static final long MIN_MAX_FRAME_SIZE = 16384L;
     private static final long MAX_MAX_FRAME_SIZE = 16_777_216L;
 
@@ -58,6 +60,9 @@ public final class Endpoint {
     private boolean helloAcknowledged;
     /** 내가 보낸 HELLO에 대한 상대의 ACK를 받았다. */
     private boolean peerAckReceived;
+
+    /** 상대가 HELLO로 알린 {@code max_concurrent_streams}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
+    private long peerMaxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
     /** CLOSE를 보냈거나 받았다(규격 3.5절). */
     private boolean closeSeen;
 
@@ -141,7 +146,8 @@ public final class Endpoint {
 
     /**
      * 애플리케이션이 요청을 보내게 한다. 상대 HELLO에 ACK를 보내기 전이면 그 뒤로 미룬다(규격 3.3절). CLOSE를 보냈거나 받은 뒤라면
-     * 프레임을 보내지 않고 로컬에서 실패시키며, 스트림이 없으므로 이벤트도 없다(규격 3.5절).
+     * 프레임을 보내지 않고 로컬에서 실패시키며, 스트림이 없으므로 이벤트도 없다(규격 3.5절). 상대가 알린 {@code max_concurrent_streams}에
+     * 닿았을 때도 같다(규격 3.2.1절).
      *
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param payload 본문
@@ -471,6 +477,7 @@ public final class Endpoint {
             return;
         }
         helloAcknowledged = true;
+        peerMaxConcurrentStreams = concurrentStreamsOf(payload);
         send(Frames.control(Frames.HELLO, Frames.ACK, new byte[0]));
         for (Runnable deferred : deferredSends) {
             if (closed || closeSeen) {
@@ -479,6 +486,15 @@ public final class Endpoint {
             deferred.run();
         }
         deferredSends.clear();
+    }
+
+    private static long concurrentStreamsOf(byte[] payload) {
+        for (int at = 0; at < payload.length; at += PARAM_SIZE) {
+            if (Frames.readUnsignedShort(payload, at) == MAX_CONCURRENT_STREAMS_ID) {
+                return Frames.readUnsignedInt(payload, at + 2);
+            }
+        }
+        return DEFAULT_MAX_CONCURRENT_STREAMS;
     }
 
     /** HELLO payload 검증(규격 3.2.3절, 3.2.5절): 6의 배수, identifier 중복 없음, max_frame_size 범위. */
@@ -588,6 +604,10 @@ public final class Endpoint {
     }
 
     private void sendRequest(int type, byte[] payload) {
+        if (pendingStreams.size() >= peerMaxConcurrentStreams) {
+            // 상대가 알린 한도에 닿았다. 새 요청은 보내지 않고 로컬에서 실패시킨다(규격 3.2.1절). 번호도 쓰지 않는다.
+            return;
+        }
         if (nextStreamId > MAX_STREAM_ID) {
             // 번호가 소진됐다. 프레임 없이 요청을 로컬에서 실패시키고 연결을 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 2.2.5절).
             close(Frames.NO_ERROR);
