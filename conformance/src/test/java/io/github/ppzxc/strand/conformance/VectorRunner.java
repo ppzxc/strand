@@ -8,6 +8,7 @@ import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.MessageKind;
+import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -50,6 +51,7 @@ final class VectorRunner {
 
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
     private static final int FIRST_APPLICATION_TYPE = 256;
+    private static final int NORMAL_CLOSURE = 1000;
 
     static {
         HELLO_DEFAULTS.put("max_frame_size", 4_194_304L);
@@ -105,6 +107,9 @@ final class VectorRunner {
         NAMED_FRAMES.put(
                 "CLOSE", frame -> "CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code")));
         NAMED_FRAMES.put(
+                "WEBSOCKET_CLOSE",
+                frame -> "WEBSOCKET_CLOSE code=" + frame.get("code").getAsInt());
+        NAMED_FRAMES.put(
                 "RESET",
                 frame -> "RESET flags=- stream_id=" + frame.get("stream_id").getAsInt() + " error_code="
                         + nameOfError(frame.get("error_code")));
@@ -141,19 +146,20 @@ final class VectorRunner {
         VectorRunner runner =
                 new VectorRunner(client, webSocket, client ? Endpoint.client(config) : Endpoint.server(config));
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
-        byte[] opening = runner.endpoint.drainOutput();
+        List<OutboundMessage> opening = runner.endpoint.drainMessages();
         if (setup.get("established").getAsBoolean()) {
             runner.establish(opening, setup.getAsJsonObject("peer_hello"));
-            opening = new byte[0];
+            opening = new ArrayList<>();
         }
         int number = 0;
         for (JsonObject step : vector.steps()) {
             number++;
             runner.apply(step);
-            byte[] sent = Bytes.concat(opening, runner.endpoint.drainOutput());
-            boolean startsWithPreface = opening.length > 0;
-            opening = new byte[0];
-            assertThat(runner.describe(sent, startsWithPreface))
+            List<OutboundMessage> sent = new ArrayList<>(opening);
+            sent.addAll(runner.endpoint.drainMessages());
+            boolean startsWithPreface = !opening.isEmpty();
+            opening = new ArrayList<>();
+            assertThat(runner.describeMessages(sent, startsWithPreface))
                     .as("%d번째 단계의 send", number)
                     .isEqualTo(expectedFrames(step));
             assertThat(describe(runner.endpoint.drainEvents()))
@@ -243,19 +249,19 @@ final class VectorRunner {
     }
 
     /** 규격 3.3절 표준 수립 순서를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. */
-    private void establish(byte[] opening, JsonObject peerHello) {
-        byte[] hello = opening;
+    private void establish(List<OutboundMessage> opening, JsonObject peerHello) {
+        List<OutboundMessage> hello = opening;
         if (!client) {
             deliver(Bytes.fromHex(PREFACE_HEX));
-            hello = endpoint.drainOutput();
+            hello = endpoint.drainMessages();
         }
-        assertThat(describe(hello, client)).as("수립: 연결을 연 뒤의 출력").hasSize(client ? 2 : 1);
+        assertThat(describeMessages(hello, client)).as("수립: 연결을 연 뒤의 출력").hasSize(client ? 2 : 1);
         deliver(encodeHello(helloParams(peerHello)));
-        assertThat(describe(endpoint.drainOutput(), false))
+        assertThat(describeMessages(endpoint.drainMessages(), false))
                 .as("수립: 상대 HELLO에 대한 ACK")
                 .containsExactly("HELLO flags=ACK stream_id=0 params=-");
         deliver(Bytes.fromHex(ACK_HELLO_HEX));
-        assertThat(endpoint.drainOutput()).as("수립: ACK 뒤의 출력").isEmpty();
+        assertThat(endpoint.drainMessages()).as("수립: ACK 뒤의 출력").isEmpty();
         assertThat(endpoint.drainEvents()).as("수립: 이벤트").isEmpty();
     }
 
@@ -338,6 +344,38 @@ final class VectorRunner {
                 result.add(event.kind().name().toLowerCase(Locale.ROOT));
             }
         }
+        return result;
+    }
+
+    /**
+     * 엔드포인트가 보낸 메시지를 벡터의 `send`와 같은 표기로 바꾼다. WebSocket에서는 바이너리 메시지마다 프레임이 정확히 하나여야 하고
+     * (벡터 형식 6.1절), WebSocket Close는 자기 항목이다. 바이트 스트림에서는 메시지를 이어 붙여 프레임으로 푼다.
+     */
+    private List<String> describeMessages(List<OutboundMessage> messages, boolean startsWithPreface) {
+        List<String> result = new ArrayList<>();
+        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+        boolean first = true;
+        for (OutboundMessage message : messages) {
+            boolean withPreface = startsWithPreface && first;
+            first = false;
+            if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE && message.statusCode() != NORMAL_CLOSURE) {
+                // 1000이 아닌 상태 코드는 규격이 정하지 않아 관측하지 않는다(벡터 형식 6.1절).
+                continue;
+            }
+            if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE) {
+                result.addAll(describe(stream.toByteArray(), startsWithPreface && result.isEmpty()));
+                stream.reset();
+                result.add("WEBSOCKET_CLOSE code=" + message.statusCode());
+            } else if (webSocket) {
+                List<String> frames = describe(message.bytes(), withPreface);
+                assertThat(frames).as("WebSocket 메시지마다 프레임이 하나").hasSize(1);
+                result.addAll(frames);
+            } else {
+                byte[] bytes = message.bytes();
+                stream.write(bytes, 0, bytes.length);
+            }
+        }
+        result.addAll(describe(stream.toByteArray(), startsWithPreface && result.isEmpty()));
         return result;
     }
 

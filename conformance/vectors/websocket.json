@@ -466,6 +466,100 @@
           ]
         }
       ]
+    },
+    {
+      "id": "no-error-close-is-followed-by-websocket-close",
+      "description": "WebSocket에서 NO_ERROR CLOSE를 보내 닫으면 CLOSE 프레임 메시지 뒤에 WebSocket Close(상태 1000 Normal Closure)를 낸다. 별도 메시지로 나온다",
+      "spec": [
+        "1.2",
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR"
+            },
+            {
+              "type": "WEBSOCKET_CLOSE",
+              "code": 1000
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "no-error-close-websocket-close-waits-for-last-stream",
+      "description": "WebSocket에서 NO_ERROR CLOSE를 보내고 대기 중인 스트림이 남았으면 WebSocket Close(1000)는 아직 내지 않는다. 마지막 스트림의 응답을 보낸 뒤 응답 프레임 메시지 다음에 낸다",
+      "spec": [
+        "1.2",
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "transport": "websocket"
+      },
+      "steps": [
+        {
+          "kind": "recv_message",
+          "opcode": "binary",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "respond",
+          "stream_id": 1,
+          "status": "OK",
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1,
+              "status": "OK"
+            },
+            {
+              "type": "WEBSOCKET_CLOSE",
+              "code": 1000
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

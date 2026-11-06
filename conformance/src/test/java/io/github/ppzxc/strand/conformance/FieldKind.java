@@ -78,6 +78,13 @@ enum FieldKind {
             c.range(path, element, 0, 0);
         }
     },
+    /** WebSocket Close의 상태 코드. 규격 1.2절이 정한 {@code 1000 Normal Closure}만 모델링한다. */
+    WEBSOCKET_CLOSE_CODE {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.range(path, element, 1000, 1000);
+        }
+    },
     /** HELLO·PING의 flags(ACK). */
     ACK_FLAGS {
         @Override
