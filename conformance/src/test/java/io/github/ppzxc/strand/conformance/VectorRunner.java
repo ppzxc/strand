@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 /**
  * 벡터 하나를 엔드포인트에 실행한다. `setup`으로 엔드포인트를 만들고 단계마다 입력을 넣어, 보낸 바이트를 프레임으로 풀어 `send`와,
@@ -38,12 +40,13 @@ final class VectorRunner {
             "known_types",
             "next_stream_id",
             "transport"));
-    private static final Set<String> SUPPORTED_STEPS = new HashSet<>(Arrays.asList(
-            "recv", "advance", "ping", "request", "close", "cancel", "respond", "disconnect", "recv_message"));
-    private static final Set<String> SUPPORTED_FRAMES =
-            new HashSet<>(Arrays.asList("PREFACE", "HELLO", "PING", "CLOSE", "RESET"));
-    private static final Set<String> SUPPORTED_EVENTS =
-            new HashSet<>(Arrays.asList("closed", "result", "request_received"));
+    /** 실행할 수 있는 단계. 지원 여부와 실행이 이 표 하나에서 정해진다. */
+    private static final Map<String, BiConsumer<VectorRunner, JsonObject>> STEPS = new LinkedHashMap<>();
+    /** 비교할 수 있는 이름 있는 프레임(숫자 type 프레임 제외). 지원 여부와 기대 표기가 이 표 하나에서 정해진다. */
+    private static final Map<String, Function<JsonObject, String>> NAMED_FRAMES = new LinkedHashMap<>();
+    /** 비교할 수 있는 이벤트. 지원 여부와 기대 표기가 이 표 하나에서 정해진다. */
+    private static final Map<String, Function<JsonObject, String>> EVENTS = new LinkedHashMap<>();
+
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
     private static final int FIRST_APPLICATION_TYPE = 256;
 
@@ -54,6 +57,64 @@ final class VectorRunner {
         HELLO_PARAMS.put(1, "max_frame_size");
         HELLO_PARAMS.put(2, "max_concurrent_streams");
         HELLO_PARAMS.put(3, "capabilities");
+
+        STEPS.put(
+                "recv",
+                (runner, step) ->
+                        runner.endpoint.receive(Bytes.fromHex(step.get("hex").getAsString())));
+        STEPS.put(
+                "recv_message",
+                (runner, step) -> runner.endpoint.receiveMessage(
+                        step.get("opcode").getAsString().equals("binary"),
+                        Bytes.fromHex(step.get("hex").getAsString())));
+        STEPS.put(
+                "advance",
+                (runner, step) -> runner.endpoint.advance(step.get("ms").getAsLong()));
+        STEPS.put(
+                "ping",
+                (runner, step) ->
+                        runner.endpoint.ping(Bytes.fromHex(step.get("payload").getAsString())));
+        STEPS.put(
+                "request",
+                (runner, step) -> runner.endpoint.request(
+                        step.get("type").getAsInt(),
+                        Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
+        STEPS.put(
+                "cancel",
+                (runner, step) -> runner.endpoint.cancel(step.get("stream_id").getAsInt()));
+        STEPS.put(
+                "respond",
+                (runner, step) ->
+                        runner.endpoint.respond(step.get("stream_id").getAsInt(), statusCode(step.get("status"))));
+        STEPS.put("disconnect", (runner, step) -> runner.endpoint.disconnect());
+        STEPS.put("close", (runner, step) -> runner.endpoint.close(errorCode(step.get("error_code"))));
+
+        NAMED_FRAMES.put("PREFACE", frame -> "PREFACE");
+        NAMED_FRAMES.put("HELLO", frame -> {
+            boolean ack = VectorSchema.hasFlag(frame, "ACK");
+            return "HELLO flags=" + (ack ? "ACK" : "-") + " stream_id=0 params="
+                    + (ack ? "-" : paramsText(helloParams(frame.getAsJsonObject("params"))));
+        });
+        NAMED_FRAMES.put(
+                "PING",
+                frame -> "PING flags=" + (VectorSchema.hasFlag(frame, "ACK") ? "ACK" : "-") + " stream_id=0 payload="
+                        + frame.get("payload").getAsString());
+        NAMED_FRAMES.put(
+                "CLOSE", frame -> "CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code")));
+        NAMED_FRAMES.put(
+                "RESET",
+                frame -> "RESET flags=- stream_id=" + frame.get("stream_id").getAsInt() + " error_code="
+                        + nameOfError(frame.get("error_code")));
+
+        EVENTS.put(
+                "result",
+                event -> "result stream_id=" + event.get("stream_id").getAsInt() + " status="
+                        + nameOfStatus(event.get("status")));
+        EVENTS.put(
+                "request_received",
+                event -> "request_received stream_id=" + event.get("stream_id").getAsInt() + " type="
+                        + event.get("type").getAsInt());
+        EVENTS.put("closed", event -> "closed");
     }
 
     private final boolean client;
@@ -110,7 +171,7 @@ final class VectorRunner {
         }
         for (JsonObject step : vector.steps()) {
             String kind = step.get("kind").getAsString();
-            requireSupportedPart(SUPPORTED_STEPS.contains(kind), vector, "단계 " + kind);
+            requireSupportedPart(STEPS.containsKey(kind), vector, "단계 " + kind);
             requireSupportedPart(
                     !kind.equals("request")
                             || !step.has("extensions")
@@ -121,7 +182,7 @@ final class VectorRunner {
                 JsonObject frame = element.getAsJsonObject();
                 String type = VectorSchema.frameType(frame);
                 requireSupportedPart(
-                        type != null ? SUPPORTED_FRAMES.contains(type) : isSupportedApplicationFrame(frame),
+                        type != null ? NAMED_FRAMES.containsKey(type) : isSupportedApplicationFrame(frame),
                         vector,
                         "프레임 " + frame.get("type"));
                 requireSupportedPart(
@@ -133,10 +194,7 @@ final class VectorRunner {
             }
             for (JsonElement event : step.getAsJsonArray("events")) {
                 requireSupportedPart(
-                        SUPPORTED_EVENTS.contains(
-                                event.getAsJsonObject().get("event").getAsString()),
-                        vector,
-                        "이벤트 " + event);
+                        EVENTS.containsKey(event.getAsJsonObject().get("event").getAsString()), vector, "이벤트 " + event);
             }
         }
     }
@@ -208,38 +266,7 @@ final class VectorRunner {
     }
 
     private void apply(JsonObject step) {
-        switch (step.get("kind").getAsString()) {
-            case "recv":
-                endpoint.receive(Bytes.fromHex(step.get("hex").getAsString()));
-                break;
-            case "recv_message":
-                endpoint.receiveMessage(
-                        step.get("opcode").getAsString().equals("binary"),
-                        Bytes.fromHex(step.get("hex").getAsString()));
-                break;
-            case "advance":
-                endpoint.advance(step.get("ms").getAsLong());
-                break;
-            case "ping":
-                endpoint.ping(Bytes.fromHex(step.get("payload").getAsString()));
-                break;
-            case "request":
-                endpoint.request(
-                        step.get("type").getAsInt(),
-                        Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : ""));
-                break;
-            case "cancel":
-                endpoint.cancel(step.get("stream_id").getAsInt());
-                break;
-            case "respond":
-                endpoint.respond(step.get("stream_id").getAsInt(), statusCode(step.get("status")));
-                break;
-            case "disconnect":
-                endpoint.disconnect();
-                break;
-            default:
-                endpoint.close(errorCode(step.get("error_code")));
-        }
+        STEPS.get(step.get("kind").getAsString()).accept(this, step);
     }
 
     /** 필드 이름에서 값으로, 빠진 값은 규격 기본값으로 채운다. 객체가 없으면 모두 기본값이다. */
@@ -272,26 +299,13 @@ final class VectorRunner {
         for (JsonElement element : step.getAsJsonArray("send")) {
             JsonObject frame = element.getAsJsonObject();
             String type = VectorSchema.frameType(frame);
-            boolean ack = VectorSchema.hasFlag(frame, "ACK");
-            String flags = ack ? "ACK" : "-";
             if (type == null) {
                 result.add("APP type=" + frame.get("type").getAsInt() + " flags=- stream_id="
                         + frame.get("stream_id").getAsInt()
                         + (frame.has("status") ? " status=" + nameOfStatus(frame.get("status")) : "") + " payload="
                         + (frame.has("payload") ? frame.get("payload").getAsString() : ""));
-            } else if (type.equals("PREFACE")) {
-                result.add("PREFACE");
-            } else if (type.equals("HELLO")) {
-                result.add("HELLO flags=" + flags + " stream_id=0 params="
-                        + (ack ? "-" : paramsText(helloParams(frame.getAsJsonObject("params")))));
-            } else if (type.equals("PING")) {
-                result.add("PING flags=" + flags + " stream_id=0 payload="
-                        + frame.get("payload").getAsString());
-            } else if (type.equals("RESET")) {
-                result.add("RESET flags=- stream_id=" + frame.get("stream_id").getAsInt() + " error_code="
-                        + nameOfError(frame.get("error_code")));
             } else {
-                result.add("CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code")));
+                result.add(NAMED_FRAMES.get(type).apply(frame));
             }
         }
         return result;
@@ -301,16 +315,7 @@ final class VectorRunner {
         List<String> result = new ArrayList<>();
         for (JsonElement element : step.getAsJsonArray("events")) {
             JsonObject event = element.getAsJsonObject();
-            if (event.get("event").getAsString().equals("result")) {
-                result.add("result stream_id=" + event.get("stream_id").getAsInt() + " status="
-                        + nameOfStatus(event.get("status")));
-            } else if (event.get("event").getAsString().equals("request_received")) {
-                result.add(
-                        "request_received stream_id=" + event.get("stream_id").getAsInt() + " type="
-                                + event.get("type").getAsInt());
-            } else {
-                result.add("closed");
-            }
+            result.add(EVENTS.get(event.get("event").getAsString()).apply(event));
         }
         return result;
     }
