@@ -16,6 +16,8 @@ class EndpointTest {
     private static final String PING_ACK = "00000014000201000000000000000000" + "0102030405060708";
     private static final String CLOSE_PROTOCOL_ERROR = "00000010000300000000000000000000" + "00000001";
     private static final String CLOSE_NO_ERROR = "00000010000300000000000000000000" + "00000000";
+    private static final String PING_PAYLOAD = "0102030405060708";
+    private static final EndpointConfig ONE_SECOND = EndpointConfig.defaults().ackTimeoutMs(1000);
     private static final String DEFAULT_HELLO_PARAMS = "0001 00400000 0002 00000064 0003 00000000".replace(" ", "");
 
     static byte[] bytes(String hex) {
@@ -893,9 +895,6 @@ class EndpointTest {
     }
 
     // ---- PING의 확인 대기(3.3절, 3.4절) ----
-
-    private static final String PING_PAYLOAD = "0102030405060708";
-    private static final EndpointConfig ONE_SECOND = EndpointConfig.defaults().ackTimeoutMs(1000);
 
     @Test
     void pingWithoutAnAckClosesWithProtocolErrorAfterTheWait() {

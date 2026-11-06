@@ -112,6 +112,7 @@ public final class Endpoint {
         now += ms;
         for (AckWait wait : ackWaits) {
             if (now > wait.deadline) {
+                // 닫으면 대기 목록이 비므로 반복을 이어 가지 않고 바로 끝낸다.
                 connectionError();
                 return;
             }
