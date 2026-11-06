@@ -2,6 +2,46 @@
   "format": 1,
   "vectors": [
     {
+      "id": "response-carries-the-application-payload",
+      "description": "애플리케이션이 payload를 실어 응답하면 응답 프레임이 요청과 같은 type·stream_id, 그 status, 그 payload를 싣고 나간다",
+      "spec": [
+        "4.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "respond",
+          "stream_id": 1,
+          "status": "OK",
+          "payload": "cafe01",
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1,
+              "status": "OK",
+              "payload": "cafe01"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
       "id": "sender-reset-received-refused",
       "description": "보낸 요청이 RESET(REFUSED)로 끝나면 애플리케이션에 UNAVAILABLE 결과를 넘기고 RESET으로 답하지 않는다. 스트림이 끝났으므로 같은 스트림의 늦은 응답과 RESET은 조용히 버려진다. 결과는 정확히 한 번 나가고 늦은 프레임에는 결과가 다시 나가지 않는다",
       "spec": [
