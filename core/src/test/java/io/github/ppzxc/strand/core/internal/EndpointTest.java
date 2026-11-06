@@ -1674,6 +1674,21 @@ class EndpointTest {
     }
 
     @Test
+    void exhaustionTakesPrecedenceOverReachingThePeerConcurrentStreamLimit() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        client.receive(bytes(helloWith("0002" + String.format("%08x", 1L))));
+        client.receive(bytes(HELLO_ACK));
+        client.request(257, new byte[0]);
+        client.drainMessages();
+        client.drainEvents();
+
+        client.request(257, new byte[0]);
+
+        assertThat(sent(client)).isEqualTo("00000010000300000000000000000000" + "00000000");
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT);
+    }
+
+    @Test
     void largestStreamNumberIsAccepted() {
         Endpoint server = established();
 

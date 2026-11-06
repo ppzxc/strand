@@ -736,15 +736,20 @@ public final class Endpoint {
     }
 
     private void sendRequest(int type, byte[] payload) {
-        if (closeSeen || pendingStreams.size() >= peerMaxConcurrentStreams) {
-            // CLOSE를 보냈거나 받았다(규격 3.5절). 또는 상대가 알린 한도에 닿았다(규격 3.2.1절). 대기시키지 않고 번호도 쓰지 않는다.
+        if (closeSeen) {
+            // CLOSE를 보냈거나 받았다(규격 3.5절). 대기시키지 않고 번호도 쓰지 않는다.
             failLocally();
             return;
         }
         if (nextStreamId > MAX_STREAM_ID) {
-            // 번호가 소진됐다. 프레임 없이 요청을 로컬에서 실패시키고 연결을 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 2.2.5절).
+            // 번호가 소진됐다. 상대가 알린 한도보다 먼저 본다. 프레임 없이 요청을 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
             failLocally();
             close(Frames.NO_ERROR);
+            return;
+        }
+        if (pendingStreams.size() >= peerMaxConcurrentStreams) {
+            // 상대가 알린 한도에 닿았다(규격 3.2.1절). 대기시키지 않고 번호도 쓰지 않는다.
+            failLocally();
             return;
         }
         int streamId = (int) nextStreamId;
