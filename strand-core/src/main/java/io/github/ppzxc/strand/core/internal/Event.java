@@ -3,6 +3,9 @@ package io.github.ppzxc.strand.core.internal;
 /** 엔드포인트가 애플리케이션에 전달하는 이벤트(적합성 벡터 형식 6.2절). */
 public final class Event {
 
+    /** 응답 {@code type}이 요청과 다를 때 애플리케이션에 넘기는 로컬 status(규격 4.1절). 규격 표의 이름이 아니라 {@code INTERNAL}의 별칭이다. */
+    static final int RESPONSE_TYPE_MISMATCH = Status.INTERNAL;
+
     /** 이벤트 종류. */
     public enum Kind {
         /** 자기가 보낸 요청의 결과가 애플리케이션에 전달됨. */

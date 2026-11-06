@@ -1,6 +1,9 @@
 package io.github.ppzxc.strand.core.internal;
 
-/** 규격 2.5.1절의 {@code status} 값(애플리케이션 결과). {@link ErrorCode}와 번호 공간이 다르다. */
+/**
+ * 규격 2.5.1절의 {@code status} 값(애플리케이션 결과)과 error_code·수신 status를 status로 바꾸는 로컬 규칙({@link #forReset}, {@link
+ * #normalize}). {@link ErrorCode}와 번호 공간이 다르다.
+ */
 final class Status {
 
     static final int CANCELLED = 1;
@@ -13,9 +16,6 @@ final class Status {
     static final int UNAVAILABLE = 14;
     /** 규격 2.5.1절에 정의된 마지막 status. */
     static final int UNAUTHENTICATED = 16;
-
-    /** 응답 {@code type}이 요청과 다를 때 애플리케이션에 넘기는 로컬 status(규격 4.1절). */
-    static final int RESPONSE_TYPE_MISMATCH = INTERNAL;
 
     private Status() {}
 

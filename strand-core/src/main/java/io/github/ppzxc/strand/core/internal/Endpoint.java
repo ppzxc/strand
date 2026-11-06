@@ -482,15 +482,15 @@ public final class Endpoint {
      */
     private void handleApplication(byte[] frame, int type, int extensionsLength, long streamId) {
         // 연결 오류 집합은 검사 순서가 없다(규격 5.1절 3번). 확장 영역 형식, 상대 ACK 전의 프레임(3.3절), 잘못된 stream_id.
-        Extensions extensionsCheck = extensionsLength > MAX_EXTENSIONS_LENGTH
+        Extensions extensionsResult = extensionsLength > MAX_EXTENSIONS_LENGTH
                 ? Extensions.MALFORMED
                 : scanExtensions(frame, extensionsLength);
-        if (extensionsCheck == Extensions.MALFORMED || !ownHelloAcked || isInvalidStreamId(streamId)) {
+        if (extensionsResult == Extensions.MALFORMED || !ownHelloAcked || isInvalidStreamId(streamId)) {
             connectionError();
         } else if (isOwnSpace(streamId)) {
             handleResponse(frame, (int) streamId);
         } else {
-            handleRequest(type, extensionsCheck, (int) streamId);
+            handleRequest(type, extensionsResult, (int) streamId);
         }
     }
 
@@ -498,7 +498,7 @@ public final class Endpoint {
      * 상대의 새 요청(규격 5.1절 5번). (가) 거절, (나) 모르는 type, (다) 확장 값 오류 순서로 보고, 모두 지나면 애플리케이션에 넘긴다.
      * 거절한 요청과 오류로 답한 요청은 대기 스트림에 넣지 않지만 번호는 쓰인 것으로 센다(규격 4.5절, 5.1절).
      */
-    private void handleRequest(int type, Extensions extensionsCheck, int streamId) {
+    private void handleRequest(int type, Extensions extensionsResult, int streamId) {
         if (streamId <= highestPeerStreamId) {
             // 번호 역행: 재사용한 번호, 건너뛰고 나중에 온 번호, 대기 중인 스트림의 번호 모두 연결 오류다(규격 4.2.1절).
             connectionError();
@@ -509,7 +509,7 @@ public final class Endpoint {
             send(Frames.reset(streamId, ErrorCode.REFUSED));
         } else if (!config.knows(type)) {
             send(Frames.response(type, streamId, Status.UNIMPLEMENTED));
-        } else if (extensionsCheck == Extensions.INVALID_VALUE) {
+        } else if (extensionsResult == Extensions.INVALID_VALUE) {
             send(Frames.response(type, streamId, Status.INVALID_ARGUMENT));
         } else {
             peerPendingStreams.put(streamId, type);
@@ -561,7 +561,7 @@ public final class Endpoint {
         // 응답 type이 요청과 다르면 status와 payload를 버리고 로컬 INTERNAL을 넘긴다. 와이어로는 아무것도 보내지 않는다(규격 4.1절).
         int status = Frames.typeOf(frame) == requestType
                 ? Status.normalize(Frames.statusOf(frame))
-                : Status.RESPONSE_TYPE_MISMATCH;
+                : Event.RESPONSE_TYPE_MISMATCH;
         events.add(Event.result(streamId, status));
         closeTransportIfNoPendingStreams();
     }

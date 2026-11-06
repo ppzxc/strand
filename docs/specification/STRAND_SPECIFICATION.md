@@ -59,7 +59,7 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 | **CLOSE 교환 (Close Exchanged)** | CLOSE를 보냈거나 받은 상태(3.5절) |
 | **종료 중인 연결 (Closing)** | `NO_ERROR` CLOSE를 보냈거나 받은 연결. 곧 `NO_ERROR`로 CLOSE 교환이 된 연결(3.5절) |
 | **확인 대기 (Ack Wait)** | HELLO나 PING을 보낸 뒤 상대의 ACK를 기다리는 구간(3.3절) |
-| **연결이 끝남 (Connection End)** | CLOSE를 보내거나 받아 닫거나, CLOSE 없이 닫거나, 상대가 CLOSE 없이 전송 계층을 끊어 연결이 마무리되는 것(3.5절) |
+| **연결이 끝남 (Connection End)** | 전송 계층이 닫혀 더는 아무것도 주고받지 않게 된 때. 원인이 CLOSE 교환이든 연결 오류든 상대의 전송 계층 끊김이든 같고, 이때 `closed` 이벤트를 낸다(3.5절) |
 
 ### 1.4 표기 규칙
 
