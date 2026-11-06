@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.Event;
+import io.github.ppzxc.strand.core.internal.MessageKind;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -65,7 +66,7 @@ final class VectorRunner {
         STEPS.put(
                 "recv_message",
                 (runner, step) -> runner.endpoint.receiveMessage(
-                        step.get("opcode").getAsString().equals("binary"),
+                        step.get("opcode").getAsString().equals("binary") ? MessageKind.BINARY : MessageKind.TEXT,
                         Bytes.fromHex(step.get("hex").getAsString())));
         STEPS.put(
                 "advance",
@@ -261,7 +262,7 @@ final class VectorRunner {
     /** 수립에 쓰는 입력 하나를 전송 방식에 맞게 넣는다. WebSocket이면 메시지 하나로, 바이트 스트림이면 바이트로 넣는다. */
     private void deliver(byte[] bytes) {
         if (webSocket) {
-            endpoint.receiveMessage(true, bytes);
+            endpoint.receiveMessage(MessageKind.BINARY, bytes);
         } else {
             endpoint.receive(bytes);
         }

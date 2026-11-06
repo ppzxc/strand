@@ -1804,7 +1804,7 @@ class EndpointTest {
 
     private static Endpoint webSocketServerAfterPreface() {
         Endpoint server = webSocketServer();
-        server.receiveMessage(true, bytes(PREFACE));
+        server.receiveMessage(MessageKind.BINARY, bytes(PREFACE));
         server.drainOutput();
         return server;
     }
@@ -1815,9 +1815,9 @@ class EndpointTest {
 
     private static Endpoint establishedWebSocket(EndpointConfig config) {
         Endpoint server = Endpoint.server(config.webSocket());
-        server.receiveMessage(true, bytes(PREFACE));
-        server.receiveMessage(true, bytes(HELLO));
-        server.receiveMessage(true, bytes(HELLO_ACK));
+        server.receiveMessage(MessageKind.BINARY, bytes(PREFACE));
+        server.receiveMessage(MessageKind.BINARY, bytes(HELLO));
+        server.receiveMessage(MessageKind.BINARY, bytes(HELLO_ACK));
         server.drainOutput();
         return server;
     }
@@ -1826,7 +1826,7 @@ class EndpointTest {
     void webSocketMessageIsOneFrame() {
         Endpoint server = establishedWebSocket();
 
-        server.receiveMessage(true, bytes(PING_MESSAGE));
+        server.receiveMessage(MessageKind.BINARY, bytes(PING_MESSAGE));
 
         assertThat(sent(server)).isEqualTo("000000140002010000000000000000000102030405060708");
     }
@@ -1835,7 +1835,7 @@ class EndpointTest {
     void webSocketPrefaceMessageGetsTheServerHello() {
         Endpoint server = webSocketServer();
 
-        server.receiveMessage(true, bytes(PREFACE));
+        server.receiveMessage(MessageKind.BINARY, bytes(PREFACE));
 
         assertThat(sent(server)).startsWith("00000");
         assertThat(server.drainEvents()).isEmpty();
@@ -1845,22 +1845,22 @@ class EndpointTest {
     void webSocketPrefaceOfTheWrongSizeOrOpcodeClosesSilently() {
         for (String hex : new String[] {"c0de5354523000", "c0de53545230000000"}) {
             Endpoint server = webSocketServer();
-            server.receiveMessage(true, bytes(hex));
+            server.receiveMessage(MessageKind.BINARY, bytes(hex));
             assertClosedSilently(server);
         }
         Endpoint text = webSocketServer();
-        text.receiveMessage(false, bytes(PREFACE));
+        text.receiveMessage(MessageKind.TEXT, bytes(PREFACE));
         assertClosedSilently(text);
     }
 
     @Test
     void webSocketFirstFrameThatIsTextOrShortClosesSilently() {
         Endpoint text = webSocketServerAfterPreface();
-        text.receiveMessage(false, bytes(HELLO));
+        text.receiveMessage(MessageKind.TEXT, bytes(HELLO));
         assertClosedSilently(text);
 
         Endpoint shortFrame = webSocketServerAfterPreface();
-        shortFrame.receiveMessage(true, bytes("0000000c000100000000"));
+        shortFrame.receiveMessage(MessageKind.BINARY, bytes("0000000c000100000000"));
         assertClosedSilently(shortFrame);
     }
 
@@ -1868,7 +1868,7 @@ class EndpointTest {
     void webSocketFirstFrameThatIsNotHelloClosesSilently() {
         Endpoint server = webSocketServerAfterPreface();
 
-        server.receiveMessage(true, bytes(PING_MESSAGE));
+        server.receiveMessage(MessageKind.BINARY, bytes(PING_MESSAGE));
 
         assertClosedSilently(server);
     }
@@ -1877,7 +1877,7 @@ class EndpointTest {
     void webSocketFirstFrameSizeMismatchIsAProtocolError() {
         Endpoint server = webSocketServerAfterPreface();
 
-        server.receiveMessage(true, bytes(HELLO + "00"));
+        server.receiveMessage(MessageKind.BINARY, bytes(HELLO + "00"));
 
         assertClosedWithProtocolError(server);
     }
@@ -1886,7 +1886,7 @@ class EndpointTest {
     void webSocketTextMessageAfterTheFirstFrameIsAProtocolError() {
         Endpoint server = establishedWebSocket();
 
-        server.receiveMessage(false, bytes(PING_MESSAGE));
+        server.receiveMessage(MessageKind.TEXT, bytes(PING_MESSAGE));
 
         assertClosedWithProtocolError(server);
     }
@@ -1894,11 +1894,11 @@ class EndpointTest {
     @Test
     void webSocketCloseCarriedInATextMessageIsAProtocolError() {
         Endpoint noError = establishedWebSocket();
-        noError.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        noError.receiveMessage(MessageKind.TEXT, bytes(CLOSE_NO_ERROR));
         assertClosedWithProtocolError(noError);
 
         Endpoint protocolError = establishedWebSocket();
-        protocolError.receiveMessage(false, bytes(CLOSE_PROTOCOL_ERROR));
+        protocolError.receiveMessage(MessageKind.TEXT, bytes(CLOSE_PROTOCOL_ERROR));
         assertClosedWithProtocolError(protocolError);
     }
 
@@ -1909,39 +1909,39 @@ class EndpointTest {
         sentClose.close(Frames.NO_ERROR);
         sentClose.drainOutput();
         sentClose.drainEvents();
-        sentClose.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        sentClose.receiveMessage(MessageKind.TEXT, bytes(CLOSE_NO_ERROR));
         assertThat(sentClose.drainOutput()).isEmpty();
         assertThat(kinds(sentClose)).contains(Event.Kind.CLOSED);
 
         Endpoint receivedClose = establishedWebSocket();
         receivedClose.request(257, new byte[0]);
-        receivedClose.receiveMessage(true, bytes(CLOSE_NO_ERROR));
+        receivedClose.receiveMessage(MessageKind.BINARY, bytes(CLOSE_NO_ERROR));
         receivedClose.drainOutput();
         receivedClose.drainEvents();
-        receivedClose.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        receivedClose.receiveMessage(MessageKind.TEXT, bytes(CLOSE_NO_ERROR));
         assertThat(receivedClose.drainOutput()).isEmpty();
         assertThat(kinds(receivedClose)).contains(Event.Kind.CLOSED);
 
         Endpoint closed = establishedWebSocket();
-        closed.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        closed.receiveMessage(MessageKind.TEXT, bytes(CLOSE_NO_ERROR));
         closed.drainOutput();
         closed.drainEvents();
-        closed.receiveMessage(false, bytes(CLOSE_NO_ERROR));
+        closed.receiveMessage(MessageKind.TEXT, bytes(CLOSE_NO_ERROR));
         assertOpenAndSilent(closed);
     }
 
     @Test
     void webSocketMessageOfTheWrongSizeIsAProtocolError() {
         Endpoint longer = establishedWebSocket();
-        longer.receiveMessage(true, bytes(PING_MESSAGE + "00"));
+        longer.receiveMessage(MessageKind.BINARY, bytes(PING_MESSAGE + "00"));
         assertClosedWithProtocolError(longer);
 
         Endpoint shorter = establishedWebSocket();
-        shorter.receiveMessage(true, bytes(PING_MESSAGE.substring(0, PING_MESSAGE.length() - 2)));
+        shorter.receiveMessage(MessageKind.BINARY, bytes(PING_MESSAGE.substring(0, PING_MESSAGE.length() - 2)));
         assertClosedWithProtocolError(shorter);
 
         Endpoint tiny = establishedWebSocket();
-        tiny.receiveMessage(true, bytes("0000"));
+        tiny.receiveMessage(MessageKind.BINARY, bytes("0000"));
         assertClosedWithProtocolError(tiny);
     }
 
@@ -1951,7 +1951,7 @@ class EndpointTest {
         String payload = new String(new char[16384 - 12 - 4 + 1]).replace("\0", "00");
 
         server.receiveMessage(
-                true,
+                MessageKind.BINARY,
                 bytes(String.format("%08x", 12 + payload.length() / 2) + "00020000" + "00000000" + "00000000"
                         + payload));
 
@@ -1962,7 +1962,7 @@ class EndpointTest {
     void webSocketCloseMessageWithTheWrongSizeClosesSilently() {
         Endpoint server = establishedWebSocket();
 
-        server.receiveMessage(true, bytes("000000100003000000000000000000000000000000"));
+        server.receiveMessage(MessageKind.BINARY, bytes("000000100003000000000000000000000000000000"));
 
         assertClosedSilently(server);
     }
@@ -1972,7 +1972,7 @@ class EndpointTest {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().webSocket());
         client.drainOutput();
 
-        client.receiveMessage(false, bytes(HELLO));
+        client.receiveMessage(MessageKind.TEXT, bytes(HELLO));
 
         assertClosedSilently(client);
     }
@@ -1980,10 +1980,10 @@ class EndpointTest {
     @Test
     void messagesAfterClosedAreIgnored() {
         Endpoint server = webSocketServer();
-        server.receiveMessage(false, bytes(PREFACE));
+        server.receiveMessage(MessageKind.TEXT, bytes(PREFACE));
         server.drainEvents();
 
-        server.receiveMessage(true, bytes(PREFACE));
+        server.receiveMessage(MessageKind.BINARY, bytes(PREFACE));
 
         assertOpenAndSilent(server);
     }
@@ -1991,7 +1991,7 @@ class EndpointTest {
     @Test
     void webSocketEndpointRejectsByteInputAndStreamEndpointRejectsMessages() {
         assertThatThrownBy(() -> webSocketServer().receive(bytes(PREFACE))).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> server().receiveMessage(true, bytes(PREFACE)))
+        assertThatThrownBy(() -> server().receiveMessage(MessageKind.BINARY, bytes(PREFACE)))
                 .isInstanceOf(IllegalStateException.class);
     }
 }
