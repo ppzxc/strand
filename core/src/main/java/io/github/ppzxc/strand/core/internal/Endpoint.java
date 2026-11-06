@@ -153,7 +153,7 @@ public final class Endpoint {
             }
             return;
         }
-        if (!firstFrameChecked && !firstMessageValid(binary, message)) {
+        if (!firstFrameChecked && !checkFirstMessage(binary, message)) {
             terminate();
             return;
         }
@@ -320,8 +320,8 @@ public final class Endpoint {
         return Frames.typeOf(bytes) == Frames.HELLO && Frames.streamIdOf(bytes) == 0 && Frames.flagsOf(bytes) == 0;
     }
 
-    /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. */
-    private boolean firstMessageValid(boolean binary, byte[] message) {
+    /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 첫 프레임 검사를 마친 것으로 기록한다. */
+    private boolean checkFirstMessage(boolean binary, byte[] message) {
         boolean valid = binary
                 && message.length >= Frames.HEADER_SIZE
                 && Frames.readUnsignedInt(message, 0) >= MIN_FRAME_LENGTH

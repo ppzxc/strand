@@ -152,6 +152,10 @@ final class VectorRunner {
         Assumptions.assumeTrue(supported, "러너 미지원: " + what + " (" + vector.id() + ")");
     }
 
+    private static boolean isWebSocket(JsonObject setup) {
+        return setup.has("transport") && setup.get("transport").getAsString().equals("websocket");
+    }
+
     private static EndpointConfig configOf(JsonObject setup) {
         Map<String, Long> hello = helloParams(setup.getAsJsonObject("local_hello"));
         long ackTimeout = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
@@ -162,7 +166,7 @@ final class VectorRunner {
                 .maxConcurrentStreams(hello.get("max_concurrent_streams"))
                 .capabilities(hello.get("capabilities"))
                 .ackTimeoutMs(ackTimeout);
-        if (setup.has("transport") && setup.get("transport").getAsString().equals("websocket")) {
+        if (isWebSocket(setup)) {
             config = config.webSocket();
         }
         if (setup.has("next_stream_id")) {

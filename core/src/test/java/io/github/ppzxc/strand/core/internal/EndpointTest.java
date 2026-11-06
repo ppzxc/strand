@@ -1692,7 +1692,12 @@ class EndpointTest {
     }
 
     private static Endpoint establishedWebSocket() {
-        Endpoint server = webSocketServerAfterPreface();
+        return establishedWebSocket(EndpointConfig.defaults());
+    }
+
+    private static Endpoint establishedWebSocket(EndpointConfig config) {
+        Endpoint server = Endpoint.server(config.webSocket());
+        server.receiveMessage(true, bytes(PREFACE));
         server.receiveMessage(true, bytes(HELLO));
         server.receiveMessage(true, bytes(HELLO_ACK));
         server.drainOutput();
@@ -1785,11 +1790,7 @@ class EndpointTest {
 
     @Test
     void webSocketMessageAboveTheMaxFrameSizeIsAProtocolError() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().webSocket().maxFrameSize(16384));
-        server.receiveMessage(true, bytes(PREFACE));
-        server.receiveMessage(true, bytes(HELLO));
-        server.receiveMessage(true, bytes(HELLO_ACK));
-        server.drainOutput();
+        Endpoint server = establishedWebSocket(EndpointConfig.defaults().maxFrameSize(16384));
         String payload = new String(new char[16384 - 12 - 4 + 1]).replace("\0", "00");
 
         server.receiveMessage(
