@@ -36,15 +36,14 @@
       ]
     },
     "error_code": {
-      "description": "2.5.2절의 이름. 9 이상은 예약 값이다.",
+      "description": "2.5.2절의 이름. 6 이상은 예약 값이다.",
       "oneOf": [
         {
           "enum": [
-            "NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "FRAME_SIZE_ERROR", "HELLO_TIMEOUT",
-            "STREAM_CLOSED", "REFUSED", "CANCEL", "OVERLOAD"
+            "NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "REFUSED", "CANCEL", "OVERLOAD"
           ]
         },
-        { "type": "integer", "minimum": 9, "maximum": 4294967295 }
+        { "type": "integer", "minimum": 6, "maximum": 4294967295 }
       ]
     },
     "app_type": { "type": "integer", "minimum": 256, "maximum": 65535 },
@@ -68,11 +67,8 @@
       "additionalProperties": false,
       "properties": {
         "max_frame_size": { "$ref": "#/$defs/u32" },
-        "max_pending_bytes": { "$ref": "#/$defs/u32" },
         "max_concurrent_streams": { "$ref": "#/$defs/u32" },
-        "capabilities": { "$ref": "#/$defs/u32" },
-        "content_types": { "$ref": "#/$defs/u32" },
-        "content_type": { "$ref": "#/$defs/u32" }
+        "capabilities": { "$ref": "#/$defs/u32" }
       }
     },
     "config": {
@@ -80,8 +76,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "draining_retention_limit": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
-        "hello_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+        "ack_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
       }
     },
     "setup": {
@@ -93,17 +88,23 @@
         "local_hello": { "$ref": "#/$defs/hello_params" },
         "peer_hello": { "$ref": "#/$defs/hello_params" },
         "established": { "type": "boolean" },
-        "config": { "$ref": "#/$defs/config" }
+        "config": { "$ref": "#/$defs/config" },
+        "transport": { "enum": ["tcp", "websocket"] },
+        "next_stream_id": {
+          "description": "1 이상 2^31-1 이하. role이 client이면 홀수, server이면 짝수여야 하지만 스키마로 표현할 수 없어 형식 문서에만 있다.",
+          "type": "integer", "minimum": 1, "maximum": 2147483647
+        },
+        "known_types": {
+          "description": "중복 값 금지.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/app_type" },
+          "uniqueItems": true
+        }
       }
     },
     "control_flags": {
       "type": "array",
       "items": { "enum": ["ACK"] },
-      "uniqueItems": true
-    },
-    "app_flags": {
-      "type": "array",
-      "items": { "enum": ["RESPONSE", "END"] },
       "uniqueItems": true
     },
     "frame_preface": {
@@ -137,11 +138,10 @@
     "frame_close": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "last_stream_id", "error_code"],
+      "required": ["type", "error_code"],
       "properties": {
         "type": { "const": "CLOSE" },
         "stream_id": { "const": 0 },
-        "last_stream_id": { "$ref": "#/$defs/u32" },
         "error_code": { "$ref": "#/$defs/error_code" }
       }
     },
@@ -158,10 +158,9 @@
     "frame_app": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "flags", "stream_id"],
+      "required": ["type", "stream_id"],
       "properties": {
         "type": { "$ref": "#/$defs/app_type" },
-        "flags": { "$ref": "#/$defs/app_flags" },
         "stream_id": { "$ref": "#/$defs/stream_id" },
         "status": { "$ref": "#/$defs/status" },
         "extensions": { "$ref": "#/$defs/extensions" },
@@ -217,6 +216,7 @@
       "items": { "$ref": "#/$defs/event" }
     },
     "step": {
+      "description": "transport가 tcp이면 recv만, websocket이면 recv_message만 쓸 수 있다. 이 교차 규칙과 ping 단계의 순서(형식 문서 8.1절 3번)는 스키마로 표현할 수 없어 형식 문서에만 있다.",
       "oneOf": [
         {
           "type": "object",
@@ -225,6 +225,29 @@
           "properties": {
             "kind": { "const": "recv" },
             "hex": { "$ref": "#/$defs/hex" },
+            "send": { "$ref": "#/$defs/expect_send" },
+            "events": { "$ref": "#/$defs/expect_events" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "opcode", "hex", "send", "events"],
+          "properties": {
+            "kind": { "const": "recv_message" },
+            "opcode": { "enum": ["binary", "text"] },
+            "hex": { "$ref": "#/$defs/hex" },
+            "send": { "$ref": "#/$defs/expect_send" },
+            "events": { "$ref": "#/$defs/expect_events" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "payload", "send", "events"],
+          "properties": {
+            "kind": { "const": "ping" },
+            "payload": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
             "send": { "$ref": "#/$defs/expect_send" },
             "events": { "$ref": "#/$defs/expect_events" }
           }

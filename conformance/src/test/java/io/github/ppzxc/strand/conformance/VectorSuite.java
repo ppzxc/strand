@@ -36,9 +36,8 @@ final class VectorSuite {
         assertThat(files).as("벡터 파일이 하나도 없다: %s", directory.toAbsolutePath()).isNotEmpty();
         List<DynamicTest> tests = new ArrayList<>();
         for (Path file : files) {
-            // 테스트 이름은 파일명에서 .json을 뺀 `파일명/id`(벡터 형식 문서 3절).
-            String fileName = file.getFileName().toString();
-            String name = fileName.substring(0, fileName.length() - ".json".length());
+            // 테스트 이름은 `파일명/id`(벡터 형식 문서 3절).
+            String name = fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 tests.add(DynamicTest.dynamicTest(name + "/" + vector.id(), () -> run(vector)));
             }
@@ -46,7 +45,14 @@ final class VectorSuite {
         return tests.stream();
     }
 
-    private static List<Path> jsonFiles(Path directory) {
+    /** 테스트 이름과 벡터 키에 쓰는 이름: 파일명에서 `.json`을 뺀 것(벡터 형식 문서 3절). */
+    static String fileKey(Path file) {
+        String fileName = file.getFileName().toString();
+        return fileName.substring(0, fileName.length() - ".json".length());
+    }
+
+    /** 디렉터리의 벡터 파일(`*.json`)을 이름순으로. */
+    static List<Path> jsonFiles(Path directory) {
         try (Stream<Path> children = Files.list(directory)) {
             List<Path> files = children.filter(p -> p.getFileName().toString().endsWith(".json"))
                     .collect(Collectors.toList());

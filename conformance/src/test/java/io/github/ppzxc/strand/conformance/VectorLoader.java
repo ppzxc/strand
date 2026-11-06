@@ -54,7 +54,9 @@ final class VectorLoader {
 
     /** 스키마 검증을 통과한 벡터 객체를 {@link ConformanceVector}로 옮긴다. 값은 이미 검증됐다. */
     private static ConformanceVector parseVector(String fileName, int index, JsonElement element) {
-        JsonObject vector = Check.forVector(fileName, index, element).object(Check.ROOT, element, VectorSchema.VECTOR);
+        Check check = Check.forVector(fileName, index, element);
+        JsonObject vector = check.object(Check.ROOT, element, VectorSchema.VECTOR);
+        VectorSchema.crossCheck(check, vector);
 
         List<String> spec = new ArrayList<>();
         for (JsonElement section : vector.getAsJsonArray("spec")) {

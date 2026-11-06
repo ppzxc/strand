@@ -1,0 +1,524 @@
+{
+  "format": 1,
+  "vectors": [
+    {
+      "id": "hello-with-extensions-closes",
+      "description": "ACK HELLO의 extensions_length가 0이 아니면 제어 프레임의 확장 영역 규칙 위반으로 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "spec": [
+        "2.4.3",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "c0de535452300000",
+          "send": [
+            {
+              "type": "HELLO"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c000100000000000000000000",
+          "send": [
+            {
+              "type": "HELLO",
+              "flags": [
+                "ACK"
+              ]
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000010100000000000004000000090000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ping-with-extensions-closes",
+      "description": "PING의 extensions_length가 0이 아니면 연결 오류다. 제어 프레임의 확장 영역은 파싱하지 않으므로 내용이 TLV가 아니어도 같다. PING에 답하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "2.4.3",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000018000200000000000000040000deadbeef0102030405060708",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-with-extensions-closes",
+      "description": "RESET의 extensions_length가 0이 아니면 연결 오류다. 대기 중이 아닌 스트림을 가리켜도 조용히 버리지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "2.4.3",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "000000140004000000000001000400000009000000000004",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reserved-type-with-extensions-closes",
+      "description": "예약 제어 타입(0x0000)도 extensions_length가 0이 아니면 연결 오류다. 예약 타입은 무시하지만 확장 영역 검사는 받는다",
+      "spec": [
+        "2.4.3",
+        "2.2.2",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000000000000000000004000000090000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reserved-type-0000-is-ignored",
+      "description": "예약 제어 타입 0x0000을 받으면 아무것도 보내지 않고 무시한다. 연결은 유지되어 이어지는 PING에 답한다",
+      "spec": [
+        "2.2.2",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140002000000000000000000000102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "flags": [
+                "ACK"
+              ],
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "reserved-type-0005-is-ignored",
+      "description": "예약 제어 타입의 아래 경계 0x0005를 받으면 무시한다. 정의된 마지막 제어 타입은 RESET(0x0004)이다",
+      "spec": [
+        "2.2.2",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c000500000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140002000000000000000000000102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "flags": [
+                "ACK"
+              ],
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "reserved-type-00ff-is-ignored",
+      "description": "예약 제어 타입의 위 경계 0x00FF를 받으면 무시한다. 0x0100부터는 애플리케이션 프레임이다",
+      "spec": [
+        "2.2.2",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c00ff00000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140002000000000000000000000102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "flags": [
+                "ACK"
+              ],
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "reserved-type-ignores-stream-id-and-flags",
+      "description": "예약 제어 타입은 stream_id와 flags를 검사하지 않는다. stream_id의 최상위 비트가 켜져 있고 flags가 모두 켜져 있으며 payload가 있어도 무시한다",
+      "spec": [
+        "2.2.2",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "000000110010ff00ffffffff000000003132333435",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140002000000000000000000000102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "flags": [
+                "ACK"
+              ],
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "ack-ping-without-sent-ping-is-ignored",
+      "description": "보낸 PING이 없을 때 ACK PING을 받아도 무시한다. ACK PING에는 답하지 않는다",
+      "spec": [
+        "3.4"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "000000140002010000000000000000000102030405060708",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "ack-ping-with-different-payload-is-ignored",
+      "description": "내가 보낸 PING과 payload가 다른 ACK PING도 무시하고 답하지 않는다. 같은 payload의 ACK PING도 답하지 않는다",
+      "spec": [
+        "3.4"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "ping",
+          "payload": "0102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140002010000000000000000001112131415161718",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140002010000000000000000000102030405060708",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "ping-payload-seven-bytes-closes",
+      "description": "PING의 payload가 정확히 8바이트가 아니면(7바이트) 연결 오류다. ACK로 답하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "3.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001300020000000000000000000001010101010101",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ack-ping-payload-seven-bytes-closes",
+      "description": "ACK PING도 payload가 정확히 8바이트가 아니면(7바이트) 연결 오류다. 무시하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "3.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001300020100000000000000000001010101010101",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ping-payload-nine-bytes-closes",
+      "description": "PING의 payload가 정확히 8바이트가 아니면(9바이트) 연결 오류다. ACK로 답하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "3.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000015000200000000000000000000010101010101010101",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ack-ping-payload-nine-bytes-closes",
+      "description": "ACK PING도 payload가 정확히 8바이트가 아니면(9바이트) 연결 오류다. 무시하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "3.4",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000015000201000000000000000000010101010101010101",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-flags-are-ignored",
+      "description": "CLOSE의 flags는 모든 비트가 미정의이므로 켜져 있어도 무시한다. flags가 0xFF인 CLOSE(NO_ERROR)를 오류로 취급하지 않고 일반 CLOSE처럼 받아, 대기 중인 스트림이 없으므로 아무것도 보내지 않고 닫는다",
+      "spec": [
+        "2.3",
+        "3.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "000000100003ff00000000000000000000000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-flags-are-ignored",
+      "description": "RESET의 flags는 모두 미정의이므로 켜져 있어도 무시한다. max_concurrent_streams가 1일 때 요청 1을 flags 0xFF인 RESET으로 끝내면 그 자리가 반환되어 요청 3을 다시 수락한다",
+      "spec": [
+        "2.3",
+        "4.3",
+        "4.5"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "local_hello": {
+          "max_concurrent_streams": 1
+        }
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "000000100004ff00000000010000000000000004",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000300000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 3,
+              "type": 257
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

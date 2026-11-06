@@ -37,7 +37,7 @@ enum FieldKind {
             c.range(path, element, 0, U32_MAX);
         }
     },
-    /** 1 이상의 u32. 0이 아닌 스트림 ID, 시간(ms), 보관 한도에 쓴다. */
+    /** 1 이상의 u32. 0이 아닌 스트림 ID와 시간(ms)에 쓴다. */
     POSITIVE_U32 {
         @Override
         void check(Check c, String path, JsonElement element) {
@@ -78,13 +78,6 @@ enum FieldKind {
             c.range(path, element, 0, 0);
         }
     },
-    /** 애플리케이션 프레임의 flags(RESPONSE, END). */
-    APP_FLAGS {
-        @Override
-        void check(Check c, String path, JsonElement element) {
-            c.flags(path, element, VectorSchema.APP_FLAGS);
-        }
-    },
     /** HELLO·PING의 flags(ACK). */
     ACK_FLAGS {
         @Override
@@ -122,6 +115,32 @@ enum FieldKind {
         @Override
         void check(Check c, String path, JsonElement element) {
             c.oneOf(path, element, VectorSchema.ROLES);
+        }
+    },
+    /** 0xFFFF 이하 256 이상 정수의 집합(중복 불가). */
+    KNOWN_TYPES {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.uniqueAppTypes(path, element);
+        }
+    },
+    TRANSPORT {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.oneOf(path, element, VectorSchema.TRANSPORTS);
+        }
+    },
+    OPCODE {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.oneOf(path, element, VectorSchema.OPCODES);
+        }
+    },
+    /** 클라이언트·서버가 다음에 쓸 스트림 번호. 홀짝은 role과 함께 보는 검사라 {@link VectorSchema}가 따로 본다. */
+    STREAM_NUMBER {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.range(path, element, 1, STREAM_ID_MAX);
         }
     },
     SETUP_CONFIG {
@@ -177,6 +196,7 @@ enum FieldKind {
     static final long U16_MAX = 65535L;
     static final long U32_MAX = 4294967295L;
     static final long FIRST_APP_TYPE = 256L;
+    static final long STREAM_ID_MAX = 2147483647L;
 
     /** 2.5.1절 status 이름, 코드 값 순서. 목록 크기가 곧 첫 예약 정수 값이다. */
     static final List<String> STATUS_NAMES = Arrays.asList(
@@ -199,16 +219,8 @@ enum FieldKind {
             "UNAUTHENTICATED");
 
     /** 2.5.2절 error_code 이름, 코드 값 순서. 목록 크기가 곧 첫 예약 정수 값이다. */
-    static final List<String> ERROR_CODE_NAMES = Arrays.asList(
-            "NO_ERROR",
-            "PROTOCOL_ERROR",
-            "INTERNAL_ERROR",
-            "FRAME_SIZE_ERROR",
-            "HELLO_TIMEOUT",
-            "STREAM_CLOSED",
-            "REFUSED",
-            "CANCEL",
-            "OVERLOAD");
+    static final List<String> ERROR_CODE_NAMES =
+            Arrays.asList("NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "REFUSED", "CANCEL", "OVERLOAD");
 
     abstract void check(Check c, String path, JsonElement element);
 }
