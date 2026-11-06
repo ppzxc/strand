@@ -46,7 +46,8 @@
       "description": "보낸 요청이 RESET(REFUSED)로 끝나면 애플리케이션에 UNAVAILABLE 결과를 넘기고 RESET으로 답하지 않는다. 스트림이 끝났으므로 같은 스트림의 늦은 응답과 RESET은 조용히 버려진다. 결과는 정확히 한 번 나가고 늦은 프레임에는 결과가 다시 나가지 않는다",
       "spec": [
         "4.3",
-        "4.4"
+        "4.4",
+        "4.6"
       ],
       "setup": {
         "role": "client",
@@ -1531,6 +1532,132 @@
               "status": "OK"
             }
           ]
+        }
+      ]
+    },
+    {
+      "id": "response-reserved-is-ignored",
+      "description": "응답 프레임의 reserved가 0이 아니어도(0xFFFF) 무시하고 정상 응답으로 전달한다",
+      "spec": [
+        "2.2.7",
+        "4.2"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c01010000000000010000ffff",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "OK"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "response-type-mismatch-discards-status-and-payload",
+      "description": "응답 type이 요청과 다르면 응답의 status(INVALID_ARGUMENT)와 payload는 버리고 애플리케이션에 로컬 INTERNAL 결과를 넘긴다. 와이어로는 아무것도 보내지 않는다",
+      "spec": [
+        "4.1",
+        "4.3"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000e010200030000000100000000abcd",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "INTERNAL"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "response-type-mismatch-returns-the-concurrency-slot",
+      "description": "응답 type 불일치도 정상 응답처럼 스트림을 끝내므로 동시 스트림 자리가 반환된다. 상대가 알린 max_concurrent_streams가 1일 때 불일치 응답 뒤의 새 요청이 로컬 실패 없이 다음 번호(3)로 나간다",
+      "spec": [
+        "4.1",
+        "4.3",
+        "4.5"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "peer_hello": {
+          "max_concurrent_streams": 1
+        }
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010200000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 1,
+              "status": "INTERNAL"
+            }
+          ]
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 3
+            }
+          ],
+          "events": []
         }
       ]
     }
