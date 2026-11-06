@@ -15,6 +15,10 @@ import java.util.Set;
 public final class Endpoint {
 
     private static final int PREFACE_MAGIC_LENGTH = 6;
+    /** 서버는 짝수, 클라이언트는 홀수 번호를 쓰고 첫 번호는 각각 2와 1이다(규격 2.2.5절). */
+    private static final int FIRST_SERVER_STREAM_ID = 2;
+
+    private static final int FIRST_CLIENT_STREAM_ID = 1;
     private static final int MIN_FRAME_LENGTH = 12;
     private static final int LENGTH_SIZE = 4;
     private static final int PING_PAYLOAD_SIZE = 8;
@@ -27,7 +31,9 @@ public final class Endpoint {
     private final ByteArrayOutputStream output = new ByteArrayOutputStream();
     private final List<Event> events = new ArrayList<>();
     private final List<Integer> pendingStreams = new ArrayList<>();
-    private final List<Request> queuedRequests = new ArrayList<>();
+    /** 상대 HELLO에 ACK를 보내기 전이라 미뤄 둔 송신(규격 3.3절). */
+    private final List<Runnable> deferredSends = new ArrayList<>();
+
     private byte[] inbound = new byte[0];
     private boolean prefaceChecked;
     private boolean firstFrameChecked;
@@ -46,7 +52,7 @@ public final class Endpoint {
 
     private Endpoint(boolean server, EndpointConfig config) {
         this.config = config;
-        this.nextStreamId = server ? 2 : 1;
+        this.nextStreamId = server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID;
     }
 
     /**
@@ -102,7 +108,7 @@ public final class Endpoint {
         }
         now += ms;
         if (waitingForAck && now > ackDeadline) {
-            connectionError(false);
+            connectionError();
         }
     }
 
@@ -117,22 +123,17 @@ public final class Endpoint {
         if (closed || closeSeen) {
             return;
         }
-        Request request = new Request(type, payload);
-        if (helloAcknowledged) {
-            sendRequest(request);
-        } else {
-            queuedRequests.add(request);
-        }
+        sendAfterAck(() -> sendRequest(type, payload));
     }
 
     /**
-     * 애플리케이션이 PING을 보내게 한다.
+     * 애플리케이션이 PING을 보내게 한다. 상대 HELLO에 ACK를 보내기 전이면 그 뒤로 미룬다(규격 3.3절).
      *
      * @param payload 정확히 8바이트
      */
     public void ping(byte[] payload) {
         if (!closed) {
-            send(Frames.control(Frames.PING, 0, payload));
+            sendAfterAck(() -> send(Frames.control(Frames.PING, 0, payload)));
         }
     }
 
@@ -147,9 +148,7 @@ public final class Endpoint {
         }
         send(Frames.close(errorCode));
         closeSeen = true;
-        if (errorCode != Frames.NO_ERROR || pendingStreams.isEmpty()) {
-            terminate();
-        }
+        terminateUnlessClosing(errorCode);
     }
 
     /**
@@ -208,14 +207,16 @@ public final class Endpoint {
             if (inbound.length < Frames.HEADER_SIZE) {
                 return false;
             }
-            if (typeOf(inbound) != Frames.HELLO || streamIdOf(inbound) != 0 || (inbound[6] & 0xFF) != 0) {
+            if (Frames.typeOf(inbound) != Frames.HELLO
+                    || Frames.streamIdOf(inbound) != 0
+                    || Frames.flagsOf(inbound) != 0) {
                 terminate();
                 return false;
             }
             firstFrameChecked = true;
         }
         if (length < MIN_FRAME_LENGTH || length > config.maxFrameSize() - LENGTH_SIZE) {
-            connectionError(false);
+            connectionError();
             return false;
         }
         int frameSize = (int) (LENGTH_SIZE + length);
@@ -229,41 +230,41 @@ public final class Endpoint {
     }
 
     private void handle(byte[] frame) {
-        int type = typeOf(frame);
-        int extensions = extensionsLengthOf(frame);
-        long streamId = streamIdOf(frame);
+        int type = Frames.typeOf(frame);
+        int extensions = Frames.extensionsLengthOf(frame);
+        long streamId = Frames.streamIdOf(frame);
         if (type == Frames.CLOSE) {
             handleClose(frame, extensions, streamId);
             return;
         }
         if (extensions > frame.length - LENGTH_SIZE - MIN_FRAME_LENGTH) {
-            connectionError(false);
+            connectionError();
             return;
         }
         if (type >= Frames.FIRST_APPLICATION_TYPE) {
             // 상대 ACK 전의 애플리케이션 프레임은 연결 오류다(규격 3.3절). 그 뒤의 처리는 이후 단계에서 다룬다.
             if (!peerAckReceived) {
-                connectionError(false);
+                connectionError();
             }
             return;
         }
         if (type != Frames.HELLO && type != Frames.PING && type != Frames.RESET) {
             // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절).
             if (extensions != 0) {
-                connectionError(false);
+                connectionError();
             }
             return;
         }
         if (extensions != 0 || (type != Frames.RESET && streamId != 0)) {
-            connectionError(false);
+            connectionError();
             return;
         }
         if (!peerAckReceived && (type == Frames.PING || type == Frames.RESET)) {
-            connectionError(false);
+            connectionError();
             return;
         }
         byte[] payload = Arrays.copyOfRange(frame, Frames.HEADER_SIZE, frame.length);
-        boolean ack = (frame[6] & Frames.ACK) != 0;
+        boolean ack = (Frames.flagsOf(frame) & Frames.ACK) != 0;
         if (type == Frames.HELLO) {
             handleHello(ack, payload);
         } else if (type == Frames.PING) {
@@ -275,7 +276,7 @@ public final class Endpoint {
         if (ack) {
             // 합친 프레임(ACK이면서 payload가 있음)과 두 번째 ACK는 연결 오류다(규격 3.2.5절).
             if (payload.length != 0 || peerAckReceived) {
-                connectionError(false);
+                connectionError();
                 return;
             }
             peerAckReceived = true;
@@ -283,18 +284,18 @@ public final class Endpoint {
             return;
         }
         if (helloAcknowledged || !validParameters(payload)) {
-            connectionError(false);
+            connectionError();
             return;
         }
         helloAcknowledged = true;
         send(Frames.control(Frames.HELLO, Frames.ACK, new byte[0]));
-        for (Request request : queuedRequests) {
+        for (Runnable deferred : deferredSends) {
             if (closed || closeSeen) {
                 break;
             }
-            sendRequest(request);
+            deferred.run();
         }
-        queuedRequests.clear();
+        deferredSends.clear();
     }
 
     /** HELLO payload 검증(규격 3.2.3절, 3.2.5절): 6의 배수, identifier 중복 없음, max_frame_size 범위. */
@@ -304,7 +305,7 @@ public final class Endpoint {
         }
         Set<Integer> seen = new HashSet<>();
         for (int at = 0; at < payload.length; at += PARAM_SIZE) {
-            int identifier = ((payload[at] & 0xFF) << 8) | (payload[at + 1] & 0xFF);
+            int identifier = Frames.readUnsignedShort(payload, at);
             if (!seen.add(identifier)) {
                 return false;
             }
@@ -318,7 +319,7 @@ public final class Endpoint {
 
     private void handlePing(boolean ack, byte[] payload) {
         if (payload.length != PING_PAYLOAD_SIZE) {
-            connectionError(false);
+            connectionError();
         } else if (!ack) {
             send(Frames.control(Frames.PING, Frames.ACK, payload));
         }
@@ -332,15 +333,19 @@ public final class Endpoint {
             terminate();
             return;
         }
-        long errorCode = Frames.readUnsignedInt(frame, Frames.HEADER_SIZE);
+        terminateUnlessClosing(Frames.readUnsignedInt(frame, Frames.HEADER_SIZE));
+    }
+
+    /** 오류 CLOSE이거나 대기 중인 스트림이 없으면 닫고, 아니면 대기 중인 스트림이 끝날 때까지 종료 중으로 둔다(규격 3.5절). */
+    private void terminateUnlessClosing(long errorCode) {
         if (errorCode != Frames.NO_ERROR || pendingStreams.isEmpty()) {
             terminate();
         }
     }
 
     /** 연결 오류: CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절, 5.1절). */
-    private void connectionError(boolean typeIsClose) {
-        if (!closeSeen && !typeIsClose) {
+    private void connectionError() {
+        if (!closeSeen) {
             send(Frames.close(Frames.PROTOCOL_ERROR));
         }
         closeSeen = true;
@@ -358,7 +363,7 @@ public final class Endpoint {
         closed = true;
         inbound = new byte[0];
         waitingForAck = false;
-        queuedRequests.clear();
+        deferredSends.clear();
         for (int streamId : pendingStreams) {
             events.add(Event.result(streamId, Event.UNAVAILABLE));
         }
@@ -372,37 +377,23 @@ public final class Endpoint {
         ackDeadline = now + config.ackTimeoutMs();
     }
 
-    private void sendRequest(Request request) {
+    /** 상대 HELLO에 ACK를 보낸 뒤면 바로, 아니면 ACK를 보낼 때까지 미뤄서 보낸다. */
+    private void sendAfterAck(Runnable sending) {
+        if (helloAcknowledged) {
+            sending.run();
+        } else {
+            deferredSends.add(sending);
+        }
+    }
+
+    private void sendRequest(int type, byte[] payload) {
         int streamId = nextStreamId;
         nextStreamId += 2;
         pendingStreams.add(streamId);
-        send(Frames.request(request.type, streamId, request.payload));
+        send(Frames.request(type, streamId, payload));
     }
 
     private void send(byte[] frame) {
         output.write(frame, 0, frame.length);
-    }
-
-    private static int typeOf(byte[] frame) {
-        return ((frame[4] & 0xFF) << 8) | (frame[5] & 0xFF);
-    }
-
-    private static long streamIdOf(byte[] frame) {
-        return Frames.readUnsignedInt(frame, 8);
-    }
-
-    private static int extensionsLengthOf(byte[] frame) {
-        return ((frame[12] & 0xFF) << 8) | (frame[13] & 0xFF);
-    }
-
-    /** 상대 HELLO에 ACK를 보내기 전이라 미뤄 둔 요청. */
-    private static final class Request {
-        final int type;
-        final byte[] payload;
-
-        Request(int type, byte[] payload) {
-            this.type = type;
-            this.payload = payload;
-        }
     }
 }

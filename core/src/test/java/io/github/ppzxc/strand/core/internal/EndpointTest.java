@@ -727,6 +727,17 @@ class EndpointTest {
     }
 
     @Test
+    void pingBeforeAckingThePeerHelloWaitsForTheAck() {
+        Endpoint server = serverAfterPreface();
+
+        server.ping(bytes("0102030405060708"));
+        assertOpenAndSilent(server);
+        server.receive(bytes(HELLO));
+
+        assertThat(sent(server)).isEqualTo(HELLO_ACK + "00000014000200000000000000000000" + "0102030405060708");
+    }
+
+    @Test
     void closeSendsCloseAndClosesWhenNothingIsPending() {
         Endpoint server = serverAfterPreface();
 

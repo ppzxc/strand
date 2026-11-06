@@ -89,4 +89,28 @@ final class Frames {
         System.arraycopy(b, 0, out, a.length, b.length);
         return out;
     }
+
+    static int readUnsignedShort(byte[] bytes, int at) {
+        return ((bytes[at] & 0xFF) << 8) | (bytes[at + 1] & 0xFF);
+    }
+
+    /** 프레임의 {@code type}(바이트 4~5, 규격 2.1절). */
+    static int typeOf(byte[] frame) {
+        return readUnsignedShort(frame, 4);
+    }
+
+    /** 프레임의 {@code flags}(바이트 6). */
+    static int flagsOf(byte[] frame) {
+        return frame[6] & 0xFF;
+    }
+
+    /** 프레임의 {@code stream_id}(바이트 8~11). */
+    static long streamIdOf(byte[] frame) {
+        return readUnsignedInt(frame, 8);
+    }
+
+    /** 프레임의 {@code extensions_length}(바이트 12~13). */
+    static int extensionsLengthOf(byte[] frame) {
+        return readUnsignedShort(frame, 12);
+    }
 }
