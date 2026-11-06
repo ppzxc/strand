@@ -138,10 +138,10 @@ public final class Endpoint {
      * WebSocket 메시지 하나를 넣는다. 서문은 첫 바이너리 메시지, 그 뒤로는 메시지 하나가 프레임 하나다(규격 1.2절). 바이너리가 아닌
      * 메시지, 크기가 {@code 4 + length}가 아닌 메시지는 연결 오류다. type이 CLOSE이면 크기가 어긋나도 받은 CLOSE로 본다.
      *
-     * @param binary 바이너리 메시지이면 true, 텍스트 메시지이면 false
+     * @param kind 메시지 종류
      * @param message 메시지 내용
      */
-    public void receiveMessage(boolean binary, byte[] message) {
+    public void receiveMessage(MessageKind kind, byte[] message) {
         if (!config.isWebSocket()) {
             throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
         }
@@ -149,7 +149,9 @@ public final class Endpoint {
             return;
         }
         if (!prefaceChecked) {
-            if (binary && message.length == Frames.preface().length && matchesPrefaceMagic(message)) {
+            if (kind == MessageKind.BINARY
+                    && message.length == Frames.preface().length
+                    && matchesPrefaceMagic(message)) {
                 prefaceChecked = true;
                 sendHello();
             } else {
@@ -157,11 +159,11 @@ public final class Endpoint {
             }
             return;
         }
-        if (!firstFrameChecked && !checkFirstMessage(binary, message)) {
+        if (!firstFrameChecked && !checkFirstMessage(kind, message)) {
             terminate();
             return;
         }
-        if (!binary || message.length < TYPE_END) {
+        if (kind != MessageKind.BINARY || message.length < TYPE_END) {
             connectionError();
             return;
         }
@@ -335,8 +337,8 @@ public final class Endpoint {
     }
 
     /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 첫 프레임 검사를 마친 것으로 기록한다. */
-    private boolean checkFirstMessage(boolean binary, byte[] message) {
-        boolean valid = binary
+    private boolean checkFirstMessage(MessageKind kind, byte[] message) {
+        boolean valid = kind == MessageKind.BINARY
                 && message.length >= Frames.HEADER_SIZE
                 && Frames.readUnsignedInt(message, 0) >= MIN_FRAME_LENGTH
                 && isFirstFrameHeader(message);
