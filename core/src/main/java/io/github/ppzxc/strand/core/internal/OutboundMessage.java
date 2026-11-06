@@ -4,7 +4,7 @@ package io.github.ppzxc.strand.core.internal;
 public final class OutboundMessage {
 
     /** 메시지 종류. */
-    public enum Kind {
+    public enum Type {
         /** 프레임 하나(연결 서문 포함)를 실은 바이너리 메시지. */
         BINARY,
         /** WebSocket 닫기({@code Close Frame 0x08}). WebSocket 전송에서만 나온다. */
@@ -14,23 +14,23 @@ public final class OutboundMessage {
     private static final int NORMAL_CLOSURE = 1000;
     private static final byte[] NO_BYTES = new byte[0];
 
-    private final Kind kind;
+    private final Type type;
     private final byte[] bytes;
     private final int statusCode;
 
-    private OutboundMessage(Kind kind, byte[] bytes, int statusCode) {
-        this.kind = kind;
+    private OutboundMessage(Type type, byte[] bytes, int statusCode) {
+        this.type = type;
         this.bytes = bytes;
         this.statusCode = statusCode;
     }
 
     static OutboundMessage binary(byte[] bytes) {
-        return new OutboundMessage(Kind.BINARY, bytes, 0);
+        return new OutboundMessage(Type.BINARY, bytes, 0);
     }
 
     /** {@code NO_ERROR} 종료의 WebSocket Close. 상태 코드는 {@code 1000 Normal Closure}다(규격 1.2절). */
     static OutboundMessage normalWebSocketClose() {
-        return new OutboundMessage(Kind.WEBSOCKET_CLOSE, NO_BYTES, NORMAL_CLOSURE);
+        return new OutboundMessage(Type.WEBSOCKET_CLOSE, NO_BYTES, NORMAL_CLOSURE);
     }
 
     /**
@@ -38,12 +38,12 @@ public final class OutboundMessage {
      *
      * @return 종류
      */
-    public Kind kind() {
-        return kind;
+    public Type type() {
+        return type;
     }
 
     /**
-     * {@link Kind#BINARY}의 내용. {@link Kind#WEBSOCKET_CLOSE}에서는 빈 배열이다.
+     * {@link Type#BINARY}의 내용. {@link Type#WEBSOCKET_CLOSE}에서는 빈 배열이다.
      *
      * @return 메시지 내용
      */
@@ -52,7 +52,7 @@ public final class OutboundMessage {
     }
 
     /**
-     * {@link Kind#WEBSOCKET_CLOSE}의 WebSocket 상태 코드. {@link Kind#BINARY}에서는 0이다.
+     * {@link Type#WEBSOCKET_CLOSE}의 WebSocket 상태 코드. {@link Type#BINARY}에서는 0이다.
      *
      * @return 상태 코드
      */

@@ -356,13 +356,13 @@ final class VectorRunner {
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         boolean first = true;
         for (OutboundMessage message : messages) {
-            if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE && message.statusCode() != NORMAL_CLOSURE) {
+            if (message.type() == OutboundMessage.Type.WEBSOCKET_CLOSE && message.statusCode() != NORMAL_CLOSURE) {
                 // 1000이 아닌 상태 코드는 규격이 정하지 않아 관측하지 않는다(벡터 형식 6.1절).
                 continue;
             }
             boolean withPreface = startsWithPreface && first;
             first = false;
-            if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE) {
+            if (message.type() == OutboundMessage.Type.WEBSOCKET_CLOSE) {
                 result.addAll(describe(stream.toByteArray(), startsWithPreface && result.isEmpty()));
                 stream.reset();
                 result.add("WEBSOCKET_CLOSE code=" + message.statusCode());
