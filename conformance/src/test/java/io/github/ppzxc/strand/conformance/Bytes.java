@@ -7,9 +7,14 @@ final class Bytes {
 
     private Bytes() {}
 
+    /** hex에서 공백(스페이스·탭·줄바꿈)을 모두 지운다. 대소문자는 건드리지 않는다. */
+    static String compactHex(String hex) {
+        return hex.replaceAll("\\s", "");
+    }
+
     /** 공백을 지운 hex를 바이트로. */
     static byte[] fromHex(String hex) {
-        String clean = hex.replaceAll("\\s", "");
+        String clean = compactHex(hex);
         byte[] out = new byte[clean.length() / 2];
         for (int i = 0; i < out.length; i++) {
             out[i] = (byte) Integer.parseInt(clean.substring(2 * i, 2 * i + 2), 16);

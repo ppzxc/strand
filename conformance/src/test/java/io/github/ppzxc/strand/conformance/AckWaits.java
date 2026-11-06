@@ -5,6 +5,8 @@ import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
+import java.util.function.Predicate;
 
 /**
  * 벡터에서 확인 대기(HELLO나 PING을 보내고 ACK를 기다리는 시간, 규격 3.3절)의 구간을 해석한다. 대기는 HELLO/PING 송신
@@ -48,18 +50,17 @@ final class AckWaits {
 
     /** 벡터가 확인 대기를 하나라도 시작하는가. */
     static boolean startsAnyWait(JsonObject vector) {
-        for (JsonElement step : vector.getAsJsonArray("steps")) {
-            if (!startedBy(step.getAsJsonObject()).isEmpty()) {
-                return true;
-            }
-        }
-        return false;
+        return anyStep(vector, step -> !startedBy(step).isEmpty());
     }
 
     /** 벡터에 advance 단계가 있는가. */
     static boolean hasAdvance(JsonObject vector) {
+        return anyStep(vector, step -> kindOf(step).equals("advance"));
+    }
+
+    private static boolean anyStep(JsonObject vector, Predicate<JsonObject> matches) {
         for (JsonElement step : vector.getAsJsonArray("steps")) {
-            if (kindOf(step.getAsJsonObject()).equals("advance")) {
+            if (matches.test(step.getAsJsonObject())) {
                 return true;
             }
         }
@@ -151,7 +152,7 @@ final class AckWaits {
         return payload != null
                         && payload.isJsonPrimitive()
                         && payload.getAsJsonPrimitive().isString()
-                ? payload.getAsString().replaceAll("\\s", "").toLowerCase()
+                ? normalizedHex(payload.getAsString())
                 : null;
     }
 
@@ -168,7 +169,12 @@ final class AckWaits {
     }
 
     private static String hexOf(JsonObject step) {
-        return step.get("hex").getAsString().replaceAll("\\s", "").toLowerCase();
+        return normalizedHex(step.get("hex").getAsString());
+    }
+
+    /** 공백을 지우고 소문자로 맞춘 hex. 로더를 거치지 않은 JSON을 읽으므로 표기를 여기서 맞춘다. */
+    private static String normalizedHex(String hex) {
+        return Bytes.compactHex(hex).toLowerCase(Locale.ROOT);
     }
 
     /** 확인 대기 하나. PING이면 payload로 ACK와 맞춰 본다. */

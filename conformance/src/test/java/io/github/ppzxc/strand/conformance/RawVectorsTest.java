@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -24,5 +25,17 @@ class RawVectorsTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("f/a");
         assertThat(target).hasSize(1);
+    }
+
+    @Test
+    void filesAreReadOncePerVectorDirectory() {
+        assertThat(RawVectors.files()).isSameAs(RawVectors.files());
+    }
+
+    @Test
+    void vectorsOfAFileAreReadOnce() {
+        Path file = RawVectors.files().get(0);
+
+        assertThat(RawVectors.vectors(file)).isSameAs(RawVectors.vectors(file));
     }
 }
