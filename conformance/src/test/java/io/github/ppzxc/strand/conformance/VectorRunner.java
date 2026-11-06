@@ -318,6 +318,10 @@ final class VectorRunner {
     private static List<String> describe(List<Event> events) {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
+            if (event.kind() == Event.Kind.RESULT && event.streamId() == 0) {
+                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id가 없어 result 이벤트가 아니다(벡터 형식 6.2절). 비교하지 않는다.
+                continue;
+            }
             if (event.kind() == Event.Kind.RESULT) {
                 result.add("result stream_id=" + event.streamId() + " status=" + nameOfStatus(event.status()));
             } else if (event.kind() == Event.Kind.REQUEST_RECEIVED) {

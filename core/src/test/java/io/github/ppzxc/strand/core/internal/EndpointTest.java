@@ -123,6 +123,19 @@ class EndpointTest {
         assertThat(endpoint.drainEvents()).isEmpty();
     }
 
+    /** 로컬에서 실패한 요청: 프레임 없이 stream id 없는 RESULT(UNAVAILABLE)가 정확히 한 번 나온다(규격 2.2.5절, 3.2.1절, 3.5절). */
+    private static void assertFailedLocally(Endpoint endpoint) {
+        assertThat(endpoint.drainOutput()).isEmpty();
+        assertLocalUnavailableEvents(endpoint.drainEvents());
+    }
+
+    private static void assertLocalUnavailableEvents(List<Event> events) {
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+        assertThat(events.get(0).streamId()).isZero();
+    }
+
     // ---- 서버: 연결 서문과 HELLO ----
 
     @Test
@@ -731,7 +744,69 @@ class EndpointTest {
 
         server.request(257, new byte[0]);
 
-        assertOpenAndSilent(server);
+        assertFailedLocally(server);
+    }
+
+    @Test
+    void requestAfterCloseWasReceivedWhileAStreamIsPendingIsFailedLocally() {
+        Endpoint server = established();
+        server.request(257, new byte[0]);
+        server.receive(bytes(CLOSE_NO_ERROR));
+        server.drainOutput();
+        server.drainEvents();
+
+        server.request(257, new byte[0]);
+
+        assertFailedLocally(server);
+    }
+
+    @Test
+    void requestAfterTheConnectionClosedIsFailedLocally() {
+        Endpoint server = established();
+        server.close(Frames.PROTOCOL_ERROR);
+        server.drainOutput();
+        server.drainEvents();
+
+        server.request(257, new byte[0]);
+
+        assertFailedLocally(server);
+    }
+
+    @Test
+    void requestDeferredBeforeTheAckIsFailedLocallyWhenCloseArrivesFirst() {
+        Endpoint server = serverAfterPreface(EndpointConfig.defaults());
+        server.request(257, new byte[0]);
+        server.drainOutput();
+        server.drainEvents();
+
+        server.receive(bytes(CLOSE_NO_ERROR));
+
+        List<Event> events = server.drainEvents();
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+        assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void deferredRequestsAfterNumberExhaustionAreFailedLocallyEachOnce() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        client.drainOutput();
+        client.request(257, new byte[0]);
+        client.request(257, new byte[0]);
+        client.request(257, new byte[0]);
+        client.ping(bytes("0102030405060708"));
+
+        client.receive(bytes(HELLO));
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(2);
+        for (Event event : events) {
+            assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
+            assertThat(event.status()).isEqualTo(Event.UNAVAILABLE);
+            assertThat(event.streamId()).isZero();
+        }
+        assertThat(sent(client)).isEqualTo(HELLO_ACK + requestFrame(257, 2147483647, "") + CLOSE_NO_ERROR);
     }
 
     @Test
@@ -1526,7 +1601,7 @@ class EndpointTest {
             endpoint.request(257, new byte[0]);
 
             assertThat(sent(endpoint)).isEqualTo("00000010000300000000000000000000" + "00000000");
-            assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
+            assertThat(kinds(endpoint)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
         }
     }
 
@@ -1541,7 +1616,7 @@ class EndpointTest {
 
         client.request(257, new byte[0]);
 
-        assertOpenAndSilent(client);
+        assertFailedLocally(client);
         client.receive(bytes(appFrame(2147483647, 0, "")));
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
@@ -1571,7 +1646,7 @@ class EndpointTest {
 
         client.request(257, new byte[0]);
 
-        assertOpenAndSilent(client);
+        assertFailedLocally(client);
     }
 
     @Test
@@ -1591,6 +1666,7 @@ class EndpointTest {
         client.request(257, new byte[0]);
         client.request(257, new byte[0]);
         client.drainOutput();
+        assertLocalUnavailableEvents(client.drainEvents());
         client.receive(bytes(appFrame(1, 0, "")));
         client.drainEvents();
 
@@ -1605,7 +1681,7 @@ class EndpointTest {
 
         client.request(257, new byte[0]);
 
-        assertOpenAndSilent(client);
+        assertFailedLocally(client);
     }
 
     @Test
