@@ -7,6 +7,8 @@ import com.google.gson.JsonObject;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.Event;
+import io.github.ppzxc.strand.core.internal.MessageKind;
+import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -16,6 +18,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 /**
  * 벡터 하나를 엔드포인트에 실행한다. `setup`으로 엔드포인트를 만들고 단계마다 입력을 넣어, 보낸 바이트를 프레임으로 풀어 `send`와,
@@ -38,14 +42,16 @@ final class VectorRunner {
             "known_types",
             "next_stream_id",
             "transport"));
-    private static final Set<String> SUPPORTED_STEPS = new HashSet<>(Arrays.asList(
-            "recv", "advance", "ping", "request", "close", "cancel", "respond", "disconnect", "recv_message"));
-    private static final Set<String> SUPPORTED_FRAMES =
-            new HashSet<>(Arrays.asList("PREFACE", "HELLO", "PING", "CLOSE", "RESET"));
-    private static final Set<String> SUPPORTED_EVENTS =
-            new HashSet<>(Arrays.asList("closed", "result", "request_received"));
+    /** 실행할 수 있는 단계. 지원 여부와 실행이 이 표 하나에서 정해진다. */
+    private static final Map<String, BiConsumer<VectorRunner, JsonObject>> STEPS = new LinkedHashMap<>();
+    /** 비교할 수 있는 이름 있는 프레임(숫자 type 프레임 제외). 지원 여부와 기대 표기가 이 표 하나에서 정해진다. */
+    private static final Map<String, Function<JsonObject, String>> NAMED_FRAMES = new LinkedHashMap<>();
+    /** 비교할 수 있는 이벤트. 지원 여부와 기대 표기가 이 표 하나에서 정해진다. */
+    private static final Map<String, Function<JsonObject, String>> EVENTS = new LinkedHashMap<>();
+
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
     private static final int FIRST_APPLICATION_TYPE = 256;
+    private static final int NORMAL_CLOSURE = 1000;
 
     static {
         HELLO_DEFAULTS.put("max_frame_size", 4_194_304L);
@@ -54,13 +60,76 @@ final class VectorRunner {
         HELLO_PARAMS.put(1, "max_frame_size");
         HELLO_PARAMS.put(2, "max_concurrent_streams");
         HELLO_PARAMS.put(3, "capabilities");
+
+        STEPS.put(
+                "recv",
+                (runner, step) ->
+                        runner.endpoint.receive(Bytes.fromHex(step.get("hex").getAsString())));
+        STEPS.put(
+                "recv_message",
+                (runner, step) -> runner.endpoint.receiveMessage(
+                        step.get("opcode").getAsString().equals("binary") ? MessageKind.BINARY : MessageKind.TEXT,
+                        Bytes.fromHex(step.get("hex").getAsString())));
+        STEPS.put(
+                "advance",
+                (runner, step) -> runner.endpoint.advance(step.get("ms").getAsLong()));
+        STEPS.put(
+                "ping",
+                (runner, step) ->
+                        runner.endpoint.ping(Bytes.fromHex(step.get("payload").getAsString())));
+        STEPS.put(
+                "request",
+                (runner, step) -> runner.endpoint.request(
+                        step.get("type").getAsInt(),
+                        Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
+        STEPS.put(
+                "cancel",
+                (runner, step) -> runner.endpoint.cancel(step.get("stream_id").getAsInt()));
+        STEPS.put(
+                "respond",
+                (runner, step) -> runner.endpoint.respond(
+                        step.get("stream_id").getAsInt(),
+                        statusCode(step.get("status")),
+                        Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
+        STEPS.put("disconnect", (runner, step) -> runner.endpoint.disconnect());
+        STEPS.put("close", (runner, step) -> runner.endpoint.close(errorCode(step.get("error_code"))));
+
+        NAMED_FRAMES.put("PREFACE", frame -> "PREFACE");
+        NAMED_FRAMES.put("HELLO", frame -> {
+            boolean ack = VectorSchema.hasFlag(frame, "ACK");
+            return "HELLO flags=" + (ack ? "ACK" : "-") + " stream_id=0 params="
+                    + (ack ? "-" : paramsText(helloParams(frame.getAsJsonObject("params"))));
+        });
+        NAMED_FRAMES.put(
+                "PING",
+                frame -> "PING flags=" + (VectorSchema.hasFlag(frame, "ACK") ? "ACK" : "-") + " stream_id=0 payload="
+                        + frame.get("payload").getAsString());
+        NAMED_FRAMES.put(
+                "CLOSE", frame -> "CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code")));
+        NAMED_FRAMES.put(
+                "WEBSOCKET_CLOSE",
+                frame -> "WEBSOCKET_CLOSE code=" + frame.get("code").getAsInt());
+        NAMED_FRAMES.put(
+                "RESET",
+                frame -> "RESET flags=- stream_id=" + frame.get("stream_id").getAsInt() + " error_code="
+                        + nameOfError(frame.get("error_code")));
+
+        EVENTS.put(
+                "result",
+                event -> "result stream_id=" + event.get("stream_id").getAsInt() + " status="
+                        + nameOfStatus(event.get("status")));
+        EVENTS.put(
+                "request_received",
+                event -> "request_received stream_id=" + event.get("stream_id").getAsInt() + " type="
+                        + event.get("type").getAsInt());
+        EVENTS.put("closed", event -> "closed");
     }
 
     private final boolean client;
     private final boolean webSocket;
     private final Endpoint endpoint;
 
-    private VectorRunner(boolean client, boolean webSocket, Endpoint endpoint) {
+    VectorRunner(boolean client, boolean webSocket, Endpoint endpoint) {
         this.client = client;
         this.webSocket = webSocket;
         this.endpoint = endpoint;
@@ -77,19 +146,20 @@ final class VectorRunner {
         VectorRunner runner =
                 new VectorRunner(client, webSocket, client ? Endpoint.client(config) : Endpoint.server(config));
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
-        byte[] opening = runner.endpoint.drainOutput();
+        List<OutboundMessage> opening = runner.endpoint.drainMessages();
         if (setup.get("established").getAsBoolean()) {
             runner.establish(opening, setup.getAsJsonObject("peer_hello"));
-            opening = new byte[0];
+            opening = new ArrayList<>();
         }
         int number = 0;
         for (JsonObject step : vector.steps()) {
             number++;
             runner.apply(step);
-            byte[] sent = Bytes.concat(opening, runner.endpoint.drainOutput());
-            boolean startsWithPreface = opening.length > 0;
-            opening = new byte[0];
-            assertThat(runner.describe(sent, startsWithPreface))
+            List<OutboundMessage> sent = new ArrayList<>(opening);
+            sent.addAll(runner.endpoint.drainMessages());
+            boolean startsWithPreface = !opening.isEmpty();
+            opening = new ArrayList<>();
+            assertThat(runner.describeMessages(sent, startsWithPreface))
                     .as("%d번째 단계의 send", number)
                     .isEqualTo(expectedFrames(step));
             assertThat(describe(runner.endpoint.drainEvents()))
@@ -110,7 +180,7 @@ final class VectorRunner {
         }
         for (JsonObject step : vector.steps()) {
             String kind = step.get("kind").getAsString();
-            requireSupportedPart(SUPPORTED_STEPS.contains(kind), vector, "단계 " + kind);
+            requireSupportedPart(STEPS.containsKey(kind), vector, "단계 " + kind);
             requireSupportedPart(
                     !kind.equals("request")
                             || !step.has("extensions")
@@ -121,7 +191,7 @@ final class VectorRunner {
                 JsonObject frame = element.getAsJsonObject();
                 String type = VectorSchema.frameType(frame);
                 requireSupportedPart(
-                        type != null ? SUPPORTED_FRAMES.contains(type) : isSupportedApplicationFrame(frame),
+                        type != null ? NAMED_FRAMES.containsKey(type) : isSupportedApplicationFrame(frame),
                         vector,
                         "프레임 " + frame.get("type"));
                 requireSupportedPart(
@@ -133,10 +203,7 @@ final class VectorRunner {
             }
             for (JsonElement event : step.getAsJsonArray("events")) {
                 requireSupportedPart(
-                        SUPPORTED_EVENTS.contains(
-                                event.getAsJsonObject().get("event").getAsString()),
-                        vector,
-                        "이벤트 " + event);
+                        EVENTS.containsKey(event.getAsJsonObject().get("event").getAsString()), vector, "이벤트 " + event);
             }
         }
     }
@@ -182,64 +249,33 @@ final class VectorRunner {
     }
 
     /** 규격 3.3절 표준 수립 순서를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. */
-    private void establish(byte[] opening, JsonObject peerHello) {
-        byte[] hello = opening;
+    private void establish(List<OutboundMessage> opening, JsonObject peerHello) {
+        List<OutboundMessage> hello = opening;
         if (!client) {
             deliver(Bytes.fromHex(PREFACE_HEX));
-            hello = endpoint.drainOutput();
+            hello = endpoint.drainMessages();
         }
-        assertThat(describe(hello, client)).as("수립: 연결을 연 뒤의 출력").hasSize(client ? 2 : 1);
+        assertThat(describeMessages(hello, client)).as("수립: 연결을 연 뒤의 출력").hasSize(client ? 2 : 1);
         deliver(encodeHello(helloParams(peerHello)));
-        assertThat(describe(endpoint.drainOutput(), false))
+        assertThat(describeMessages(endpoint.drainMessages(), false))
                 .as("수립: 상대 HELLO에 대한 ACK")
                 .containsExactly("HELLO flags=ACK stream_id=0 params=-");
         deliver(Bytes.fromHex(ACK_HELLO_HEX));
-        assertThat(endpoint.drainOutput()).as("수립: ACK 뒤의 출력").isEmpty();
+        assertThat(endpoint.drainMessages()).as("수립: ACK 뒤의 출력").isEmpty();
         assertThat(endpoint.drainEvents()).as("수립: 이벤트").isEmpty();
     }
 
     /** 수립에 쓰는 입력 하나를 전송 방식에 맞게 넣는다. WebSocket이면 메시지 하나로, 바이트 스트림이면 바이트로 넣는다. */
     private void deliver(byte[] bytes) {
         if (webSocket) {
-            endpoint.receiveMessage(true, bytes);
+            endpoint.receiveMessage(MessageKind.BINARY, bytes);
         } else {
             endpoint.receive(bytes);
         }
     }
 
     private void apply(JsonObject step) {
-        switch (step.get("kind").getAsString()) {
-            case "recv":
-                endpoint.receive(Bytes.fromHex(step.get("hex").getAsString()));
-                break;
-            case "recv_message":
-                endpoint.receiveMessage(
-                        step.get("opcode").getAsString().equals("binary"),
-                        Bytes.fromHex(step.get("hex").getAsString()));
-                break;
-            case "advance":
-                endpoint.advance(step.get("ms").getAsLong());
-                break;
-            case "ping":
-                endpoint.ping(Bytes.fromHex(step.get("payload").getAsString()));
-                break;
-            case "request":
-                endpoint.request(
-                        step.get("type").getAsInt(),
-                        Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : ""));
-                break;
-            case "cancel":
-                endpoint.cancel(step.get("stream_id").getAsInt());
-                break;
-            case "respond":
-                endpoint.respond(step.get("stream_id").getAsInt(), statusCode(step.get("status")));
-                break;
-            case "disconnect":
-                endpoint.disconnect();
-                break;
-            default:
-                endpoint.close(errorCode(step.get("error_code")));
-        }
+        STEPS.get(step.get("kind").getAsString()).accept(this, step);
     }
 
     /** 필드 이름에서 값으로, 빠진 값은 규격 기본값으로 채운다. 객체가 없으면 모두 기본값이다. */
@@ -272,26 +308,13 @@ final class VectorRunner {
         for (JsonElement element : step.getAsJsonArray("send")) {
             JsonObject frame = element.getAsJsonObject();
             String type = VectorSchema.frameType(frame);
-            boolean ack = VectorSchema.hasFlag(frame, "ACK");
-            String flags = ack ? "ACK" : "-";
             if (type == null) {
                 result.add("APP type=" + frame.get("type").getAsInt() + " flags=- stream_id="
                         + frame.get("stream_id").getAsInt()
                         + (frame.has("status") ? " status=" + nameOfStatus(frame.get("status")) : "") + " payload="
                         + (frame.has("payload") ? frame.get("payload").getAsString() : ""));
-            } else if (type.equals("PREFACE")) {
-                result.add("PREFACE");
-            } else if (type.equals("HELLO")) {
-                result.add("HELLO flags=" + flags + " stream_id=0 params="
-                        + (ack ? "-" : paramsText(helloParams(frame.getAsJsonObject("params")))));
-            } else if (type.equals("PING")) {
-                result.add("PING flags=" + flags + " stream_id=0 payload="
-                        + frame.get("payload").getAsString());
-            } else if (type.equals("RESET")) {
-                result.add("RESET flags=- stream_id=" + frame.get("stream_id").getAsInt() + " error_code="
-                        + nameOfError(frame.get("error_code")));
             } else {
-                result.add("CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code")));
+                result.add(NAMED_FRAMES.get(type).apply(frame));
             }
         }
         return result;
@@ -301,16 +324,7 @@ final class VectorRunner {
         List<String> result = new ArrayList<>();
         for (JsonElement element : step.getAsJsonArray("events")) {
             JsonObject event = element.getAsJsonObject();
-            if (event.get("event").getAsString().equals("result")) {
-                result.add("result stream_id=" + event.get("stream_id").getAsInt() + " status="
-                        + nameOfStatus(event.get("status")));
-            } else if (event.get("event").getAsString().equals("request_received")) {
-                result.add(
-                        "request_received stream_id=" + event.get("stream_id").getAsInt() + " type="
-                                + event.get("type").getAsInt());
-            } else {
-                result.add("closed");
-            }
+            result.add(EVENTS.get(event.get("event").getAsString()).apply(event));
         }
         return result;
     }
@@ -318,6 +332,10 @@ final class VectorRunner {
     private static List<String> describe(List<Event> events) {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
+            if (event.kind() == Event.Kind.RESULT && event.streamId() == 0) {
+                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id가 없어 result 이벤트가 아니다(벡터 형식 6.2절). 비교하지 않는다.
+                continue;
+            }
             if (event.kind() == Event.Kind.RESULT) {
                 result.add("result stream_id=" + event.streamId() + " status=" + nameOfStatus(event.status()));
             } else if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
@@ -326,6 +344,38 @@ final class VectorRunner {
                 result.add(event.kind().name().toLowerCase(Locale.ROOT));
             }
         }
+        return result;
+    }
+
+    /**
+     * 엔드포인트가 보낸 메시지를 벡터의 `send`와 같은 표기로 바꾼다. WebSocket에서는 바이너리 메시지마다 프레임이 정확히 하나여야 하고
+     * (벡터 형식 6.1절), WebSocket Close는 자기 항목이다. 바이트 스트림에서는 메시지를 이어 붙여 프레임으로 푼다.
+     */
+    List<String> describeMessages(List<OutboundMessage> messages, boolean startsWithPreface) {
+        List<String> result = new ArrayList<>();
+        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+        boolean first = true;
+        for (OutboundMessage message : messages) {
+            if (message.type() == OutboundMessage.Type.WEBSOCKET_CLOSE && message.statusCode() != NORMAL_CLOSURE) {
+                // 1000이 아닌 상태 코드는 규격이 정하지 않아 관측하지 않는다(벡터 형식 6.1절).
+                continue;
+            }
+            boolean withPreface = startsWithPreface && first;
+            first = false;
+            if (message.type() == OutboundMessage.Type.WEBSOCKET_CLOSE) {
+                result.addAll(describe(stream.toByteArray(), startsWithPreface && result.isEmpty()));
+                stream.reset();
+                result.add("WEBSOCKET_CLOSE code=" + message.statusCode());
+            } else if (webSocket) {
+                List<String> frames = describe(message.bytes(), withPreface);
+                assertThat(frames).as("WebSocket 메시지마다 프레임이 하나").hasSize(1);
+                result.addAll(frames);
+            } else {
+                byte[] bytes = message.bytes();
+                stream.write(bytes, 0, bytes.length);
+            }
+        }
+        result.addAll(describe(stream.toByteArray(), startsWithPreface && result.isEmpty()));
         return result;
     }
 

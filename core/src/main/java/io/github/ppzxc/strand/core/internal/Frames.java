@@ -39,7 +39,12 @@ final class Frames {
 
     /** 확장 영역과 payload가 없는 응답 프레임. 오류 응답에 쓴다(규격 4.1절). */
     static byte[] response(int type, int streamId, int status) {
-        return frame(type, 0, status, streamId, new byte[0]);
+        return response(type, streamId, status, new byte[0]);
+    }
+
+    /** 확장 영역이 없는 응답 프레임(규격 4.1절). */
+    static byte[] response(int type, int streamId, int status, byte[] payload) {
+        return frame(type, 0, status, streamId, payload);
     }
 
     /** 스트림 하나를 중단하는 RESET(규격 4.4절). */

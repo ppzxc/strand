@@ -2,6 +2,46 @@
   "format": 1,
   "vectors": [
     {
+      "id": "response-carries-the-application-payload",
+      "description": "애플리케이션이 payload를 실어 응답하면 응답 프레임이 요청과 같은 type·stream_id, 그 status, 그 payload를 싣고 나간다",
+      "spec": [
+        "4.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000c010100000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": 1,
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "respond",
+          "stream_id": 1,
+          "status": "OK",
+          "payload": "cafe01",
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 1,
+              "status": "OK",
+              "payload": "cafe01"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
       "id": "sender-reset-received-refused",
       "description": "보낸 요청이 RESET(REFUSED)로 끝나면 애플리케이션에 UNAVAILABLE 결과를 넘기고 RESET으로 답하지 않는다. 스트림이 끝났으므로 같은 스트림의 늦은 응답과 RESET은 조용히 버려진다. 결과는 정확히 한 번 나가고 늦은 프레임에는 결과가 다시 나가지 않는다",
       "spec": [
@@ -446,6 +486,61 @@
           "type": 257,
           "send": [],
           "events": []
+        }
+      ]
+    },
+    {
+      "id": "exhaustion-takes-precedence-over-peer-limit",
+      "description": "번호가 소진됐고 상대가 알린 max_concurrent_streams(1)에도 닿은 경우, 요청은 프레임 없이 로컬 UNAVAILABLE로 실패하고 CLOSE(NO_ERROR)도 보낸다. 마지막 번호의 요청이 대기 중이므로 연결은 종료 중이고 그 응답을 받은 뒤 closed가 난다",
+      "spec": [
+        "2.2.5",
+        "3.2.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true,
+        "next_stream_id": 2147483647,
+        "peer_hello": {
+          "max_concurrent_streams": 1
+        }
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": 2147483647
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000000c010100007fffffff00000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": 2147483647,
+              "status": "OK"
+            },
+            {
+              "event": "closed"
+            }
+          ]
         }
       ]
     },

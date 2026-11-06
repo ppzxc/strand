@@ -50,6 +50,11 @@ public final class Event {
         return new Event(Kind.RESULT, streamId, status, 0);
     }
 
+    /** 스트림을 열기 전에 로컬에서 실패한 요청의 결과. 스트림 번호가 없다(규격 2.2.5절, 3.2.1절, 3.5절). */
+    static Event localUnavailable() {
+        return new Event(Kind.RESULT, 0, UNAVAILABLE, 0);
+    }
+
     /** 내 요청이 받은 RESET으로 끝났을 때 애플리케이션에 넘기는 로컬 status(규격 4.4절). 예약 error_code는 INTERNAL_ERROR로 본다. */
     static int statusForReset(long errorCode) {
         if (errorCode == Frames.ERROR_CANCEL) {
@@ -77,7 +82,8 @@ public final class Event {
     }
 
     /**
-     * {@link Kind#RESULT}와 {@link Kind#REQUEST_RECEIVED}의 스트림 번호. 다른 종류에서는 0이다.
+     * {@link Kind#RESULT}와 {@link Kind#REQUEST_RECEIVED}의 스트림 번호. 다른 종류에서는 0이다. 스트림을 열기 전에 로컬에서 실패한
+     * 요청의 {@link Kind#RESULT}도 0이다. 실제 스트림 번호는 0이 될 수 없다.
      *
      * @return 스트림 번호
      */

@@ -44,6 +44,10 @@ _Avoid_: 피요청자, 피호출자
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 패킷(L3/L4와 혼동 주의), 메시지(프레임과 페이로드를 구별할 것)
 
+**WebSocket 메시지 (WebSocket Message) / WebSocket Close**:
+정의: [규격 1.2절](docs/specification/STRAND_SPECIFICATION.md#12-공식-사용-환경)
+_Avoid_: 메시지(단독 표기. 프레임과 구별할 것), WebSocket 프레임(RFC 6455의 프레임과 혼동 주의), 웹소켓 종료 프레임
+
 **헤더 (Header)**:
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 프레임 프리픽스, 메타 헤더

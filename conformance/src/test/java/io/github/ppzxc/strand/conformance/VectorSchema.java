@@ -121,6 +121,7 @@ final class VectorSchema {
                         .allow("stream_id", FieldKind.ZERO));
         FRAMES_BY_TYPE.put(
                 "CLOSE", FRAME_BASE.require("error_code", FieldKind.ERROR_CODE).allow("stream_id", FieldKind.ZERO));
+        FRAMES_BY_TYPE.put("WEBSOCKET_CLOSE", FRAME_BASE.require("code", FieldKind.WEBSOCKET_CLOSE_CODE));
         FRAMES_BY_TYPE.put(
                 "RESET",
                 FRAME_BASE.require("stream_id", FieldKind.POSITIVE_U32).require("error_code", FieldKind.ERROR_CODE));
@@ -181,7 +182,22 @@ final class VectorSchema {
                         Check.child(Check.item("steps", i), STEP_TAG),
                         "established가 false인 벡터는 상대 HELLO에 대한 ACK 송신(send의 HELLO ACK) 이전에 ping 단계를 쓸 수 없다");
             }
+            if (transport.equals("tcp")) {
+                rejectWebSocketClose(c, i, step);
+            }
             helloAckSent |= sendsHelloAck(step);
+        }
+    }
+
+    /** WebSocket Close는 WebSocket 전송의 출력 항목이다(벡터 형식 문서 6.1절). */
+    private static void rejectWebSocketClose(Check c, int stepIndex, JsonObject step) {
+        JsonArray send = step.getAsJsonArray("send");
+        for (int j = 0; j < send.size(); j++) {
+            if ("WEBSOCKET_CLOSE".equals(frameType(send.get(j).getAsJsonObject()))) {
+                throw c.failAt(
+                        Check.child(Check.item(Check.child(Check.item("steps", stepIndex), "send"), j), FRAME_TAG),
+                        "transport가 tcp인 벡터에는 WEBSOCKET_CLOSE 항목을 쓸 수 없다");
+            }
         }
     }
 

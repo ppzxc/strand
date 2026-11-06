@@ -1,10 +1,16 @@
 package io.github.ppzxc.strand.conformance;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import io.github.ppzxc.strand.core.internal.Endpoint;
+import io.github.ppzxc.strand.core.internal.EndpointConfig;
+import io.github.ppzxc.strand.core.internal.OutboundMessage;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -184,5 +190,114 @@ class VectorRunnerTest {
                 vector(ESTABLISHED, step("request", "\"type\":257,\"extensions\":[{\"tag\":1}],", "[]", "[]"));
 
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
+
+    private static final String WEBSOCKET_ESTABLISHED =
+            "{\"role\":\"server\",\"established\":true,\"transport\":\"websocket\"}";
+    private static final String WEBSOCKET_CLOSE_1000 = "{\"type\":\"WEBSOCKET_CLOSE\",\"code\":1000}";
+    private static final String CLOSE_NO_ERROR = "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\"}";
+    private static final String CLOSE_STEP_NO_ERROR = "\"error_code\":\"NO_ERROR\",";
+
+    @Test
+    void webSocketCloseItemIsComparedAfterTheCloseFrame() {
+        ConformanceVector v = vector(
+                WEBSOCKET_ESTABLISHED,
+                step(
+                        "close",
+                        CLOSE_STEP_NO_ERROR,
+                        "[" + CLOSE_NO_ERROR + "," + WEBSOCKET_CLOSE_1000 + "]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void aMissingWebSocketCloseItemFails() {
+        ConformanceVector v = vector(
+                WEBSOCKET_ESTABLISHED,
+                step("close", CLOSE_STEP_NO_ERROR, "[" + CLOSE_NO_ERROR + "]", "[{\"event\":\"closed\"}]"));
+
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void aWebSocketCloseItemBeforeTheCloseFrameFails() {
+        ConformanceVector v = vector(
+                WEBSOCKET_ESTABLISHED,
+                step(
+                        "close",
+                        CLOSE_STEP_NO_ERROR,
+                        "[" + WEBSOCKET_CLOSE_1000 + "," + CLOSE_NO_ERROR + "]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void aByteStreamEndpointExpectedToSendAWebSocketCloseFails() {
+        ConformanceVector v = vector(
+                ESTABLISHED,
+                step(
+                        "close",
+                        CLOSE_STEP_NO_ERROR,
+                        "[" + CLOSE_NO_ERROR + "," + WEBSOCKET_CLOSE_1000 + "]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
+
+    /** 규격이 정하지 않아 관측하지 않는 WebSocket Close(1000이 아닌 상태 코드). 엔드포인트는 내지 않으므로 직접 만든다. */
+    private static OutboundMessage unobservedWebSocketClose() throws ReflectiveOperationException {
+        Constructor<OutboundMessage> constructor =
+                OutboundMessage.class.getDeclaredConstructor(OutboundMessage.Type.class, byte[].class, int.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(OutboundMessage.Type.WEBSOCKET_CLOSE, new byte[0], 1001);
+    }
+
+    private static OutboundMessage binaryMessage(byte[] bytes) throws ReflectiveOperationException {
+        Method binary = OutboundMessage.class.getDeclaredMethod("binary", byte[].class);
+        binary.setAccessible(true);
+        return (OutboundMessage) binary.invoke(null, (Object) bytes);
+    }
+
+    @Test
+    void skippingAnUnobservedWebSocketCloseKeepsTheNextMessageAsTheFirst() throws ReflectiveOperationException {
+        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        List<OutboundMessage> messages =
+                Arrays.asList(unobservedWebSocketClose(), binaryMessage(Bytes.fromHex("c0de535452300000")));
+
+        assertThat(runner.describeMessages(messages, true)).containsExactly("PREFACE");
+    }
+
+    private static final String PING_FRAME = "00000014000200000000000000000000" + "0102030405060708";
+
+    @Test
+    void aWebSocketMessageCarryingTwoFramesFails() throws ReflectiveOperationException {
+        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        List<OutboundMessage> messages = Arrays.asList(binaryMessage(Bytes.fromHex(PING_FRAME + PING_FRAME)));
+
+        assertThatThrownBy(() -> runner.describeMessages(messages, false)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void aFrameSplitAcrossTwoWebSocketMessagesFails() throws ReflectiveOperationException {
+        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        List<OutboundMessage> messages = Arrays.asList(
+                binaryMessage(Bytes.fromHex(PING_FRAME.substring(0, 20))),
+                binaryMessage(Bytes.fromHex(PING_FRAME.substring(20))));
+
+        assertThatThrownBy(() -> runner.describeMessages(messages, false)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void aByteStreamMayCarryTwoFramesInOneMessageOrSplitAcrossMessages() throws ReflectiveOperationException {
+        VectorRunner runner = new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()));
+        List<OutboundMessage> twoInOne = Arrays.asList(binaryMessage(Bytes.fromHex(PING_FRAME + PING_FRAME)));
+        List<OutboundMessage> split = Arrays.asList(
+                binaryMessage(Bytes.fromHex(PING_FRAME.substring(0, 20))),
+                binaryMessage(Bytes.fromHex(PING_FRAME.substring(20) + PING_FRAME)));
+
+        assertThat(runner.describeMessages(twoInOne, false)).hasSize(2);
+        assertThat(runner.describeMessages(split, false)).hasSize(2);
     }
 }
