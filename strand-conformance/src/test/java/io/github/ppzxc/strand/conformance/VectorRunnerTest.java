@@ -249,9 +249,9 @@ class VectorRunnerTest {
     /** 규격이 정하지 않아 관측하지 않는 WebSocket Close(1000이 아닌 상태 코드). 엔드포인트는 내지 않으므로 직접 만든다. */
     private static OutboundMessage unobservedWebSocketClose() throws ReflectiveOperationException {
         Constructor<OutboundMessage> constructor =
-                OutboundMessage.class.getDeclaredConstructor(OutboundMessage.Type.class, byte[].class, int.class);
+                OutboundMessage.class.getDeclaredConstructor(OutboundMessage.Kind.class, byte[].class, int.class);
         constructor.setAccessible(true);
-        return constructor.newInstance(OutboundMessage.Type.WEBSOCKET_CLOSE, new byte[0], 1001);
+        return constructor.newInstance(OutboundMessage.Kind.WEBSOCKET_CLOSE, new byte[0], 1001);
     }
 
     private static OutboundMessage binaryMessage(byte[] bytes) throws ReflectiveOperationException {
