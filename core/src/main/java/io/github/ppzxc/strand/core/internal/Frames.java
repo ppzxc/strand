@@ -11,19 +11,32 @@ final class Frames {
     static final int PING = 0x0002;
     static final int CLOSE = 0x0003;
     static final int ACK = 0x01;
+    static final int NO_ERROR = 0;
     static final int PROTOCOL_ERROR = 1;
+    static final int RESET = 0x0004;
+    /** 이 값부터 애플리케이션 프레임이다(규격 2.2.2절). */
+    static final int FIRST_APPLICATION_TYPE = 0x0100;
 
     private Frames() {}
 
     /** 확장 영역이 없고 status·stream_id가 0인 제어 프레임. */
     static byte[] control(int type, int flags, byte[] payload) {
+        return frame(type, flags, 0, payload);
+    }
+
+    /** 확장 영역이 없는 애플리케이션 요청 프레임. */
+    static byte[] request(int type, int streamId, byte[] payload) {
+        return frame(type, 0, streamId, payload);
+    }
+
+    private static byte[] frame(int type, int flags, int streamId, byte[] payload) {
         ByteArrayOutputStream out = new ByteArrayOutputStream(HEADER_SIZE + payload.length);
         writeInt(out, 12 + payload.length);
         out.write(type >>> 8);
         out.write(type);
         out.write(flags);
         out.write(0); // status
-        writeInt(out, 0); // stream_id
+        writeInt(out, streamId);
         out.write(0); // extensions_length
         out.write(0);
         out.write(0); // reserved
@@ -38,6 +51,11 @@ final class Frames {
         writeParam(payload, 0x0002, config.maxConcurrentStreams());
         writeParam(payload, 0x0003, config.capabilities());
         return control(HELLO, 0, payload.toByteArray());
+    }
+
+    /** 연결 서문 8바이트(규격 3.1절). */
+    static byte[] preface() {
+        return new byte[] {(byte) 0xC0, (byte) 0xDE, 0x53, 0x54, 0x52, 0x30, 0x00, 0x00};
     }
 
     static byte[] close(int errorCode) {
