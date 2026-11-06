@@ -7,23 +7,6 @@ import java.util.Arrays;
 final class Frames {
 
     static final int HEADER_SIZE = 16;
-    static final int HELLO = 0x0001;
-    static final int PING = 0x0002;
-    static final int CLOSE = 0x0003;
-    static final int ACK = 0x01;
-    /** 규격 2.5.2절의 error_code 값(CLOSE·RESET). */
-    static final int NO_ERROR = 0;
-
-    static final int PROTOCOL_ERROR = 1;
-    static final int ERROR_REFUSED = 3;
-    static final int ERROR_CANCEL = 4;
-    /** 규격 2.5.1절의 status 값(응답). error_code와 번호 공간이 다르다. */
-    static final int STATUS_INVALID_ARGUMENT = 3;
-
-    static final int STATUS_UNIMPLEMENTED = 12;
-    static final int RESET = 0x0004;
-    /** 이 값부터 애플리케이션 프레임이다(규격 2.2.2절). */
-    static final int FIRST_APPLICATION_TYPE = 0x0100;
 
     private Frames() {}
 
@@ -51,7 +34,7 @@ final class Frames {
     static byte[] reset(int streamId, int errorCode) {
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
         writeInt(payload, errorCode);
-        return frame(RESET, 0, 0, streamId, payload.toByteArray());
+        return frame(FrameType.RESET, 0, 0, streamId, payload.toByteArray());
     }
 
     private static byte[] frame(int type, int flags, int status, int streamId, byte[] payload) {
@@ -72,10 +55,10 @@ final class Frames {
 
     static byte[] hello(EndpointConfig config) {
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
-        writeParam(payload, 0x0001, config.maxFrameSize());
-        writeParam(payload, 0x0002, config.maxConcurrentStreams());
-        writeParam(payload, 0x0003, config.capabilities());
-        return control(HELLO, 0, payload.toByteArray());
+        writeParam(payload, HelloParams.MAX_FRAME_SIZE_ID, config.maxFrameSize());
+        writeParam(payload, HelloParams.MAX_CONCURRENT_STREAMS_ID, config.maxConcurrentStreams());
+        writeParam(payload, HelloParams.CAPABILITIES_ID, config.capabilities());
+        return control(FrameType.HELLO, 0, payload.toByteArray());
     }
 
     /** 연결 서문 8바이트(규격 3.1절). */
@@ -86,7 +69,7 @@ final class Frames {
     static byte[] close(int errorCode) {
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
         writeInt(payload, errorCode);
-        return control(CLOSE, 0, payload.toByteArray());
+        return control(FrameType.CLOSE, 0, payload.toByteArray());
     }
 
     private static void writeParam(ByteArrayOutputStream out, int identifier, long value) {

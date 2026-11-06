@@ -7,8 +7,6 @@ import org.jspecify.annotations.Nullable;
 /** 엔드포인트의 설정: 보내는 HELLO의 파라미터(규격 3.2.1절)와 확인 대기 시간. 값을 바꾼 복사본을 돌려주는 불변 객체다. */
 public final class EndpointConfig {
 
-    private static final long DEFAULT_MAX_FRAME_SIZE = 4_194_304L;
-    private static final long DEFAULT_MAX_CONCURRENT_STREAMS = 100L;
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
 
     private final long maxFrameSize;
@@ -34,8 +32,8 @@ public final class EndpointConfig {
 
     /** 설정 값의 모음. 복사본을 만들 때 한 필드만 고치는 데 쓴다. 필드를 더해도 생성자 인자 나열은 늘지 않는다. */
     private static final class Values {
-        long maxFrameSize = DEFAULT_MAX_FRAME_SIZE;
-        long maxConcurrentStreams = DEFAULT_MAX_CONCURRENT_STREAMS;
+        long maxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
+        long maxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
         long capabilities;
         long ackTimeoutMs = DEFAULT_ACK_TIMEOUT_MS;
 

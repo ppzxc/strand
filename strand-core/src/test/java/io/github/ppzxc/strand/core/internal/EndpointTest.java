@@ -156,7 +156,7 @@ class EndpointTest {
     private static void assertLocalUnavailableEvents(List<Event> events) {
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
-        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+        assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(events.get(0).streamId()).isZero();
     }
 
@@ -627,7 +627,7 @@ class EndpointTest {
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).streamId()).isEqualTo(2);
-        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+        assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
     }
 
@@ -762,7 +762,7 @@ class EndpointTest {
     @Test
     void requestAfterCloseIsFailedLocallyWithoutAFrame() {
         Endpoint server = established();
-        server.close(Frames.NO_ERROR);
+        server.close(ErrorCode.NO_ERROR);
         server.drainMessages();
         server.drainEvents();
 
@@ -787,7 +787,7 @@ class EndpointTest {
     @Test
     void requestAfterTheConnectionClosedIsFailedLocally() {
         Endpoint server = established();
-        server.close(Frames.PROTOCOL_ERROR);
+        server.close(ErrorCode.PROTOCOL_ERROR);
         server.drainMessages();
         server.drainEvents();
 
@@ -808,7 +808,7 @@ class EndpointTest {
         List<Event> events = server.drainEvents();
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
-        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+        assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
     }
 
@@ -827,7 +827,7 @@ class EndpointTest {
         assertThat(events).hasSize(2);
         for (Event event : events) {
             assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
-            assertThat(event.status()).isEqualTo(Event.UNAVAILABLE);
+            assertThat(event.status()).isEqualTo(Status.UNAVAILABLE);
             assertThat(event.streamId()).isZero();
         }
         assertThat(sent(client)).isEqualTo(HELLO_ACK + requestFrame(257, 2147483647, "") + CLOSE_NO_ERROR);
@@ -857,7 +857,7 @@ class EndpointTest {
     void closeSendsCloseAndClosesWhenNothingIsPending() {
         Endpoint server = serverAfterPreface();
 
-        server.close(Frames.NO_ERROR);
+        server.close(ErrorCode.NO_ERROR);
 
         assertThat(sent(server)).isEqualTo(CLOSE_NO_ERROR);
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
@@ -869,7 +869,7 @@ class EndpointTest {
         server.request(257, new byte[0]);
         server.drainMessages();
 
-        server.close(Frames.NO_ERROR);
+        server.close(ErrorCode.NO_ERROR);
 
         assertThat(sent(server)).isEqualTo(CLOSE_NO_ERROR);
         assertThat(server.drainEvents()).isEmpty();
@@ -879,8 +879,8 @@ class EndpointTest {
     void errorCloseClosesAtOnceAndNoSecondCloseIsSent() {
         Endpoint server = established();
 
-        server.close(Frames.PROTOCOL_ERROR);
-        server.close(Frames.NO_ERROR);
+        server.close(ErrorCode.PROTOCOL_ERROR);
+        server.close(ErrorCode.NO_ERROR);
 
         assertThat(sent(server)).isEqualTo(CLOSE_PROTOCOL_ERROR);
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
@@ -894,7 +894,7 @@ class EndpointTest {
         server.drainMessages();
         server.drainEvents();
 
-        server.close(Frames.NO_ERROR);
+        server.close(ErrorCode.NO_ERROR);
 
         assertOpenAndSilent(server);
     }
@@ -995,7 +995,7 @@ class EndpointTest {
         Endpoint client = client();
         client.drainMessages();
 
-        client.close(Frames.NO_ERROR);
+        client.close(ErrorCode.NO_ERROR);
 
         assertThat(sent(client)).isEqualTo(CLOSE_NO_ERROR);
     }
@@ -1620,7 +1620,7 @@ class EndpointTest {
     @Test
     void oversizeRequestAfterCloseFailsLocallyInsteadOfThrowing() {
         Endpoint client = establishedClientWithPeerFrameSize(MIN_MAX_FRAME_SIZE);
-        client.close(Frames.NO_ERROR);
+        client.close(ErrorCode.NO_ERROR);
         client.drainMessages();
         client.drainEvents();
 
@@ -1857,7 +1857,7 @@ class EndpointTest {
         List<Event> events = client.drainEvents();
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
-        assertThat(events.get(0).status()).isEqualTo(Event.UNAVAILABLE);
+        assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
     }
 
@@ -1936,7 +1936,7 @@ class EndpointTest {
     void webSocketNoErrorCloseIsFollowedByWebSocketCloseNormalClosure() {
         Endpoint server = establishedWebSocket();
 
-        server.close(Frames.NO_ERROR);
+        server.close(ErrorCode.NO_ERROR);
 
         List<OutboundMessage> messages = server.drainMessages();
         assertThat(messageTypes(messages))
@@ -1951,7 +1951,7 @@ class EndpointTest {
         Endpoint server = establishedWebSocket();
         server.receiveMessage(MessageKind.BINARY, bytes("0000000c010100000000000100000000"));
         server.drainEvents();
-        server.close(Frames.NO_ERROR);
+        server.close(ErrorCode.NO_ERROR);
         assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Type.BINARY);
 
         server.respond(1, 0, new byte[0]);
@@ -2008,7 +2008,7 @@ class EndpointTest {
         Endpoint server = establishedWebSocket();
         server.receiveMessage(MessageKind.BINARY, bytes("0000000c010100000000000100000000"));
         server.drainEvents();
-        server.close(Frames.NO_ERROR);
+        server.close(ErrorCode.NO_ERROR);
         server.drainMessages();
 
         server.receiveMessage(MessageKind.BINARY, bytes(CLOSE_PROTOCOL_ERROR));
@@ -2020,7 +2020,7 @@ class EndpointTest {
     void byteStreamNoErrorCloseHasNoWebSocketClose() {
         Endpoint server = established();
 
-        server.close(Frames.NO_ERROR);
+        server.close(ErrorCode.NO_ERROR);
 
         assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Type.BINARY);
     }
@@ -2029,7 +2029,7 @@ class EndpointTest {
     void webSocketErrorCloseHasNoWebSocketCloseItem() {
         Endpoint server = establishedWebSocket();
 
-        server.close(Frames.PROTOCOL_ERROR);
+        server.close(ErrorCode.PROTOCOL_ERROR);
 
         assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Type.BINARY);
     }
@@ -2118,7 +2118,7 @@ class EndpointTest {
     void webSocketTextCloseSendsNoSecondCloseAfterOneWasSentOrReceived() {
         Endpoint sentClose = establishedWebSocket();
         sentClose.request(257, new byte[0]);
-        sentClose.close(Frames.NO_ERROR);
+        sentClose.close(ErrorCode.NO_ERROR);
         sentClose.drainMessages();
         sentClose.drainEvents();
         sentClose.receiveMessage(MessageKind.TEXT, bytes(CLOSE_NO_ERROR));
