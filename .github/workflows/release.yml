@@ -102,7 +102,7 @@ jobs:
 
       # SBOM(CycloneDX JSON)은 Release에만 붙이고 Central에는 올리지 않는다.
       - name: Generate SBOM
-        run: ./gradlew :core:cyclonedxBom
+        run: ./gradlew :strand-core:cyclonedxBom
 
       - name: Collect and sign release assets
         env:
@@ -112,10 +112,10 @@ jobs:
           SIGNING_KEY_ID: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyId }}
         run: |
           mkdir release-assets
-          cp "core/build/libs/strand-core-$VERSION.jar" \
-             "core/build/libs/strand-core-$VERSION-sources.jar" \
-             "core/build/libs/strand-core-$VERSION-javadoc.jar" release-assets/
-          cp core/build/reports/cyclonedx/bom.json "release-assets/strand-core-$VERSION-cyclonedx.json"
+          cp "strand-core/build/libs/strand-core-$VERSION.jar" \
+             "strand-core/build/libs/strand-core-$VERSION-sources.jar" \
+             "strand-core/build/libs/strand-core-$VERSION-javadoc.jar" release-assets/
+          cp strand-core/build/reports/cyclonedx/bom.json "release-assets/strand-core-$VERSION-cyclonedx.json"
           cd release-assets
           ../.github/scripts/sign-artifacts.sh ./*
 

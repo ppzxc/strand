@@ -8,7 +8,7 @@
 
 ---
 
-이 문서는 규범이다. 와이어 규격(`STRAND_SPECIFICATION.md`)의 규범 참조이며, 벡터 형식 버전 1을 정의한다. 다른 언어로 구현하는 사람이 이 문서와 JSON Schema 파일(`conformance/schema/vector-format-1.schema.json`)만 보고 벡터를 쓰고 러너를 만들 수 있도록, 벡터의 의미를 여기서 정의한다. JSON Schema는 이 문서의 구조를 기계가 검사하게 만든 것이다. 둘이 어긋나면 이 문서가 우선한다. id 유일성, `next_stream_id`의 홀짝, `transport`와 단계 `kind`의 조합, `ping` 단계의 순서(이 문서 8.1절 3번), 번호 할당 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 이 문서에만 있다.
+이 문서는 규범이다. 와이어 규격(`STRAND_SPECIFICATION.md`)의 규범 참조이며, 벡터 형식 버전 1을 정의한다. 다른 언어로 구현하는 사람이 이 문서와 JSON Schema 파일(`strand-conformance/schema/vector-format-1.schema.json`)만 보고 벡터를 쓰고 러너를 만들 수 있도록, 벡터의 의미를 여기서 정의한다. JSON Schema는 이 문서의 구조를 기계가 검사하게 만든 것이다. 둘이 어긋나면 이 문서가 우선한다. id 유일성, `next_stream_id`의 홀짝, `transport`와 단계 `kind`의 조합, `ping` 단계의 순서(이 문서 8.1절 3번), 번호 할당 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 이 문서에만 있다.
 
 이 문서에서 **러너**는 벡터를 읽어 테스트 대상 구현에 입력을 넣고 출력을 기대 결과와 비교하는 프로그램이고, **단계**는 시나리오의 한 항목이다. 두 말은 이 문서 안에서만 쓴다.
 

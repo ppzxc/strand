@@ -55,7 +55,7 @@ class BuildFixture(
       """
       plugins { id("$plugin") }
       version = "$version"
-      // 프로젝트 이름과 산출물 이름을 다르게 둬서(실제 저장소의 core/strand-core처럼) 기준선이 자기 자신으로 해석되지 않게 한다.
+      // 프로젝트 이름과 산출물 이름을 다르게 둬서(프로젝트 이름과 archivesName이 다른 경우를 흉내 낸다) 기준선이 자기 자신으로 해석되지 않게 한다.
       base.archivesName = "lib"
       repositories { mavenCentral() }
       ${if (usesCompatExtension) "strandCompat { baselineRepository = \"${repo.toURI()}\" }" else ""}
@@ -67,7 +67,7 @@ class BuildFixture(
   /** 프로젝트 디렉터리 기준 경로에 쓴다. */
   fun write(path: String, text: String) = writeTo(projectDir, path, text)
 
-  /** git 저장소 루트 기준 경로에 쓴다. 벡터(`conformance/vectors`)는 루트 기준이다. */
+  /** git 저장소 루트 기준 경로에 쓴다. 벡터(`strand-conformance/vectors`)는 루트 기준이다. */
   fun writeAtRepoRoot(path: String, text: String) = writeTo(dir, path, text)
 
   private fun writeTo(base: File, path: String, text: String) {

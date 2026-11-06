@@ -2,7 +2,7 @@
 val compat = extensions.create<StrandCompatExtension>("strandCompat")
 compat.baselineRepository.convention(providers.gradleProperty("strand.compat.baselineRepository").orElse("central"))
 compat.gitExecutable.convention("git")
-compat.vectorsPath.convention("conformance/vectors")
+compat.vectorsPath.convention("strand-conformance/vectors")
 
 tasks.register<CompatBaselineTask>("compatBaseline") {
   group = "verification"

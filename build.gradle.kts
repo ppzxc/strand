@@ -15,7 +15,7 @@ tasks.check {
 tasks.register("runtimeMatrixTest") {
   group = "verification"
   description = "런타임 매트릭스 대상 모듈(core, conformance)의 테스트만 실행한다. -PtestJavaVersion=<N>과 함께 쓴다."
-  dependsOn(":core:test", ":conformance:test")
+  dependsOn(":strand-core:test", ":strand-conformance:test")
 }
 
 // 배포 테스트 하네스 (a): mavenLocal에 배포한 core를 외부 소비자 4개가 받아 쓰는지 확인한다. 느려서 check에는 묶지 않는다.
@@ -30,7 +30,7 @@ val deployTestVersion = providers.gradleProperty("version")
 tasks.register<Exec>("deployTest") {
   group = "verification"
   description = "~/.m2에 strand-core를 발행하고(정리하지 않는다) deploy-test/run.sh로 외부 소비자 4개를 돌린다(하네스 a)."
-  dependsOn(":core:publishToMavenLocal")
+  dependsOn(":strand-core:publishToMavenLocal")
   workingDir = layout.projectDirectory.asFile
   executable = layout.projectDirectory.file("deploy-test/run.sh").asFile.path
   argumentProviders.add(VersionArg(deployTestVersion))

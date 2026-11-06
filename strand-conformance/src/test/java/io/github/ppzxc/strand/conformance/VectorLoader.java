@@ -16,7 +16,7 @@ import java.util.Set;
 /**
  * 적합성 벡터 파일의 엄격 로더. 파일을 읽어 {@link StrictJson}으로 트리를 만들고, {@link VectorSchema}의 규칙으로 벡터 형식
  * 문서를 검증한 뒤 {@link ConformanceVector}로 조립한다. 하나라도 어기면 {@link InvalidVectorException}을 던진다. JSON
- * Schema 파일({@code conformance/schema/})은 다른 언어 구현자를 위한 보조 자료이고, 어긋나면 벡터 형식 문서가 우선한다.
+ * Schema 파일({@code strand-conformance/schema/})은 다른 언어 구현자를 위한 보조 자료이고, 어긋나면 벡터 형식 문서가 우선한다.
  *
  * <p>모든 오류는 {@code 파일명: [위치](id=...) 경로: 메시지} 형식이다({@link Check}).
  */

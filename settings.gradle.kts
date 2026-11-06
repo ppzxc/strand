@@ -8,6 +8,6 @@ plugins {
 
 rootProject.name = "strand"
 
-include("core")
-include("conformance")
-include("examples")
+include("strand-core")
+include("strand-conformance")
+include("strand-examples")
