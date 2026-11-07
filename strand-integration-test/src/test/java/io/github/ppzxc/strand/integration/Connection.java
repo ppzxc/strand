@@ -27,21 +27,24 @@ final class Connection implements AutoCloseable {
     /** 이벤트나 종료를 기다리는 상한. 넘기면 실패시켜 테스트가 멈추지 않게 한다. */
     static final long TIMEOUT_MS = 5000L;
 
-    private static final int READ_BUFFER_BYTES = 4096;
+    /** 읽기 단위를 따로 제한하지 않을 때 한 번에 읽는 최대 바이트 수. */
+    static final int DEFAULT_READ_CHUNK_BYTES = 4096;
 
     private final Socket socket;
     private final Endpoint endpoint;
     private final BiConsumer<Endpoint, Event> onEvent;
+    private final int readChunkBytes;
     private final BlockingQueue<Event> queue = new LinkedBlockingQueue<>();
     private final List<Event> history = new ArrayList<>();
     private final Thread reader;
     /** 읽기 스레드가 예기치 못한 예외로 멈췄을 때의 원인. 기다리는 쪽 실패 메시지에 붙인다. */
     private volatile Throwable readerFailure;
 
-    Connection(Socket socket, Endpoint endpoint, String name, BiConsumer<Endpoint, Event> onEvent) {
+    Connection(Socket socket, Endpoint endpoint, String name, int readChunkBytes, BiConsumer<Endpoint, Event> onEvent) {
         this.socket = socket;
         this.endpoint = endpoint;
         this.onEvent = onEvent;
+        this.readChunkBytes = readChunkBytes;
         this.reader = new Thread(this::readLoop, name);
         this.reader.setDaemon(true);
     }
@@ -102,7 +105,7 @@ final class Connection implements AutoCloseable {
     }
 
     private void readLoop() {
-        byte[] buffer = new byte[READ_BUFFER_BYTES];
+        byte[] buffer = new byte[readChunkBytes];
         try {
             InputStream in = socket.getInputStream();
             boolean eof = false;
