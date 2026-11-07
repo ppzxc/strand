@@ -17,7 +17,7 @@ checked: 2026-11-07
 | FIXSL | FIX Session Layer Technical Specification, Technical Standard – June 2020, FIX Protocol Ltd. | https://www.fixtrading.org/wp-content/uploads/download-manager-files/FIX_Session_Layer_June_2020.pdf | FIX4·FIXT·LFIXT 세션 프로필을 함께 정의한다. FIXT의 BeginString은 `FIXT.1.1`(5.3절, 4.2.1절 표 1) |
 | FIXORCH | FIX Orchestra 저장소의 FIXT 세션·FIX Latest 정의 | https://github.com/FIXTradingCommunity/orchestrations (`FIX Standard/FIXTSession.xml`, `FIX Standard/OrchestraFIXLatest.xml`) | 필드·자료형 정의(MsgSeqNum, SeqNum, ClOrdID) 확인용 |
 | ISO8583 | ISO 8583:2023, Edition 3 | https://committee.iso.org/standard/79451.html (초록) | **본문은 유료(18쪽)라 읽지 못했다.** 초록에 따르면 메시지·필드·값 정의는 유지 기관(MA)이 제공하고, "메시지 전송 방식이나 정산 방식은 이 문서의 범위가 아니다" |
-| ISO8583-ANX | ISO 8583 부속서 C(데이터 요소), D(코드 목록), E(메시지 클래스), F(메시지·거래 매칭), J(이전 판) | https://standards.iso.org/iso/8583/ed-3/en/ | ISO가 공개한 전자 부록이다. **경로는 ed-3인데 각 파일 머리말은 `ISO/DIS 8583:2021(E)`**라서, 발행본과 문구가 다를 수 있다 |
+| ISO8583-ANX | ISO 8583 부속서 C(데이터 요소), D(코드 목록), E(메시지 클래스), F(메시지·거래 매칭), J(이전 판) | https://standards.iso.org/iso/8583/ed-3/en/ | ISO가 공개한 전자 부록이다. **경로는 ed-3인데 각 파일 머리말은 `ISO/DIS 8583:2021(E)`**다. 부속서 J는 현행판을 "fourth edition"이라 부르지만 iso.org는 ISO 8583:2023을 Edition 3으로 적는다. 그러니 발행본과 문구가 다를 수 있다 |
 | MQTT5 | MQTT Version 5.0, OASIS Standard, 2019-03-07 | https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html | 규범 문장 번호 `[MQTT-x.y.z-n]`로 인용 |
 | AMQP1 | OASIS AMQP Version 1.0, Part 2 Transport / Part 5 Security | http://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html , http://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-security-v1.0-os.html | |
 
@@ -200,7 +200,7 @@ checked: 2026-11-07
 
 ### #148 번호 소진 제거 방식
 
-- 지금 Strand는 31비트 공간을 단조 증가로만 쓰고, 다 쓰면 `CLOSE(NO_ERROR)`로 닫는다(2.2.5절). 같은 크기(`0x7FFFFFFF`)를 쓰는 SMPP는 5.0에서 "1로 순환"을 규정했고, 응답을 받은 번호를 바로 재사용하는 방식도 허용한다(SMPP50 §4.7.24, §2.6.2).
+- 지금 Strand는 31비트 공간을 단조 증가로만 쓰고, 다 쓰면 `CLOSE(NO_ERROR)`로 닫는다(2.2.5절). 값의 범위(`1`~`0x7FFFFFFF`)는 SMPP와 같지만 용량은 다르다. Strand는 이 범위를 홀수·짝수로 나눠 엔드포인트마다 약 2^30개를 쓰고, SMPP는 방향마다 범위 전체(2^31−1개)를 따로 쓴다(SMPP50 §2.6.1). SMPP는 5.0에서 "1로 순환"을 규정했고, 응답을 받은 번호를 바로 재사용하는 방식도 허용한다(SMPP50 §4.7.24, §2.6.2).
 - MQTT는 "현재 쓰이지 않는" 값을 재사용하고(§2.2.1), AMQP는 RFC 1982 순환 산술을 쓴다(§2.8.10). 세 방식 모두 번호 재등장을 허용하므로, "상대 공간 번호가 `highest_peer_stream_id` 이하이면 연결 오류"라는 Strand 4.2.1절의 번호 역행 규칙과 그대로는 함께 쓸 수 없다.
 - FIX는 번호 상한을 두지 않는 대신, 연결을 유지한 채 번호를 1로 되돌리는 절차(§4.4.2)를 둔다. 이 절차는 "새 FIX 세션의 시작"으로 정의되므로(§4.1), 번호의 수명을 연결의 수명에서 떼어 내는 사례다.
 
@@ -220,7 +220,7 @@ checked: 2026-11-07
 - SMPP의 사후 조회 열쇠(`message_id`)는 응답에 실려 오기 때문에 응답 유실 시 조회가 막힌다(1.1절 추론). 조회 기반 확정을 생각한다면, 열쇠를 요청 쪽이 정하는지가 갈림길이 된다. ISO 8583의 STAN과 FIX의 `ClOrdID`는 요청 쪽이 정한다.
 - FIX와 ISO 8583은 "다시 보낸 것"을 메시지에 표시한다(FIX `PossDupFlag`/`PossResend`, ISO MTI 셋째 자리 repeat). Strand의 `idempotency-key`에는 재전송 표시가 없다.
 - 중복 판단 기간의 사례: FIX `ClOrdID`는 거래일 단위, MQTT는 PUBCOMP까지 + 세션 수명, AMQP는 정산까지. SMPP와 ISO 8583 부속서에는 없다.
-- ISO 8583 9123 "Request in progress"는 "같은 요청이 아직 처리 중"이라는 응답 코드의 사례다. 지금 Strand `status`(2.5.1절)에는 이에 해당하는 값이 없다.
+- ISO 8583 9123 "Request in progress"는 "같은 요청이 아직 처리 중"이라는 응답 코드의 사례다. **(추론)** 지금 Strand `status`(2.5.1절)에는 이름이 딱 맞는 값이 없다. 가장 가까운 것은 `ABORTED`("동시 작업과 충돌")와 `ALREADY_EXISTS`다.
 
 ### #151 장기 연결 생존성
 
@@ -231,7 +231,7 @@ checked: 2026-11-07
 
 ### #152 과부하 제어
 
-- 창(미응답 요청 수 상한)과 흐름 제어를 구분하는 문장이 SMPP 5.0 §2.9에 있다. Strand는 `max_concurrent_streams` 하나가 배압의 유일한 수량 한도이고, 넘으면 `RESET(REFUSED)`로 거절한다(4.5절). 이는 SMPP의 "창"에 해당한다.
+- 창(미응답 요청 수 상한)과 흐름 제어를 구분하는 문장이 SMPP 5.0 §2.9에 있다. Strand는 `max_concurrent_streams` 하나가 배압의 유일한 수량 한도이고, 넘으면 `RESET(REFUSED)`로 거절한다(4.5절). **(추론)** 이는 SMPP의 "창"에 해당한다.
 - 속도 초과 거절 코드 사례: SMPP `ESME_RTHROTTLED`, MQTT 0x96/0x97, ISO 8583 9106(다시 보낼 시점 안내 포함). Strand에는 `RESOURCE_EXHAUSTED`(status)와 `OVERLOAD`(error_code)가 있다(2.5절).
 - 부하 정도를 응답마다 실어 보내는 사례는 SMPP 5.0 `congestion_state`(0~100, 선택 TLV)다. 송신자는 이 값을 보고 속도를 조절한다.
 - FIX 세션 계층에는 과부하 제어가 없다.
@@ -240,5 +240,5 @@ checked: 2026-11-07
 
 - 프로토콜 안 인증: SMPP `bind`(NULL 비밀번호 허용 가능), FIX Logon(TLS 필수 위에 자격 증명 필드), MQTT CONNECT/AUTH, AMQP SASL 계층.
 - 메시지 단위 무결성: ISO 8583 MAC(bit 64/128)과 키 관리용 네트워크 관리 메시지.
-- 채널에만 맡기는 사례: SMPP 5.0 §2.10이 암호화를 전용선, TLS, VPN에 맡긴다(인증 자체는 `bind`에 있다). Strand는 현재 기밀성, 무결성, 상대 인증을 모두 채널(상호 인증 TLS 1.3 권고)에 맡긴다(6.1절). 멱등 키를 "인증된 상대별로" 나눠 관리하라는 요구(6.2절)는 채널 인증의 신원을 애플리케이션이 받아 쓸 수 있다는 전제를 깔고 있다.
+- 채널에만 맡기는 사례: SMPP 5.0 §2.10이 암호화를 전용선, TLS, VPN에 맡긴다(인증 자체는 `bind`에 있다). Strand는 현재 기밀성, 무결성, 상대 인증을 모두 채널(상호 인증 TLS 1.3 권고)에 맡긴다(6.1절). **(추론)** 멱등 키를 "인증된 상대별로" 나눠 관리하라는 요구(6.2절)는 채널 인증의 신원을 애플리케이션이 받아 쓸 수 있다는 전제를 깔고 있다.
 - FIX는 TCP 위에서 TLS를 MUST로 두면서도 Logon 자격 증명을 함께 둔다. 이는 채널 인증과 프로토콜 안 인증이 서로를 배제하지 않는 사례다.
