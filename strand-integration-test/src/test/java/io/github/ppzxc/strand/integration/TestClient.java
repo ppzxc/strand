@@ -46,9 +46,22 @@ final class TestClient implements AutoCloseable {
         connection.withEndpoint(endpoint -> endpoint.request(type, payload));
     }
 
+    Connection connection() {
+        return connection;
+    }
+
     /** 애플리케이션이 연결을 닫는다(규격 3.5절). */
     void closeConnection(int errorCode) {
         connection.withEndpoint(endpoint -> endpoint.close(errorCode));
+    }
+
+    List<Event> awaitEvents(int count) throws InterruptedException {
+        return connection.awaitEvents(count);
+    }
+
+    /** 지금까지 소켓에 쓴 바이트 수. */
+    long writtenBytes() {
+        return connection.writtenBytes();
     }
 
     Event awaitEvent(Event.Kind kind) throws InterruptedException {

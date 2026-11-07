@@ -121,14 +121,14 @@ class MultiClientIntegrationTest {
                 serverSides.get(i).awaitFinished();
             }
 
-            assertThat(kinds(serverSides.get(aborted).events()))
+            assertThat(Fixtures.kinds(serverSides.get(aborted).events()))
                     .containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.CLOSED);
             for (int i = 0; i < CLIENT_COUNT; i++) {
                 if (i != aborted) {
-                    assertThat(kinds(clients.get(i).events()))
+                    assertThat(Fixtures.kinds(clients.get(i).events()))
                             .as("클라이언트 %d의 이벤트", i)
                             .containsExactly(Event.Kind.RESULT, Event.Kind.RESULT, Event.Kind.CLOSED);
-                    assertThat(kinds(serverSides.get(i).events()))
+                    assertThat(Fixtures.kinds(serverSides.get(i).events()))
                             .as("서버 쪽 연결 %d의 이벤트", i)
                             .containsExactly(
                                     Event.Kind.REQUEST_RECEIVED, Event.Kind.REQUEST_RECEIVED, Event.Kind.CLOSED);
@@ -139,13 +139,5 @@ class MultiClientIntegrationTest {
                 client.close();
             }
         }
-    }
-
-    private static List<Event.Kind> kinds(List<Event> events) {
-        List<Event.Kind> kinds = new ArrayList<>();
-        for (Event event : events) {
-            kinds.add(event.kind());
-        }
-        return kinds;
     }
 }
