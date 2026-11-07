@@ -1,0 +1,13 @@
+/**
+ * 실제 TCP 위에서 클라이언트·서버 {@code Endpoint}가 맞물려 동작하는지 확인하는 통합 테스트.
+ *
+ * <p>확인하는 것: 연결 수립(규격 3.1~3.3절), 요청·응답의 스트림 매칭(4.2절), 정상 종료(3.5절)가 소켓 위에서 어긋나지 않는지. 컨포먼스 벡터가 {@code
+ * Endpoint} 하나를 바이트 단위로 검증하는 것과 달리, 여기서는 두 {@code Endpoint}를 실제 연결로 이어 전송에 붙이는 쪽의 동작을 본다.
+ *
+ * <p>확인하지 않는 것: 프레임 필드 검증과 오류 코드는 {@code strand-conformance}가 맡는다. 네트워크 지연, 부하, 보안, WebSocket과 NIO 전송도 범위
+ * 밖이다.
+ *
+ * <p>작성 규칙: 포트는 0에 바인딩하고, 대기는 {@code sleep} 없이 큐와 상한 시간 대기로 한다. 새 시나리오는 무엇을 예방하는지 Javadoc과 {@code
+ * @DisplayName}에 적는다.
+ */
+package io.github.ppzxc.strand.integration;
