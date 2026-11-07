@@ -11,6 +11,9 @@ final class Fixtures {
     /** 규격 2.5.1절 status {@code OK}. */
     static final int STATUS_OK = 0;
 
+    /** 규격 2.5.1절 status {@code UNAVAILABLE}. */
+    static final int STATUS_UNAVAILABLE = 14;
+
     /** 규격 2.5.2절 error_code {@code NO_ERROR}. */
     static final int NO_ERROR = 0;
 

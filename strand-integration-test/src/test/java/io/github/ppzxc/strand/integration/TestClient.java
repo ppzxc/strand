@@ -18,9 +18,18 @@ final class TestClient implements AutoCloseable {
     }
 
     static TestClient connect(int port) throws IOException {
+        return connect(port, Connection.DEFAULT_READ_CHUNK_BYTES);
+    }
+
+    /** 한 번에 {@code readChunkBytes}바이트까지만 읽어 {@code Endpoint}에 넘기는 클라이언트. 프레임이 쪼개져 오는 경우를 만든다. */
+    static TestClient connect(int port, int readChunkBytes) throws IOException {
         Socket socket = new Socket(InetAddress.getLoopbackAddress(), port);
         Connection connection = new Connection(
-                socket, Endpoint.client(EndpointConfig.defaults()), "test-client", (endpoint, event) -> {});
+                socket,
+                Endpoint.client(EndpointConfig.defaults()),
+                "test-client",
+                readChunkBytes,
+                (endpoint, event) -> {});
         connection.start();
         return new TestClient(connection);
     }
