@@ -13,6 +13,9 @@ import org.junit.jupiter.api.Test;
 /** 전송 계층이 CLOSE 없이 끊기거나 바이트가 쪼개져 오는 경우를 실제 TCP 위에서 확인한다. */
 class TransportFailureIntegrationTest {
 
+    /** 규격 4.2절: 클라이언트가 처음 여는 스트림은 1번이다. */
+    private static final int FIRST_CLIENT_STREAM_ID = 1;
+
     /**
      * 응답을 기다리는 중에 상대가 CLOSE 없이 TCP를 끊으면, 대기 중이던 요청은 로컬 {@code UNAVAILABLE}로 정확히 한 번 끝나고 그 뒤에 {@code
      * closed}가 한 번 나야 한다(규격 3.5절). 이 처리가 빠지면 애플리케이션이 응답을 영영 기다리고, 중복되면 같은 요청이 두 번 실패로 처리된다.
@@ -31,6 +34,7 @@ class TransportFailureIntegrationTest {
 
             List<Event> events = client.events();
             assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+            assertThat(events.get(0).streamId()).isEqualTo(FIRST_CLIENT_STREAM_ID);
             assertThat(events.get(0).status()).isEqualTo(STATUS_UNAVAILABLE);
         }
     }
