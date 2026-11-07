@@ -45,11 +45,7 @@ final class TestServer implements AutoCloseable {
 
     /** {@link #startResponding(IntUnaryOperator)}와 같되, 연결마다 한 번에 {@code readChunkBytes}바이트까지만 읽는다. */
     static TestServer startResponding(IntUnaryOperator statusForType, int readChunkBytes) throws IOException {
-        return start(readChunkBytes, (endpoint, event) -> {
-            if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
-                endpoint.respond(event.streamId(), statusForType.applyAsInt(event.type()), Fixtures.payload("ok"));
-            }
-        });
+        return start(readChunkBytes, Connection.responding(statusForType));
     }
 
     private static TestServer start(int readChunkBytes, BiConsumer<Endpoint, Event> handler) throws IOException {

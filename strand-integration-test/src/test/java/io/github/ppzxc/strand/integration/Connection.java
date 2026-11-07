@@ -14,6 +14,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 
 /**
  * 소켓 하나에 {@link Endpoint} 하나를 붙여 읽기 스레드로 돌린다. core가 쌓은 메시지는 매번 소켓에 쓰고, 이벤트는 모아 둔다. {@code Endpoint}는
@@ -187,6 +188,15 @@ final class Connection implements AutoCloseable {
         } catch (IOException e) {
             // 이미 닫힌 소켓이다.
         }
+    }
+
+    /** 받은 요청마다 응답하는 이벤트 핸들러. 응답 {@code status}는 요청 {@code type}에서 {@code statusForType}으로 정한다. */
+    static BiConsumer<Endpoint, Event> responding(IntUnaryOperator statusForType) {
+        return (endpoint, event) -> {
+            if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
+                endpoint.respond(event.streamId(), statusForType.applyAsInt(event.type()), Fixtures.payload("ok"));
+            }
+        };
     }
 
     /** 이 연결 하나를 끊는다. 다른 연결에는 영향이 없다. */
