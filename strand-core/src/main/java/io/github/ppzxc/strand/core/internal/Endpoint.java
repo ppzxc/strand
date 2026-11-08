@@ -324,6 +324,19 @@ public final class Endpoint {
     }
 
     /**
+     * 종료 중인 연결(CLOSE를 보냈거나 받음)에서 애플리케이션이 더 기다리지 않고 닫기로 했을 때 부른다. 받아들였지만 아직 애플리케이션에
+     * 넘기지 않은 상대의 요청을 {@code RESET(REFUSED)}로 돌려보낸 뒤 전송 계층을 닫는다(규격 3.5.1절). 종료 중이 아니거나 이미 닫혔으면
+     * 아무것도 하지 않는다.
+     */
+    public void abortClosing() {
+        if (transportClosed || !closeExchanged) {
+            return;
+        }
+        refuseUnhandedRequests();
+        closeTransportAfterNoError();
+    }
+
+    /**
      * 지금까지 쌓인, 상대에게 보낼 메시지를 보낸 순서대로 꺼낸다. 프레임 하나가 메시지 하나다. 바이트 스트림 전송은 메시지를 이어 붙여 보내면
      * 된다.
      *
