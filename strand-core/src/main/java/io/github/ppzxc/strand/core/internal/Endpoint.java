@@ -38,6 +38,8 @@ public final class Endpoint {
     private static final int TLV_HEADER_SIZE = 4;
     private static final int TIMEOUT_TAG = 0x0001;
     private static final int TIMEOUT_LENGTH = 4;
+    private static final int CLOSE_ERROR_CODE_SIZE = 4;
+    private static final int CLOSE_MIN_PAYLOAD_SIZE = 12;
     private static final int IDEMPOTENCY_KEY_TAG = 0x0003;
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 64;
     /** extensions_length의 한도(규격 2.4절). */
@@ -73,6 +75,10 @@ public final class Endpoint {
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
     /** CLOSE 교환: CLOSE를 보냈거나 받았다(규격 1.3절, 3.5절). */
     private boolean closeExchanged;
+    /** 상대의 CLOSE를 이미 받았다. 처음 받은 CLOSE의 {@code last_stream_id}만 쓴다(규격 3.5절). */
+    private boolean closeReceived;
+    /** 요청 프레임을 전송 계층에 넘긴 내 스트림 가운데 가장 큰 번호. 상대 CLOSE의 {@code last_stream_id} 검사 기준이다(규격 3.5절). */
+    private long highestSentOwnStreamId;
 
     /** 전송 계층이 닫혀 연결이 끝났다(규격 1.3절 연결이 끝남). */
     private boolean transportClosed;
@@ -331,8 +337,12 @@ public final class Endpoint {
         if (transportClosed || closeExchanged) {
             return;
         }
+        if (errorCode != ErrorCode.NO_ERROR) {
+            refuseUnhandedRequests();
+        }
         send(Frames.close(errorCode, highestPeerStreamId));
         closeExchanged = true;
+        endQueuedRequests();
         closeTransportUnlessClosing(errorCode);
     }
 
@@ -342,6 +352,19 @@ public final class Endpoint {
      */
     public void disconnect() {
         closeTransport();
+    }
+
+    /**
+     * 종료 중인 연결(CLOSE를 보냈거나 받음)에서 애플리케이션이 더 기다리지 않고 닫기로 했을 때 부른다. 받아들였지만 아직 애플리케이션에
+     * 넘기지 않은 상대의 요청을 {@code RESET(REFUSED)}로 돌려보낸 뒤 전송 계층을 닫는다(규격 3.5.1절). 종료 중이 아니거나 이미 닫혔으면
+     * 아무것도 하지 않는다.
+     */
+    public void abortClosing() {
+        if (transportClosed || !closeExchanged) {
+            return;
+        }
+        refuseUnhandedRequests();
+        closeTransportAfterNoError();
     }
 
     /**
@@ -358,6 +381,9 @@ public final class Endpoint {
             if (!wait.started && drained.contains(wait.message)) {
                 wait.start(now + config.ackTimeoutMs());
             }
+        }
+        for (long streamId : undrainedRequests.keySet()) {
+            highestSentOwnStreamId = Math.max(highestSentOwnStreamId, streamId);
         }
         undrainedRequests.clear();
         return drained;
@@ -580,7 +606,11 @@ public final class Endpoint {
             return;
         }
         highestPeerStreamId = streamId;
-        if (closeExchanged || peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
+        if (closeExchanged) {
+            // CLOSE를 보냈거나 받은 뒤의 새 요청은 끝까지 읽고 조용히 버린다. 어떤 프레임도 보내지 않는다(규격 3.5절).
+            return;
+        }
+        if (peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
             send(Frames.reset(streamId, ErrorCode.REFUSED));
         } else if (!config.knows(type)) {
             send(Frames.response(type, streamId, Status.UNIMPLEMENTED));
@@ -795,12 +825,70 @@ public final class Endpoint {
     /** 받은 CLOSE(규격 3.5절). 형태가 잘못돼도 받은 CLOSE로 치고, 그때는 오류 CLOSE처럼 CLOSE 없이 닫는다. */
     private void handleClose(byte[] frame, int extensionsLength, long streamId) {
         int payloadSize = frame.length - Frames.HEADER_SIZE - extensionsLength;
-        if (extensionsLength != 0 || streamId != 0 || payloadSize < 4) {
+        if (extensionsLength != 0 || streamId != 0 || payloadSize < CLOSE_MIN_PAYLOAD_SIZE) {
+            closeReceivedMalformed();
+            return;
+        }
+        long lastStreamId = Frames.readLong(frame, Frames.HEADER_SIZE + CLOSE_ERROR_CODE_SIZE);
+        if (lastStreamId != 0
+                && (!isOwnSpace(lastStreamId) || lastStreamId < 0 || lastStreamId > highestSentOwnStreamId)) {
+            // 최상위 비트가 1이면 long으로 음수이고 보낸 번호보다 크다. 이 값은 쓰지 않는다.
             closeReceivedMalformed();
             return;
         }
         closeExchanged = true;
+        if (!closeReceived) {
+            closeReceived = true;
+            endRequestsAfter(lastStreamId);
+        }
+        endQueuedRequests();
         closeTransportUnlessClosing(Frames.readUnsignedInt(frame, Frames.HEADER_SIZE));
+    }
+
+    /**
+     * CLOSE의 {@code last_stream_id}보다 큰 번호의 대기 중인 내 요청을 지금 로컬 UNAVAILABLE(처리 안 됨)로 끝낸다(규격 3.5절).
+     * 상대가 처리하지 않은 요청이므로 아직 넘기지 못한 프레임도 보내지 않는다.
+     */
+    private void endRequestsAfter(long lastStreamId) {
+        Iterator<Long> pending = ownPendingStreams.keySet().iterator();
+        while (pending.hasNext()) {
+            long streamId = pending.next();
+            if (streamId > lastStreamId) {
+                pending.remove();
+                OutboundMessage unsent = undrainedRequests.remove(streamId);
+                if (unsent != null) {
+                    outbox.removeIf(message -> message == unsent);
+                }
+                events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
+            }
+        }
+    }
+
+    /**
+     * CLOSE를 보내거나 받은 즉시, 번호를 받지 못하고 기다리던 요청(AUTH 관문 전에 미룬 요청)을 로컬 UNAVAILABLE(처리 안 됨)로 끝낸다(규격
+     * 3.5절). 미룬 PING은 그대로 둔다.
+     */
+    private void endQueuedRequests() {
+        deferredSends.removeIf(deferred -> {
+            if (deferred.request) {
+                failLocally();
+            }
+            return deferred.request;
+        });
+    }
+
+    /**
+     * 끊기 전에 돌려보낸다(규격 3.5.1절, SHOULD). 받아들였지만 아직 애플리케이션이 이벤트로 받지 않은 상대의 요청을 {@code
+     * RESET(REFUSED)}로 돌려보내고 스트림을 끝낸다. 오류 CLOSE보다 먼저 호출한다.
+     */
+    private void refuseUnhandedRequests() {
+        events.removeIf(event -> {
+            if (event.kind() != Event.Kind.REQUEST_RECEIVED || peerPendingStreams.remove(event.streamId()) == null) {
+                return false;
+            }
+            send(Frames.reset(event.streamId(), ErrorCode.REFUSED));
+            return true;
+        });
     }
 
     /** 형태가 잘못된 CLOSE를 받았다. 받은 CLOSE로 치고 CLOSE를 보내지 않은 채 닫는다(규격 3.5절). */
@@ -843,6 +931,7 @@ public final class Endpoint {
      * 받았다면 보내지 않는다(규격 3.5절).
      */
     private void closeWithError(int errorCode) {
+        refuseUnhandedRequests();
         if (!closeExchanged) {
             send(Frames.close(errorCode, highestPeerStreamId));
         }
