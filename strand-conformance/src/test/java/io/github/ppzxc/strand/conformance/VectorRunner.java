@@ -64,6 +64,7 @@ final class VectorRunner {
     private static final Map<String, Function<JsonObject, String>> EVENTS = new LinkedHashMap<>();
 
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
+    private static final long DEFAULT_AUTH_TIMEOUT_MS = 10000L;
     private static final int FIRST_APPLICATION_TYPE = 256;
     private static final int NORMAL_CLOSURE = 1000;
 
@@ -207,7 +208,8 @@ final class VectorRunner {
         }
         if (setup.has("config")) {
             for (String key : setup.getAsJsonObject("config").keySet()) {
-                requireSupportedPart(key.equals("ack_timeout_ms"), vector, "config." + key);
+                requireSupportedPart(
+                        key.equals("ack_timeout_ms") || key.equals("auth_timeout_ms"), vector, "config." + key);
             }
         }
         for (JsonObject step : vector.steps()) {
@@ -279,11 +281,16 @@ final class VectorRunner {
         long ackTimeout = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
                 ? setup.getAsJsonObject("config").get("ack_timeout_ms").getAsLong()
                 : DEFAULT_ACK_TIMEOUT_MS;
+        long authTimeout =
+                setup.has("config") && setup.getAsJsonObject("config").has("auth_timeout_ms")
+                        ? setup.getAsJsonObject("config").get("auth_timeout_ms").getAsLong()
+                        : DEFAULT_AUTH_TIMEOUT_MS;
         EndpointConfig config = EndpointConfig.defaults()
                 .maxFrameSize(hello.get("max_frame_size"))
                 .maxConcurrentStreams(hello.get("max_concurrent_streams"))
                 .capabilities(hello.get("capabilities"))
-                .ackTimeoutMs(ackTimeout);
+                .ackTimeoutMs(ackTimeout)
+                .authTimeoutMs(authTimeout);
         if (isWebSocket(setup)) {
             config = config.webSocket();
         }

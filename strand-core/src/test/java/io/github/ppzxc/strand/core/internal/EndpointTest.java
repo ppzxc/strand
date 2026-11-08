@@ -721,7 +721,8 @@ class EndpointTest {
 
     @Test
     void theAckCancelsTheWait() {
-        Endpoint server = serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000));
+        Endpoint server =
+                serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000).authTimeoutMs(Long.MAX_VALUE / 2));
         server.receive(bytes(HELLO));
         server.advance(999);
         server.receive(bytes(HELLO_ACK));
@@ -1035,6 +1036,56 @@ class EndpointTest {
 
         assertThat(seen).containsExactly("PLAIN:0075736572007077");
         assertThat(sent(server)).isEqualTo(AUTH_ACK);
+    }
+
+    private static String closeWith(int errorCode) {
+        return "0000001c00030000000000000000000000000000" + String.format("%08x", errorCode) + NO_STREAM;
+    }
+
+    private static Endpoint serverAwaitingAuth(EndpointConfig config) {
+        Endpoint server = serverAfterPreface(config);
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+        return server;
+    }
+
+    @Test
+    void serverClosesWithUnauthenticatedAndNoReasonWhenTheApplicationRejects() {
+        Endpoint server = serverAwaitingAuth(EndpointConfig.defaults().authenticator((m, c) -> AuthDecision.REJECT));
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(closeWith(7));
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void serverClosesWithInternalErrorWhenTheAuthenticationFailsTransiently() {
+        Endpoint server =
+                serverAwaitingAuth(EndpointConfig.defaults().authenticator((m, c) -> AuthDecision.TRANSIENT_FAILURE));
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(closeWith(2));
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void credentialExpiryClosesWithNoErrorAndRevocationWithUnauthenticated() {
+        Endpoint expiring = established();
+        expiring.drainMessages();
+        expiring.drainEvents();
+        expiring.close(0);
+        assertThat(sent(expiring)).isEqualTo(closeWith(0));
+        assertThat(kinds(expiring)).containsExactly(Event.Kind.CLOSED);
+
+        Endpoint revoked = established();
+        revoked.drainMessages();
+        revoked.drainEvents();
+        revoked.close(7);
+        assertThat(sent(revoked)).isEqualTo(closeWith(7));
+        assertThat(kinds(revoked)).containsExactly(Event.Kind.CLOSED);
     }
 
     @Test

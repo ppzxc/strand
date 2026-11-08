@@ -4,17 +4,7 @@
 ack-timeout/ack-timeout-fails-pending-request-with-unavailable
 ack-timeout/client-ping-ack-timeout-before-and-after-limit
 ack-timeout/ping-ack-timeout-before-and-after-limit
-auth/client-auth-ack-duplicate-identifier-closes
 auth/client-auth-ack-wait-times-out-closes-unresponsive
-auth/client-receives-auth-closes
-auth/client-second-auth-ack-closes
-auth/server-auth-mechanism-with-lowercase-closes
-auth/server-auth-wait-is-cancelled-by-auth
-auth/server-auth-wait-times-out-closes-unauthenticated
-auth/server-receives-auth-ack-closes
-auth/server-second-auth-closes
-auth/server-unknown-mechanism-closes-unauthenticated
-auth/server-wrong-credentials-closes-unauthenticated
 backpressure/local-failure-at-peer-limit-sends-nothing-and-keeps-the-number
 backpressure/request-after-close-received-is-dropped-silently
 backpressure/request-after-close-sent-is-dropped-silently
