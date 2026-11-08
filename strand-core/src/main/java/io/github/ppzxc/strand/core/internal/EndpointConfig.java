@@ -8,6 +8,10 @@ import org.jspecify.annotations.Nullable;
 /** 엔드포인트의 설정: 보내는 HELLO의 파라미터(규격 3.2.1절)와 확인 대기 시간. 값을 바꾼 복사본을 돌려주는 불변 객체다. */
 public final class EndpointConfig {
 
+    private static final long MAX_U32 = 0xFFFF_FFFFL;
+    /** 시각 계산(현재 + 기한)이 넘치지 않도록 막는 시간 값의 상한. */
+    private static final long MAX_TIMEOUT_MS = Long.MAX_VALUE / 2;
+
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
     private static final long DEFAULT_AUTH_TIMEOUT_MS = 10000L;
     /** 인증이 필요 없는 연결의 메커니즘(규격 3.3.1절). */
@@ -101,9 +105,13 @@ public final class EndpointConfig {
      *
      * @param value 바이트 수
      * @return 새 설정
+     * @throws IllegalArgumentException 16384 미만이거나 1048576 초과일 때
      */
     public EndpointConfig maxFrameSize(long value) {
         ConfigDraft draft = draft();
+        if (value < HelloParams.MAX_FRAME_SIZE_LOWER_LIMIT || value > HelloParams.MAX_FRAME_SIZE_UPPER_LIMIT) {
+            throw new IllegalArgumentException("maxFrameSize는 16384 이상 1048576 이하여야 한다: " + value);
+        }
         draft.maxFrameSize = value;
         return new EndpointConfig(draft);
     }
@@ -113,9 +121,13 @@ public final class EndpointConfig {
      *
      * @param value 스트림 수
      * @return 새 설정
+     * @throws IllegalArgumentException 0 미만이거나 4294967295 초과일 때
      */
     public EndpointConfig maxConcurrentStreams(long value) {
         ConfigDraft draft = draft();
+        if (value < 0 || value > MAX_U32) {
+            throw new IllegalArgumentException("maxConcurrentStreams는 0 이상 4294967295 이하여야 한다: " + value);
+        }
         draft.maxConcurrentStreams = value;
         return new EndpointConfig(draft);
     }
@@ -137,9 +149,13 @@ public final class EndpointConfig {
      *
      * @param value 밀리초
      * @return 새 설정
+     * @throws IllegalArgumentException 0 이하이거나 Long.MAX_VALUE/2 초과일 때
      */
     public EndpointConfig ackTimeoutMs(long value) {
         ConfigDraft draft = draft();
+        if (value <= 0 || value > MAX_TIMEOUT_MS) {
+            throw new IllegalArgumentException("ackTimeoutMs는 양수이고 Long.MAX_VALUE/2 이하여야 한다: " + value);
+        }
         draft.ackTimeoutMs = value;
         return new EndpointConfig(draft);
     }
@@ -150,9 +166,13 @@ public final class EndpointConfig {
      *
      * @param value 밀리초. 0이면 유휴 PING을 끈다
      * @return 새 설정
+     * @throws IllegalArgumentException 음수이거나 Long.MAX_VALUE/2 초과일 때
      */
     public EndpointConfig idleIntervalMs(long value) {
         ConfigDraft draft = draft();
+        if (value < 0 || value > MAX_TIMEOUT_MS) {
+            throw new IllegalArgumentException("idleIntervalMs는 0 이상 Long.MAX_VALUE/2 이하여야 한다: " + value);
+        }
         draft.idleIntervalMs = value;
         return new EndpointConfig(draft);
     }
@@ -163,9 +183,13 @@ public final class EndpointConfig {
      *
      * @param value 밀리초
      * @return 새 설정
+     * @throws IllegalArgumentException 0 이하이거나 Long.MAX_VALUE/2 초과일 때
      */
     public EndpointConfig authTimeoutMs(long value) {
         ConfigDraft draft = draft();
+        if (value <= 0 || value > MAX_TIMEOUT_MS) {
+            throw new IllegalArgumentException("authTimeoutMs는 양수이고 Long.MAX_VALUE/2 이하여야 한다: " + value);
+        }
         draft.authTimeoutMs = value;
         return new EndpointConfig(draft);
     }
@@ -189,9 +213,13 @@ public final class EndpointConfig {
      *
      * @param value 다음 스트림 번호. 역할의 번호 공간(클라이언트는 홀수, 서버는 짝수)에 속해야 한다
      * @return 새 설정
+     * @throws IllegalArgumentException 1 미만일 때
      */
     public EndpointConfig nextStreamId(long value) {
         ConfigDraft draft = draft();
+        if (value < 1) {
+            throw new IllegalArgumentException("nextStreamId는 1 이상이어야 한다: " + value);
+        }
         draft.nextStreamId = value;
         return new EndpointConfig(draft);
     }

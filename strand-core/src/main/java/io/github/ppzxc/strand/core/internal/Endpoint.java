@@ -77,6 +77,8 @@ public final class Endpoint {
     private long peerMaxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
     /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
+    /** 연결을 닫게 한 로컬 원인. 닫을 때 {@code CLOSED} 이벤트에 싣는다. */
+    private @Nullable Throwable closeCause;
     /** CLOSE 교환: CLOSE를 보냈거나 받았다(규격 1.3절, 3.5절). */
     private boolean closeExchanged;
     /** 상대의 CLOSE를 이미 받았다. 처음 받은 CLOSE의 {@code last_stream_id}만 쓴다(규격 3.5절). */
@@ -109,6 +111,10 @@ public final class Endpoint {
         this.config = config;
         this.nextStreamId = config.firstStreamId(server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID);
         this.ownParity = server ? 0 : 1;
+        if ((nextStreamId & 1) != ownParity) {
+            throw new IllegalArgumentException(
+                    "nextStreamId " + nextStreamId + "는 " + (server ? "서버(짝수)" : "클라이언트(홀수)") + "의 번호 공간이 아니다");
+        }
         this.server = server;
     }
 
@@ -117,6 +123,7 @@ public final class Endpoint {
      *
      * @param config 엔드포인트의 설정
      * @return 연결 서문을 기다리는 엔드포인트
+     * @throws IllegalArgumentException 설정의 nextStreamId가 역할의 번호 공간에 속하지 않을 때
      */
     public static Endpoint server(EndpointConfig config) {
         return new Endpoint(true, config);
@@ -127,6 +134,7 @@ public final class Endpoint {
      *
      * @param config 엔드포인트의 설정
      * @return 서버 HELLO를 기다리는 엔드포인트
+     * @throws IllegalArgumentException 설정의 nextStreamId가 역할의 번호 공간에 속하지 않을 때
      */
     public static Endpoint client(EndpointConfig config) {
         Endpoint endpoint = new Endpoint(false, config);
@@ -298,6 +306,9 @@ public final class Endpoint {
      * 유무 무관)이면 {@code RESET} 없이 프레임을 버리고 {@code DEADLINE_EXCEEDED}(처리 안 됨), 쓰기를 시작했으면 {@code RESET(CANCEL)}을
      * 보내고 {@code DEADLINE_EXCEEDED}(결과 모름)를 넘긴다. 요청 확장 영역의 {@code timeout}은 받는 쪽에 주는 힌트일 뿐 이 기한이 아니다.
      *
+     * <p>"지금"은 실제 시각이 아니라 마지막 {@link #advance(long)}까지 흐른 가상 시계다. 이 엔드포인트는 실제 시계를 읽지 않으므로, 호출자는 기한이
+     * 있는 요청을 보내기 직전에 {@code advance}로 시계를 맞춘다. {@code AUTH} 대기와 확인 대기의 기준 시각도 같은 가상 시계다.
+     *
      * @param deadlineMs 지금부터 센 기한(밀리초, 1 이상)
      * @throws IllegalArgumentException {@code deadlineMs}가 1보다 작을 때
      * @see #request(int, byte[])
@@ -418,8 +429,12 @@ public final class Endpoint {
      * 애플리케이션이 PING을 보내게 한다. AUTH 관문을 통과하기 전이면 그 뒤로 미룬다(규격 3.3절).
      *
      * @param payload 정확히 8바이트
+     * @throws IllegalArgumentException payload가 8바이트가 아닐 때
      */
     public void ping(byte[] payload) {
+        if (payload.length != PING_PAYLOAD_SIZE) {
+            throw new IllegalArgumentException("PING payload는 정확히 8바이트여야 한다: " + payload.length);
+        }
         if (!transportClosed) {
             byte[] copy = payload.clone();
             sendAfterAuthGate(DeferredSend.ping(() -> sendPing(copy)));
@@ -655,6 +670,7 @@ public final class Endpoint {
         }
         if (isOwnSpace(streamId)) {
             if (endOwnStream(streamId) != null) {
+                dropUnwrittenRequest(streamId);
                 long errorCode = Frames.readUnsignedInt(payload, 0);
                 // 거절한 요청은 처리를 시작하지 않았다(규격 4.4절 결과 표).
                 Certainty certainty = errorCode == ErrorCode.REFUSED ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
@@ -768,6 +784,7 @@ public final class Endpoint {
         int status = Frames.typeOf(frame) == requestType
                 ? Status.normalize(Frames.statusOf(frame))
                 : Event.RESPONSE_TYPE_MISMATCH;
+        dropUnwrittenRequest(streamId);
         events.add(Event.result(streamId, status, Certainty.RESPONSE));
         closeTransportIfNoPendingStreams();
     }
@@ -850,7 +867,8 @@ public final class Endpoint {
         try {
             decision = config.authenticator().authenticate(mechanism, credentials);
         } catch (RuntimeException e) {
-            // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다.
+            // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다. 원인은 CLOSED 이벤트에 싣는다.
+            closeCause = e;
             decision = AuthDecision.TRANSIENT_FAILURE;
         }
         if (decision != AuthDecision.PASS) {
@@ -1091,7 +1109,7 @@ public final class Endpoint {
         deferredSends.clear();
         ownPendingStreams.clear();
         peerPendingStreams.clear();
-        events.add(Event.closed());
+        events.add(Event.closed(closeCause));
     }
 
     private void sendHello() {
@@ -1102,7 +1120,7 @@ public final class Endpoint {
         sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), payload);
     }
 
-    /** ACK 하나가 끝내는 대기는 가장 먼저 시작한 것 하나다. HELLO 대기는 payload가 null이다. */
+    /** ACK 하나가 끝내는 대기는 payload가 같은 것 중 가장 먼저 등록한 하나다. 프레임을 넘기기 전에 도착한 ACK도 그 대기를 끝낸다. HELLO 대기는 payload가 null이다. */
     private void endOldestWait(byte @Nullable [] payload) {
         for (Iterator<AckWait> it = ackWaits.iterator(); it.hasNext(); ) {
             if (Arrays.equals(it.next().payload, payload)) {
@@ -1156,6 +1174,14 @@ public final class Endpoint {
     /** 번호를 받아 아직 끝나지 않은 내 스트림의 수. 요청 기록이 끝난 요청 뒤에 남지 않는지 보는 기준이다. */
     int openStreamCount() {
         return ownPendingStreams.size();
+    }
+
+    /** 상대가 아직 쓰지 않은 내 요청에 답한 경우(상대의 규격 위반), 쓰기 대기열에 남은 요청 기록을 함께 치운다. */
+    private void dropUnwrittenRequest(long streamId) {
+        OutboundMessage unwritten = undrainedRequests.remove(streamId);
+        if (unwritten != null) {
+            outbox.removeIf(message -> message == unwritten);
+        }
     }
 
     /** 내 스트림을 끝낸다. 대기 중이던 요청의 type을 돌려주고, 대기 중이 아니면 null이다. */

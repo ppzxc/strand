@@ -1217,7 +1217,10 @@ class EndpointTest {
         server.receive(bytes(AUTH_ANONYMOUS));
 
         assertThat(sent(server)).isEqualTo(closeWith(2));
-        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+        List<Event> events = server.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.CLOSED);
+        assertThat(events.get(0).cause()).get().isInstanceOf(IllegalStateException.class);
     }
 
     @Test
@@ -3117,5 +3120,49 @@ class EndpointTest {
         server.abortClosing();
 
         assertOpenAndSilent(server);
+    }
+
+    @Test
+    void pingWithWrongLengthPayloadIsRejectedLocally() {
+        Endpoint client = establishedClient();
+
+        assertThatThrownBy(() -> client.ping(new byte[3])).isInstanceOf(IllegalArgumentException.class);
+        assertOpenAndSilent(client);
+    }
+
+    @Test
+    void configRejectsOutOfRangeValues() {
+        EndpointConfig defaults = EndpointConfig.defaults();
+
+        assertThatThrownBy(() -> defaults.maxFrameSize(10)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.maxConcurrentStreams(-1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.ackTimeoutMs(0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.authTimeoutMs(0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.idleIntervalMs(-1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.nextStreamId(0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.maxFrameSize(1_048_577)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.maxConcurrentStreams(0x1_0000_0000L))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.ackTimeoutMs(Long.MAX_VALUE)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.authTimeoutMs(Long.MAX_VALUE)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> defaults.idleIntervalMs(Long.MAX_VALUE)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void nextStreamIdMustBelongToTheRolesNumberSpace() {
+        assertThatThrownBy(() -> Endpoint.client(EndpointConfig.defaults().nextStreamId(2)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Endpoint.server(EndpointConfig.defaults().nextStreamId(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void aResponseToAnUnwrittenRequestAlsoDropsItFromTheOutbox() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+
+        client.receive(bytes(appFrame(1, 0, "")));
+
+        assertThat(client.drainMessages()).isEmpty();
     }
 }
