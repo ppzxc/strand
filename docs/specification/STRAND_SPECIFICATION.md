@@ -484,7 +484,7 @@ sequenceDiagram
 
 애플리케이션 프레임의 `type`은 `0x0100` 이상의 값으로, 애플리케이션이 요청 종류마다 하나씩 붙인다. payload는 불투명 바이트열이다. 프로토콜은 payload의 형식을 요구하지 않는다.
 
-모르는 `type`으로 요청이 오면 연결은 그대로 두고 `status` = `UNIMPLEMENTED`로 답한다(MUST). 메시지 형식을 호환되지 않게 바꿔야 할 때는 기존 `type`을 고치지 말고 새 번호를 받는다.
+모르는 `type`으로 요청이 오면 연결은 그대로 두고 `status` = `UNIMPLEMENTED`로 답한다(MUST). payload 형식을 호환되지 않게 바꿔야 할 때는 기존 `type`을 고치지 말고 새 번호를 받는다.
 
 프로토콜은 애플리케이션 payload를 해석하지 않고 그대로 넘긴다. 애플리케이션은 요청 payload를 해석하지 못하면 `status` = `INVALID_ARGUMENT`로 답하는 것이 좋다(SHOULD).
 
