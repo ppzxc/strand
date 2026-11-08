@@ -149,7 +149,8 @@ final class VectorRunner {
                 "result",
                 event -> "result stream_id="
                         + (event.has("stream_id") ? streamId(event.get("stream_id")) : "-") + " status="
-                        + nameOfStatus(event.get("status")));
+                        + nameOfStatus(event.get("status")) + " certainty="
+                        + event.get("certainty").getAsString());
         EVENTS.put(
                 "request_received",
                 event -> "request_received stream_id=" + streamId(event.get("stream_id")) + " type="
@@ -429,6 +430,10 @@ final class VectorRunner {
         return result;
     }
 
+    private static String certaintyName(Event event) {
+        return event.certainty().orElseThrow(AssertionError::new).name().toLowerCase(Locale.ROOT);
+    }
+
     private static List<String> describe(List<Event> events) {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
@@ -436,13 +441,11 @@ final class VectorRunner {
                 // 벡터 형식에 없는 이벤트다(6.2절). 클라이언트의 credential_lifetime 통지는 core 테스트가 본다.
                 continue;
             }
-            if (event.kind() == Event.Kind.RESULT && event.streamId() == 0) {
-                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). 구현 이슈에서 core가
-                // certainty를 내보내면 이 줄과 certainty 비교를 함께 고친다. 지금은 비교하지 않는다.
-                continue;
-            }
             if (event.kind() == Event.Kind.RESULT) {
-                result.add("result stream_id=" + event.streamId() + " status=" + nameOfStatus(event.status()));
+                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). core는 번호 0으로 알린다.
+                String id = event.streamId() == 0 ? "-" : String.valueOf(event.streamId());
+                result.add("result stream_id=" + id + " status=" + nameOfStatus(event.status()) + " certainty="
+                        + certaintyName(event));
             } else if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
                 result.add("request_received stream_id=" + event.streamId() + " type=" + event.type());
             } else {

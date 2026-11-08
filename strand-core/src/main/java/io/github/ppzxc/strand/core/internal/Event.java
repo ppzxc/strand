@@ -1,5 +1,6 @@
 package io.github.ppzxc.strand.core.internal;
 
+import java.util.Optional;
 import java.util.OptionalLong;
 
 /** 엔드포인트가 애플리케이션에 전달하는 이벤트(적합성 벡터 형식 6.2절). */
@@ -93,6 +94,15 @@ public final class Event {
      */
     public int status() {
         return status;
+    }
+
+    /**
+     * {@link Kind#RESULT}의 결과 확정성(규격 1.3절). 다른 종류에서는 비어 있다.
+     *
+     * @return 결과 확정성
+     */
+    public Optional<Certainty> certainty() {
+        return kind == Kind.RESULT ? Optional.of(Certainty.RESPONSE) : Optional.empty();
     }
 
     /**

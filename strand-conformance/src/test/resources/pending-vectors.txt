@@ -15,7 +15,6 @@ auth/server-receives-auth-ack-closes
 auth/server-second-auth-closes
 auth/server-unknown-mechanism-closes-unauthenticated
 auth/server-wrong-credentials-closes-unauthenticated
-backpressure/local-failure-at-peer-limit-sends-nothing-and-keeps-the-number
 backpressure/request-after-close-received-is-dropped-silently
 backpressure/request-after-close-sent-is-dropped-silently
 backpressure/request-after-close-with-regressed-number-closes-silently
@@ -42,7 +41,4 @@ request-checks/closing-drops-unknown-type-with-bad-extension-value
 streams/closing-dropped-number-reuse-closes
 streams/exhaustion-after-close-received-sends-no-close
 streams/exhaustion-after-close-sent-sends-no-second-close
-streams/exhaustion-after-last-number-sends-close-client
 streams/exhaustion-after-last-number-sends-close-server
-streams/exhaustion-takes-precedence-over-peer-limit
-streams/exhaustion-with-pending-stream-closes-after-it-ends
