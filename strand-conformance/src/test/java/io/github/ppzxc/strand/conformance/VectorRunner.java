@@ -118,7 +118,8 @@ final class VectorRunner {
 
         EVENTS.put(
                 "result",
-                event -> "result stream_id=" + event.get("stream_id").getAsInt() + " status="
+                event -> "result stream_id="
+                        + (event.has("stream_id") ? event.get("stream_id").getAsString() : "-") + " status="
                         + nameOfStatus(event.get("status")));
         EVENTS.put(
                 "request_received",
@@ -335,7 +336,8 @@ final class VectorRunner {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
             if (event.kind() == Event.Kind.RESULT && event.streamId() == 0) {
-                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id가 없어 result 이벤트가 아니다(벡터 형식 6.2절). 비교하지 않는다.
+                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). 구현 이슈에서 core가
+                // certainty를 내보내면 이 줄과 certainty 비교를 함께 고친다. 지금은 비교하지 않는다.
                 continue;
             }
             if (event.kind() == Event.Kind.RESULT) {

@@ -50,6 +50,55 @@ class VectorLoaderTest {
     }
 
     @Test
+    void rejectsResultEventWithoutCertainty() {
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "x.json", recvWithEvent("{\"event\":\"result\",\"stream_id\":\"1\",\"status\":\"OK\"}")))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContainingAll("필수 필드 누락", "certainty");
+    }
+
+    @Test
+    void rejectsResultEventWithUnknownCertainty() {
+        assertThatThrownBy(
+                        () -> VectorLoader.parse(
+                                "x.json",
+                                recvWithEvent(
+                                        "{\"event\":\"result\",\"stream_id\":\"1\",\"status\":\"OK\",\"certainty\":\"maybe\"}")))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContainingAll("certainty", "maybe");
+    }
+
+    @Test
+    void rejectsAResultWithoutStreamIdThatIsNotAnUnavailableNotProcessed() {
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "x.json",
+                        recvWithEvent("{\"event\":\"result\",\"status\":\"OK\",\"certainty\":\"not_processed\"}")))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContainingAll("status", "UNAVAILABLE");
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "x.json",
+                        recvWithEvent("{\"event\":\"result\",\"status\":\"UNAVAILABLE\",\"certainty\":\"unknown\"}")))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContainingAll("certainty", "not_processed");
+    }
+
+    @Test
+    void acceptsEveryCertaintyValueAndAResultWithoutStreamId() {
+        for (String certainty : new String[] {"response", "not_processed", "unknown"}) {
+            assertThat(VectorLoader.parse(
+                            "x.json",
+                            recvWithEvent("{\"event\":\"result\",\"stream_id\":\"1\",\"status\":\"OK\",\"certainty\":\""
+                                    + certainty + "\"}")))
+                    .hasSize(1);
+        }
+        assertThat(VectorLoader.parse(
+                        "x.json",
+                        recvWithEvent(
+                                "{\"event\":\"result\",\"status\":\"UNAVAILABLE\",\"certainty\":\"not_processed\"}")))
+                .hasSize(1);
+    }
+
+    @Test
     void loadsAppendixGExample() {
         String json = "{\"format\":2,\"vectors\":[{\"id\":\"ping-is-acknowledged\","
                 + "\"description\":\"PING을 받으면 같은 8바이트에 ACK를 붙여 돌려준다\",\"spec\":[\"3.4\"],"
@@ -96,7 +145,7 @@ class VectorLoaderTest {
                 + "{\"type\":\"CLOSE\",\"stream_id\":\"0\",\"error_code\":\"NO_ERROR\"},"
                 + "{\"type\":\"RESET\",\"stream_id\":\"1\",\"error_code\":6}],"
                 + "\"events\":[{\"event\":\"request_received\",\"stream_id\":\"1\",\"type\":257},"
-                + "{\"event\":\"result\",\"stream_id\":\"1\",\"status\":\"OK\"},{\"event\":\"closed\"}]},"
+                + "{\"event\":\"result\",\"stream_id\":\"1\",\"status\":\"OK\",\"certainty\":\"response\"},{\"event\":\"closed\"}]},"
                 + "{\"kind\":\"respond\",\"stream_id\":\"9007199254740993\",\"status\":\"INTERNAL\",\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"cancel\",\"stream_id\":\"1\",\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"close\",\"error_code\":\"NO_ERROR\",\"send\":[],\"events\":[]},"
@@ -114,7 +163,8 @@ class VectorLoaderTest {
         String setup = "{\"role\":\"client\",\"established\":true,\"next_stream_id\":\"" + big + "\"}";
         String steps = "[{\"kind\":\"respond\",\"stream_id\":\"" + big + "\",\"status\":\"OK\","
                 + "\"send\":[{\"type\":\"RESET\",\"stream_id\":\"" + big + "\",\"error_code\":\"CANCEL\"}],"
-                + "\"events\":[{\"event\":\"result\",\"stream_id\":\"" + big + "\",\"status\":\"OK\"}]}]";
+                + "\"events\":[{\"event\":\"result\",\"stream_id\":\"" + big
+                + "\",\"status\":\"OK\",\"certainty\":\"response\"}]}]";
 
         ConformanceVector vector = VectorLoader.parse("x.json", file(vector("a", "[\"3.4\"]", setup, steps)))
                 .get(0);
@@ -157,7 +207,7 @@ class VectorLoaderTest {
                 "control frame stream_id", recvWithSend("{\"type\":\"HELLO\",\"stream_id\":0}"), "stream_id", "문자열"));
         t.add(rejected(
                 "event stream_id",
-                recvWithEvent("{\"event\":\"result\",\"stream_id\":1,\"status\":\"OK\"}"),
+                recvWithEvent("{\"event\":\"result\",\"stream_id\":1,\"status\":\"OK\",\"certainty\":\"response\"}"),
                 "stream_id",
                 "문자열"));
         t.add(rejected(
@@ -382,7 +432,7 @@ class VectorLoaderTest {
         t.add(rejected("unknown event", recvWithEvent("{\"event\":\"opened\"}"), "event", "a"));
         t.add(rejected(
                 "result event missing status",
-                recvWithEvent("{\"event\":\"result\",\"stream_id\":\"1\"}"),
+                recvWithEvent("{\"event\":\"result\",\"stream_id\":\"1\",\"certainty\":\"response\"}"),
                 "status",
                 "a"));
         t.add(rejected("closed event unknown field", recvWithEvent("{\"event\":\"closed\",\"x\":1}"), "x", "a"));

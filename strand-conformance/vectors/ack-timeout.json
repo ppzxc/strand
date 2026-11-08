@@ -202,7 +202,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -280,7 +281,8 @@
             {
               "event": "result",
               "stream_id": "2",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -345,7 +347,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"

@@ -31,7 +31,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         }
@@ -67,7 +68,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         }
@@ -103,7 +105,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         },
@@ -126,7 +129,8 @@
             {
               "event": "result",
               "stream_id": "3",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         }
@@ -169,7 +173,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -215,7 +220,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"

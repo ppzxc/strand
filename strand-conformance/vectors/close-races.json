@@ -44,7 +44,7 @@
     },
     {
       "id": "close-received-blocks-opening-new-stream",
-      "description": "CLOSE를 받은 클라이언트 역할 구현은 새 스트림을 열지 않는다. 그 뒤 애플리케이션의 새 요청은 프레임을 보내지 않고 애플리케이션에 UNAVAILABLE로 실패를 알리는데, 스트림을 열기 전의 로컬 결과라서 stream_id가 없고 result 이벤트가 아니다. 스트림 1이 대기 중이라 연결은 열려 있다",
+      "description": "CLOSE를 받은 클라이언트 역할 구현은 새 스트림을 열지 않는다. 그 뒤 애플리케이션의 새 요청은 프레임을 보내지 않고 애플리케이션에 UNAVAILABLE로 실패를 알리는데, 스트림을 열기 전의 로컬 결과라서 stream_id가 없는 result(처리 안 됨)로 단언한다. 스트림 1이 대기 중이라 연결은 열려 있다",
       "spec": [
         "3.5"
       ],
@@ -74,7 +74,13 @@
           "kind": "request",
           "type": 257,
           "send": [],
-          "events": []
+          "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            }
+          ]
         }
       ]
     },
@@ -114,7 +120,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             },
             {
               "event": "closed"
@@ -164,7 +171,8 @@
             {
               "event": "result",
               "stream_id": "2",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             },
             {
               "event": "closed"
@@ -221,7 +229,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         },
@@ -373,7 +382,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -417,7 +427,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -467,7 +478,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -602,7 +614,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -704,7 +717,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -756,7 +770,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -947,7 +962,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -958,7 +974,7 @@
     },
     {
       "id": "request-after-close-sent-fails-locally",
-      "description": "CLOSE를 보낸 뒤 애플리케이션의 새 요청은 프레임을 보내지 않고 로컬 UNAVAILABLE로 실패한다. 스트림을 열기 전의 결과라서 stream_id가 없고 result 이벤트가 아니다. 상대 스트림 1이 대기 중이라 연결은 열려 있다",
+      "description": "CLOSE를 보낸 뒤 애플리케이션의 새 요청은 프레임을 보내지 않고 로컬 UNAVAILABLE로 실패한다. 스트림을 열기 전의 결과라서 stream_id가 없는 result(처리 안 됨)로 단언한다. 상대 스트림 1이 대기 중이라 연결은 열려 있다",
       "spec": [
         "3.5"
       ],
@@ -994,13 +1010,19 @@
           "kind": "request",
           "type": 257,
           "send": [],
-          "events": []
+          "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            }
+          ]
         }
       ]
     },
     {
       "id": "request-after-close-received-fails-locally-server",
-      "description": "서버 역할 구현도 CLOSE를 받은 뒤의 새 요청을 프레임 없이 로컬 UNAVAILABLE로 실패시킨다. stream_id가 없고 result 이벤트가 아니다",
+      "description": "서버 역할 구현도 CLOSE를 받은 뒤의 새 요청을 프레임 없이 로컬 UNAVAILABLE로 실패시킨다. stream_id가 없는 result(처리 안 됨)로 단언한다",
       "spec": [
         "3.5"
       ],
@@ -1031,7 +1053,13 @@
           "kind": "request",
           "type": 257,
           "send": [],
-          "events": []
+          "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            }
+          ]
         }
       ]
     },
@@ -1222,7 +1250,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"
@@ -1266,7 +1295,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
             },
             {
               "event": "closed"

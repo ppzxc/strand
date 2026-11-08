@@ -22,6 +22,7 @@ final class VectorSchema {
     static final List<String> ROLES = Arrays.asList("client", "server");
     static final String DEFAULT_TRANSPORT = "tcp";
     static final List<String> TRANSPORTS = Arrays.asList("tcp", "websocket");
+    static final List<String> CERTAINTIES = Arrays.asList("response", "not_processed", "unknown");
     static final List<String> OPCODES = Arrays.asList("binary", "text");
     static final List<String> ACK_FLAGS = Arrays.asList("ACK");
 
@@ -145,7 +146,11 @@ final class VectorSchema {
                 "request_received",
                 EVENT_BASE.require("stream_id", FieldKind.STREAM_ID).require("type", FieldKind.APP_TYPE));
         EVENTS_BY_NAME.put(
-                "result", EVENT_BASE.require("stream_id", FieldKind.STREAM_ID).require("status", FieldKind.STATUS));
+                "result",
+                EVENT_BASE
+                        .allow("stream_id", FieldKind.STREAM_ID)
+                        .require("status", FieldKind.STATUS)
+                        .require("certainty", FieldKind.CERTAINTY));
         EVENTS_BY_NAME.put("closed", EVENT_BASE);
     }
 
@@ -231,6 +236,19 @@ final class VectorSchema {
         return flags != null && flags.isJsonArray() && flags.getAsJsonArray().contains(new JsonPrimitive(flag));
     }
 
+    /** 벡터 형식 문서 6.2절: `stream_id` 없는 result는 UNAVAILABLE이고 not_processed다. */
+    static void localResult(Check c, String path, JsonObject event) {
+        if (event.has("stream_id")) {
+            return;
+        }
+        if (!"UNAVAILABLE".equals(event.get("status").getAsString())) {
+            throw c.failAt(Check.child(path, "status"), "stream_id 없는 result의 status는 UNAVAILABLE이어야 한다");
+        }
+        if (!"not_processed".equals(event.get("certainty").getAsString())) {
+            throw c.failAt(Check.child(path, "certainty"), "stream_id 없는 result의 certainty는 not_processed여야 한다");
+        }
+    }
+
     static void steps(Check c, String path, JsonElement element) {
         JsonArray array = c.array(path, element);
         if (array.isEmpty()) {
@@ -253,7 +271,10 @@ final class VectorSchema {
         JsonArray array = c.array(path, element);
         for (int i = 0; i < array.size(); i++) {
             String eventPath = Check.item(path, i);
-            c.objectNamedBy(eventPath, array.get(i), EVENT_TAG, EVENT_LABEL, EVENTS_BY_NAME);
+            JsonObject event = c.objectNamedBy(eventPath, array.get(i), EVENT_TAG, EVENT_LABEL, EVENTS_BY_NAME);
+            if ("result".equals(event.get(EVENT_TAG).getAsString())) {
+                localResult(c, eventPath, event);
+            }
         }
     }
 

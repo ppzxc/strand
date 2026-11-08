@@ -214,11 +214,19 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["event", "stream_id", "status"],
+          "required": ["event", "status", "certainty"],
           "properties": {
             "event": { "const": "result" },
             "stream_id": { "$ref": "#/$defs/stream_id" },
-            "status": { "$ref": "#/$defs/status" }
+            "status": { "$ref": "#/$defs/status" },
+            "certainty": { "enum": ["response", "not_processed", "unknown"] }
+          },
+          "if": { "not": { "required": ["stream_id"] } },
+          "then": {
+            "properties": {
+              "status": { "const": "UNAVAILABLE" },
+              "certainty": { "const": "not_processed" }
+            }
           }
         },
         {

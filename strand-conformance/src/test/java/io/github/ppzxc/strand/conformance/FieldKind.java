@@ -133,6 +133,13 @@ enum FieldKind {
             c.bool(path, element);
         }
     },
+    /** 결과 확정성(규격 1.3절): 응답 받음, 처리 안 됨, 결과 모름. */
+    CERTAINTY {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.oneOf(path, element, VectorSchema.CERTAINTIES);
+        }
+    },
     ROLE {
         @Override
         void check(Check c, String path, JsonElement element) {
