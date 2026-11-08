@@ -16,18 +16,18 @@ class EndpointTest {
     /** 규격 3.2.3절이 허용하는 {@code max_frame_size}의 최솟값(16 KiB). */
     private static final int MIN_MAX_FRAME_SIZE = 16384;
     /** 길이 필드(4B)와 헤더·확장 영역 길이를 포함한, payload 없는 프레임의 크기. */
-    private static final int EMPTY_FRAME_SIZE = 16;
+    private static final int EMPTY_FRAME_SIZE = 20;
 
     private static final String PREFACE = "c0de535452300000";
-    private static final String HELLO = "0000000c000100000000000000000000";
+    private static final String HELLO = "0000001000010000000000000000000000000000";
     /** extensions_length의 한도(규격 2.4절). */
     private static final int MAX_EXTENSIONS = 8192;
 
-    private static final String HELLO_ACK = "0000000c000101000000000000000000";
-    private static final String PING = "00000014 00020000 00000000 00000000 0102030405060708";
-    private static final String PING_ACK = "00000014000201000000000000000000" + "0102030405060708";
-    private static final String CLOSE_PROTOCOL_ERROR = "00000010000300000000000000000000" + "00000001";
-    private static final String CLOSE_NO_ERROR = "00000010000300000000000000000000" + "00000000";
+    private static final String HELLO_ACK = "0000001000010100000000000000000000000000";
+    private static final String PING = "00000018 0002 00 00 0000000000000000 0000 0000 0102030405060708";
+    private static final String PING_ACK = "0000001800020100000000000000000000000000" + "0102030405060708";
+    private static final String CLOSE_PROTOCOL_ERROR = "0000001400030000000000000000000000000000" + "00000001";
+    private static final String CLOSE_NO_ERROR = "0000001400030000000000000000000000000000" + "00000000";
     private static final String PING_PAYLOAD = "0102030405060708";
     private static final EndpointConfig ONE_SECOND = EndpointConfig.defaults().ackTimeoutMs(1000);
     private static final String DEFAULT_HELLO_PARAMS = "0001 00400000 0002 00000064 0003 00000000".replace(" ", "");
@@ -51,7 +51,8 @@ class EndpointTest {
 
     /** 파라미터 HELLO 프레임. payload는 hex. */
     private static String helloWith(String payloadHex) {
-        return String.format("%08x", 12 + payloadHex.length() / 2) + "000100000000000000000000" + payloadHex;
+        return String.format("%08x", 16 + payloadHex.length() / 2) + "00010000" + "0000000000000000" + "00000000"
+                + payloadHex;
     }
 
     private static String sent(Endpoint endpoint) {
@@ -169,7 +170,7 @@ class EndpointTest {
         server.receive(bytes(PREFACE));
 
         assertThat(sent(server))
-                .isEqualTo("0000001e000100000000000000000000" + "0001000040000002000000640003" + "00000000");
+                .isEqualTo("0000002200010000000000000000000000000000" + "0001000040000002000000640003" + "00000000");
         assertThat(server.drainEvents()).isEmpty();
     }
 
@@ -179,7 +180,7 @@ class EndpointTest {
 
         server.receive(bytes("c0de53545230ffff"));
 
-        assertThat(sent(server)).isEqualTo("0000001e000100000000000000000000" + DEFAULT_HELLO_PARAMS);
+        assertThat(sent(server)).isEqualTo("0000002200010000000000000000000000000000" + DEFAULT_HELLO_PARAMS);
     }
 
     @Test
@@ -283,7 +284,7 @@ class EndpointTest {
     void firstFrameWithAnApplicationTypeClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c010100000000000100000000"));
+        server.receive(bytes("0000001001010000000000000000000100000000"));
 
         assertClosedSilently(server);
     }
@@ -292,7 +293,7 @@ class EndpointTest {
     void firstFrameWithAReservedControlTypeClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c000500000000000000000000"));
+        server.receive(bytes("0000001000050000000000000000000000000000"));
 
         assertClosedSilently(server);
     }
@@ -301,7 +302,7 @@ class EndpointTest {
     void firstFrameWithANonzeroStreamIdClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c000100000000000100000000"));
+        server.receive(bytes("0000001000010000000000000000000100000000"));
 
         assertClosedSilently(server);
     }
@@ -319,7 +320,7 @@ class EndpointTest {
     void firstFrameWithAnUndefinedFlagClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c000180000000000000000000"));
+        server.receive(bytes("0000001000018000000000000000000000000000"));
 
         assertClosedSilently(server);
     }
@@ -337,7 +338,7 @@ class EndpointTest {
     void firstFrameStatusAndReservedAreNotChecked() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c000100ff000000000000ffff"));
+        server.receive(bytes("00000010000100ff00000000000000000000ffff"));
 
         assertThat(sent(server)).isEqualTo(HELLO_ACK);
     }
@@ -346,8 +347,8 @@ class EndpointTest {
     void firstFrameHelloAboveTheOwnLimitClosesWithProtocolError() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
 
-        // 헤더 16바이트만으로 판정한다. length = 16381 = 알린 한도 − 4 + 1.
-        server.receive(bytes("00003ffd 0001 00 00 00000000 0000 0000"));
+        // 헤더 20바이트만으로 판정한다. length = 16381 = 알린 한도 − 4 + 1.
+        server.receive(bytes("00003ffd 0001 00 00 0000000000000000 0000 0000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -356,7 +357,7 @@ class EndpointTest {
     void firstFrameOfTheWrongTypeAboveTheOwnLimitClosesSilently() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
 
-        server.receive(bytes("00003ffd 0002 00 00 00000000 0000 0000"));
+        server.receive(bytes("00003ffd 0002 00 00 0000000000000000 0000 0000"));
 
         assertClosedSilently(server);
     }
@@ -365,7 +366,7 @@ class EndpointTest {
     void firstFrameHelloWithExtensionsClosesWithProtocolError() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000001000010000000000000004000000090000"));
+        server.receive(bytes("000000140001000000000000000000000004000000090000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -433,7 +434,7 @@ class EndpointTest {
         server.receive(bytes(HELLO));
         server.drainMessages();
 
-        server.receive(bytes("00000012000101000000000000000000000200000064"));
+        server.receive(bytes("0000001600010100000000000000000000000000000200000064"));
 
         assertClosedWithProtocolError(server);
     }
@@ -444,7 +445,7 @@ class EndpointTest {
         server.receive(bytes(HELLO));
         server.drainMessages();
 
-        server.receive(bytes("0000000c000101000000000100000000"));
+        server.receive(bytes("0000001000010100000000000000000100000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -500,7 +501,7 @@ class EndpointTest {
     void frameLengthBelowTheMinimumClosesWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000b0002"));
+        server.receive(bytes("0000000f0002"));
 
         assertClosedWithProtocolError(server);
     }
@@ -508,7 +509,7 @@ class EndpointTest {
     @Test
     void nothingIsHandledOnceClosed() {
         Endpoint server = established();
-        server.receive(bytes("0000000b0002"));
+        server.receive(bytes("0000000f0002"));
         server.drainMessages();
         server.drainEvents();
 
@@ -521,7 +522,7 @@ class EndpointTest {
     void controlFramesWithExtensionsCloseWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("00000010 0002 00 00 00000000 0004 0000 00000000"));
+        server.receive(bytes("00000014 0002 00 00 0000000000000000 0004 0000 00000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -530,7 +531,7 @@ class EndpointTest {
     void extensionsLongerThanTheFrameCloseWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000c000500000000000000050000"));
+        server.receive(bytes("0000001000050000000000000000000000050000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -539,7 +540,7 @@ class EndpointTest {
     void controlFramesWithANonzeroStreamIdCloseWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("00000014000200000000000100000000" + "0102030405060708"));
+        server.receive(bytes("0000001800020000000000000000000100000000" + "0102030405060708"));
 
         assertClosedWithProtocolError(server);
     }
@@ -547,8 +548,8 @@ class EndpointTest {
     @Test
     void pingPayloadMustBeExactlyEightBytesEvenForAnAck() {
         for (String frame : new String[] {
-            "0000000c000200000000000000000000",
-            "0000000c000201000000000000000000",
+            "0000001000020000000000000000000000000000",
+            "0000001000020100000000000000000000000000",
             "0000001500020100000000000000000001020304050607" + "0809"
         }) {
             Endpoint server = established();
@@ -563,8 +564,9 @@ class EndpointTest {
 
     @Test
     void pingResetAndApplicationFramesBeforeThePeerAckCloseWithProtocolError() {
-        for (String frame :
-                new String[] {PING, "0000001000040000000000010000000000000004", "0000000c010100000000000100000000"}) {
+        for (String frame : new String[] {
+            PING, "000000140004000000000000000000010000000000000004", "0000001001010000000000000000000100000000"
+        }) {
             Endpoint server = serverAfterPreface();
             server.receive(bytes(HELLO));
             server.drainMessages();
@@ -581,7 +583,7 @@ class EndpointTest {
         server.receive(bytes(HELLO));
         server.drainMessages();
 
-        server.receive(bytes("0000000c000500000000000000000000"));
+        server.receive(bytes("0000001000050000000000000000000000000000"));
         assertOpenAndSilent(server);
         server.receive(bytes(HELLO_ACK));
         server.receive(bytes(PING));
@@ -609,7 +611,7 @@ class EndpointTest {
     void aMalformedCloseIsTreatedAsAReceivedCloseAndClosesWithoutSending() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000f 0003 00 00 00000000 0000 0000 000000".replace(" ", "")));
+        server.receive(bytes("00000013 0003 00 00 0000000000000000 0000 0000 000000".replace(" ", "")));
 
         assertClosedSilently(server);
     }
@@ -736,7 +738,8 @@ class EndpointTest {
         server.request(258, new byte[0]);
 
         assertThat(sent(server))
-                .isEqualTo("0000000e010100000000000200000000" + "0102" + "0000000c010200000000000400000000");
+                .isEqualTo("0000001201010000000000000000000200000000" + "0102"
+                        + "0000001001020000000000000000000400000000");
     }
 
     @Test
@@ -745,7 +748,7 @@ class EndpointTest {
 
         client.request(257, new byte[0]);
 
-        assertThat(sent(client)).isEqualTo("0000000c010100000000000100000000");
+        assertThat(sent(client)).isEqualTo("0000001001010000000000000000000100000000");
     }
 
     @Test
@@ -756,7 +759,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.receive(bytes(HELLO));
 
-        assertThat(sent(server)).isEqualTo(HELLO_ACK + "0000000c010100000000000200000000");
+        assertThat(sent(server)).isEqualTo(HELLO_ACK + "0000001001010000000000000000000200000000");
     }
 
     @Test
@@ -814,7 +817,7 @@ class EndpointTest {
 
     @Test
     void deferredRequestsAfterNumberExhaustionAreFailedLocallyEachOnce() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
         client.drainMessages();
         client.request(257, new byte[0]);
         client.request(257, new byte[0]);
@@ -830,7 +833,7 @@ class EndpointTest {
             assertThat(event.status()).isEqualTo(Status.UNAVAILABLE);
             assertThat(event.streamId()).isZero();
         }
-        assertThat(sent(client)).isEqualTo(HELLO_ACK + requestFrame(257, 2147483647, "") + CLOSE_NO_ERROR);
+        assertThat(sent(client)).isEqualTo(HELLO_ACK + requestFrame(257, Long.MAX_VALUE, "") + CLOSE_NO_ERROR);
     }
 
     @Test
@@ -839,7 +842,7 @@ class EndpointTest {
 
         server.ping(bytes("0102030405060708"));
 
-        assertThat(sent(server)).isEqualTo("00000014000200000000000000000000" + "0102030405060708");
+        assertThat(sent(server)).isEqualTo("0000001800020000000000000000000000000000" + "0102030405060708");
     }
 
     @Test
@@ -850,7 +853,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.receive(bytes(HELLO));
 
-        assertThat(sent(server)).isEqualTo(HELLO_ACK + "00000014000200000000000000000000" + "0102030405060708");
+        assertThat(sent(server)).isEqualTo(HELLO_ACK + "0000001800020000000000000000000000000000" + "0102030405060708");
     }
 
     @Test
@@ -905,7 +908,7 @@ class EndpointTest {
     void clientSendsThePrefaceAndItsHelloAtOnce() {
         Endpoint client = client();
 
-        assertThat(sent(client)).isEqualTo(PREFACE + "0000001e000100000000000000000000" + DEFAULT_HELLO_PARAMS);
+        assertThat(sent(client)).isEqualTo(PREFACE + "0000002200010000000000000000000000000000" + DEFAULT_HELLO_PARAMS);
         assertThat(client.drainEvents()).isEmpty();
     }
 
@@ -922,7 +925,9 @@ class EndpointTest {
     @Test
     void clientFirstFrameChecksCloseSilently() {
         for (String frame : new String[] {
-            "0000001000030000000000000000000000000001", HELLO_ACK, "00000012000100000000000100000000000200000064"
+            "000000140003000000000000000000000000000000000001",
+            HELLO_ACK,
+            "0000001600010000000000000000000100000000000200000064"
         }) {
             Endpoint client = client();
             client.drainMessages();
@@ -948,7 +953,7 @@ class EndpointTest {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().maxFrameSize(16384));
         client.drainMessages();
 
-        client.receive(bytes("00003ffd 0001 00 00 00000000 0000 0000"));
+        client.receive(bytes("00003ffd 0001 00 00 0000000000000000 0000 0000"));
 
         assertClosedWithProtocolError(client);
     }
@@ -1133,7 +1138,7 @@ class EndpointTest {
     void firstFrameOfAPeerStreamIsReportedAsAReceivedRequest() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000c010100000000000100000000"));
+        server.receive(bytes("0000001001010000000000000000000100000000"));
 
         List<Event> events = server.drainEvents();
         assertThat(events).hasSize(1);
@@ -1145,19 +1150,19 @@ class EndpointTest {
     @Test
     void resetWithAnyFlagsFreesThePeerStreamSoItCanBeOpenedAgain() {
         Endpoint server = established();
-        server.receive(bytes("0000000c010100000000000100000000"));
+        server.receive(bytes("0000001001010000000000000000000100000000"));
         server.drainEvents();
 
-        server.receive(bytes("000000100004ff00000000010000000000000004"));
+        server.receive(bytes("000000140004ff0000000000000000010000000000000004"));
         assertThat(server.drainEvents()).isEmpty();
-        server.receive(bytes("0000000c010100000000000300000000"));
+        server.receive(bytes("0000001001010000000000000000000300000000"));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
     @Test
     void resetWithStreamIdZeroOrTopBitSetClosesWithProtocolError() {
-        for (String streamId : new String[] {"00000000", "80000001"}) {
+        for (String streamId : new String[] {"0000000000000000", "8000000000000001"}) {
             Endpoint server = established();
 
             server.receive(bytes("00000010000400" + "00" + streamId + "0000" + "0000" + "00000004"));
@@ -1167,10 +1172,10 @@ class EndpointTest {
     }
 
     /** 확장 영역이 {@code extHex}이고 payload가 없는 type 0x0101 프레임 hex. */
-    private static String appFrame(int streamId, int status, String extHex) {
+    private static String appFrame(long streamId, int status, String extHex) {
         return String.format(
-                "%08x0101%02x%02x%08x%04x0000%s",
-                12 + extHex.length() / 2, 0, status, streamId, extHex.length() / 2, extHex);
+                "%08x0101%02x%02x%016x%04x0000%s",
+                16 + extHex.length() / 2, 0, status, streamId, extHex.length() / 2, extHex);
     }
 
     private static String unknownTlv(int valueLength) {
@@ -1233,7 +1238,7 @@ class EndpointTest {
     void lastResponseWhileClosingCompletesTheClose() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        client.receive(bytes("0000001400030000000000000000000000000000" + "00000000"));
         assertThat(client.drainEvents()).isEmpty();
 
         client.receive(bytes(appFrame(1, 0, "")));
@@ -1281,14 +1286,14 @@ class EndpointTest {
     }
 
     /** 요청 프레임 hex: 확장 영역은 {@code extHex}, payload 없음. */
-    private static String requestFrame(int type, int streamId, String extHex) {
+    private static String requestFrame(int type, long streamId, String extHex) {
         return String.format(
-                "%08x%04x0000%08x%04x0000%s", 12 + extHex.length() / 2, type, streamId, extHex.length() / 2, extHex);
+                "%08x%04x0000%016x%04x0000%s", 16 + extHex.length() / 2, type, streamId, extHex.length() / 2, extHex);
     }
 
-    private static final String RESET_REFUSED_1 = "000000100004000000000001" + "0000" + "0000" + "00000003";
-    private static final String RESET_REFUSED_3 = "000000100004000000000003" + "0000" + "0000" + "00000003";
-    private static final String RESET_REFUSED_5 = "000000100004000000000005" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_1 = "00000014000400000000000000000001" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_3 = "00000014000400000000000000000003" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_5 = "00000014000400000000000000000005" + "0000" + "0000" + "00000003";
 
     private static String keyBytes(int count) {
         StringBuilder hex = new StringBuilder();
@@ -1312,7 +1317,7 @@ class EndpointTest {
 
         server.receive(bytes(requestFrame(258, 1, "")));
 
-        assertThat(sent(server)).isEqualTo("0000000c0102000c000000010000" + "0000");
+        assertThat(sent(server)).isEqualTo("000000100102000c00000000000000010000" + "0000");
         assertOpenAndSilent(server);
         server.receive(bytes(requestFrame(257, 3, "")));
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
@@ -1327,7 +1332,7 @@ class EndpointTest {
 
         client.receive(bytes(requestFrame(258, 2, "")));
 
-        assertThat(sent(client)).isEqualTo("0000000c0102000c000000020000" + "0000");
+        assertThat(sent(client)).isEqualTo("000000100102000c00000000000000020000" + "0000");
     }
 
     @Test
@@ -1343,7 +1348,7 @@ class EndpointTest {
 
             server.receive(bytes(requestFrame(257, 1, extensions)));
 
-            assertThat(sent(server)).isEqualTo("0000000c0101000300000001" + "0000" + "0000");
+            assertThat(sent(server)).isEqualTo("00000010010100030000000000000001" + "0000" + "0000");
             assertOpenAndSilent(server);
         }
     }
@@ -1367,7 +1372,7 @@ class EndpointTest {
 
         server.receive(bytes(requestFrame(258, 1, "00010003000001")));
 
-        assertThat(sent(server)).isEqualTo("0000000c0102000c000000010000" + "0000");
+        assertThat(sent(server)).isEqualTo("000000100102000c00000000000000010000" + "0000");
     }
 
     @Test
@@ -1399,7 +1404,7 @@ class EndpointTest {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
-        server.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        server.receive(bytes("0000001400030000000000000000000000000000" + "00000000"));
 
         server.receive(bytes(requestFrame(258, 3, "00010003000001")));
 
@@ -1426,7 +1431,7 @@ class EndpointTest {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
-        server.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        server.receive(bytes("0000001400030000000000000000000000000000" + "00000000"));
         assertThat(server.drainEvents()).isEmpty();
 
         server.receive(bytes("000000100004000000000001000000000000" + "0004"));
@@ -1469,7 +1474,7 @@ class EndpointTest {
     void repeatedNumberWhileClosingClosesWithoutSendingClose() {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
-        server.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        server.receive(bytes("0000001400030000000000000000000000000000" + "00000000"));
         server.receive(bytes(requestFrame(257, 3, "")));
         server.drainMessages();
         server.drainEvents();
@@ -1481,7 +1486,7 @@ class EndpointTest {
 
     @Test
     void applicationFrameWithStreamIdZeroOrTopBitSetClosesWithProtocolError() {
-        for (int streamId : new int[] {0, 0x80000001}) {
+        for (long streamId : new long[] {0, 0x8000000000000001L}) {
             Endpoint server = established();
 
             server.receive(bytes(requestFrame(257, streamId, "")));
@@ -1495,7 +1500,7 @@ class EndpointTest {
         for (String payload : new String[] {"", "000000", "0000000000"}) {
             Endpoint server = established();
 
-            server.receive(bytes(String.format("%08x00040000%08x00000000", 12 + payload.length() / 2, 1) + payload));
+            server.receive(bytes(String.format("%08x00040000%016x00000000", 16 + payload.length() / 2, 1) + payload));
 
             assertClosedWithProtocolError(server);
         }
@@ -1510,7 +1515,7 @@ class EndpointTest {
         server.respond(1, 0, new byte[0]);
         server.respond(1, 0, new byte[0]);
 
-        assertThat(sent(server)).isEqualTo("0000000c0102000000000001" + "0000" + "0000");
+        assertThat(sent(server)).isEqualTo("00000010010200000000000000000001" + "0000" + "0000");
         server.receive(bytes(requestFrame(257, 3, "")));
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
@@ -1545,7 +1550,7 @@ class EndpointTest {
 
         server.respond(1, 0, bytes("cafe01"));
 
-        assertThat(sent(server)).isEqualTo("0000000f0102000000000001" + "0000" + "0000" + "cafe01");
+        assertThat(sent(server)).isEqualTo("00000013010200000000000000000001" + "0000" + "0000" + "cafe01");
     }
 
     private static Endpoint establishedServerWithPeerFrameSize(int maxFrameSize) {
@@ -1576,7 +1581,7 @@ class EndpointTest {
 
         assertThat(sent(server)).isEmpty();
         server.respond(1, 0, new byte[0]);
-        assertThat(sent(server)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
+        assertThat(sent(server)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
     }
 
     @Test
@@ -1598,7 +1603,7 @@ class EndpointTest {
         assertThat(sent(client)).isEmpty();
         assertThat(client.drainEvents()).isEmpty();
         client.request(257, new byte[0]);
-        assertThat(sent(client)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
+        assertThat(sent(client)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
     }
 
     @Test
@@ -1614,7 +1619,7 @@ class EndpointTest {
         assertLocalUnavailableEvents(client.drainEvents());
         client.receive(bytes(HELLO_ACK));
         client.request(257, new byte[0]);
-        assertThat(sent(client)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
+        assertThat(sent(client)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
     }
 
     @Test
@@ -1638,7 +1643,7 @@ class EndpointTest {
         client.cancel(1);
         client.cancel(1);
 
-        assertThat(sent(client)).isEqualTo("000000100004000000000001" + "0000" + "0000" + "00000004");
+        assertThat(sent(client)).isEqualTo("00000014000400000000000000000001" + "0000" + "0000" + "00000004");
         List<Event> events = client.drainEvents();
         assertThat(events).hasSize(1);
         assertThat(events.get(0).status()).isEqualTo(1);
@@ -1666,7 +1671,7 @@ class EndpointTest {
             client.request(257, new byte[0]);
             client.drainMessages();
 
-            client.receive(bytes(String.format("000000100004000000000001000000000000%04x", c[0])));
+            client.receive(bytes(String.format("00000014000400000000000000000001" + "00000000" + "0000%04x", c[0])));
 
             List<Event> events = client.drainEvents();
             assertThat(events).hasSize(1);
@@ -1679,8 +1684,8 @@ class EndpointTest {
     void resetOnAStreamThatIsNotPendingIsDropped() {
         Endpoint server = established();
 
-        server.receive(bytes("000000100004000000000005" + "0000" + "0000" + "00000004"));
-        server.receive(bytes("000000100004000000000004" + "0000" + "0000" + "00000004"));
+        server.receive(bytes("00000014000400000000000000000005" + "0000" + "0000" + "00000004"));
+        server.receive(bytes("00000014000400000000000000000004" + "0000" + "0000" + "00000004"));
         server.receive(bytes(requestFrame(257, 3, "")));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
@@ -1702,8 +1707,8 @@ class EndpointTest {
 
     @Test
     void streamNumbersAreExhaustedAfterTheLastNumberAndTheConnectionCloses() {
-        int[][] roles = {{1, 2147483647}, {0, 2147483646}};
-        for (int[] role : roles) {
+        long[][] roles = {{1, Long.MAX_VALUE}, {0, (Long.MAX_VALUE - 1)}};
+        for (long[] role : roles) {
             EndpointConfig config = EndpointConfig.defaults().nextStreamId(role[1]);
             Endpoint endpoint = role[0] == 1 ? Endpoint.client(config) : serverAfterPreface(config);
             endpoint.receive(bytes(HELLO));
@@ -1716,14 +1721,14 @@ class EndpointTest {
 
             endpoint.request(257, new byte[0]);
 
-            assertThat(sent(endpoint)).isEqualTo("00000010000300000000000000000000" + "00000000");
+            assertThat(sent(endpoint)).isEqualTo("0000001400030000000000000000000000000000" + "00000000");
             assertThat(kinds(endpoint)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
         }
     }
 
     @Test
     void exhaustionWithAPendingRequestWaitsForItAndSendsNoSecondClose() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
         client.request(257, new byte[0]);
@@ -1733,13 +1738,13 @@ class EndpointTest {
         client.request(257, new byte[0]);
 
         assertFailedLocally(client);
-        client.receive(bytes(appFrame(2147483647, 0, "")));
+        client.receive(bytes(appFrame(Long.MAX_VALUE, 0, "")));
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
     @Test
     void exhaustionTakesPrecedenceOverReachingThePeerConcurrentStreamLimit() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
         client.receive(bytes(helloWith("0002" + String.format("%08x", 1L))));
         client.receive(bytes(HELLO_ACK));
         client.request(257, new byte[0]);
@@ -1748,7 +1753,7 @@ class EndpointTest {
 
         client.request(257, new byte[0]);
 
-        assertThat(sent(client)).isEqualTo("00000010000300000000000000000000" + "00000000");
+        assertThat(sent(client)).isEqualTo("0000001400030000000000000000000000000000" + "00000000");
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT);
     }
 
@@ -1756,7 +1761,7 @@ class EndpointTest {
     void largestStreamNumberIsAccepted() {
         Endpoint server = established();
 
-        server.receive(bytes(requestFrame(257, 2147483647, "")));
+        server.receive(bytes(requestFrame(257, Long.MAX_VALUE, "")));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
@@ -1819,7 +1824,7 @@ class EndpointTest {
     void closeFrameWithLengthBelowMinimumClosesSilently() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000b0003000000000000000000"));
+        server.receive(bytes("0000000f0003" + "00000000000000000000000000"));
 
         assertThat(sent(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
@@ -1839,7 +1844,7 @@ class EndpointTest {
     void nonCloseFrameWithLengthBelowMinimumStillGetsProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000b0004000000000000000000"));
+        server.receive(bytes("0000000f0004" + "00000000000000000000000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -1877,7 +1882,7 @@ class EndpointTest {
     void closeFrameWithBadLengthIsSilentEvenWhenTheTypeArrivesLater() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000b"));
+        server.receive(bytes("0000000f"));
         assertOpenAndSilent(server);
         server.receive(bytes("0003"));
 
@@ -1885,7 +1890,7 @@ class EndpointTest {
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 
-    private static final String PING_MESSAGE = "000000140002000000000000000000000102030405060708";
+    private static final String PING_MESSAGE = "00000018000200000000000000000000000000000102030405060708";
 
     private static Endpoint webSocketServer() {
         return Endpoint.server(EndpointConfig.defaults().webSocket());
@@ -1920,7 +1925,7 @@ class EndpointTest {
         assertThat(messages).hasSize(2);
         assertThat(hex(messages.get(0).bytes())).isEqualTo(PREFACE);
         assertThat(hex(messages.get(1).bytes()))
-                .isEqualTo("0000001e" + "000100000000000000000000" + DEFAULT_HELLO_PARAMS);
+                .isEqualTo("00000022" + "00010000" + "0000000000000000" + "00000000" + DEFAULT_HELLO_PARAMS);
         assertThat(client.drainMessages()).isEmpty();
     }
 
@@ -1949,7 +1954,7 @@ class EndpointTest {
     @Test
     void webSocketCloseWaitsForTheLastStreamWhenNoErrorCloseIsDraining() {
         Endpoint server = establishedWebSocket();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000000c010100000000000100000000"));
+        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
         server.drainEvents();
         server.close(ErrorCode.NO_ERROR);
         assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Kind.BINARY);
@@ -1974,7 +1979,7 @@ class EndpointTest {
     @Test
     void webSocketCloseWaitsForTheLastStreamWhenReceivedNoErrorCloseIsDraining() {
         Endpoint server = establishedWebSocket();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000000c010100000000000100000000"));
+        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
         server.drainEvents();
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_NO_ERROR));
         assertThat(server.drainMessages()).isEmpty();
@@ -2006,7 +2011,7 @@ class EndpointTest {
     @Test
     void webSocketErrorCloseReceivedWhileDrainingHasNoWebSocketCloseItem() {
         Endpoint server = establishedWebSocket();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000000c010100000000000100000000"));
+        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
         server.drainEvents();
         server.close(ErrorCode.NO_ERROR);
         server.drainMessages();
@@ -2040,7 +2045,7 @@ class EndpointTest {
 
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PING_MESSAGE));
 
-        assertThat(sent(server)).isEqualTo("000000140002010000000000000000000102030405060708");
+        assertThat(sent(server)).isEqualTo("00000018000201000000000000000000000000000102030405060708");
     }
 
     @Test
@@ -2161,11 +2166,11 @@ class EndpointTest {
     @Test
     void webSocketMessageAboveTheMaxFrameSizeIsAProtocolError() {
         Endpoint server = establishedWebSocket(EndpointConfig.defaults().maxFrameSize(16384));
-        String payload = new String(new char[16384 - 12 - 4 + 1]).replace("\0", "00");
+        String payload = new String(new char[16384 - 16 - 4 + 1]).replace("\0", "00");
 
         server.receiveMessage(
                 WebSocketMessageKind.BINARY,
-                bytes(String.format("%08x", 12 + payload.length() / 2) + "00020000" + "00000000" + "00000000"
+                bytes(String.format("%08x", 16 + payload.length() / 2) + "00020000" + "0000000000000000" + "00000000"
                         + payload));
 
         assertClosedWithProtocolError(server);

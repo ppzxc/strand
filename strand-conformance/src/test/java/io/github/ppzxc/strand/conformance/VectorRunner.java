@@ -84,11 +84,11 @@ final class VectorRunner {
                 (runner, step) -> runner.endpoint.request(
                         step.get("type").getAsInt(),
                         Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
-        STEPS.put("cancel", (runner, step) -> runner.endpoint.cancel((int) streamId(step.get("stream_id"))));
+        STEPS.put("cancel", (runner, step) -> runner.endpoint.cancel(streamId(step.get("stream_id"))));
         STEPS.put(
                 "respond",
                 (runner, step) -> runner.endpoint.respond(
-                        (int) streamId(step.get("stream_id")),
+                        streamId(step.get("stream_id")),
                         statusCode(step.get("status")),
                         Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
         STEPS.put("disconnect", (runner, step) -> runner.endpoint.disconnect());

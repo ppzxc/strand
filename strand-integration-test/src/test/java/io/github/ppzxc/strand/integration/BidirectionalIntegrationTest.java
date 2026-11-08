@@ -39,10 +39,10 @@ class BidirectionalIntegrationTest {
                         e -> e.request(APPLICATION_TYPE + index, Fixtures.payload("from-server-" + index)));
             }
 
-            Map<Integer, Integer> typeByStreamAtServer = new HashMap<>();
-            Map<Integer, Integer> typeByStreamAtClient = new HashMap<>();
-            Map<Integer, Integer> statusByStreamAtClient = new HashMap<>();
-            Map<Integer, Integer> statusByStreamAtServer = new HashMap<>();
+            Map<Long, Integer> typeByStreamAtServer = new HashMap<>();
+            Map<Long, Integer> typeByStreamAtClient = new HashMap<>();
+            Map<Long, Integer> statusByStreamAtClient = new HashMap<>();
+            Map<Long, Integer> statusByStreamAtServer = new HashMap<>();
             // 요청 도착과 결과가 섞여 오므로 종류와 상관없이 양쪽 이벤트를 각각 6개(요청 3 + 결과 3)씩 받아 나눈다.
             int eventsPerSide = 2 * REQUESTS_PER_SIDE;
             for (Event event : serverConnection.awaitEvents(eventsPerSide)) {
@@ -63,12 +63,16 @@ class BidirectionalIntegrationTest {
             // 클라이언트 개시: 번호 1, 3, 5. 서버 개시: 번호 2, 4, 6. 번호 i번째 요청의 type이 APPLICATION_TYPE + i다.
             assertThat(typeByStreamAtServer)
                     .containsOnly(
-                            entry(1, APPLICATION_TYPE), entry(3, APPLICATION_TYPE + 1), entry(5, APPLICATION_TYPE + 2));
+                            entry(1L, APPLICATION_TYPE),
+                            entry(3L, APPLICATION_TYPE + 1),
+                            entry(5L, APPLICATION_TYPE + 2));
             assertThat(typeByStreamAtClient)
                     .containsOnly(
-                            entry(2, APPLICATION_TYPE), entry(4, APPLICATION_TYPE + 1), entry(6, APPLICATION_TYPE + 2));
-            assertThat(statusByStreamAtClient).containsOnly(entry(1, 0), entry(3, 1), entry(5, 2));
-            assertThat(statusByStreamAtServer).containsOnly(entry(2, 3), entry(4, 4), entry(6, 5));
+                            entry(2L, APPLICATION_TYPE),
+                            entry(4L, APPLICATION_TYPE + 1),
+                            entry(6L, APPLICATION_TYPE + 2));
+            assertThat(statusByStreamAtClient).containsOnly(entry(1L, 0), entry(3L, 1), entry(5L, 2));
+            assertThat(statusByStreamAtServer).containsOnly(entry(2L, 3), entry(4L, 4), entry(6L, 5));
         }
     }
 }

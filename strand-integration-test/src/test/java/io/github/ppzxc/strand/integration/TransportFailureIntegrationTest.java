@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 class TransportFailureIntegrationTest {
 
     /** 규격 4.2절: 클라이언트가 처음 여는 스트림은 1번이다. */
-    private static final int FIRST_CLIENT_STREAM_ID = 1;
+    private static final long FIRST_CLIENT_STREAM_ID = 1L;
 
     /**
      * 응답을 기다리는 중에 상대가 CLOSE 없이 TCP를 끊으면, 대기 중이던 요청은 로컬 {@code UNAVAILABLE}로 정확히 한 번 끝나고 그 뒤에 {@code
