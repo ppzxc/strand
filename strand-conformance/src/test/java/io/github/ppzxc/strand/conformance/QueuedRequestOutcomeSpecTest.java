@@ -81,19 +81,26 @@ class QueuedRequestOutcomeSpecTest {
     }
 
     @Test
-    void resultTableHasCancelBeforeHandOverRow() throws IOException {
+    void cancelRowsSplitAtTheFirstWrittenByte() throws IOException {
         String reset = section("4.4 스트림 중단");
-        assertThat(rows(reset).stream().filter(l -> l.contains("넘기기 전에")).collect(Collectors.toList()))
-                .singleElement()
-                .satisfies(row -> {
-                    assertThat(row).contains("`CANCELLED`").contains("처리 안 됨").doesNotContain("결과 모름");
-                });
-        // 넘긴 뒤 취소는 결과 모름 그대로다.
-        assertThat(rows(reset).stream().filter(l -> l.contains("넘긴 뒤")).collect(Collectors.toList()))
+        List<String> rows = rows(reset);
+        assertThat(rows.stream().filter(l -> l.contains("한 바이트도 쓰기 전에")).collect(Collectors.toList()))
                 .singleElement()
                 .asString()
                 .contains("`CANCELLED`")
+                .contains("처리 안 됨")
+                .doesNotContain("결과 모름");
+        // 쓰기를 시작한 뒤 취소는 결과 모름이다.
+        assertThat(rows.stream()
+                        .filter(l -> l.contains("`CANCELLED`") && l.contains("쓰기를 시작한 뒤"))
+                        .collect(Collectors.toList()))
+                .singleElement()
+                .asString()
                 .contains("결과 모름");
+        // 마지막 바이트 기준은 4.4절 표에 남지 않는다(3.5절 연결이 끝날 때만 쓴다).
+        assertThat(reset).doesNotContain("마지막 바이트");
+        // 쓰기를 시작한 프레임은 끊지 않고 마저 쓴 뒤 RESET을 보낸다.
+        assertThat(reset).contains("마저 쓴 뒤");
     }
 
     @Test
