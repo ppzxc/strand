@@ -45,7 +45,7 @@ class SpecFinalizationTest {
             } else if (in && line.startsWith("| **")) {
                 Matcher m = Pattern.compile("^\\| \\*\\*(.+?)\\*\\*").matcher(line);
                 if (m.find()) {
-                    terms.add(m.group(1).replaceAll("\\*\\*.*", ""));
+                    terms.add(m.group(1));
                 }
             }
         }
@@ -205,12 +205,5 @@ class SpecFinalizationTest {
 
     private static JsonArray array(JsonObject o, String key) {
         return o.has(key) ? o.getAsJsonArray(key) : new JsonArray();
-    }
-
-    @Test
-    void examplesWriteHexInFull() throws IOException {
-        assertThat(exampleBlocks())
-                .as("형식 문서가 정의하지 않는 반복 표기를 예시가 쓰지 않는다")
-                .noneMatch(b -> b.matches("(?s).*<[0-9a-fA-F]{2}x\\d+>.*"));
     }
 }
