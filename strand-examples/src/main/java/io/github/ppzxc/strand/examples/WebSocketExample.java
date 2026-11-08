@@ -31,7 +31,8 @@ public final class WebSocketExample {
     public static void main(String[] args) throws Exception {
         URI uri = URI.create(ExampleSupport.arg(args, 0, "ws://localhost:8080/"));
         System.out.println("strand core " + StrandVersion.get());
-        Endpoint endpoint = Endpoint.client(EndpointConfig.defaults().webSocket());
+        Endpoint endpoint = Endpoint.client(
+                ExampleSupport.withAuth(EndpointConfig.defaults().webSocket()));
         CountDownLatch finished = new CountDownLatch(1);
 
         WebSocket.Listener listener = new WebSocket.Listener() {
@@ -91,6 +92,8 @@ public final class WebSocketExample {
 
         WebSocket socket = HttpClient.newHttpClient()
                 .newWebSocketBuilder()
+                // 규격 1.2.1절: 하위 프로토콜 strand를 제시한다.
+                .subprotocols("strand")
                 .buildAsync(uri, listener)
                 .join();
         synchronized (endpoint) {
@@ -108,6 +111,7 @@ public final class WebSocketExample {
         for (Event event : endpoint.drainEvents()) {
             System.out.println("[클라이언트] " + ExampleSupport.describe(event));
             if (event.kind() == Event.Kind.RESULT) {
+                ExampleSupport.handleResult(event);
                 endpoint.close(ExampleSupport.NO_ERROR);
             } else if (event.kind() == Event.Kind.CLOSED) {
                 finished.countDown();

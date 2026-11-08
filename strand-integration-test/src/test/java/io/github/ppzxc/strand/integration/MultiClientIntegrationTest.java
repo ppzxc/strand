@@ -4,6 +4,7 @@ import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static io.github.ppzxc.strand.integration.Fixtures.NO_ERROR;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.Event;
 import java.util.ArrayList;
 import java.util.List;
@@ -95,8 +96,9 @@ class MultiClientIntegrationTest {
                 requestFor(clients.get(i), i);
             }
             for (int i = 0; i < CLIENT_COUNT; i++) {
-                assertThat(clients.get(i).awaitEvent(Event.Kind.RESULT).status())
-                        .isEqualTo(i);
+                Event result = clients.get(i).awaitEvent(Event.Kind.RESULT);
+                assertThat(result.status()).isEqualTo(i);
+                assertThat(result.certainty()).contains(Certainty.RESPONSE);
             }
 
             for (int i = 0; i < CLIENT_COUNT; i++) {

@@ -55,7 +55,8 @@ class SpecFinalizationTest {
     /** core jar 매니페스트의 Implementation-Version(StrandVersion)은 프로젝트 version에서 오므로, 그 값이 규격 버전과 같아야 한다. */
     @Test
     void projectVersionEqualsSpecVersion() throws IOException {
-        Matcher spec = Pattern.compile("\\*\\*규격 버전 \\(Version\\)\\*\\*: (\\S+)").matcher(read(SPEC));
+        Matcher spec =
+                Pattern.compile("\\*\\*규격 버전 \\(Version\\)\\*\\*: (\\S+)").matcher(read(SPEC));
         assertThat(spec.find()).as("규격의 규격 버전 줄").isTrue();
         Matcher project = Pattern.compile("(?m)^version=(\\S+)$").matcher(read(ROOT.resolve("gradle.properties")));
         assertThat(project.find()).as("gradle.properties의 version").isTrue();

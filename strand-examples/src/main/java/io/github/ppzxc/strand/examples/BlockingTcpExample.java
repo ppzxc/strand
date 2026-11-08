@@ -30,7 +30,7 @@ public final class BlockingTcpExample {
             OutputStream out = socket.getOutputStream();
             InputStream in = socket.getInputStream();
 
-            Endpoint endpoint = Endpoint.client(EndpointConfig.defaults());
+            Endpoint endpoint = Endpoint.client(ExampleSupport.withAuth(EndpointConfig.defaults()));
             // 서버 HELLO를 ACK하기 전의 요청은 core가 미뤘다가 보낸다.
             endpoint.request(ExampleSupport.DEMO_REQUEST_TYPE, "hello".getBytes(StandardCharsets.UTF_8));
             endpoint.ping(new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
@@ -50,7 +50,10 @@ public final class BlockingTcpExample {
                 }
                 for (Event event : endpoint.drainEvents()) {
                     System.out.println("[클라이언트] " + ExampleSupport.describe(event));
-                    resultReceived |= event.kind() == Event.Kind.RESULT;
+                    if (event.kind() == Event.Kind.RESULT) {
+                        ExampleSupport.handleResult(event);
+                        resultReceived = true;
+                    }
                     closed |= event.kind() == Event.Kind.CLOSED;
                 }
                 if (resultReceived && !closed) {
