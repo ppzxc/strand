@@ -793,8 +793,9 @@ public final class Endpoint {
             return;
         }
         long lastStreamId = Frames.readLong(frame, Frames.HEADER_SIZE + CLOSE_ERROR_CODE_SIZE);
-        if (lastStreamId != 0 && (!isOwnSpace(lastStreamId) || lastStreamId > highestSentOwnStreamId)) {
-            // 최상위 비트가 1이면 long으로 음수라서 보낸 번호보다 크다고 센다. 이 값은 쓰지 않는다.
+        if (lastStreamId != 0
+                && (!isOwnSpace(lastStreamId) || lastStreamId < 0 || lastStreamId > highestSentOwnStreamId)) {
+            // 최상위 비트가 1이면 long으로 음수이고 보낸 번호보다 크다. 이 값은 쓰지 않는다.
             closeReceivedMalformed();
             return;
         }

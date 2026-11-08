@@ -2525,4 +2525,45 @@ class EndpointTest {
         assertThat(server.drainMessages()).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
+
+    @Test
+    void closeLastStreamIdEndsUndrainedRequestsAndTheirFramesAreNeverSent() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.drainMessages();
+        client.request(257, new byte[0]);
+
+        client.receive(bytes(closeNoErrorLast(1)));
+
+        assertThat(client.drainMessages()).isEmpty();
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).streamId()).isEqualTo(3);
+        assertThat(events.get(0).certainty()).contains(Certainty.NOT_PROCESSED);
+    }
+
+    @Test
+    void closeWithLastStreamIdHighBitSetIsMalformedAndClosesSilently() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.drainMessages();
+
+        client.receive(bytes(closeNoErrorLast(0x8000000000000001L)));
+
+        assertThat(client.drainMessages()).isEmpty();
+        List<Event> events = client.drainEvents();
+        assertThat(events.get(0).certainty()).contains(Certainty.UNKNOWN);
+        assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void abandoningTheWaitAfterTheConnectionClosedDoesNothing() {
+        Endpoint server = established();
+        server.receive(bytes(CLOSE_NO_ERROR));
+        server.drainEvents();
+
+        server.abortClosing();
+
+        assertOpenAndSilent(server);
+    }
 }
