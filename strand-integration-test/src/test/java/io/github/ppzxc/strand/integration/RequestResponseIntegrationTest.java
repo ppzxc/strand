@@ -34,13 +34,13 @@ class RequestResponseIntegrationTest {
             client.request(FIRST_TYPE, Fixtures.payload("first"));
             client.request(SECOND_TYPE, Fixtures.payload("second"));
 
-            Map<Integer, Integer> statusByStream = new HashMap<>();
+            Map<Long, Integer> statusByStream = new HashMap<>();
             for (int i = 0; i < 2; i++) {
                 Event result = client.awaitEvent(Event.Kind.RESULT);
                 statusByStream.put(result.streamId(), result.status());
             }
 
-            assertThat(statusByStream).containsOnly(entry(1, STATUS_FOR_FIRST), entry(3, STATUS_FOR_SECOND));
+            assertThat(statusByStream).containsOnly(entry(1L, STATUS_FOR_FIRST), entry(3L, STATUS_FOR_SECOND));
         }
     }
 }

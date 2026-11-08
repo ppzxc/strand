@@ -29,8 +29,17 @@ import java.util.function.Function;
  */
 final class VectorRunner {
 
+    /** 헤더 크기(규격 2.1절). 러너는 core의 상수가 아니라 규격의 값을 따로 둔다. */
+    private static final int HEADER_SIZE = 20;
+    /** extensions_length 필드의 위치(규격 2.1절). */
+    private static final int EXTENSIONS_LENGTH_AT = 16;
+
     private static final String PREFACE_HEX = "c0de535452300000";
-    private static final String ACK_HELLO_HEX = "0000000c000101000000000000000000";
+    private static final int HELLO_TYPE = 1;
+    private static final int ACK_FLAG = 0x01;
+    /** 연결 수립에 쓰는 상대 HELLO에 대한 ACK(페이로드 없음). */
+    private static final String ACK_HELLO_HEX = controlHeader(HELLO_TYPE, ACK_FLAG, 0);
+
     private static final Map<String, Long> HELLO_DEFAULTS = new LinkedHashMap<>();
     private static final Map<Integer, String> HELLO_PARAMS = new LinkedHashMap<>();
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(Arrays.asList(
@@ -84,13 +93,11 @@ final class VectorRunner {
                 (runner, step) -> runner.endpoint.request(
                         step.get("type").getAsInt(),
                         Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
-        STEPS.put(
-                "cancel",
-                (runner, step) -> runner.endpoint.cancel(step.get("stream_id").getAsInt()));
+        STEPS.put("cancel", (runner, step) -> runner.endpoint.cancel(streamId(step.get("stream_id"))));
         STEPS.put(
                 "respond",
                 (runner, step) -> runner.endpoint.respond(
-                        step.get("stream_id").getAsInt(),
+                        streamId(step.get("stream_id")),
                         statusCode(step.get("status")),
                         Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
         STEPS.put("disconnect", (runner, step) -> runner.endpoint.disconnect());
@@ -115,17 +122,17 @@ final class VectorRunner {
                 frame -> "WEBSOCKET_CLOSE code=" + frame.get("code").getAsInt());
         NAMED_FRAMES.put(
                 "RESET",
-                frame -> "RESET flags=- stream_id=" + frame.get("stream_id").getAsInt() + " error_code="
+                frame -> "RESET flags=- stream_id=" + streamId(frame.get("stream_id")) + " error_code="
                         + nameOfError(frame.get("error_code")));
 
         EVENTS.put(
                 "result",
                 event -> "result stream_id="
-                        + (event.has("stream_id") ? event.get("stream_id").getAsString() : "-") + " status="
+                        + (event.has("stream_id") ? streamId(event.get("stream_id")) : "-") + " status="
                         + nameOfStatus(event.get("status")));
         EVENTS.put(
                 "request_received",
-                event -> "request_received stream_id=" + event.get("stream_id").getAsInt() + " type="
+                event -> "request_received stream_id=" + streamId(event.get("stream_id")) + " type="
                         + event.get("type").getAsInt());
         EVENTS.put("closed", event -> "closed");
     }
@@ -227,6 +234,14 @@ final class VectorRunner {
         return setup.has("transport") && setup.get("transport").getAsString().equals("websocket");
     }
 
+    /** 벡터의 스트림 번호(10진수 문자열, 벡터 형식 5절)를 정수로. 2^53을 넘는 값도 정확하다. 문자열이 아니면 거부한다. */
+    private static long streamId(JsonElement element) {
+        assertThat(element.getAsJsonPrimitive().isString())
+                .as("스트림 번호는 문자열이다: %s", element)
+                .isTrue();
+        return Long.parseLong(element.getAsString());
+    }
+
     private static EndpointConfig configOf(JsonObject setup) {
         Map<String, Long> hello = helloParams(setup.getAsJsonObject("local_hello"));
         long ackTimeout = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
@@ -241,7 +256,7 @@ final class VectorRunner {
             config = config.webSocket();
         }
         if (setup.has("next_stream_id")) {
-            config = config.nextStreamId(setup.get("next_stream_id").getAsLong());
+            config = config.nextStreamId(streamId(setup.get("next_stream_id")));
         }
         if (setup.has("known_types")) {
             Set<Integer> known = new HashSet<>();
@@ -294,6 +309,14 @@ final class VectorRunner {
         return params;
     }
 
+    /**
+     * 확장 영역이 없고 {@code status}와 {@code stream_id}가 0인 제어 프레임의 헤더 hex(20바이트, 규격 2.1절). {@code length}는 header 뒤 payload
+     * 크기로 채운다.
+     */
+    private static String controlHeader(int type, int flags, int payloadSize) {
+        return String.format("%08x%04x%02x%02x%016x%04x%04x", HEADER_SIZE - 4 + payloadSize, type, flags, 0, 0L, 0, 0);
+    }
+
     private static byte[] encodeHello(Map<String, Long> params) {
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
         for (Map.Entry<Integer, String> param : HELLO_PARAMS.entrySet()) {
@@ -305,7 +328,7 @@ final class VectorRunner {
             }
         }
         byte[] body = payload.toByteArray();
-        return Bytes.concat(Bytes.fromHex(String.format("%08x000100000000000000000000", 12 + body.length)), body);
+        return Bytes.concat(Bytes.fromHex(controlHeader(HELLO_TYPE, 0, body.length)), body);
     }
 
     private static List<String> expectedFrames(JsonObject step) {
@@ -315,7 +338,7 @@ final class VectorRunner {
             String type = VectorSchema.frameType(frame);
             if (type == null) {
                 result.add("APP type=" + frame.get("type").getAsInt() + " flags=- stream_id="
-                        + frame.get("stream_id").getAsInt()
+                        + streamId(frame.get("stream_id"))
                         + (frame.has("status") ? " status=" + nameOfStatus(frame.get("status")) : "") + " payload="
                         + (frame.has("payload") ? frame.get("payload").getAsString() : ""));
             } else {
@@ -401,9 +424,9 @@ final class VectorRunner {
             int type = ((frame[4] & 0xFF) << 8) | (frame[5] & 0xFF);
             int flags = frame[6] & 0xFF;
             long streamId = Bytes.readLong(frame, 8);
-            int extensions = ((frame[16] & 0xFF) << 8) | (frame[17] & 0xFF);
-            byte[] payload = Arrays.copyOfRange(frame, 20 + extensions, frame.length);
-            String head = " flags=" + flagsText(flags) + " stream_id=" + streamId;
+            int extensions = ((frame[EXTENSIONS_LENGTH_AT] & 0xFF) << 8) | (frame[EXTENSIONS_LENGTH_AT + 1] & 0xFF);
+            byte[] payload = Arrays.copyOfRange(frame, HEADER_SIZE + extensions, frame.length);
+            String head = " flags=" + flagsText(flags) + " stream_id=" + Long.toUnsignedString(streamId);
             String ext = extensions == 0 ? "" : " extensions=" + extensions;
             if (type == 1) {
                 result.add("HELLO" + head + ext + " params=" + (payload.length == 0 ? "-" : paramsText(payload)));
@@ -417,7 +440,7 @@ final class VectorRunner {
                         "RESET" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));
             } else if (type >= FIRST_APPLICATION_TYPE) {
                 // 자기 번호 공간(클라이언트는 홀수, 서버는 짝수)의 프레임은 요청이라 status를 비교하지 않는다.
-                boolean ownSpace = streamId % 2 == (client ? 1 : 0);
+                boolean ownSpace = (streamId & 1) == (client ? 1 : 0);
                 String status = ownSpace ? "" : " status=" + nameOfStatus(frame[7] & 0xFF);
                 result.add("APP type=" + type + head + ext + status + " payload=" + Bytes.toHex(payload));
             } else {

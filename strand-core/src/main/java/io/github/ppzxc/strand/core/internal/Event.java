@@ -17,11 +17,11 @@ public final class Event {
     }
 
     private final Kind kind;
-    private final int streamId;
+    private final long streamId;
     private final int status;
     private final int type;
 
-    private Event(Kind kind, int streamId, int status, int type) {
+    private Event(Kind kind, long streamId, int status, int type) {
         this.kind = kind;
         this.streamId = streamId;
         this.status = status;
@@ -32,7 +32,7 @@ public final class Event {
         return new Event(Kind.CLOSED, 0, 0, 0);
     }
 
-    static Event result(int streamId, int status) {
+    static Event result(long streamId, int status) {
         return new Event(Kind.RESULT, streamId, status, 0);
     }
 
@@ -41,7 +41,7 @@ public final class Event {
         return new Event(Kind.RESULT, 0, Status.UNAVAILABLE, 0);
     }
 
-    static Event requestReceived(int streamId, int type) {
+    static Event requestReceived(long streamId, int type) {
         return new Event(Kind.REQUEST_RECEIVED, streamId, 0, type);
     }
 
@@ -60,7 +60,7 @@ public final class Event {
      *
      * @return 스트림 번호
      */
-    public int streamId() {
+    public long streamId() {
         return streamId;
     }
 

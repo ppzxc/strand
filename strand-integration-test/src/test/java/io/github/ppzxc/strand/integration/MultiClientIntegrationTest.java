@@ -26,7 +26,7 @@ class MultiClientIntegrationTest {
 
     private static final int CLIENT_COUNT = 16;
     /** 규격 4.2절: 클라이언트가 처음 여는 스트림은 1번이다. 연결마다 번호 공간이 따로라 모든 클라이언트가 1번을 쓴다. */
-    private static final int FIRST_CLIENT_STREAM_ID = 1;
+    private static final long FIRST_CLIENT_STREAM_ID = 1L;
 
     private static TestServer startServer() throws Exception {
         return TestServer.startResponding(type -> type - APPLICATION_TYPE);
