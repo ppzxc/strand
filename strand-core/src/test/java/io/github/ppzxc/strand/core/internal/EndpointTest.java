@@ -1057,6 +1057,36 @@ class EndpointTest {
                         + "0075736572007077");
     }
 
+    /** 3.2.1절: AUTH도 상대 max_frame_size를 넘지 못한다(MUST NOT). 보내지 않고 CLOSE 없이 로컬로 닫는다(#196). */
+    @Test
+    void clientClosesLocallyWithoutAuthOrCloseWhenItsAuthExceedsThePeerMaxFrameSize() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", new byte[20000]));
+        client.drainMessages();
+        client.request(257, new byte[0]);
+
+        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
+
+        assertThat(client.drainMessages()).isEmpty();
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(events.get(0).certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+        assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void clientSendsAuthExactlyAtThePeerMaxFrameSize() {
+        int credentials = MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE - 1 - "PLAIN".length();
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", new byte[credentials]));
+        client.drainMessages();
+
+        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
+
+        assertThat(kinds(client)).isEmpty();
+        assertThat(client.drainMessages()).hasSize(2);
+    }
+
     @Test
     void clientReportsTheCredentialLifetimeAndIgnoresUnknownIdentifiers() {
         Endpoint client = client();
