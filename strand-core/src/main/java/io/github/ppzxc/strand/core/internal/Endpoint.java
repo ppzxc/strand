@@ -82,6 +82,10 @@ public final class Endpoint {
     private @Nullable Long authDeadline;
     /** ACK를 기다리는 HELLO와 PING들. 보낸 순서대로다(규격 3.3절). */
     private final List<AckWait> ackWaits = new ArrayList<>();
+    /** 마지막으로 프레임을 받은 가상 시각(규격 3.4.1절 유휴 판단). */
+    private long lastReceivedAt;
+
+    private long idlePingCount;
 
     private long nextStreamId;
     /** 내 번호 공간의 홀짝: 클라이언트는 1, 서버는 0이다(규격 2.2.5절). */
@@ -201,12 +205,39 @@ public final class Endpoint {
             return;
         }
         for (AckWait wait : ackWaits) {
-            if (now > wait.deadline) {
+            if (wait.started && now > wait.deadline) {
                 // 닫으면 대기 목록이 비므로 반복을 이어 가지 않고 바로 끝낸다.
-                connectionError();
+                closeWithError(ErrorCode.UNRESPONSIVE);
                 return;
             }
         }
+        sendIdlePingIfDue();
+    }
+
+    /**
+     * 유휴 간격 동안 받은 프레임이 없고 ACK를 기다리는 PING이 없으면 PING을 보낸다(규격 3.4.1절). 간격이 설정돼 있지 않으면 보내지 않는다.
+     * 보내는 때는 규격 3.3절의 송신 규칙을 따라 AUTH 관문을 통과한 뒤에만 보낸다. 종료 중에도 보낸다.
+     */
+    private void sendIdlePingIfDue() {
+        long idle = config.idleIntervalMs();
+        if (idle <= 0 || !authGatePassed || now - lastReceivedAt < idle || hasOutstandingPing()) {
+            return;
+        }
+        byte[] payload = new byte[PING_PAYLOAD_SIZE];
+        for (int i = PING_PAYLOAD_SIZE - 1; i >= 0; i--) {
+            payload[i] = (byte) (idlePingCount >>> (8 * (PING_PAYLOAD_SIZE - 1 - i)));
+        }
+        idlePingCount++;
+        sendPing(payload);
+    }
+
+    private boolean hasOutstandingPing() {
+        for (AckWait wait : ackWaits) {
+            if (wait.payload != null && wait.payload.length == PING_PAYLOAD_SIZE) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -323,6 +354,12 @@ public final class Endpoint {
     public List<OutboundMessage> drainMessages() {
         List<OutboundMessage> drained = new ArrayList<>(outbox);
         outbox.clear();
+        // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
+        for (AckWait wait : ackWaits) {
+            if (!wait.started && drained.contains(wait.message)) {
+                wait.start(now + config.ackTimeoutMs());
+            }
+        }
         undrainedRequests.clear();
         return drained;
     }
@@ -430,6 +467,7 @@ public final class Endpoint {
     }
 
     private void handle(byte[] frame) {
+        lastReceivedAt = now;
         int type = Frames.typeOf(frame);
         int extensionsLength = Frames.extensionsLengthOf(frame);
         long streamId = Frames.streamIdOf(frame);
@@ -635,8 +673,7 @@ public final class Endpoint {
             authDeadline = now + config.authTimeoutMs();
         } else {
             // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
-            send(Frames.auth(config.authMechanism(), config.authCredentials()));
-            ackWaits.add(new AckWait(AUTH_WAIT, now + config.ackTimeoutMs()));
+            sendAwaitingAck(Frames.auth(config.authMechanism(), config.authCredentials()), AUTH_WAIT);
         }
     }
 
@@ -799,14 +836,13 @@ public final class Endpoint {
      * 이 호출 뒤에는 CLOSE 교환이 된 상태다.
      */
     private void connectionError() {
-        if (!closeExchanged) {
-            send(Frames.close(ErrorCode.PROTOCOL_ERROR, highestPeerStreamId));
-        }
-        closeExchanged = true;
-        closeTransport();
+        closeWithError(ErrorCode.PROTOCOL_ERROR);
     }
 
-    /** 연결 인증의 거부·일시 실패·대기 초과: 이유 없는 오류 CLOSE를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절). */
+    /**
+     * 오류 {@code errorCode}의 CLOSE를 보내고 닫는다(연결 오류, 확인 대기 초과, 연결 인증의 거부·일시 실패·대기 초과). 이미 CLOSE를 보냈거나
+     * 받았다면 보내지 않는다(규격 3.5절).
+     */
     private void closeWithError(int errorCode) {
         if (!closeExchanged) {
             send(Frames.close(errorCode, highestPeerStreamId));
@@ -849,13 +885,11 @@ public final class Endpoint {
     }
 
     private void sendHello() {
-        send(Frames.hello(config));
-        ackWaits.add(new AckWait(null, now + config.ackTimeoutMs()));
+        sendAwaitingAck(Frames.hello(config), null);
     }
 
     private void sendPing(byte[] payload) {
-        send(Frames.control(FrameType.PING, 0, payload));
-        ackWaits.add(new AckWait(payload, now + config.ackTimeoutMs()));
+        sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), payload);
     }
 
     /** ACK 하나가 끝내는 대기는 가장 먼저 시작한 것 하나다. HELLO 대기는 payload가 null이다. */
@@ -1010,6 +1044,13 @@ public final class Endpoint {
         return last + 1;
     }
 
+    /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
+    private void sendAwaitingAck(byte[] frame, byte @Nullable [] payload) {
+        OutboundMessage message = OutboundMessage.binary(frame);
+        outbox.add(message);
+        ackWaits.add(new AckWait(payload, message));
+    }
+
     /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
     private static final class DeferredSend {
         final boolean request;
@@ -1044,13 +1085,20 @@ public final class Endpoint {
         }
     }
 
-    /** 확인 대기 하나. {@code payload}는 PING이면 보낸 8바이트, HELLO이면 null이다. */
+    /** 확인 대기 하나. {@code payload}는 PING이면 보낸 8바이트, HELLO이면 null이다. 기한은 {@code message}를 넘긴 때부터 센다. */
     private static final class AckWait {
         final byte @Nullable [] payload;
-        final long deadline;
+        final OutboundMessage message;
+        boolean started;
+        long deadline;
 
-        AckWait(byte @Nullable [] payload, long deadline) {
+        AckWait(byte @Nullable [] payload, OutboundMessage message) {
             this.payload = payload;
+            this.message = message;
+        }
+
+        void start(long deadline) {
+            this.started = true;
             this.deadline = deadline;
         }
     }

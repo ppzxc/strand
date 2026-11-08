@@ -1,10 +1,6 @@
 # 아직 구현하지 않은 동작에 기대 core로 실패하는 벡터(규격 0.2.0 구현 중). 한 줄에 `파일명/id` 하나, 이름순.
 # 구현한 티켓이 자기 벡터를 지운다. 통과하는 벡터가 남아 있으면 테스트가 실패한다.
 # 수립 전(established: false) 서문·첫 프레임·헤더 판독 벡터는 CLOSE(last_stream_id)만 필요한 것까지 모두 통과한다.
-ack-timeout/ack-timeout-fails-pending-request-with-unavailable
-ack-timeout/client-ping-ack-timeout-before-and-after-limit
-ack-timeout/ping-ack-timeout-before-and-after-limit
-auth/client-auth-ack-wait-times-out-closes-unresponsive
 backpressure/request-after-close-received-is-dropped-silently
 backpressure/request-after-close-sent-is-dropped-silently
 backpressure/request-after-close-with-regressed-number-closes-silently
@@ -14,9 +10,6 @@ close-races/close-last-stream-id-in-own-number-space-is-malformed
 close-races/close-last-stream-id-zero-ends-every-request-as-not-processed
 close-races/error-close-last-stream-id-ends-crossed-request-as-not-processed
 close-races/first-close-last-stream-id-is-the-only-one-used
-hello-establishment/client-ack-timeout-before-and-after-limit
-hello-establishment/client-ack-timeout-is-not-reset-by-server-hello
-hello-establishment/server-ack-timeout-before-and-after-limit
 request-checks/closing-after-close-received-drops-new-request
 request-checks/closing-after-close-sent-drops-new-request
 request-checks/closing-client-drops-new-request-from-server
