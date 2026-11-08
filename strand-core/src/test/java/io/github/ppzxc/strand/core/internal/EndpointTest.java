@@ -1422,8 +1422,8 @@ class EndpointTest {
 
     @Test
     void helloWaitStartsWhenTheFrameIsDrainedNotWhenItIsQueued() {
-        Endpoint server = serverAfterPreface(ONE_SECOND);
-        server.receive(bytes(HELLO));
+        Endpoint server = Endpoint.server(ONE_SECOND);
+        server.receive(bytes(PREFACE));
 
         server.advance(5000);
         assertThat(server.drainEvents()).isEmpty();

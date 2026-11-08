@@ -205,7 +205,7 @@ public final class Endpoint {
             return;
         }
         for (AckWait wait : ackWaits) {
-            if (now > wait.deadline) {
+            if (wait.started && now > wait.deadline) {
                 // 닫으면 대기 목록이 비므로 반복을 이어 가지 않고 바로 끝낸다.
                 closeWithError(ErrorCode.UNRESPONSIVE);
                 return;
@@ -356,7 +356,7 @@ public final class Endpoint {
         // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
         for (AckWait wait : ackWaits) {
             if (!wait.started && drained.contains(wait.message)) {
-                wait.start(0);
+                wait.start(now + config.ackTimeoutMs());
             }
         }
         undrainedRequests.clear();
@@ -981,7 +981,6 @@ public final class Endpoint {
         OutboundMessage message = OutboundMessage.binary(frame);
         outbox.add(message);
         ackWaits.add(new AckWait(payload, message));
-        ackWaits.get(ackWaits.size() - 1).start(now + config.ackTimeoutMs());
     }
 
     /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
