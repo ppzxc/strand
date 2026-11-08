@@ -38,6 +38,7 @@ class RequestResponseIntegrationTest {
             Map<Long, Integer> statusByStream = new HashMap<>();
             for (int i = 0; i < 2; i++) {
                 Event result = client.awaitEvent(Event.Kind.RESULT);
+                assertThat(result.certainty()).contains(Certainty.RESPONSE);
                 statusByStream.put(result.streamId(), result.status());
             }
 

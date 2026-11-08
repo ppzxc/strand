@@ -8,7 +8,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
@@ -46,39 +45,10 @@ class VectorConformanceTest {
         }
     }
 
-    /**
-     * 실제 벡터 디렉터리의 벡터를 core로 실행한다. pending 목록({@link PendingVectors})의 벡터는 아직 구현하지 않은 동작에 기대므로
-     * 실패해야 하고, 통과하면 테스트가 실패한다. 나머지는 모두 통과해야 한다. 벡터 목록은 단언하지 않는다.
-     */
+    /** 실제 벡터 디렉터리의 모든 벡터를 core로 실행한다. 모두 통과해야 한다. 벡터 목록은 단언하지 않는다. */
     @TestFactory
     Stream<DynamicTest> vectors() {
-        Set<String> pending = PendingVectors.load();
-        return VectorSuite.dynamicTests(VectorSuite.defaultDirectory())
-                .map(test -> pending.contains(test.getDisplayName())
-                        ? DynamicTest.dynamicTest(test.getDisplayName(), () -> assertStillFails(test))
-                        : test);
-    }
-
-    private static void assertStillFails(DynamicTest pendingTest) {
-        boolean passed = true;
-        try {
-            pendingTest.getExecutable().execute();
-        } catch (Throwable expected) {
-            passed = false;
-        }
-        assertThat(passed)
-                .as("pending 목록의 벡터가 통과했다. 구현이 끝났으니 pending-vectors.txt에서 지운다: %s", pendingTest.getDisplayName())
-                .isFalse();
-    }
-
-    /** pending 목록의 항목은 모두 실제 벡터여야 한다. 지워진 벡터나 오타가 목록에 남지 않게 한다. */
-    @Test
-    void pendingListNamesOnlyExistingVectors() {
-        Set<String> existing = VectorSuite.dynamicTests(VectorSuite.defaultDirectory())
-                .map(DynamicTest::getDisplayName)
-                .collect(Collectors.toSet());
-
-        assertThat(PendingVectors.load()).isSubsetOf(existing);
+        return VectorSuite.dynamicTests(VectorSuite.defaultDirectory());
     }
 
     @Test

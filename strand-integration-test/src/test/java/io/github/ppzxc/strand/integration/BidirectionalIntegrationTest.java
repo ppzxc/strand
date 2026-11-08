@@ -4,6 +4,7 @@ import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 
+import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.Event;
 import java.util.HashMap;
 import java.util.Map;
@@ -49,6 +50,7 @@ class BidirectionalIntegrationTest {
                 if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
                     typeByStreamAtServer.put(event.streamId(), event.type());
                 } else {
+                    assertThat(event.certainty()).contains(Certainty.RESPONSE);
                     statusByStreamAtServer.put(event.streamId(), event.status());
                 }
             }
@@ -56,6 +58,7 @@ class BidirectionalIntegrationTest {
                 if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
                     typeByStreamAtClient.put(event.streamId(), event.type());
                 } else {
+                    assertThat(event.certainty()).contains(Certainty.RESPONSE);
                     statusByStreamAtClient.put(event.streamId(), event.status());
                 }
             }

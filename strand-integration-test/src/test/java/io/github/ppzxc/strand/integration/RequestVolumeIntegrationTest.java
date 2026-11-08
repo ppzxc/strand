@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.integration;
 import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.Event;
 import java.util.HashMap;
 import java.util.Map;
@@ -37,6 +38,7 @@ class RequestVolumeIntegrationTest {
                     sent++;
                 }
                 Event result = client.awaitEvent(Event.Kind.RESULT);
+                assertThat(result.certainty()).contains(Certainty.RESPONSE);
                 statusByStream.put(result.streamId(), result.status());
                 received++;
             }
