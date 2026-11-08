@@ -721,7 +721,8 @@ class EndpointTest {
 
     @Test
     void theAckCancelsTheWait() {
-        Endpoint server = serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000));
+        Endpoint server =
+                serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000).authTimeoutMs(Long.MAX_VALUE / 2));
         server.receive(bytes(HELLO));
         server.advance(999);
         server.receive(bytes(HELLO_ACK));

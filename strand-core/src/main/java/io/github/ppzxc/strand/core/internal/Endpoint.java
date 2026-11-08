@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -28,6 +29,7 @@ public final class Endpoint {
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int MAX_AUTH_MECHANISM_LENGTH = 20;
     private static final int AUTH_ACK_PARAM_SIZE = 6;
+    private static final Pattern AUTH_MECHANISM_GRAMMAR = Pattern.compile("[A-Z0-9_-]+");
     private static final int CREDENTIAL_LIFETIME_ID = 0x0001;
     /** AUTH 확인 대기를 PING(8바이트)·HELLO(null)의 대기와 구분하는 표지. */
     private static final byte[] AUTH_WAIT = new byte[0];
@@ -71,6 +73,8 @@ public final class Endpoint {
     private boolean transportClosed;
 
     private long now;
+    /** 서버의 AUTH 대기가 끝나는 시각. 대기 중이 아니면 null이다(규격 3.3절 AUTH 대기). */
+    private @Nullable Long authDeadline;
     /** ACK를 기다리는 HELLO와 PING들. 보낸 순서대로다(규격 3.3절). */
     private final List<AckWait> ackWaits = new ArrayList<>();
 
@@ -187,6 +191,10 @@ public final class Endpoint {
             return;
         }
         now += ms;
+        if (authDeadline != null && now > authDeadline) {
+            closeWithError(ErrorCode.UNAUTHENTICATED);
+            return;
+        }
         for (AckWait wait : ackWaits) {
             if (now > wait.deadline) {
                 // 닫으면 대기 목록이 비므로 반복을 이어 가지 않고 바로 끝낸다.
@@ -611,7 +619,9 @@ public final class Endpoint {
         peerMaxConcurrentStreams = peer.maxConcurrentStreams;
         peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
-        if (!server) {
+        if (server) {
+            authDeadline = now + config.authTimeoutMs();
+        } else {
             // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
             send(Frames.auth(config.authMechanism(), config.authCredentials()));
             ackWaits.add(new AckWait(AUTH_WAIT, now + config.ackTimeoutMs()));
@@ -619,19 +629,22 @@ public final class Endpoint {
     }
 
     /**
-     * 받은 {@code AUTH}와 {@code AUTH(ACK)}의 성공 경로(규격 3.3.1절). 서버는 첫 {@code AUTH}를 애플리케이션에 넘겨 통과하면
-     * {@code AUTH(ACK)}를 보내고, 클라이언트는 첫 {@code AUTH(ACK)}에서 {@code credential_lifetime}을 알린다. 방향 위반, 두 번째
-     * {@code AUTH}·{@code AUTH(ACK)}, 거부·일시 실패는 아직 처리하지 않는다(TICKET-3). 처리할 수 없는 모양의 payload는 연결 오류다.
+     * 받은 {@code AUTH}와 {@code AUTH(ACK)}(규격 3.3.1절). 서버는 첫 {@code AUTH}를 애플리케이션에 넘기고, 클라이언트는 첫
+     * {@code AUTH(ACK)}에서 {@code credential_lifetime}을 알린다. 방향 위반, 두 번째 {@code AUTH}·{@code AUTH(ACK)},
+     * 형태 위반은 연결 오류다.
      */
     private void handleAuth(boolean ack, byte[] payload) {
         if (server && !ack && !authGatePassed) {
             handleServerAuth(payload);
         } else if (!server && ack && peerHelloAcked && !authGatePassed) {
             handleClientAuthAck(payload);
+        } else {
+            connectionError();
         }
     }
 
     private void handleServerAuth(byte[] payload) {
+        authDeadline = null;
         int mechanismLength = payload.length == 0 ? 0 : payload[0] & 0xFF;
         if (mechanismLength < 1
                 || mechanismLength > MAX_AUTH_MECHANISM_LENGTH
@@ -640,10 +653,16 @@ public final class Endpoint {
             return;
         }
         String mechanism = new String(payload, 1, mechanismLength, StandardCharsets.US_ASCII);
+        if (!AUTH_MECHANISM_GRAMMAR.matcher(mechanism).matches()) {
+            connectionError();
+            return;
+        }
         byte[] credentials = Arrays.copyOfRange(payload, 1 + mechanismLength, payload.length);
         AuthDecision decision = config.authenticator().authenticate(mechanism, credentials);
         if (decision != AuthDecision.PASS) {
-            throw new UnsupportedOperationException("AUTH 거부와 일시 실패는 아직 구현하지 않았다(TICKET-3, #186)");
+            // 거부와 모르는 메커니즘은 UNAUTHENTICATED, 일시 실패는 INTERNAL_ERROR. 이유는 비운다(규격 3.3.1절).
+            closeWithError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);
+            return;
         }
         send(Frames.control(FrameType.AUTH, Flags.ACK, new byte[0]));
         openAuthGate();
@@ -655,7 +674,12 @@ public final class Endpoint {
             return;
         }
         OptionalLong lifetime = OptionalLong.empty();
+        Set<Integer> seen = new HashSet<>();
         for (int at = 0; at < payload.length; at += AUTH_ACK_PARAM_SIZE) {
+            if (!seen.add(Frames.readUnsignedShort(payload, at))) {
+                connectionError();
+                return;
+            }
             // 모르는 identifier는 무시한다(규격 3.3.1절).
             if (Frames.readUnsignedShort(payload, at) == CREDENTIAL_LIFETIME_ID) {
                 lifetime = OptionalLong.of(Frames.readUnsignedInt(payload, at + 2));
@@ -765,6 +789,15 @@ public final class Endpoint {
     private void connectionError() {
         if (!closeExchanged) {
             send(Frames.close(ErrorCode.PROTOCOL_ERROR, highestPeerStreamId));
+        }
+        closeExchanged = true;
+        closeTransport();
+    }
+
+    /** 연결 인증의 거부·일시 실패·대기 초과: 이유 없는 오류 CLOSE를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절). */
+    private void closeWithError(int errorCode) {
+        if (!closeExchanged) {
+            send(Frames.close(errorCode, highestPeerStreamId));
         }
         closeExchanged = true;
         closeTransport();

@@ -8,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 public final class EndpointConfig {
 
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
+    private static final long DEFAULT_AUTH_TIMEOUT_MS = 10000L;
     /** 인증이 필요 없는 연결의 메커니즘(규격 3.3.1절). */
     static final String ANONYMOUS = "ANONYMOUS";
 
@@ -15,6 +16,8 @@ public final class EndpointConfig {
     private final long maxConcurrentStreams;
     private final long capabilities;
     private final long ackTimeoutMs;
+    /** 서버가 상대 HELLO에 ACK를 보낸 때부터 {@code AUTH}를 기다리는 시간(규격 3.3절 AUTH 대기). */
+    private final long authTimeoutMs;
     /** 구현이 아는 애플리케이션 {@code type}. null이면 모든 type을 안다(규격 4.1절). */
     private final @Nullable Set<Integer> knownTypes;
     /** 다음에 쓸 스트림 번호. null이면 역할의 첫 번호다(규격 2.2.5절). */
@@ -33,6 +36,7 @@ public final class EndpointConfig {
         this.maxConcurrentStreams = draft.maxConcurrentStreams;
         this.capabilities = draft.capabilities;
         this.ackTimeoutMs = draft.ackTimeoutMs;
+        this.authTimeoutMs = draft.authTimeoutMs;
         this.knownTypes = draft.knownTypes;
         this.nextStreamId = draft.nextStreamId;
         this.webSocket = draft.webSocket;
@@ -47,6 +51,7 @@ public final class EndpointConfig {
         long maxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
         long capabilities;
         long ackTimeoutMs = DEFAULT_ACK_TIMEOUT_MS;
+        long authTimeoutMs = DEFAULT_AUTH_TIMEOUT_MS;
 
         @Nullable
         Set<Integer> knownTypes;
@@ -66,6 +71,7 @@ public final class EndpointConfig {
         draft.maxConcurrentStreams = maxConcurrentStreams;
         draft.capabilities = capabilities;
         draft.ackTimeoutMs = ackTimeoutMs;
+        draft.authTimeoutMs = authTimeoutMs;
         draft.knownTypes = knownTypes;
         draft.nextStreamId = nextStreamId;
         draft.webSocket = webSocket;
@@ -129,6 +135,19 @@ public final class EndpointConfig {
     public EndpointConfig ackTimeoutMs(long value) {
         ConfigDraft draft = draft();
         draft.ackTimeoutMs = value;
+        return new EndpointConfig(draft);
+    }
+
+    /**
+     * 서버가 상대 HELLO에 ACK를 보낸 때부터 {@code AUTH}를 기다리는 시간(AUTH 대기, 규격 3.3절)을 바꾼 복사본. 규격은 값을 정하지
+     * 않는다. 정하지 않으면 10초다.
+     *
+     * @param value 밀리초
+     * @return 새 설정
+     */
+    public EndpointConfig authTimeoutMs(long value) {
+        ConfigDraft draft = draft();
+        draft.authTimeoutMs = value;
         return new EndpointConfig(draft);
     }
 
@@ -231,6 +250,10 @@ public final class EndpointConfig {
 
     long ackTimeoutMs() {
         return ackTimeoutMs;
+    }
+
+    long authTimeoutMs() {
+        return authTimeoutMs;
     }
 
     long maxFrameSize() {
