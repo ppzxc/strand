@@ -79,7 +79,7 @@ class SpecFinalizationTest {
     private static String majorMinor(String version) {
         Matcher m = Pattern.compile("^(\\d+\\.\\d+)(?:\\..*|-.*)?$").matcher(version);
         assertThat(m.matches()).as("version 형식 " + version).isTrue();
-        return version; // red
+        return m.group(1);
     }
 
     @Test
