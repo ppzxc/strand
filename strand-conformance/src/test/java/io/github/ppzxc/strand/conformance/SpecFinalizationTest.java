@@ -84,7 +84,7 @@ class SpecFinalizationTest {
                 .filter(l -> l.startsWith("strand는 "))
                 .findFirst()
                 .orElseThrow(AssertionError::new);
-        assertThat(intro).doesNotContain("고성능");
+        assertThat(intro).doesNotContain("고성능").contains("단일 연결");
     }
 
     @Test
@@ -126,22 +126,6 @@ class SpecFinalizationTest {
         return blocks;
     }
 
-    private static final Pattern REPEAT = Pattern.compile("<([0-9a-fA-F]{2})x(\\d+)>");
-
-    private static String expandRepeats(String hex) {
-        Matcher m = REPEAT.matcher(hex);
-        StringBuffer out = new StringBuffer();
-        while (m.find()) {
-            StringBuilder unit = new StringBuilder();
-            for (int i = 0; i < Integer.parseInt(m.group(2)); i++) {
-                unit.append(m.group(1));
-            }
-            m.appendReplacement(out, unit.toString());
-        }
-        m.appendTail(out);
-        return out.toString();
-    }
-
     @Test
     void examplesAreFormat2VectorsThatLoad() throws IOException {
         List<String> blocks = exampleBlocks();
@@ -164,7 +148,7 @@ class SpecFinalizationTest {
                     if (!s.has("hex")) {
                         continue;
                     }
-                    byte[] bytes = Bytes.fromHex(expandRepeats(s.get("hex").getAsString()));
+                    byte[] bytes = Bytes.fromHex(s.get("hex").getAsString());
                     int at = 0;
                     if (bytes.length >= 8
                             && Bytes.toHex(java.util.Arrays.copyOf(bytes, 6)).equals("c0de53545230")) {
@@ -174,10 +158,10 @@ class SpecFinalizationTest {
                         assertThat(bytes.length - at).as("헤더 20바이트 이상: %s", s).isGreaterThanOrEqualTo(20);
                         long length = Bytes.readUnsignedInt(bytes, at);
                         assertThat(length).as("length는 16 이상: %s", s).isGreaterThanOrEqualTo(16);
-                        assertThat(at + 4 + length)
+                        assertThat(at + 4L + length)
                                 .as("프레임 경계가 hex 끝과 맞는다: %s", s)
                                 .isLessThanOrEqualTo(bytes.length);
-                        at += 4 + (int) length;
+                        at = (int) (at + 4L + length);
                         frames++;
                     }
                     assertThat(at).as("남는 바이트가 없다: %s", s).isEqualTo(bytes.length);
@@ -224,11 +208,9 @@ class SpecFinalizationTest {
     }
 
     @Test
-    void repeatNotationIsDefinedOnlyIfAnExampleUsesIt() throws IOException {
-        String text = read(FORMAT);
-        int intro = text.indexOf("## 10. ");
-        boolean defined = text.substring(intro, text.indexOf("### 10.1")).contains("줄여 쓰는 표기");
-        boolean used = exampleBlocks().stream().anyMatch(b -> REPEAT.matcher(b).find());
-        assertThat(defined).as("반복 표기를 정의했으면 예시가 쓴다. 쓰지 않으면 정의를 지운다").isEqualTo(used);
+    void examplesWriteHexInFull() throws IOException {
+        assertThat(exampleBlocks())
+                .as("형식 문서가 정의하지 않는 반복 표기를 예시가 쓰지 않는다")
+                .noneMatch(b -> b.matches("(?s).*<[0-9a-fA-F]{2}x\\d+>.*"));
     }
 }
