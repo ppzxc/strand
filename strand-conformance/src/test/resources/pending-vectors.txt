@@ -4,22 +4,12 @@
 # 이 범주에서 남은 두 벡터는 헤더 판독이 아니라 AUTH 송신·수신(TICKET-2, #185)을 기대해서 실패한다.
 #   hello-establishment/client-first-frame-length-at-limit-is-accepted: HELLO ACK 뒤 send에 AUTH가 있다.
 #   handshake/postack-frame-above-announced-limit-closes: 수립에 AUTH 왕복이 있다. 그 뒤 length 검사는 core가 이미 한다.
-ack-timeout/ack-timeout-fails-pending-request-with-unavailable
-ack-timeout/client-ping-ack-timeout-before-and-after-limit
-ack-timeout/ping-ack-timeout-before-and-after-limit
-auth/client-application-frame-before-auth-ack-closes
 auth/client-auth-ack-duplicate-identifier-closes
-auth/client-auth-ack-ignores-unknown-identifier
 auth/client-auth-ack-payload-not-multiple-of-six-closes
 auth/client-auth-ack-wait-times-out-closes-unresponsive
-auth/client-auth-passes-and-gate-opens
-auth/client-ping-before-auth-ack-closes
 auth/client-receives-auth-closes
 auth/client-receives-unauthenticated-close
 auth/client-second-auth-ack-closes
-auth/client-sends-no-request-before-auth-ack
-auth/server-application-frame-before-auth-closes
-auth/server-auth-anonymous-passes-and-gate-opens
 auth/server-auth-empty-payload-closes
 auth/server-auth-mechanism-length-above-twenty-closes
 auth/server-auth-mechanism-length-zero-closes
@@ -27,29 +17,10 @@ auth/server-auth-mechanism-longer-than-payload-closes
 auth/server-auth-mechanism-with-lowercase-closes
 auth/server-auth-wait-is-cancelled-by-auth
 auth/server-auth-wait-times-out-closes-unauthenticated
-auth/server-auth-with-credentials-passes
-auth/server-ping-before-auth-closes
 auth/server-receives-auth-ack-closes
-auth/server-reset-before-auth-closes
 auth/server-second-auth-closes
-auth/server-sends-no-request-before-auth-passes
 auth/server-unknown-mechanism-closes-unauthenticated
 auth/server-wrong-credentials-closes-unauthenticated
-auth/websocket-auth-passes
-backpressure/local-failure-at-peer-limit-sends-nothing-and-keeps-the-number
-backpressure/request-after-close-received-is-dropped-silently
-backpressure/request-after-close-sent-is-dropped-silently
-backpressure/request-after-close-with-regressed-number-closes-silently
-close-races/close-last-stream-id-above-highest-sent-is-malformed
-close-races/close-last-stream-id-ends-crossed-request-as-not-processed
-close-races/close-last-stream-id-in-own-number-space-is-malformed
-close-races/close-last-stream-id-zero-ends-every-request-as-not-processed
-close-races/close-received-blocks-opening-new-stream
-close-races/error-close-last-stream-id-ends-crossed-request-as-not-processed
-close-races/first-close-last-stream-id-is-the-only-one-used
-close-races/request-after-close-received-fails-locally-server
-close-races/request-after-close-sent-fails-locally
-handshake/postack-frame-above-announced-limit-closes
 hello-establishment/ack-gate-allows-reserved-control-type
 hello-establishment/ack-gate-client-ping-closes
 hello-establishment/client-accepts-server-max-frame-size-at-range-maximum
@@ -59,7 +30,6 @@ hello-establishment/client-ack-timeout-is-cancelled-by-ack
 hello-establishment/client-ack-timeout-is-not-reset-by-server-hello
 hello-establishment/client-acks-valid-server-hello
 hello-establishment/client-combined-hello-and-ack-closes
-hello-establishment/client-first-frame-length-at-limit-is-accepted
 hello-establishment/client-rejects-server-max-frame-size-above-range
 hello-establishment/client-second-ack-closes
 hello-establishment/client-second-parameter-hello-closes
@@ -67,16 +37,3 @@ hello-establishment/client-sends-after-acking-server-hello-without-waiting-for-a
 hello-establishment/negotiation-fails-when-client-max-frame-size-above-range
 hello-establishment/server-ack-timeout-before-and-after-limit
 hello-establishment/server-ack-timeout-is-cancelled-by-ack
-request-checks/closing-after-close-received-drops-new-request
-request-checks/closing-after-close-sent-drops-new-request
-request-checks/closing-client-drops-new-request-from-server
-request-checks/closing-drops-bad-extension-value-request
-request-checks/closing-drops-unknown-type-request
-request-checks/closing-drops-unknown-type-with-bad-extension-value
-streams/closing-dropped-number-reuse-closes
-streams/exhaustion-after-close-received-sends-no-close
-streams/exhaustion-after-close-sent-sends-no-second-close
-streams/exhaustion-after-last-number-sends-close-client
-streams/exhaustion-after-last-number-sends-close-server
-streams/exhaustion-takes-precedence-over-peer-limit
-streams/exhaustion-with-pending-stream-closes-after-it-ends
