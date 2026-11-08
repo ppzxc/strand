@@ -24,6 +24,10 @@ class EndpointTest {
     private static final int MAX_EXTENSIONS = 8192;
 
     private static final String HELLO_ACK = "0000001000010100000000000000000000000000";
+    /** 메커니즘 {@code ANONYMOUS}에 빈 자격 증명인 {@code AUTH}(규격 3.3.1절). */
+    private static final String AUTH_ANONYMOUS = "0000001a0005000000000000000000000000000009414e4f4e594d4f5553";
+
+    private static final String AUTH_ACK = "0000001000050100000000000000000000000000";
     private static final String PING = "00000018 0002 00 00 0000000000000000 0000 0000 0102030405060708";
     private static final String PING_ACK = "0000001800020100000000000000000000000000" + "0102030405060708";
     /** CLOSE의 {@code last_stream_id}가 0인 경우(상대 요청이 아직 없다, 규격 3.5절). */
@@ -93,6 +97,7 @@ class EndpointTest {
         Endpoint server = serverAfterPreface();
         server.receive(bytes(HELLO));
         server.receive(bytes(HELLO_ACK));
+        server.receive(bytes(AUTH_ANONYMOUS));
         server.drainMessages();
         assertThat(server.drainEvents()).isEmpty();
         return server;
@@ -102,6 +107,7 @@ class EndpointTest {
         Endpoint server = serverAfterPreface(config);
         server.receive(bytes(HELLO));
         server.receive(bytes(HELLO_ACK));
+        server.receive(bytes(AUTH_ANONYMOUS));
         server.drainMessages();
         return server;
     }
@@ -110,13 +116,26 @@ class EndpointTest {
         return Endpoint.client(EndpointConfig.defaults());
     }
 
+    /** 클라이언트가 서버의 {@code AUTH(ACK)}를 받아 AUTH 관문을 통과한다. 알림 이벤트는 비운다. */
+    private static void clientPassesAuthGate(Endpoint client) {
+        client.receive(bytes(AUTH_ACK));
+        assertThat(kinds(client)).containsExactly(Event.Kind.AUTHENTICATED);
+    }
+
+    /** 서버가 클라이언트의 {@code ANONYMOUS AUTH}를 통과시킨다. 보낸 {@code AUTH(ACK)}는 비운다. */
+    private static void serverPassesAuthGate(Endpoint server) {
+        server.receive(bytes(AUTH_ANONYMOUS));
+        server.drainMessages();
+    }
+
     /** 클라이언트: 서버 HELLO에 ACK를 보냈고 서버 ACK도 받은 상태. */
     private static Endpoint establishedClient() {
         Endpoint client = client();
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
+        client.receive(bytes(AUTH_ACK));
         client.drainMessages();
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(kinds(client)).containsExactly(Event.Kind.AUTHENTICATED);
         return client;
     }
 
@@ -124,6 +143,7 @@ class EndpointTest {
         Endpoint client = client();
         client.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
         client.receive(bytes(HELLO_ACK));
+        client.receive(bytes(AUTH_ACK));
         client.drainMessages();
         client.drainEvents();
         return client;
@@ -601,6 +621,7 @@ class EndpointTest {
             assertOpenAndSilent(server);
         }
         server.receive(bytes(HELLO_ACK));
+        serverPassesAuthGate(server);
         server.receive(bytes(PING));
 
         assertThat(sent(server)).isEqualTo(PING_ACK);
@@ -661,16 +682,14 @@ class EndpointTest {
 
     @Test
     void connectionErrorAfterCloseWasReceivedSendsNoClose() {
-        Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Endpoint server = established();
         server.request(257, new byte[0]);
         server.drainMessages();
         server.receive(bytes(CLOSE_NO_ERROR));
         assertOpenAndSilent(server);
 
-        // 상대 ACK 전의 PING은 연결 오류지만 CLOSE를 이미 받았으므로 CLOSE를 보내지 않는다.
-        server.receive(bytes(PING));
+        // payload가 8바이트가 아닌 PING은 연결 오류지만 CLOSE를 이미 받았으므로 CLOSE를 보내지 않는다.
+        server.receive(bytes("00000010 0002 00 00 0000000000000000 0000 0000"));
 
         assertThat(server.drainMessages()).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
@@ -739,9 +758,8 @@ class EndpointTest {
 
     @Test
     void theWaitIsDroppedWhenCloseWasReceivedEarlier() {
-        Endpoint server = serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000));
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
         server.request(257, new byte[0]);
         server.receive(bytes(CLOSE_NO_ERROR));
         server.drainMessages();
@@ -778,14 +796,18 @@ class EndpointTest {
     }
 
     @Test
-    void requestBeforeAckingThePeerHelloWaitsForTheAck() {
+    void requestBeforeTheAuthGateWaitsForIt() {
         Endpoint server = serverAfterPreface();
 
         server.request(257, new byte[0]);
         assertOpenAndSilent(server);
         server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
 
-        assertThat(sent(server)).isEqualTo(HELLO_ACK + "0000001001010000000000000000000200000000");
+        assertThat(sent(server)).isEqualTo(HELLO_ACK);
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(AUTH_ACK + "0000001001010000000000000000000200000000");
     }
 
     @Test
@@ -851,15 +873,21 @@ class EndpointTest {
         client.ping(bytes("0102030405060708"));
 
         client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        assertThat(client.drainEvents()).isEmpty();
+        client.receive(bytes(AUTH_ACK));
 
         List<Event> events = client.drainEvents();
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
+        events = events.subList(1, events.size());
         assertThat(events).hasSize(2);
         for (Event event : events) {
             assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
             assertThat(event.status()).isEqualTo(Status.UNAVAILABLE);
             assertThat(event.streamId()).isZero();
         }
-        assertThat(sent(client)).isEqualTo(HELLO_ACK + requestFrame(257, Long.MAX_VALUE, "") + CLOSE_NO_ERROR);
+        assertThat(sent(client))
+                .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + requestFrame(257, Long.MAX_VALUE, "") + CLOSE_NO_ERROR);
     }
 
     @Test
@@ -872,14 +900,18 @@ class EndpointTest {
     }
 
     @Test
-    void pingBeforeAckingThePeerHelloWaitsForTheAck() {
+    void pingBeforeTheAuthGateWaitsForIt() {
         Endpoint server = serverAfterPreface();
 
         server.ping(bytes("0102030405060708"));
         assertOpenAndSilent(server);
         server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
 
-        assertThat(sent(server)).isEqualTo(HELLO_ACK + "0000001800020000000000000000000000000000" + "0102030405060708");
+        assertThat(sent(server)).isEqualTo(HELLO_ACK);
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(AUTH_ACK + "0000001800020000000000000000000000000000" + "0102030405060708");
     }
 
     @Test
@@ -945,7 +977,76 @@ class EndpointTest {
 
         client.receive(bytes(helloWith("000200000064")));
 
-        assertThat(sent(client)).isEqualTo(HELLO_ACK);
+        assertThat(sent(client)).isEqualTo(HELLO_ACK + AUTH_ANONYMOUS);
+    }
+
+    @Test
+    void clientSendsTheConfiguredMechanismAndCredentialsInAuth() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", bytes("0075736572007077")));
+        client.drainMessages();
+
+        client.receive(bytes(HELLO));
+
+        assertThat(sent(client))
+                .isEqualTo(HELLO_ACK + "0000001e00050000" + "0000000000000000" + "00000000" + "05" + "504c41494e"
+                        + "0075736572007077");
+    }
+
+    @Test
+    void clientReportsTheCredentialLifetimeAndIgnoresUnknownIdentifiers() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+
+        client.receive(bytes("0000001c0005010000000000000000000000000000010000012c00ff00000001"));
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
+        assertThat(events.get(0).credentialLifetime()).hasValue(300);
+        assertOpenAndSilent(client);
+    }
+
+    @Test
+    void authAckWithoutLifetimeReportsNoLifetime() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+
+        client.receive(bytes(AUTH_ACK));
+
+        assertThat(client.drainEvents().get(0).credentialLifetime()).isEmpty();
+    }
+
+    @Test
+    void serverHandsTheAuthToTheApplicationAndAnswersAuthAckWhenItPasses() {
+        List<String> seen = new ArrayList<>();
+        Endpoint server = serverAfterPreface(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+            seen.add(mechanism + ":" + hex(credentials));
+            return AuthDecision.PASS;
+        }));
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+
+        server.receive(
+                bytes("0000001e00050000" + "0000000000000000" + "00000000" + "05" + "504c41494e" + "0075736572007077"));
+
+        assertThat(seen).containsExactly("PLAIN:0075736572007077");
+        assertThat(sent(server)).isEqualTo(AUTH_ACK);
+    }
+
+    @Test
+    void applicationFrameBeforeTheAuthGateIsAProtocolError() {
+        Endpoint server = serverAfterPreface();
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        assertClosedWithProtocolError(server);
     }
 
     @Test
@@ -1132,6 +1233,7 @@ class EndpointTest {
         Endpoint client = Endpoint.client(ONE_SECOND);
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.request(257, new byte[0]);
         client.ping(bytes(PING_PAYLOAD));
         client.receive(bytes(CLOSE_NO_ERROR));
@@ -1151,6 +1253,7 @@ class EndpointTest {
         server.advance(500);
         server.ping(bytes(PING_PAYLOAD));
         server.receive(bytes(HELLO_ACK));
+        serverPassesAuthGate(server);
         server.drainMessages();
 
         server.advance(999);
@@ -1354,6 +1457,7 @@ class EndpointTest {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().knownTypes(Collections.singleton(257)));
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.drainMessages();
 
         client.receive(bytes(requestFrame(258, 2, "")));
@@ -1583,7 +1687,7 @@ class EndpointTest {
         Endpoint server = serverAfterPreface();
         server.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
         server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        serverPassesAuthGate(server);
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
         return server;
@@ -1633,7 +1737,7 @@ class EndpointTest {
     }
 
     @Test
-    void requestDeferredBeforeTheAckFailsLocallyWhenItsFrameIsOverThePeerMaxFrameSize() {
+    void requestDeferredBeforeTheAuthGateFailsLocallyWhenItsFrameIsOverThePeerMaxFrameSize() {
         Endpoint client = client();
         client.drainMessages();
         client.request(257, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE + 1]);
@@ -1641,9 +1745,13 @@ class EndpointTest {
 
         client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
 
-        assertThat(sent(client)).isEqualTo(HELLO_ACK);
-        assertLocalUnavailableEvents(client.drainEvents());
+        assertThat(sent(client)).isEqualTo(HELLO_ACK + AUTH_ANONYMOUS);
+        assertThat(client.drainEvents()).isEmpty();
         client.receive(bytes(HELLO_ACK));
+        client.receive(bytes(AUTH_ACK));
+        List<Event> events = client.drainEvents();
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
+        assertLocalUnavailableEvents(events.subList(1, events.size()));
         client.request(257, new byte[0]);
         assertThat(sent(client)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
     }
@@ -1739,7 +1847,9 @@ class EndpointTest {
             Endpoint endpoint = role[0] == 1 ? Endpoint.client(config) : serverAfterPreface(config);
             endpoint.receive(bytes(HELLO));
             endpoint.receive(bytes(HELLO_ACK));
+            endpoint.receive(bytes(role[0] == 1 ? AUTH_ACK : AUTH_ANONYMOUS));
             endpoint.drainMessages();
+            endpoint.drainEvents();
             endpoint.request(257, new byte[0]);
             endpoint.drainMessages();
             endpoint.receive(bytes(appFrame(role[1], 0, "")));
@@ -1757,6 +1867,7 @@ class EndpointTest {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.request(257, new byte[0]);
         client.close(0);
         client.drainMessages();
@@ -1773,6 +1884,7 @@ class EndpointTest {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
         client.receive(bytes(helloWith("0002" + String.format("%08x", 1L))));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.request(257, new byte[0]);
         client.drainMessages();
         client.drainEvents();
@@ -1796,6 +1908,7 @@ class EndpointTest {
         Endpoint client = client();
         client.receive(bytes(helloWith("0002" + String.format("%08x", maxConcurrentStreams))));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.drainMessages();
         return client;
     }
@@ -1938,6 +2051,7 @@ class EndpointTest {
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO));
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO_ACK));
+        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(AUTH_ANONYMOUS));
         server.drainMessages();
         return server;
     }

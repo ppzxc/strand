@@ -22,6 +22,11 @@ final class ExampleSupport {
                 return "RESULT stream=" + event.streamId() + " status=" + event.status();
             case REQUEST_RECEIVED:
                 return "REQUEST_RECEIVED stream=" + event.streamId() + " type=" + event.type();
+            case AUTHENTICATED:
+                return "AUTHENTICATED credential_lifetime="
+                        + (event.credentialLifetime().isPresent()
+                                ? String.valueOf(event.credentialLifetime().getAsLong())
+                                : "-");
             default:
                 return "CLOSED";
         }

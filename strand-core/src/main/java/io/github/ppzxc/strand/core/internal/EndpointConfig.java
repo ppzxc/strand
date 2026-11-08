@@ -8,6 +8,8 @@ import org.jspecify.annotations.Nullable;
 public final class EndpointConfig {
 
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
+    /** 인증이 필요 없는 연결의 메커니즘(규격 3.3.1절). */
+    static final String ANONYMOUS = "ANONYMOUS";
 
     private final long maxFrameSize;
     private final long maxConcurrentStreams;
@@ -19,6 +21,12 @@ public final class EndpointConfig {
     private final @Nullable Long nextStreamId;
     /** WebSocket 위에서 쓴다(규격 1.2절). */
     private final boolean webSocket;
+    /** 클라이언트가 {@code AUTH}로 보낼 메커니즘(규격 3.3.1절). */
+    private final String authMechanism;
+    /** 클라이언트가 {@code AUTH}로 보낼 자격 증명. */
+    private final byte[] authCredentials;
+    /** 서버가 받은 {@code AUTH}를 넘길 애플리케이션. */
+    private final Authenticator authenticator;
 
     private EndpointConfig(ConfigDraft draft) {
         this.maxFrameSize = draft.maxFrameSize;
@@ -28,6 +36,9 @@ public final class EndpointConfig {
         this.knownTypes = draft.knownTypes;
         this.nextStreamId = draft.nextStreamId;
         this.webSocket = draft.webSocket;
+        this.authMechanism = draft.authMechanism;
+        this.authCredentials = draft.authCredentials;
+        this.authenticator = draft.authenticator;
     }
 
     /** 설정 값의 모음. 복사본을 만들 때 한 필드만 고치는 데 쓴다. 필드를 더해도 생성자 인자 나열은 늘지 않는다. */
@@ -44,6 +55,9 @@ public final class EndpointConfig {
         Long nextStreamId;
 
         boolean webSocket;
+        String authMechanism = ANONYMOUS;
+        byte[] authCredentials = new byte[0];
+        Authenticator authenticator = EndpointConfig::passesAnonymousOnly;
     }
 
     private ConfigDraft draft() {
@@ -55,6 +69,9 @@ public final class EndpointConfig {
         draft.knownTypes = knownTypes;
         draft.nextStreamId = nextStreamId;
         draft.webSocket = webSocket;
+        draft.authMechanism = authMechanism;
+        draft.authCredentials = authCredentials;
+        draft.authenticator = authenticator;
         return draft;
     }
 
@@ -151,6 +168,53 @@ public final class EndpointConfig {
         ConfigDraft draft = draft();
         draft.webSocket = true;
         return new EndpointConfig(draft);
+    }
+
+    /**
+     * 클라이언트가 {@code AUTH}로 보낼 메커니즘과 자격 증명을 정한 복사본. 정하지 않으면 {@code ANONYMOUS}와 빈 자격 증명이다(규격
+     * 3.3.1절).
+     *
+     * @param mechanism 메커니즘 이름. 대문자·숫자·하이픈·밑줄 1~20자
+     * @param credentials 메커니즘이 정한 불투명 자격 증명
+     * @return 새 설정
+     * @throws IllegalArgumentException 메커니즘이 문법을 어길 때
+     */
+    public EndpointConfig auth(String mechanism, byte[] credentials) {
+        if (!mechanism.matches("[A-Z0-9_-]{1,20}")) {
+            throw new IllegalArgumentException("AUTH 메커니즘이 문법(대문자·숫자·하이픈·밑줄 1~20자)을 어긴다: " + mechanism);
+        }
+        ConfigDraft draft = draft();
+        draft.authMechanism = mechanism;
+        draft.authCredentials = credentials.clone();
+        return new EndpointConfig(draft);
+    }
+
+    /**
+     * 서버가 받은 {@code AUTH}를 넘길 애플리케이션을 정한 복사본. 정하지 않으면 {@code ANONYMOUS}와 빈 자격 증명만 통과시킨다.
+     *
+     * @param value 판단하는 애플리케이션
+     * @return 새 설정
+     */
+    public EndpointConfig authenticator(Authenticator value) {
+        ConfigDraft draft = draft();
+        draft.authenticator = value;
+        return new EndpointConfig(draft);
+    }
+
+    private static AuthDecision passesAnonymousOnly(String mechanism, byte[] credentials) {
+        return mechanism.equals(ANONYMOUS) && credentials.length == 0 ? AuthDecision.PASS : AuthDecision.REJECT;
+    }
+
+    String authMechanism() {
+        return authMechanism;
+    }
+
+    byte[] authCredentials() {
+        return authCredentials.clone();
+    }
+
+    Authenticator authenticator() {
+        return authenticator;
     }
 
     boolean isWebSocket() {

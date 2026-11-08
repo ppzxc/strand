@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import io.github.ppzxc.strand.core.internal.AuthDecision;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.Event;
@@ -52,6 +53,7 @@ final class VectorRunner {
             "peer_hello",
             "config",
             "known_types",
+            "auth",
             "next_stream_id",
             "transport"));
     /** 실행할 수 있는 단계. 지원 여부와 실행이 이 표 하나에서 정해진다. */
@@ -260,6 +262,18 @@ final class VectorRunner {
         return Long.parseLong(element.getAsString());
     }
 
+    /** {@code setup.auth}의 메커니즘. 생략하면 {@code ANONYMOUS}다(벡터 형식 5절). */
+    private static String authMechanism(JsonObject setup) {
+        JsonObject auth = setup.getAsJsonObject("auth");
+        return auth.has("mechanism") ? auth.get("mechanism").getAsString() : DEFAULT_AUTH_MECHANISM;
+    }
+
+    /** {@code setup.auth}의 자격 증명. 생략하면 빈 값이다. */
+    private static byte[] authCredentials(JsonObject setup) {
+        JsonObject auth = setup.getAsJsonObject("auth");
+        return Bytes.fromHex(auth.has("credentials") ? auth.get("credentials").getAsString() : "");
+    }
+
     private static EndpointConfig configOf(JsonObject setup) {
         Map<String, Long> hello = helloParams(setup.getAsJsonObject("local_hello"));
         long ackTimeout = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
@@ -275,6 +289,13 @@ final class VectorRunner {
         }
         if (setup.has("next_stream_id")) {
             config = config.nextStreamId(streamId(setup.get("next_stream_id")));
+        }
+        if (setup.has("auth")) {
+            config = config.auth(authMechanism(setup), authCredentials(setup))
+                    .authenticator((mechanism, credentials) ->
+                            mechanism.equals(authMechanism(setup)) && Arrays.equals(credentials, authCredentials(setup))
+                                    ? AuthDecision.PASS
+                                    : AuthDecision.REJECT);
         }
         if (setup.has("known_types")) {
             Set<Integer> known = new HashSet<>();
@@ -411,6 +432,10 @@ final class VectorRunner {
     private static List<String> describe(List<Event> events) {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
+            if (event.kind() == Event.Kind.AUTHENTICATED) {
+                // 벡터 형식에 없는 이벤트다(6.2절). 클라이언트의 credential_lifetime 통지는 core 테스트가 본다.
+                continue;
+            }
             if (event.kind() == Event.Kind.RESULT && event.streamId() == 0) {
                 // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). 구현 이슈에서 core가
                 // certainty를 내보내면 이 줄과 certainty 비교를 함께 고친다. 지금은 비교하지 않는다.

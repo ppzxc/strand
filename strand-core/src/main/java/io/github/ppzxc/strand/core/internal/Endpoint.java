@@ -1,5 +1,6 @@
 package io.github.ppzxc.strand.core.internal;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -7,6 +8,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
@@ -24,6 +26,12 @@ public final class Endpoint {
     private static final int FIRST_CLIENT_STREAM_ID = 1;
 
     private static final int PING_PAYLOAD_SIZE = 8;
+    private static final int MAX_AUTH_MECHANISM_LENGTH = 20;
+    private static final int AUTH_ACK_PARAM_SIZE = 6;
+    private static final int CREDENTIAL_LIFETIME_ID = 0x0001;
+    /** AUTH 확인 대기를 PING(8바이트)·HELLO(null)의 대기와 구분하는 표지. */
+    private static final byte[] AUTH_WAIT = new byte[0];
+
     private static final int RESET_PAYLOAD_SIZE = 4;
     private static final int TLV_HEADER_SIZE = 4;
     private static final int TIMEOUT_TAG = 0x0001;
@@ -40,7 +48,7 @@ public final class Endpoint {
     private final Map<Long, Integer> ownPendingStreams = new LinkedHashMap<>();
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
     private final Map<Long, Integer> peerPendingStreams = new LinkedHashMap<>();
-    /** 상대 HELLO에 ACK를 보내기 전이라 미뤄 둔 송신(규격 3.3절). */
+    /** AUTH 관문을 통과하기 전이라 미뤄 둔 송신(규격 3.3절). */
     private final List<DeferredSend> deferredSends = new ArrayList<>();
 
     private byte[] receiveBuffer = new byte[0];
@@ -50,6 +58,8 @@ public final class Endpoint {
     private boolean peerHelloAcked;
     /** 내가 보낸 HELLO에 대해 상대가 보낸 ACK를 받았다(규격 3.3절 ACK 관문). */
     private boolean ownHelloAcked;
+    /** 서버는 {@code AUTH(ACK)}를 보냈고 클라이언트는 {@code AUTH(ACK)}를 받았다(규격 3.3절 AUTH 관문). */
+    private boolean authGatePassed;
     /** 상대가 HELLO로 알린 {@code max_concurrent_streams}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
     /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
@@ -67,6 +77,8 @@ public final class Endpoint {
     private long nextStreamId;
     /** 내 번호 공간의 홀짝: 클라이언트는 1, 서버는 0이다(규격 2.2.5절). */
     private final int ownParity;
+
+    private final boolean server;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
     private long highestPeerStreamId;
 
@@ -74,6 +86,7 @@ public final class Endpoint {
         this.config = config;
         this.nextStreamId = config.firstStreamId(server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID);
         this.ownParity = server ? 0 : 1;
+        this.server = server;
     }
 
     /**
@@ -184,7 +197,7 @@ public final class Endpoint {
     }
 
     /**
-     * 애플리케이션이 요청을 보내게 한다. 상대 HELLO에 ACK를 보내기 전이면 그 뒤로 미룬다(규격 3.3절). CLOSE를 보냈거나 받은 뒤,
+     * 애플리케이션이 요청을 보내게 한다. AUTH 관문을 통과하기 전이면 그 뒤로 미룬다(규격 3.3절). CLOSE를 보냈거나 받은 뒤,
      * 번호 소진(규격 2.2.5절), 상대가 알린 {@code max_concurrent_streams} 도달(규격 3.2.1절)이면 프레임을 보내지 않고 로컬에서
      * 실패시킨다. 이때 스트림 번호 없는 {@link Event.Kind#RESULT} 이벤트(status {@code UNAVAILABLE})가 한 번 나온다. 한도에 닿은
      * 요청은 대기시키지 않고 즉시 실패시키며 스트림 번호를 쓰지 않는다.
@@ -193,7 +206,7 @@ public final class Endpoint {
      * @param payload 본문
      * @throws IllegalArgumentException 지금 보낼 수 있는 요청의 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런
      *     프레임을 보내지 못하게 하고(MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림 번호도 쓰지 않는다.
-     *     상대 HELLO에 ACK하기 전이라 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고, 보낼 때 넘으면 로컬 {@code UNAVAILABLE}로
+     *     AUTH 관문 전이라 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고, 보낼 때 넘으면 로컬 {@code UNAVAILABLE}로
      *     실패시킨다.
      */
     public void request(int type, byte[] payload) {
@@ -201,7 +214,7 @@ public final class Endpoint {
             failLocally();
             return;
         }
-        if (peerHelloAcked) {
+        if (authGatePassed) {
             if (sendRequest(type, payload) == RequestOutcome.OVERSIZE) {
                 throw oversizeFrame("요청");
             }
@@ -253,13 +266,13 @@ public final class Endpoint {
     }
 
     /**
-     * 애플리케이션이 PING을 보내게 한다. 상대 HELLO에 ACK를 보내기 전이면 그 뒤로 미룬다(규격 3.3절).
+     * 애플리케이션이 PING을 보내게 한다. AUTH 관문을 통과하기 전이면 그 뒤로 미룬다(규격 3.3절).
      *
      * @param payload 정확히 8바이트
      */
     public void ping(byte[] payload) {
         if (!transportClosed) {
-            sendAfterAckingPeerHello(DeferredSend.ping(() -> sendPing(payload)));
+            sendAfterAuthGate(DeferredSend.ping(() -> sendPing(payload)));
         }
     }
 
@@ -431,6 +444,11 @@ public final class Endpoint {
             connectionError();
             return;
         }
+        if (!authGatePassed && type != FrameType.HELLO && type != FrameType.AUTH) {
+            // AUTH 관문(규격 3.3절): 통과 전에는 HELLO·AUTH·CLOSE만 받는다. ACK 관문이 먼저 적용된다.
+            connectionError();
+            return;
+        }
         byte[] payload = Arrays.copyOfRange(frame, Frames.HEADER_SIZE, frame.length);
         boolean ack = (Frames.flagsOf(frame) & Flags.ACK) != 0;
         if (type == FrameType.HELLO) {
@@ -439,8 +457,9 @@ public final class Endpoint {
             handlePing(ack, payload);
         } else if (type == FrameType.RESET) {
             handleReset(streamId, payload);
+        } else if (type == FrameType.AUTH) {
+            handleAuth(ack, payload);
         }
-        // AUTH의 처리는 아직 없다(TICKET-2).
     }
 
     /**
@@ -481,7 +500,10 @@ public final class Endpoint {
         Extensions extensionsResult = extensionsLength > MAX_EXTENSIONS_LENGTH
                 ? Extensions.MALFORMED
                 : scanExtensions(frame, extensionsLength);
-        if (extensionsResult == Extensions.MALFORMED || !ownHelloAcked || isInvalidStreamId(streamId)) {
+        if (extensionsResult == Extensions.MALFORMED
+                || !ownHelloAcked
+                || !authGatePassed
+                || isInvalidStreamId(streamId)) {
             connectionError();
         } else if (isOwnSpace(streamId)) {
             handleResponse(frame, streamId);
@@ -589,6 +611,64 @@ public final class Endpoint {
         peerMaxConcurrentStreams = peer.maxConcurrentStreams;
         peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
+        if (!server) {
+            // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
+            send(Frames.auth(config.authMechanism(), config.authCredentials()));
+            ackWaits.add(new AckWait(AUTH_WAIT, now + config.ackTimeoutMs()));
+        }
+    }
+
+    /**
+     * 받은 {@code AUTH}와 {@code AUTH(ACK)}의 성공 경로(규격 3.3.1절). 서버는 첫 {@code AUTH}를 애플리케이션에 넘겨 통과하면
+     * {@code AUTH(ACK)}를 보내고, 클라이언트는 첫 {@code AUTH(ACK)}에서 {@code credential_lifetime}을 알린다. 방향 위반, 두 번째
+     * {@code AUTH}·{@code AUTH(ACK)}, 거부·일시 실패는 아직 처리하지 않는다(TICKET-3). 처리할 수 없는 모양의 payload는 연결 오류다.
+     */
+    private void handleAuth(boolean ack, byte[] payload) {
+        if (server && !ack && !authGatePassed) {
+            handleServerAuth(payload);
+        } else if (!server && ack && peerHelloAcked && !authGatePassed) {
+            handleClientAuthAck(payload);
+        }
+    }
+
+    private void handleServerAuth(byte[] payload) {
+        int mechanismLength = payload.length == 0 ? 0 : payload[0] & 0xFF;
+        if (mechanismLength < 1
+                || mechanismLength > MAX_AUTH_MECHANISM_LENGTH
+                || payload.length < 1 + mechanismLength) {
+            connectionError();
+            return;
+        }
+        String mechanism = new String(payload, 1, mechanismLength, StandardCharsets.US_ASCII);
+        byte[] credentials = Arrays.copyOfRange(payload, 1 + mechanismLength, payload.length);
+        AuthDecision decision = config.authenticator().authenticate(mechanism, credentials);
+        if (decision != AuthDecision.PASS) {
+            throw new UnsupportedOperationException("AUTH 거부와 일시 실패는 아직 구현하지 않았다(TICKET-3, #186)");
+        }
+        send(Frames.control(FrameType.AUTH, Flags.ACK, new byte[0]));
+        openAuthGate();
+    }
+
+    private void handleClientAuthAck(byte[] payload) {
+        if (payload.length % AUTH_ACK_PARAM_SIZE != 0) {
+            connectionError();
+            return;
+        }
+        OptionalLong lifetime = OptionalLong.empty();
+        for (int at = 0; at < payload.length; at += AUTH_ACK_PARAM_SIZE) {
+            // 모르는 identifier는 무시한다(규격 3.3.1절).
+            if (Frames.readUnsignedShort(payload, at) == CREDENTIAL_LIFETIME_ID) {
+                lifetime = OptionalLong.of(Frames.readUnsignedInt(payload, at + 2));
+            }
+        }
+        endOldestWait(AUTH_WAIT);
+        events.add(Event.authenticated(lifetime));
+        openAuthGate();
+    }
+
+    /** AUTH 관문을 연다. 미뤄 둔 송신을 보낸다. */
+    private void openAuthGate() {
+        authGatePassed = true;
         // 보내다가 닫히면 closeTransport가 남은 요청을 closed 이벤트 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
         while (!deferredSends.isEmpty()) {
             DeferredSend deferred = deferredSends.remove(0);
@@ -735,9 +815,9 @@ public final class Endpoint {
         }
     }
 
-    /** 상대 HELLO에 ACK를 보낸 뒤면 바로, 아니면 ACK를 보낼 때까지 미뤄서 보낸다. */
-    private void sendAfterAckingPeerHello(DeferredSend sending) {
-        if (peerHelloAcked) {
+    /** AUTH 관문을 통과한 뒤면 바로, 아니면 통과할 때까지 미뤄서 보낸다. */
+    private void sendAfterAuthGate(DeferredSend sending) {
+        if (authGatePassed) {
             sending.run();
         } else {
             deferredSends.add(sending);
@@ -808,7 +888,7 @@ public final class Endpoint {
         outbox.add(OutboundMessage.binary(frame));
     }
 
-    /** 상대 HELLO에 ACK를 보낼 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
+    /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
     private static final class DeferredSend {
         final boolean request;
         final Runnable sending;
