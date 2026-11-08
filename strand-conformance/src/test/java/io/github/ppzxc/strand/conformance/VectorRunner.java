@@ -54,7 +54,7 @@ final class VectorRunner {
     private static final int NORMAL_CLOSURE = 1000;
 
     static {
-        HELLO_DEFAULTS.put("max_frame_size", 4_194_304L);
+        HELLO_DEFAULTS.put("max_frame_size", 65_536L);
         HELLO_DEFAULTS.put("max_concurrent_streams", 100L);
         HELLO_DEFAULTS.put("capabilities", 0L);
         HELLO_PARAMS.put(1, "max_frame_size");

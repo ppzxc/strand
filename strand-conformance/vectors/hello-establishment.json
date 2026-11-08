@@ -401,7 +401,7 @@
     },
     {
       "id": "negotiation-accepts-max-frame-size-at-range-maximum",
-      "description": "클라이언트 HELLO의 max_frame_size가 허용 범위 위 끝(16 MiB = 16,777,216)이면 받아들이고 ACK HELLO로 답한다",
+      "description": "클라이언트 HELLO의 max_frame_size가 허용 범위 위 끝(1 MiB = 1,048,576)이면 받아들이고 ACK HELLO로 답한다",
       "spec": [
         "3.2.1",
         "3.2.3"
@@ -423,7 +423,7 @@
         },
         {
           "kind": "recv",
-          "hex": "0000001600010000000000000000000000000000000101000000",
+          "hex": "0000001600010000000000000000000000000000000100100000",
           "send": [
             {
               "type": "HELLO",
@@ -478,7 +478,7 @@
     },
     {
       "id": "negotiation-fails-when-client-max-frame-size-above-range",
-      "description": "클라이언트 HELLO의 max_frame_size가 허용 범위 위(16 MiB + 1 = 16,777,217)이면 값 검증에 실패한 것이다. 서버는 ACK HELLO 없이 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "description": "클라이언트 HELLO의 max_frame_size가 허용 범위 위(1 MiB + 1 = 1,048,577)이면 값 검증에 실패한 것이다. 서버는 ACK HELLO 없이 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
       "spec": [
         "3.2.3",
         "5.1"
@@ -500,7 +500,7 @@
         },
         {
           "kind": "recv",
-          "hex": "0000001600010000000000000000000000000000000101000001",
+          "hex": "0000001600010000000000000000000000000000000100100001",
           "send": [
             {
               "type": "CLOSE",
@@ -1092,7 +1092,7 @@
     },
     {
       "id": "client-rejects-server-max-frame-size-above-range",
-      "description": "서버 HELLO의 max_frame_size가 허용 범위 위(16 MiB + 1)이면 클라이언트는 ACK HELLO 없이 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "description": "서버 HELLO의 max_frame_size가 허용 범위 위(1 MiB + 1)이면 클라이언트는 ACK HELLO 없이 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
       "spec": [
         "3.2.3",
         "5.1"
@@ -1104,7 +1104,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "0000001600010000000000000000000000000000000101000001",
+          "hex": "0000001600010000000000000000000000000000000100100001",
           "send": [
             {
               "type": "PREFACE"
@@ -2293,7 +2293,7 @@
     },
     {
       "id": "client-accepts-server-max-frame-size-at-range-maximum",
-      "description": "서버 HELLO의 max_frame_size가 허용 범위 위 끝(16 MiB = 16,777,216)이면 클라이언트는 받아들이고 ACK HELLO로 답한다",
+      "description": "서버 HELLO의 max_frame_size가 허용 범위 위 끝(1 MiB = 1,048,576)이면 클라이언트는 받아들이고 ACK HELLO로 답한다",
       "spec": [
         "3.2.3"
       ],
@@ -2304,7 +2304,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "0000001600010000000000000000000000000000000101000000",
+          "hex": "0000001600010000000000000000000000000000000100100000",
           "send": [
             {
               "type": "PREFACE"
