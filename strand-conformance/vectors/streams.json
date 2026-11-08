@@ -1852,7 +1852,7 @@
     },
     {
       "id": "request-deadline-of-queued-request-ends-without-stream-id",
-      "description": "AUTH 관문이 열리기 전이라 번호를 받지 못하고 기다리는 대기열 요청의 기한이 지나면 RESET 없이 프레임 없이 stream_id 없는 DEADLINE_EXCEEDED(처리 안 됨)로 끝난다. 관문이 열려도 그 요청의 프레임은 나가지 않는다",
+      "description": "AUTH 관문이 열리기 전이라 번호를 받지 못하고 미뤄진 요청의 기한이 지나면 RESET 없이 프레임 없이 stream_id 없는 DEADLINE_EXCEEDED(처리 안 됨)로 끝난다. 관문이 열려도 그 요청의 프레임은 나가지 않는다",
       "spec": [
         "4.4",
         "4.4.1"
