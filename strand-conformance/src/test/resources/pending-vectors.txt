@@ -16,8 +16,6 @@ close-races/error-close-last-stream-id-ends-crossed-request-as-not-processed
 close-races/first-close-last-stream-id-is-the-only-one-used
 hello-establishment/client-ack-timeout-before-and-after-limit
 hello-establishment/client-ack-timeout-is-not-reset-by-server-hello
-hello-establishment/client-rejects-server-max-frame-size-above-range
-hello-establishment/negotiation-fails-when-client-max-frame-size-above-range
 hello-establishment/server-ack-timeout-before-and-after-limit
 request-checks/closing-after-close-received-drops-new-request
 request-checks/closing-after-close-sent-drops-new-request
