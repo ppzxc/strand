@@ -798,20 +798,22 @@ public final class Endpoint {
         peerHelloAcked = true;
         peerMaxConcurrentStreams = peer.maxConcurrentStreams;
         peerMaxFrameSize = peer.maxFrameSize;
-        if (!server && exceedsPeerFrameSize(Frames.auth(config.authMechanism(), config.authCredentials()))) {
-            // 3.2.1절은 상대 max_frame_size를 넘는 프레임을 금지(MUST NOT)하는데 AUTH도 예외가 아니다. 규격이 로컬 처리를 정하지 않아(#196)
-            // AUTH도 CLOSE도 보내지 않고 전송 계층만 닫는다. 아무것도 보내지 않았으므로 대기 요청은 closeTransport가 처리 안 됨으로 끝낸다.
+        send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
+        if (server) {
+            authDeadline = now + config.authTimeoutMs();
+            return;
+        }
+        byte[] auth = Frames.auth(config.authMechanism(), config.authCredentials());
+        if (exceedsPeerFrameSize(auth)) {
+            // 3.2.1절은 상대 max_frame_size를 넘는 프레임을 금지(MUST NOT)하며 AUTH도 예외가 아니다. 상대 HELLO는 유효하므로 ACK는 3.2.3절이
+            // 요구한 대로 보냈다. 그다음 닫는 처리만 규격에 정의가 없다(#196): AUTH도 CLOSE도 보내지 않고 전송 계층만 닫는다. 아무것도 보내지
+            // 않았으므로 대기 요청은 closeTransport가 처리 안 됨으로 끝낸다.
             closeExchanged = true;
             closeTransport();
             return;
         }
-        send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
-        if (server) {
-            authDeadline = now + config.authTimeoutMs();
-        } else {
-            // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
-            sendAwaitingAck(Frames.auth(config.authMechanism(), config.authCredentials()), AUTH_WAIT);
-        }
+        // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
+        sendAwaitingAck(auth, AUTH_WAIT);
     }
 
     /**
