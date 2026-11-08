@@ -121,10 +121,10 @@ class NewVectorCoverageTest {
     void aVectorUsesNextStreamIdForNumberExhaustion() {
         JsonObject client = vector("streams/exhaustion-after-last-number-sends-close-client")
                 .getAsJsonObject("setup");
-        assertThat(client.get("next_stream_id").getAsLong()).isEqualTo(2147483647L);
+        assertThat(client.get("next_stream_id").getAsString()).isEqualTo("9223372036854775807");
         JsonObject server = vector("streams/exhaustion-after-last-number-sends-close-server")
                 .getAsJsonObject("setup");
-        assertThat(server.get("next_stream_id").getAsLong()).isEqualTo(2147483646L);
+        assertThat(server.get("next_stream_id").getAsString()).isEqualTo("9223372036854775806");
     }
 
     @Test
