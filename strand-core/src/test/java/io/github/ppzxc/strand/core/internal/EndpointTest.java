@@ -1071,7 +1071,7 @@ class EndpointTest {
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
-        assertThat(events.get(0).certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+        assertThat(events.get(0).certainty()).hasValue(Certainty.NOT_PROCESSED);
         assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
     }
 
