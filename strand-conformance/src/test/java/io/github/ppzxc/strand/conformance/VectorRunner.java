@@ -30,7 +30,7 @@ import java.util.function.Function;
 final class VectorRunner {
 
     private static final String PREFACE_HEX = "c0de535452300000";
-    private static final String ACK_HELLO_HEX = "0000000c000101000000000000000000";
+    private static final String ACK_HELLO_HEX = "00000010000101000000000000000000" + "00000000";
     private static final Map<String, Long> HELLO_DEFAULTS = new LinkedHashMap<>();
     private static final Map<Integer, String> HELLO_PARAMS = new LinkedHashMap<>();
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(Arrays.asList(
@@ -84,13 +84,11 @@ final class VectorRunner {
                 (runner, step) -> runner.endpoint.request(
                         step.get("type").getAsInt(),
                         Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
-        STEPS.put(
-                "cancel",
-                (runner, step) -> runner.endpoint.cancel(step.get("stream_id").getAsInt()));
+        STEPS.put("cancel", (runner, step) -> runner.endpoint.cancel((int) streamId(step.get("stream_id"))));
         STEPS.put(
                 "respond",
                 (runner, step) -> runner.endpoint.respond(
-                        step.get("stream_id").getAsInt(),
+                        (int) streamId(step.get("stream_id")),
                         statusCode(step.get("status")),
                         Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
         STEPS.put("disconnect", (runner, step) -> runner.endpoint.disconnect());
@@ -115,17 +113,17 @@ final class VectorRunner {
                 frame -> "WEBSOCKET_CLOSE code=" + frame.get("code").getAsInt());
         NAMED_FRAMES.put(
                 "RESET",
-                frame -> "RESET flags=- stream_id=" + frame.get("stream_id").getAsInt() + " error_code="
+                frame -> "RESET flags=- stream_id=" + streamId(frame.get("stream_id")) + " error_code="
                         + nameOfError(frame.get("error_code")));
 
         EVENTS.put(
                 "result",
                 event -> "result stream_id="
-                        + (event.has("stream_id") ? event.get("stream_id").getAsString() : "-") + " status="
+                        + (event.has("stream_id") ? streamId(event.get("stream_id")) : "-") + " status="
                         + nameOfStatus(event.get("status")));
         EVENTS.put(
                 "request_received",
-                event -> "request_received stream_id=" + event.get("stream_id").getAsInt() + " type="
+                event -> "request_received stream_id=" + streamId(event.get("stream_id")) + " type="
                         + event.get("type").getAsInt());
         EVENTS.put("closed", event -> "closed");
     }
@@ -227,6 +225,14 @@ final class VectorRunner {
         return setup.has("transport") && setup.get("transport").getAsString().equals("websocket");
     }
 
+    /** 벡터의 스트림 번호(10진수 문자열, 벡터 형식 5절)를 정수로. 2^53을 넘는 값도 정확하다. 문자열이 아니면 거부한다. */
+    private static long streamId(JsonElement element) {
+        assertThat(element.getAsJsonPrimitive().isString())
+                .as("스트림 번호는 문자열이다: %s", element)
+                .isTrue();
+        return Long.parseLong(element.getAsString());
+    }
+
     private static EndpointConfig configOf(JsonObject setup) {
         Map<String, Long> hello = helloParams(setup.getAsJsonObject("local_hello"));
         long ackTimeout = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
@@ -241,7 +247,7 @@ final class VectorRunner {
             config = config.webSocket();
         }
         if (setup.has("next_stream_id")) {
-            config = config.nextStreamId(setup.get("next_stream_id").getAsLong());
+            config = config.nextStreamId(streamId(setup.get("next_stream_id")));
         }
         if (setup.has("known_types")) {
             Set<Integer> known = new HashSet<>();
@@ -305,7 +311,8 @@ final class VectorRunner {
             }
         }
         byte[] body = payload.toByteArray();
-        return Bytes.concat(Bytes.fromHex(String.format("%08x000100000000000000000000", 12 + body.length)), body);
+        return Bytes.concat(
+                Bytes.fromHex(String.format("%08x000100000000000000000000" + "00000000", 16 + body.length)), body);
     }
 
     private static List<String> expectedFrames(JsonObject step) {
@@ -315,7 +322,7 @@ final class VectorRunner {
             String type = VectorSchema.frameType(frame);
             if (type == null) {
                 result.add("APP type=" + frame.get("type").getAsInt() + " flags=- stream_id="
-                        + frame.get("stream_id").getAsInt()
+                        + streamId(frame.get("stream_id"))
                         + (frame.has("status") ? " status=" + nameOfStatus(frame.get("status")) : "") + " payload="
                         + (frame.has("payload") ? frame.get("payload").getAsString() : ""));
             } else {
@@ -403,7 +410,7 @@ final class VectorRunner {
             long streamId = Bytes.readLong(frame, 8);
             int extensions = ((frame[16] & 0xFF) << 8) | (frame[17] & 0xFF);
             byte[] payload = Arrays.copyOfRange(frame, 20 + extensions, frame.length);
-            String head = " flags=" + flagsText(flags) + " stream_id=" + streamId;
+            String head = " flags=" + flagsText(flags) + " stream_id=" + Long.toUnsignedString(streamId);
             String ext = extensions == 0 ? "" : " extensions=" + extensions;
             if (type == 1) {
                 result.add("HELLO" + head + ext + " params=" + (payload.length == 0 ? "-" : paramsText(payload)));
@@ -417,7 +424,7 @@ final class VectorRunner {
                         "RESET" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));
             } else if (type >= FIRST_APPLICATION_TYPE) {
                 // 자기 번호 공간(클라이언트는 홀수, 서버는 짝수)의 프레임은 요청이라 status를 비교하지 않는다.
-                boolean ownSpace = streamId % 2 == (client ? 1 : 0);
+                boolean ownSpace = (streamId & 1) == (client ? 1 : 0);
                 String status = ownSpace ? "" : " status=" + nameOfStatus(frame[7] & 0xFF);
                 result.add("APP type=" + type + head + ext + status + " payload=" + Bytes.toHex(payload));
             } else {
