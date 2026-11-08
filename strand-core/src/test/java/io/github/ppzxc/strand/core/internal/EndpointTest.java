@@ -685,7 +685,7 @@ class EndpointTest {
         Endpoint server = established();
         server.request(257, new byte[0]);
         server.drainMessages();
-        server.receive(bytes(CLOSE_NO_ERROR));
+        server.receive(bytes(closeNoErrorLast(2)));
         assertOpenAndSilent(server);
 
         // payload가 8바이트가 아닌 PING은 연결 오류지만 CLOSE를 이미 받았으므로 CLOSE를 보내지 않는다.
@@ -762,8 +762,8 @@ class EndpointTest {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
         server.request(257, new byte[0]);
-        server.receive(bytes(CLOSE_NO_ERROR));
         server.drainMessages();
+        server.receive(bytes(closeNoErrorLast(2)));
         server.drainEvents();
 
         server.advance(2000);
@@ -1038,6 +1038,11 @@ class EndpointTest {
         assertThat(sent(server)).isEqualTo(AUTH_ACK);
     }
 
+    /** {@code last_stream_id}를 지정한 CLOSE(NO_ERROR)(규격 3.5절). */
+    private static String closeNoErrorLast(long lastStreamId) {
+        return "0000001c00030000000000000000000000000000" + "00000000" + String.format("%016x", lastStreamId);
+    }
+
     private static String closeWith(int errorCode) {
         return "0000001c00030000000000000000000000000000" + String.format("%08x", errorCode) + NO_STREAM;
     }
@@ -1287,8 +1292,8 @@ class EndpointTest {
         clientPassesAuthGate(client);
         client.request(257, new byte[0]);
         client.ping(bytes(PING_PAYLOAD));
-        client.receive(bytes(CLOSE_NO_ERROR));
         client.drainMessages();
+        client.receive(bytes(closeNoErrorLast(1)));
         assertThat(client.drainEvents()).isEmpty();
 
         client.advance(1001);
@@ -1418,7 +1423,8 @@ class EndpointTest {
     void lastResponseWhileClosingCompletesTheClose() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
+        client.drainMessages();
+        client.receive(bytes(closeNoErrorLast(1)));
         assertThat(client.drainEvents()).isEmpty();
 
         client.receive(bytes(appFrame(1, 0, "")));
@@ -1581,7 +1587,7 @@ class EndpointTest {
     }
 
     @Test
-    void requestAfterReceivingCloseIsRefusedWhileAPeerStreamKeepsTheConnectionOpen() {
+    void requestAfterReceivingCloseIsDroppedSilentlyWhileAPeerStreamKeepsTheConnectionOpen() {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
@@ -1589,12 +1595,11 @@ class EndpointTest {
 
         server.receive(bytes(requestFrame(258, 3, "00010003000001")));
 
-        assertThat(sent(server)).isEqualTo(RESET_REFUSED_3);
         assertOpenAndSilent(server);
     }
 
     @Test
-    void requestAfterSendingCloseIsRefused() {
+    void requestAfterSendingCloseIsDroppedSilently() {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
@@ -1603,7 +1608,6 @@ class EndpointTest {
 
         server.receive(bytes(requestFrame(257, 3, "")));
 
-        assertThat(sent(server)).isEqualTo(RESET_REFUSED_3);
         assertOpenAndSilent(server);
     }
 
@@ -2328,6 +2332,7 @@ class EndpointTest {
     void webSocketTextCloseSendsNoSecondCloseAfterOneWasSentOrReceived() {
         Endpoint sentClose = establishedWebSocket();
         sentClose.request(257, new byte[0]);
+        sentClose.drainMessages();
         sentClose.close(ErrorCode.NO_ERROR);
         sentClose.drainMessages();
         sentClose.drainEvents();
@@ -2337,7 +2342,8 @@ class EndpointTest {
 
         Endpoint receivedClose = establishedWebSocket();
         receivedClose.request(257, new byte[0]);
-        receivedClose.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_NO_ERROR));
+        receivedClose.drainMessages();
+        receivedClose.receiveMessage(WebSocketMessageKind.BINARY, bytes(closeNoErrorLast(2)));
         receivedClose.drainMessages();
         receivedClose.drainEvents();
         receivedClose.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
@@ -2416,5 +2422,80 @@ class EndpointTest {
         assertThatThrownBy(() -> webSocketServer().receive(bytes(PREFACE))).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> server().receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE)))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    // ---- CLOSE: 대기열 요청 즉시 종료, 끊기 전 REFUSED (규격 3.5절, 3.5.1절) ----
+
+    @Test
+    void closeSentEndsDeferredRequestsImmediatelyAsNotProcessed() {
+        Endpoint client = client();
+        client.drainMessages();
+        client.request(257, new byte[0]);
+        client.request(257, new byte[0]);
+
+        client.close(ErrorCode.NO_ERROR);
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(3);
+        for (Event event : events.subList(0, 2)) {
+            assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
+            assertThat(event.status()).isEqualTo(Status.UNAVAILABLE);
+            assertThat(event.streamId()).isZero();
+            assertThat(event.certainty()).contains(Certainty.NOT_PROCESSED);
+        }
+        assertThat(events.get(2).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void closeReceivedEndsDeferredRequestsImmediatelyAsNotProcessedBeforeTheAuthGate() {
+        Endpoint client = client();
+        client.drainMessages();
+        client.request(257, new byte[0]);
+
+        client.receive(bytes(CLOSE_NO_ERROR));
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).streamId()).isZero();
+        assertThat(events.get(0).certainty()).contains(Certainty.NOT_PROCESSED);
+        assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void connectionErrorReturnsUnhandedRequestsAsRefusedBeforeTheClose() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        assertThat(sent(server))
+                .isEqualTo(RESET_REFUSED_1
+                        + CLOSE_PROTOCOL_ERROR.substring(0, CLOSE_PROTOCOL_ERROR.length() - NO_STREAM.length())
+                        + "0000000000000001");
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void errorCloseFromTheApplicationReturnsUnhandedRequestsAsRefusedBeforeTheClose() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        server.close(ErrorCode.INTERNAL_ERROR);
+
+        assertThat(sent(server))
+                .isEqualTo(
+                        RESET_REFUSED_1 + "0000001c00030000000000000000000000000000" + "00000002" + "0000000000000001");
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void connectionErrorDoesNotRefuseRequestsTheApplicationAlreadyReceived() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        assertClosedWithProtocolError(server, 1);
     }
 }

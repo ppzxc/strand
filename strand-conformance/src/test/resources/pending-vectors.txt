@@ -5,6 +5,7 @@ ack-timeout/ack-timeout-fails-pending-request-with-unavailable
 ack-timeout/client-ping-ack-timeout-before-and-after-limit
 ack-timeout/ping-ack-timeout-before-and-after-limit
 auth/client-auth-ack-wait-times-out-closes-unresponsive
+backpressure/request-after-close-received-is-dropped-silently
 hello-establishment/client-ack-timeout-before-and-after-limit
 hello-establishment/client-ack-timeout-is-not-reset-by-server-hello
 hello-establishment/client-rejects-server-max-frame-size-above-range
