@@ -20,7 +20,6 @@ B-5 hello-establishment/ack-gate-ping-closes
 B-5 hello-establishment/ack-gate-reset-closes
 B-5 hello-establishment/ack-gate-application-frame-closes
 B-5 hello-establishment/ack-gate-client-ping-closes
-B-5 hello-establishment/ack-gate-while-closing-closes-without-close-frame
 B-5 hello-establishment/ack-gate-allows-close-no-error
 B-5 hello-establishment/ack-gate-allows-error-close
 B-5 hello-establishment/ack-gate-allows-reserved-control-type
@@ -39,7 +38,7 @@ B-7 request-checks/unknown-type-precedes-bad-extension-value
 B-7 request-checks/unknown-type-request-is-answered-unimplemented
 B-7 request-checks/client-answers-unknown-type-request-from-server
 B-8 control-frames/reserved-type-0000-is-ignored
-B-8 control-frames/reserved-type-0005-is-ignored
+B-8 control-frames/reserved-type-0006-is-ignored
 B-8 control-frames/reserved-type-00ff-is-ignored
 B-8 control-frames/reserved-type-ignores-stream-id-and-flags
 B-8 hello-establishment/ack-gate-allows-reserved-control-type
@@ -126,7 +125,6 @@ B-24 ack-timeout/ping-ack-timeout-before-and-after-limit
 B-24 ack-timeout/client-ping-ack-timeout-before-and-after-limit
 B-24 ack-timeout/ping-ack-timeout-is-cancelled-by-ack
 B-24 ack-timeout/ping-ack-timeout-while-closing-closes-without-close-frame
-B-24 ack-timeout/hello-ack-timeout-while-closing-closes-without-close-frame
 B-24 hello-establishment/server-ack-timeout-before-and-after-limit
 B-24 hello-establishment/client-ack-timeout-before-and-after-limit
 B-25 hello-establishment/first-frame-hello-length-above-own-max-closes
@@ -142,8 +140,6 @@ B-26 hello-establishment/negotiation-fails-when-client-max-frame-size-below-rang
 B-26 hello-establishment/negotiation-fails-when-client-max-frame-size-above-range
 B-26 hello-establishment/client-rejects-server-max-frame-size-below-range
 B-26 hello-establishment/client-rejects-server-max-frame-size-above-range
-B-27 hello-establishment/server-sends-after-acking-client-hello-without-waiting-for-ack
-B-27 hello-establishment/server-sends-ping-after-acking-client-hello
 B-27 hello-establishment/client-sends-after-acking-server-hello-without-waiting-for-ack
 B-27 hello-establishment/server-sends-no-application-frame-before-acking-client-hello
 B-27 hello-establishment/client-sends-no-application-frame-before-acking-server-hello

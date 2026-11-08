@@ -8,7 +8,7 @@
 
 ---
 
-이 문서는 규범이다. 와이어 규격(`STRAND_SPECIFICATION.md`)의 규범 참조이며, 벡터 형식 버전 2를 정의한다. 다른 언어로 구현하는 사람이 이 문서와 JSON Schema 파일(`strand-conformance/schema/vector-format-2.schema.json`)만 보고 벡터를 쓰고 러너를 만들 수 있도록, 벡터의 의미를 여기서 정의한다. JSON Schema는 이 문서의 구조를 기계가 검사하게 만든 것이다. 둘이 어긋나면 이 문서가 우선한다. id 유일성, 스트림 번호의 범위(2^63-1 이하)와 `next_stream_id`의 홀짝, `transport`와 단계 `kind`의 조합, `ping` 단계의 순서(이 문서 8.1절 3번), 번호 할당 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 이 문서에만 있다.
+이 문서는 규범이다. 와이어 규격(`STRAND_SPECIFICATION.md`)의 규범 참조이며, 벡터 형식 버전 2를 정의한다. 다른 언어로 구현하는 사람이 이 문서와 JSON Schema 파일(`strand-conformance/schema/vector-format-2.schema.json`)만 보고 벡터를 쓰고 러너를 만들 수 있도록, 벡터의 의미를 여기서 정의한다. JSON Schema는 이 문서의 구조를 기계가 검사하게 만든 것이다. 둘이 어긋나면 이 문서가 우선한다. id 유일성, 스트림 번호의 범위(2^63-1 이하)와 `next_stream_id`의 홀짝, `transport`와 단계 `kind`의 조합, `ping` 단계의 순서(이 문서 8.1절 3번), `AUTH` 항목의 필드 조합(이 문서 6.1절), 번호 할당 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 이 문서에만 있다.
 
 이 문서에서 **러너**는 벡터를 읽어 테스트 대상 구현에 입력을 넣고 출력을 기대 결과와 비교하는 프로그램이고, **단계**는 시나리오의 한 항목이다. 두 말은 이 문서 안에서만 쓴다.
 
@@ -73,7 +73,7 @@
 | `setup` | 예 | 초기 상태(이 문서 4절) |
 | `steps` | 예 | 단계 목록(이 문서 5절). 하나 이상 |
 
-벡터 파일은 규격 영역별로 나눈다. `framing`, `handshake`, `streams`, `backpressure`, `extensions`, `close` 같은 이름을 쓴다. 테스트 이름은 `파일명/id`다(파일명에서 `.json`은 뺀다).
+벡터 파일은 규격 영역별로 나눈다. `framing`, `handshake`, `auth`, `streams`, `backpressure`, `extensions`, `close` 같은 이름을 쓴다. 테스트 이름은 `파일명/id`다(파일명에서 `.json`은 뺀다).
 
 ## 4. 초기 상태: `setup`
 
@@ -84,11 +84,12 @@
 | `peer_hello` | 아니오 | 러너가 상대 **엔드포인트**(`role`과 반대 역할)로서 보내는 HELLO의 파라미터 | 규격 기본값 |
 | `established` | 예 | 연결을 수립한 상태에서 시작하는지 | — |
 | `config` | 아니오 | 설정 항목(이 문서 8.2절) | 항목별 기본값 |
+| `auth` | 아니오 | 연결 인증에 쓰는 메커니즘과 자격 증명. `{mechanism, credentials}`이고 두 필드 모두 생략할 수 있다. `mechanism`은 규격 3.3.1절의 문법(대문자·숫자·하이픈·밑줄 1~20자)을 따르고 `credentials`는 hex다. `role`이 `client`이면 구현이 이것을 `AUTH`로 보내고, `server`이면 구현은 이것과 같은 `AUTH`만 통과시킨다 | `{"mechanism": "ANONYMOUS", "credentials": ""}` |
 | `transport` | 아니오 | 전송 계층. `tcp` 또는 `websocket`. 바이트를 넣는 단계가 `tcp`에서는 `recv`, `websocket`에서는 `recv_message`로 갈린다(이 문서 5절) | `tcp` |
 | `next_stream_id` | 아니오 | 구현이 자기 번호 공간에서 다음에 쓸 스트림 번호. 1 이상이고 표기는 이 문서 5절을 따르며, `role`이 `client`이면 홀수, `server`이면 짝수 | `role`이 `client`이면 1, `server`이면 2 |
 | `known_types` | 아니오 | 구현이 아는 애플리케이션 `type`의 목록. 256 이상 정수의 배열이고 같은 값을 두 번 쓸 수 없다 | 256 이상의 모든 `type` |
 
-`established`가 `true`이면 러너가 표준 수립 순서(3.3절)를 실행하고, 성공을 확인한 뒤 구현의 출력과 이벤트를 비운 다음 첫 단계를 시작한다. 표준 수립 순서에서 서버 역할 구현은 연결 서문을 받은 즉시 HELLO를 보내고, 클라이언트 역할 구현은 연결 서문에 이어 HELLO를 보낸다. 러너는 상대 HELLO에 `ACK`를 보내고 구현의 `ACK`를 받아야 수립을 마친 것으로 본다. `transport`가 `websocket`이면 연결 서문과 각 프레임을 바이너리 메시지 하나씩으로 주고받는다. 이때 `local_hello`와 `peer_hello`로는 수립이 성공하는 값만 쓴다. `false`이면 연결이 막 열린 맨 바이트 상태에서 시작한다. 연결 서문과 첫 프레임 검사를 확인하는 벡터가 이 쪽이다. 이 경우 구현이 연결이 열리자마자 내보내는 출력(클라이언트 역할의 연결 서문 등)은 첫 단계의 `send`에 합쳐 비교한다.
+`established`가 `true`이면 러너가 표준 수립 순서(3.3절)를 실행하고, 성공을 확인한 뒤 구현의 출력과 이벤트를 비운 다음 첫 단계를 시작한다. 그러므로 `established: true`인 벡터는 모두 AUTH 왕복을 거쳐 AUTH 관문을 통과한 상태에서 시작한다. 표준 수립 순서에서 서버 역할 구현은 연결 서문을 받은 즉시 HELLO를 보내고, 클라이언트 역할 구현은 연결 서문에 이어 HELLO를 보낸다. 러너는 상대 HELLO에 `ACK`를 보내고 구현의 `ACK`를 받는다. 이어 AUTH 왕복을 한다. 서버 역할이면 러너가 클라이언트로서 `setup.auth`의 `AUTH`를 보내고 구현의 `AUTH(ACK)`를 받는다. 클라이언트 역할이면 구현이 보낸 `AUTH`가 `setup.auth`와 같음을 확인하고 러너가 서버로서 빈 payload의 `AUTH(ACK)`를 돌려준다. 여기까지 마쳐야 수립을 마친 것으로 본다. `transport`가 `websocket`이면 연결 서문과 각 프레임을 바이너리 메시지 하나씩으로 주고받는다. 이때 `local_hello`와 `peer_hello`로는 수립이 성공하는 값만 쓴다. `false`이면 연결이 막 열린 맨 바이트 상태에서 시작한다. 연결 서문과 첫 프레임 검사를 확인하는 벡터가 이 쪽이다. 이 경우 구현이 연결이 열리자마자 내보내는 출력(클라이언트 역할의 연결 서문 등)은 첫 단계의 `send`에 합쳐 비교한다.
 
 `peer_hello`는 필드 이름(식별자)이고, 가리키는 것은 용어집의 **엔드포인트** 중 테스트 대상이 아닌 쪽, 곧 러너가 흉내 내는 상대 엔드포인트가 보내는 HELLO다. `role`이 `server`이면 클라이언트 HELLO이고 `client`이면 서버 HELLO다. 반대로 `local_hello`는 테스트 대상 구현 자신의 HELLO다. 용어집은 "피어"의 단독 표기를 피하라고 하므로 이 문서의 설명문에서는 "상대 엔드포인트"라고 쓰고, `peer_hello`라는 이름만 형식 호환을 위해 유지한다.
 
@@ -127,12 +128,15 @@
 | `PREFACE` | 8바이트 연결 서문 전체 | — |
 | `HELLO` | `flags`(`ACK` 여부), `stream_id`(0), `params`(빠진 값은 규격 기본값으로 채워 비교. `ACK`이면 payload가 비어 있어야 함), 확장 영역(비어 있어야 함) | — |
 | `PING` | `flags`(`ACK` 여부), `stream_id`(0), `payload`(공백 없는 16자리 hex), 확장 영역(비어 있어야 함) | — |
+| `AUTH` | `flags`(`ACK` 여부), `stream_id`(0), 확장 영역(비어 있어야 함). `ACK`가 아니면 `mechanism`과 `credentials`(생략하면 빈 값). `ACK`이면 `params`(생략하면 빈 payload. 항목은 `credential_lifetime`이고 쓴 항목만 payload에 있어야 함) | — |
 | `CLOSE` | `stream_id`(0), `error_code`, `last_stream_id`, `flags`(0), 확장 영역(비어 있어야 함) | `reason` |
 | `RESET` | `stream_id`, `error_code`, `flags`(0), 확장 영역(비어 있어야 함) | — |
 | `WEBSOCKET_CLOSE` | `code`(`1000`만 쓴다) | — |
 | 애플리케이션 프레임 (`type` 256 이상 정수) | `type`, `flags`(0), `stream_id`, `status`(응답 프레임, 곧 `stream_id`가 상대 엔드포인트의 번호 공간인 프레임만. 생략하면 `OK`), `extensions`(tag별 값. 순서는 비교하지 않음), `payload`(생략하면 빈 값) | 요청 프레임의 `status` |
 
 `WEBSOCKET_CLOSE`는 WebSocket Close(`Close Frame 0x08`)를 관측하는 항목이고 `transport`가 `websocket`인 벡터에서만 쓴다. 구현이 `NO_ERROR` CLOSE를 보냈거나 받아 연결을 끝낼 때(규격 1.2절, 3.5절) 마지막 프레임 메시지 뒤에 나온다(받아서 끝나면 보낸 프레임이 없을 수 있다). `NO_ERROR`가 아닌 CLOSE로 끝낼 때의 WebSocket Close와 상태 1000이 아닌 WebSocket Close는 이 형식으로 관측하지 않으며, 러너는 비교에서 뺀다.
+
+`AUTH` 항목에서 `ACK`가 아니면 `mechanism`이 필수이고 `params`를 쓸 수 없다. `ACK`이면 `mechanism`과 `credentials`를 쓸 수 없다. 서버 역할 구현은 적합성 실행 중 자격 증명의 수명을 알 수 없으므로 `AUTH(ACK)`에 `credential_lifetime`을 싣지 않는다(이 문서 8.1절).
 
 모든 프레임에서 `length`와 `reserved`는 비교하지 않는다. 비교 대상이지만 쓰지 않은 필드는 위 표의 기본값(빈 `flags`, 빈 확장 영역, 빈 `payload`)과 비교한다.
 
@@ -163,16 +167,19 @@
 
 1. 구현은 자기 번호 공간에서 번호를 `next_stream_id`부터 연속으로 할당한다. 클라이언트는 1, 3, 5, ...(홀수)이고 서버는 2, 4, 6, ...(짝수)이다. 번호 건너뛰기를 허용하는 2.2.5절은 바뀌지 않는다. 이 전제 덕분에 벡터 작성자는 응답을 담은 `recv`의 `stream_id`를 미리 적을 수 있다.
 2. `known_types`가 없으면 구현은 256 이상의 모든 `type`을 아는 것으로 다루고 payload를 해석하지 않은 채 전달한다. 있으면 목록에 없는 `type`은 모르는 것이다(4.1절, 5.1절 5번 (나)).
-3. 상대 HELLO에 `ACK`를 보내기 전에 `ping` 단계를 쓰는 벡터는 없다.
+3. AUTH 관문(3.3절)이 열리기 전에 `ping` 단계를 쓰는 벡터는 없다. 서버 역할이면 구현이 `AUTH(ACK)`를 보낸 단계부터, 클라이언트 역할이면 `recv`로 `AUTH(ACK)`를 넣은 단계부터 `ping` 단계를 쓸 수 있다.
+4. 서버 역할 구현은 자격 증명의 수명을 알리지 않는다. `AUTH(ACK)`의 payload는 비어 있다.
 
 ### 8.2 설정 항목
 
-적합한 구현은 적합성 실행 중에 아래 항목을 모두 설정할 수 있어야 한다(MUST). 건너뛰는 항목은 없다. 설정은 `setup`의 `local_hello`, `config`, `next_stream_id`, `known_types`로 한다. `local_hello`의 파라미터는 구현이 보내는 HELLO의 값으로 설정할 수 있어야 한다.
+적합한 구현은 적합성 실행 중에 아래 항목을 모두 설정할 수 있어야 한다(MUST). 건너뛰는 항목은 없다. 설정은 `setup`의 `local_hello`, `config`, `auth`, `next_stream_id`, `known_types`로 한다. `local_hello`의 파라미터는 구현이 보내는 HELLO의 값으로 설정할 수 있어야 한다.
 
 | 항목 | 위치 | 의미 | 기본값 |
 | --- | --- | --- | --- |
 | `max_frame_size`, `max_concurrent_streams`, `capabilities` | `local_hello` | 3.2.1절의 파라미터 | 3.2.1절의 기본값 |
-| `ack_timeout_ms` | `config` | HELLO나 PING을 보내고 `ACK`를 기다리는 시간(확인 대기, 3.3절). 둘이 같은 값을 쓴다. 규격은 값을 정하지 않으므로 이 기본값은 적합성 실행의 설정일 뿐이다 | 5000 |
+| `ack_timeout_ms` | `config` | HELLO·PING·AUTH를 보내고 `ACK`를 기다리는 시간(확인 대기, 3.3절). 클라이언트 역할 구현의 `AUTH(ACK)` 대기도 이 값을 쓴다. 셋이 같은 값을 쓴다. 규격은 값을 정하지 않으므로 이 기본값은 적합성 실행의 설정일 뿐이다 | 5000 |
+| `auth_timeout_ms` | `config` | 서버 역할 구현이 상대 HELLO에 `ACK`를 보낸 때부터 `AUTH`를 기다리는 시간(AUTH 대기, 3.3절). 규격은 값을 정하지 않으므로 이 기본값은 적합성 실행의 설정일 뿐이다. 확인 대기의 기본값과 달라서 두 대기가 한 `advance` 단계에서 함께 끝나지 않는다 | 10000 |
+| `auth` | `setup` | 클라이언트 역할 구현이 보낼 자격 증명이자 서버 역할 구현이 통과시킬 자격 증명 | `{"mechanism": "ANONYMOUS", "credentials": ""}` |
 | `next_stream_id` | `setup` | 구현이 자기 번호 공간에서 다음에 쓸 스트림 번호 | `role`이 `client`이면 1, `server`이면 2 |
 | `known_types` | `setup` | 구현이 아는 애플리케이션 `type`의 목록 | 256 이상의 모든 `type` |
 
@@ -326,3 +333,53 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
   ]
 }
 ```
+
+### 10.4 연결 인증 거부
+
+서버 역할 구현이 `PLAIN`과 자격 증명 `\0user\0pw`만 통과시키도록 설정한다. 러너는 수립 순서를 따라 HELLO를 주고받은 뒤, 다른 자격 증명(`\0user\0xx`)의 `AUTH`를 보낸다. 구현은 `CLOSE(UNAUTHENTICATED)`를 보내고 닫는다. 관문을 통과하지 못했으므로 `established`는 `false`다.
+
+```json
+{
+  "format": 2,
+  "vectors": [
+    {
+      "id": "server-wrong-credentials-closes-unauthenticated",
+      "description": "서버가 설정된 자격 증명과 다른 AUTH를 받으면 CLOSE(UNAUTHENTICATED)를 보내고 닫는다",
+      "spec": ["3.3.1"],
+      "setup": {
+        "role": "server",
+        "established": false,
+        "auth": { "mechanism": "PLAIN", "credentials": "0075736572007077" }
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "c0de5354 52300000",
+          "send": [{ "type": "HELLO" }],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "00000010 00010000 0000000000000000 00000000",
+          "send": [{ "type": "HELLO", "flags": ["ACK"] }],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "00000010 00010100 0000000000000000 00000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001e 00050000 0000000000000000 00000000 05 504c41494e 0075736572007878",
+          "send": [{ "type": "CLOSE", "error_code": "UNAUTHENTICATED", "last_stream_id": "0" }],
+          "events": [{ "event": "closed" }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+세 번째 단계의 `ACK`는 클라이언트가 서버 HELLO를 확인한 것이다. 네 번째 단계의 `AUTH`는 `mechanism_length` 5, `mechanism` `PLAIN`, `credentials` 8바이트로 이뤄진다.

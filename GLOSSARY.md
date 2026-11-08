@@ -145,11 +145,11 @@ _Avoid_: `timeout`(받는 쪽에 주는 힌트인 확장 항목의 이름이다)
 _Avoid_: 스로틀링, 거부 응답(`status`를 담은 응답은 거절이 아니다), `RESOURCE_EXHAUSTED`(애플리케이션이 보낸 응답이다)
 
 **연결 인증 (Connection Authentication)**:
-정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#153](https://github.com/ppzxc/strand/issues/153)). 연결을 맺을 때 클라이언트가 `AUTH`로 자격 증명을 한 번 보내고 서버가 확인하는 것이다. 통과하기 전에는 애플리케이션 프레임을 주고받지 않는다
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어). 연결을 맺을 때 클라이언트가 `AUTH`로 자격 증명을 한 번 보내고 서버가 확인하는 것이다. 통과하기 전에는 애플리케이션 프레임을 주고받지 않는다
 _Avoid_: 세션 인증, 로그인, `bind`, 애플리케이션 인증(payload로 하는 인증은 규격이 다루지 않는다), 재인증(없다)
 
 **인증된 상대 (Authenticated Peer)**:
-정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#153](https://github.com/ppzxc/strand/issues/153)). 서버에게는 연결 인증에서 서버가 확정한 클라이언트의 신원이고, 클라이언트에게는 채널이 확인한 서버의 신원이다. 연결이 끝날 때까지 바뀌지 않는다. 익명 연결은 연결마다 서로 다른 상대다
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어). 서버에게는 연결 인증에서 서버가 확정한 클라이언트의 신원이고, 클라이언트에게는 채널이 확인한 서버의 신원이다. 연결이 끝날 때까지 바뀌지 않는다. 익명 연결은 연결마다 서로 다른 상대다
 _Avoid_: 클라이언트가 주장한 이름, 엔드포인트 식별자(연결 재개용으로 쓰는 말이며 strand에는 없다)
 
 **과도한 사용 (Excessive Use)**:

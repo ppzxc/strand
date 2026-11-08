@@ -3,7 +3,7 @@
   "vectors": [
     {
       "id": "postack-frame-above-announced-limit-closes",
-      "description": "서버는 자기가 알린 max_frame_size(16,384)로 length를 언제나 검사한다. 클라이언트 ACK를 받은 뒤 length가 16,396(알린 한도 − 4 = 16,380 초과, 전체 16,400바이트)인 프레임이 오면 연결 오류이고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "description": "서버는 자기가 알린 max_frame_size(16,384)로 length를 언제나 검사한다. 클라이언트 ACK와 AUTH를 받아 AUTH 관문을 통과한 뒤 length가 16,396(알린 한도 − 4 = 16,380 초과, 전체 16,400바이트)인 프레임이 오면 연결 오류이고 CLOSE(PROTOCOL_ERROR)를 보낸다",
       "spec": [
         "2.2.1",
         "5.1"
@@ -46,6 +46,19 @@
           "kind": "recv",
           "hex": "0000001000010100000000000000000000000000",
           "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001a0005000000000000000000000000000009414e4f4e594d4f5553",
+          "send": [
+            {
+              "type": "AUTH",
+              "flags": [
+                "ACK"
+              ]
+            }
+          ],
           "events": []
         },
         {

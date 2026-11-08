@@ -118,7 +118,7 @@ class VectorRevisionTest {
 
     @Test
     void deletedVectorIdsAreAbsentFromEveryFile() throws IOException {
-        assertThat(deletedIds()).hasSize(62);
+        assertThat(deletedIds()).hasSize(66);
         assertThat(allIds()).doesNotContainAnyElementsOf(deletedIds());
     }
 

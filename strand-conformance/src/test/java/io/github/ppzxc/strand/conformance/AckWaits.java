@@ -3,15 +3,21 @@ package io.github.ppzxc.strand.conformance;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 /**
- * 벡터에서 확인 대기(HELLO나 PING을 보내고 ACK를 기다리는 시간, 규격 3.3절)의 구간을 해석한다. 대기는 HELLO/PING 송신
- * 단계에서 시작해 ACK를 받는 단계에서 끝난다. HELLO ACK는 가장 먼저 시작한 HELLO 대기를, PING ACK는 payload가 같은
- * PING 대기를 끝낸다. 끝나지 않으면 벡터 끝까지 이어진다.
+ * 벡터에서 확인 대기(HELLO·PING·AUTH를 보내고 ACK를 기다리는 시간, 규격 3.3절)와 서버의 AUTH 대기(상대 HELLO에 ACK를 보낸 때부터
+ * AUTH를 기다리는 시간, 규격 3.3절)의 구간을 해석한다. 확인 대기는 HELLO/PING/AUTH 송신 단계에서 시작해 ACK를 받는 단계에서 끝난다.
+ * HELLO ACK는 가장 먼저 시작한 HELLO 대기를, PING ACK는 payload가 같은 PING 대기를, AUTH(ACK)는 AUTH 대기를 끝낸다. AUTH 대기는
+ * ACK HELLO를 보내는 단계에서 시작해(클라이언트 역할은 AUTH를 기다리지 않는다) AUTH를 받는 단계에서 끝난다. 끝나지 않으면 벡터
+ * 끝까지 이어진다. 확인 대기의 한도는 `ack_timeout_ms`, AUTH 대기의 한도는 `auth_timeout_ms`다.
  *
  * <p>ACK를 알아보지 못하면 대기를 끝내지 않은 것으로 본다(대기가 길어지는 쪽이라 한도 검사가 더 엄격해진다). 바이트는 `recv`
  * 단계에 걸쳐 이어 읽고(프레임 경계와 무관하게 잘려 올 수 있다), 완결된 프레임에서만 ACK를 찾는다. `recv_message`는 binary
@@ -22,6 +28,10 @@ final class AckWaits {
 
     private static final int HELLO = 0x0001;
     private static final int PING = 0x0002;
+    private static final int AUTH = 0x0005;
+    /** 받은 `AUTH`(ACK 아님)와 그것을 기다리는 서버의 AUTH 대기를 나타내는 값. 프레임 `type`(16비트)에 없는 값이다. */
+    private static final int AUTH_REQUEST = 0x10005;
+
     private static final int ACK_FLAG = 0x01;
     /** 연결 서문의 식별자 6바이트. 뒤의 2바이트는 예약이라 값을 보지 않는다(규격 3.1절). */
     private static final String PREFACE_PREFIX_HEX = "c0de53545230";
@@ -36,21 +46,37 @@ final class AckWaits {
 
     private static final int HEADER_HEX = 32;
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000;
+    private static final long DEFAULT_AUTH_TIMEOUT_MS = 10000;
 
     private AckWaits() {}
 
-    /** 구조를 해석해 확인 대기 구간별로 센 경과 시간 중 한도(`ack_timeout_ms`, 없으면 5000)에 정확히 닿는 것이 있는가. */
+    /** 구조를 해석해 대기 구간별로 센 경과 시간 중 그 대기의 한도(`ack_timeout_ms`는 5000, `auth_timeout_ms`는 10000이 기본)에 정확히 닿는 것이 있는가. */
     static boolean reachesLimitExactly(JsonObject vector) {
-        JsonObject setup = vector.getAsJsonObject("setup");
-        long limit = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
-                ? setup.getAsJsonObject("config").get("ack_timeout_ms").getAsLong()
-                : DEFAULT_ACK_TIMEOUT_MS;
-        return elapsedAtEachAdvance(vector).contains(limit);
+        for (Sample sample : samples(vector)) {
+            if (sample.elapsed == sample.limit) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    /** 벡터가 확인 대기를 하나라도 시작하는가. */
+    /** 벡터가 확인 대기나 AUTH 대기를 하나라도 시작하는가. */
     static boolean startsAnyWait(JsonObject vector) {
-        return anyStep(vector, step -> !startedBy(step).isEmpty());
+        boolean server = isServerSide(vector);
+        return anyStep(vector, step -> !startedBy(step, server).isEmpty());
+    }
+
+    /** 벡터가 AUTH 대기(클라이언트의 `AUTH(ACK)` 대기나 서버의 `AUTH` 대기)를 시작하는가. */
+    static boolean startsAuthWait(JsonObject vector) {
+        boolean server = isServerSide(vector);
+        return anyStep(vector, step -> {
+            for (Wait wait : startedBy(step, server)) {
+                if (wait.type == AUTH || wait.type == AUTH_REQUEST) {
+                    return true;
+                }
+            }
+            return false;
+        });
     }
 
     /** 벡터에 advance 단계가 있는가. */
@@ -68,26 +94,97 @@ final class AckWaits {
     }
 
     /**
-     * 확인 대기가 시작된 시점부터 센 경과 시간을 advance 단계마다 모아 돌려준다. 대기 여러 개가 겹치면 각각 따로 센다. 대기가
-     * 시작된 단계 자체가 advance이면 그 단계의 시간을 대기 안에 센다(송신이 advance 앞에서 일어났다고 보는, 한도에 더 가까운
-     * 쪽의 해석).
+     * 이 벡터의 서버가 AUTH를 기다리는가. 서버 쪽(`role`이 `client`가 아니면, 없으면 포함)이고 AUTH 관문을 아직 지나지 않은 채
+     * 시작하는(`established`가 `true`가 아닌) 벡터만 해당한다.
+     */
+    private static boolean isServerSide(JsonObject vector) {
+        JsonObject setup = vector.getAsJsonObject("setup");
+        boolean client = setup.has("role") && setup.get("role").getAsString().equals("client");
+        boolean established =
+                setup.has("established") && setup.get("established").getAsBoolean();
+        return !client && !established;
+    }
+
+    /**
+     * 각 단계가 끝난 시점까지 AUTH(ACK)를 받았는가. 클라이언트 역할의 AUTH 관문(규격 3.3절)이 열렸는지 보는 데 쓴다. 바이트를 읽는
+     * 방법은 확인 대기와 같다.
+     */
+    static boolean[] authAckReceivedThrough(JsonObject vector) {
+        int count = vector.getAsJsonArray("steps").size();
+        boolean[] result = new boolean[count];
+        Inbound stream = new Inbound();
+        boolean received = false;
+        for (int i = 0; i < count; i++) {
+            JsonObject step = vector.getAsJsonArray("steps").get(i).getAsJsonObject();
+            for (Ack ack : acknowledgedBy(step, stream)) {
+                received |= ack.type == AUTH;
+            }
+            result[i] = received;
+            if (endsConnection(step)) {
+                stream = new Inbound();
+                received = false;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 대기가 시작된 시점부터 센 경과 시간을 advance 단계마다 모아 돌려준다. 대기 여러 개가 겹치면 각각 따로 센다. 대기가 시작된
+     * 단계 자체가 advance이면 그 단계의 시간을 대기 안에 센다(송신이 advance 앞에서 일어났다고 보는, 한도에 더 가까운 쪽의 해석).
      */
     static List<Long> elapsedAtEachAdvance(JsonObject vector) {
-        List<Wait> running = new ArrayList<>();
         List<Long> result = new ArrayList<>();
+        for (Sample sample : samples(vector)) {
+            result.add(sample.elapsed);
+        }
+        return result;
+    }
+
+    /**
+     * advance 한 단계에서 자기 한도를 넘어서는 대기들이 낳는 CLOSE 사유의 가짓수의 최댓값. 확인 대기는 `UNRESPONSIVE`, AUTH 대기는
+     * `UNAUTHENTICATED`다. 사유가 둘 이상이면 어느 CLOSE가 나갈지 정해지지 않는다. 같은 사유의 대기가 함께 넘는 것은 센 하나로 본다.
+     */
+    static int maxLimitsCrossedInOneAdvance(JsonObject vector) {
+        Map<Integer, Set<String>> crossed = new HashMap<>();
+        int max = 0;
+        for (Sample sample : samples(vector)) {
+            if (sample.elapsed - sample.ms < sample.limit && sample.elapsed > sample.limit) {
+                Set<String> reasons = crossed.computeIfAbsent(sample.step, k -> new HashSet<>());
+                reasons.add(sample.reason);
+                max = Math.max(max, reasons.size());
+            }
+        }
+        return max;
+    }
+
+    private static List<Sample> samples(JsonObject vector) {
+        JsonObject setup = vector.getAsJsonObject("setup");
+        long ackLimit = limitOf(setup, "ack_timeout_ms", DEFAULT_ACK_TIMEOUT_MS);
+        long authLimit = limitOf(setup, "auth_timeout_ms", DEFAULT_AUTH_TIMEOUT_MS);
+        boolean server = isServerSide(vector);
+        List<Wait> running = new ArrayList<>();
+        List<Sample> result = new ArrayList<>();
         Inbound stream = new Inbound();
+        int index = -1;
         for (JsonElement element : vector.getAsJsonArray("steps")) {
+            index++;
             JsonObject step = element.getAsJsonObject();
-            // 단계로 들어온 바이트의 ACK가 먼저이고, 이 단계에서 보낸 HELLO/PING의 대기는 그 뒤에 시작한다.
+            // 단계로 들어온 바이트의 ACK가 먼저이고, 이 단계에서 보낸 HELLO/PING/AUTH의 대기는 그 뒤에 시작한다.
             for (Ack ack : acknowledgedBy(step, stream)) {
                 endOldestMatching(running, ack);
             }
-            running.addAll(startedBy(step));
+            running.addAll(startedBy(step, server));
             if (kindOf(step).equals("advance")) {
                 long ms = step.get("ms").getAsLong();
                 for (Wait wait : running) {
                     wait.elapsed += ms;
-                    result.add(wait.elapsed);
+                    boolean authWait = wait.type == AUTH_REQUEST;
+                    result.add(new Sample(
+                            index,
+                            wait.elapsed,
+                            ms,
+                            authWait ? authLimit : ackLimit,
+                            authWait ? "UNAUTHENTICATED" : "UNRESPONSIVE"));
                 }
             }
             if (endsConnection(step)) {
@@ -98,6 +195,12 @@ final class AckWaits {
             }
         }
         return result;
+    }
+
+    private static long limitOf(JsonObject setup, String name, long fallback) {
+        return setup.has("config") && setup.getAsJsonObject("config").has(name)
+                ? setup.getAsJsonObject("config").get(name).getAsLong()
+                : fallback;
     }
 
     /** 이 단계 뒤에 연결이 끝나는가: 상대가 끊었거나(disconnect) 연결이 닫혔음이 애플리케이션에 전달됐다(closed 이벤트). */
@@ -128,19 +231,30 @@ final class AckWaits {
         }
     }
 
-    /** 이 단계에서 보낸 ACK 아닌 HELLO/PING이 시작하는 대기. */
-    private static List<Wait> startedBy(JsonObject step) {
+    /**
+     * 이 단계에서 보낸 프레임이 시작하는 대기. ACK 아닌 HELLO·PING·AUTH는 확인 대기를 시작하고, 서버 쪽의 ACK HELLO는 AUTH 대기를
+     * 시작한다.
+     */
+    private static List<Wait> startedBy(JsonObject step, boolean server) {
         List<Wait> waits = new ArrayList<>();
         for (JsonElement frame : step.getAsJsonArray("send")) {
             JsonObject f = frame.getAsJsonObject();
             String type = VectorSchema.frameType(f);
-            if (type == null || VectorSchema.hasFlag(f, "ACK")) {
+            if (type == null) {
+                continue;
+            }
+            if (VectorSchema.hasFlag(f, "ACK")) {
+                if (server && type.equals("HELLO")) {
+                    waits.add(new Wait(AUTH_REQUEST, null));
+                }
                 continue;
             }
             if (type.equals("HELLO")) {
                 waits.add(new Wait(HELLO, null));
             } else if (type.equals("PING")) {
                 waits.add(new Wait(PING, pingPayload(step, f)));
+            } else if (type.equals("AUTH")) {
+                waits.add(new Wait(AUTH, null));
             }
         }
         return waits;
@@ -177,7 +291,24 @@ final class AckWaits {
         return Bytes.compactHex(hex).toLowerCase(Locale.ROOT);
     }
 
-    /** 확인 대기 하나. PING이면 payload로 ACK와 맞춰 본다. */
+    /** advance 단계 하나에서 대기 하나를 센 결과: 그 단계 번호, 대기가 시작된 뒤의 경과 시간, 그 단계의 시간, 그 대기의 한도, 한도를 넘으면 나갈 CLOSE 사유. */
+    private static final class Sample {
+        final int step;
+        final long elapsed;
+        final long ms;
+        final long limit;
+        final String reason;
+
+        Sample(int step, long elapsed, long ms, long limit, String reason) {
+            this.step = step;
+            this.elapsed = elapsed;
+            this.ms = ms;
+            this.limit = limit;
+            this.reason = reason;
+        }
+    }
+
+    /** 대기 하나. PING이면 payload로 ACK와 맞춰 본다. */
     private static final class Wait {
         final int type;
         final String payload;
@@ -203,7 +334,7 @@ final class AckWaits {
             if (wait.type != type) {
                 return false;
             }
-            return type == HELLO || wait.payload == null || (payload != null && payload.equals(wait.payload));
+            return type != PING || wait.payload == null || (payload != null && payload.equals(wait.payload));
         }
     }
 
@@ -258,10 +389,13 @@ final class AckWaits {
         private static void collectAck(String frame, List<Ack> acks) {
             int type = Integer.parseInt(frame.substring(LENGTH_HEX, LENGTH_HEX + 4), 16);
             int flags = Integer.parseInt(frame.substring(LENGTH_HEX + 4, LENGTH_HEX + 6), 16);
-            if ((flags & ACK_FLAG) == 0 || (type != HELLO && type != PING)) {
-                return;
+            boolean ack = (flags & ACK_FLAG) != 0;
+            if (type == AUTH) {
+                // ACK가 없는 AUTH는 서버의 AUTH 대기를 끝낸다.
+                acks.add(new Ack(ack ? AUTH : AUTH_REQUEST, null));
+            } else if (ack && (type == HELLO || type == PING)) {
+                acks.add(new Ack(type, payloadOf(frame)));
             }
-            acks.add(new Ack(type, payloadOf(frame)));
         }
 
         /** 헤더 16바이트와 확장 영역 뒤의 payload. 정확히 8바이트가 아니면 null이다(PING 말고는 payload를 맞춰 보지 않는다). */

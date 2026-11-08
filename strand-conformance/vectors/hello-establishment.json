@@ -154,7 +154,7 @@
     },
     {
       "id": "server-first-frame-reserved-control-type-closes-silently",
-      "description": "첫 프레임 type이 예약 제어 타입(0x0005)이어도 무시하지 않고 첫 프레임 검사에서 아무것도 더 보내지 않고 닫는다. 첫 프레임 검사(5.1절 2번)가 예약 타입 무시(3번)보다 앞선다",
+      "description": "첫 프레임 type이 예약 제어 타입(0x0006)이어도 무시하지 않고 첫 프레임 검사에서 아무것도 더 보내지 않고 닫는다. 첫 프레임 검사(5.1절 2번)가 예약 타입 무시(3번)보다 앞선다",
       "spec": [
         "2.2.2",
         "3.2.4",
@@ -177,7 +177,7 @@
         },
         {
           "kind": "recv",
-          "hex": "0000001000050000000000000000000000000000",
+          "hex": "0000001000060000000000000000000000000000",
           "send": [],
           "events": [
             {
@@ -840,7 +840,7 @@
     },
     {
       "id": "server-ack-timeout-is-cancelled-by-ack",
-      "description": "대기 시간 직전(999ms)에 클라이언트 ACK가 도착하면 시계가 더 지나도 CLOSE를 보내지 않는다",
+      "description": "대기 시간 직전(999ms)에 클라이언트 ACK와 AUTH가 도착하면(서버는 AUTH(ACK)로 답한다) 시계가 더 지나도 CLOSE를 보내지 않는다",
       "spec": [
         "3.3"
       ],
@@ -883,8 +883,15 @@
         },
         {
           "kind": "recv",
-          "hex": "0000001000010100000000000000000000000000",
-          "send": [],
+          "hex": "00000010000101000000000000000000000000000000001a0005000000000000000000000000000009414e4f4e594d4f5553",
+          "send": [
+            {
+              "type": "AUTH",
+              "flags": [
+                "ACK"
+              ]
+            }
+          ],
           "events": []
         },
         {
@@ -1015,6 +1022,10 @@
               "flags": [
                 "ACK"
               ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -1048,6 +1059,10 @@
               "flags": [
                 "ACK"
               ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -1190,6 +1205,10 @@
               "flags": [
                 "ACK"
               ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -1239,6 +1258,10 @@
               "flags": [
                 "ACK"
               ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -1288,6 +1311,10 @@
               "flags": [
                 "ACK"
               ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -1392,6 +1419,10 @@
               "flags": [
                 "ACK"
               ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -1422,7 +1453,7 @@
     },
     {
       "id": "client-ack-timeout-is-cancelled-by-ack",
-      "description": "대기 시간 직전(999ms)에 서버 ACK가 도착하면 시계가 더 지나도 CLOSE를 보내지 않는다",
+      "description": "대기 시간 직전(999ms)에 서버 ACK와 AUTH(ACK)가 도착하면 시계가 더 지나도 CLOSE를 보내지 않는다",
       "spec": [
         "3.3"
       ],
@@ -1449,6 +1480,10 @@
               "flags": [
                 "ACK"
               ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -1461,7 +1496,7 @@
         },
         {
           "kind": "recv",
-          "hex": "0000001000010100000000000000000000000000",
+          "hex": "00000010000101000000000000000000000000000000001000050100000000000000000000000000",
           "send": [],
           "events": []
         },
@@ -1683,6 +1718,10 @@
               "flags": [
                 "ACK"
               ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -1698,77 +1737,6 @@
             }
           ],
           "events": [
-            {
-              "event": "closed"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "ack-gate-while-closing-closes-without-close-frame",
-      "description": "상대 ACK 전이라도 서버는 ACK HELLO를 보낸 직후부터 요청을 보낼 수 있다. 그 요청(스트림 2)이 대기 중일 때 CLOSE(NO_ERROR)를 받으면 종료 중이 되고, 그 뒤 ACK 전에 PING이 오면 연결 오류지만 종료 중이므로 CLOSE 없이 닫는다. 대기 중인 내 요청은 로컬 UNAVAILABLE을 받고 그 뒤 closed가 난다",
-      "spec": [
-        "3.3",
-        "3.5",
-        "5.1"
-      ],
-      "setup": {
-        "role": "server",
-        "established": false
-      },
-      "steps": [
-        {
-          "kind": "recv",
-          "hex": "c0de535452300000",
-          "send": [
-            {
-              "type": "HELLO"
-            }
-          ],
-          "events": []
-        },
-        {
-          "kind": "recv",
-          "hex": "0000001000010000000000000000000000000000",
-          "send": [
-            {
-              "type": "HELLO",
-              "flags": [
-                "ACK"
-              ]
-            }
-          ],
-          "events": []
-        },
-        {
-          "kind": "request",
-          "type": 257,
-          "send": [
-            {
-              "type": 257,
-              "stream_id": "2"
-            }
-          ],
-          "events": []
-        },
-        {
-          "kind": "recv",
-          "hex": "0000001c00030000000000000000000000000000000000000000000000000002",
-          "send": [],
-          "events": []
-        },
-        {
-          "kind": "recv",
-          "hex": "00000018000200000000000000000000000000000102030405060708",
-          "send": [],
-          "events": [
-            {
-              "event": "result",
-              "stream_id": "2",
-              "status": "UNAVAILABLE",
-              "certainty": "unknown"
-            },
             {
               "event": "closed"
             }
@@ -1872,7 +1840,7 @@
     },
     {
       "id": "ack-gate-allows-reserved-control-type",
-      "description": "예약 제어 타입(0x0005)은 상대 ACK 전에도 무시한다. 아무것도 보내지 않고 연결을 유지하며, 이어 ACK를 받으면 PING에 답한다",
+      "description": "예약 제어 타입(0x0006)은 상대 ACK 전에도 무시한다. 아무것도 보내지 않고 연결을 유지하며, 이어 ACK와 AUTH를 받아 AUTH 관문을 통과한 뒤에는 PING에 답한다",
       "spec": [
         "2.2.2",
         "3.3"
@@ -1907,7 +1875,7 @@
         },
         {
           "kind": "recv",
-          "hex": "0000001000050000000000000000000000000000",
+          "hex": "0000001000060000000000000000000000000000",
           "send": [],
           "events": []
         },
@@ -1915,6 +1883,19 @@
           "kind": "recv",
           "hex": "0000001000010100000000000000000000000000",
           "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001a0005000000000000000000000000000009414e4f4e594d4f5553",
+          "send": [
+            {
+              "type": "AUTH",
+              "flags": [
+                "ACK"
+              ]
+            }
+          ],
           "events": []
         },
         {
@@ -2285,6 +2266,10 @@
               "flags": [
                 "ACK"
               ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -2317,101 +2302,10 @@
               "flags": [
                 "ACK"
               ]
-            }
-          ],
-          "events": []
-        }
-      ]
-    },
-    {
-      "id": "server-sends-after-acking-client-hello-without-waiting-for-ack",
-      "description": "서버는 클라이언트 HELLO에 ACK를 보낸 직후부터 프레임을 보낼 수 있고 클라이언트의 ACK를 기다리지 않는다. ACK를 받기 전에 애플리케이션 요청이 그대로 나간다",
-      "spec": [
-        "3.3"
-      ],
-      "setup": {
-        "role": "server",
-        "established": false
-      },
-      "steps": [
-        {
-          "kind": "recv",
-          "hex": "c0de535452300000",
-          "send": [
+            },
             {
-              "type": "HELLO"
-            }
-          ],
-          "events": []
-        },
-        {
-          "kind": "recv",
-          "hex": "0000001000010000000000000000000000000000",
-          "send": [
-            {
-              "type": "HELLO",
-              "flags": [
-                "ACK"
-              ]
-            }
-          ],
-          "events": []
-        },
-        {
-          "kind": "request",
-          "type": 257,
-          "send": [
-            {
-              "type": 257,
-              "stream_id": "2"
-            }
-          ],
-          "events": []
-        }
-      ]
-    },
-    {
-      "id": "server-sends-ping-after-acking-client-hello",
-      "description": "서버는 클라이언트 HELLO에 ACK를 보낸 직후부터 PING도 보낼 수 있다. 클라이언트 ACK를 받기 전에 PING이 그대로 나간다",
-      "spec": [
-        "3.3",
-        "3.4"
-      ],
-      "setup": {
-        "role": "server",
-        "established": false
-      },
-      "steps": [
-        {
-          "kind": "recv",
-          "hex": "c0de535452300000",
-          "send": [
-            {
-              "type": "HELLO"
-            }
-          ],
-          "events": []
-        },
-        {
-          "kind": "recv",
-          "hex": "0000001000010000000000000000000000000000",
-          "send": [
-            {
-              "type": "HELLO",
-              "flags": [
-                "ACK"
-              ]
-            }
-          ],
-          "events": []
-        },
-        {
-          "kind": "ping",
-          "payload": "0102030405060708",
-          "send": [
-            {
-              "type": "PING",
-              "payload": "0102030405060708"
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
@@ -2420,7 +2314,7 @@
     },
     {
       "id": "client-sends-after-acking-server-hello-without-waiting-for-ack",
-      "description": "클라이언트는 서버 HELLO를 검증하고 ACK를 보낸 뒤부터 프레임을 보낼 수 있다. 서버 ACK를 받기 전에 애플리케이션 요청이 그대로 나간다",
+      "description": "클라이언트는 서버 HELLO를 검증하고 ACK를 보낸 직후 AUTH를 보낸다. 서버가 보낸 HELLO에 대한 ACK(클라이언트 HELLO의 확인)를 기다리지 않는다",
       "spec": [
         "3.3"
       ],
@@ -2444,17 +2338,10 @@
               "flags": [
                 "ACK"
               ]
-            }
-          ],
-          "events": []
-        },
-        {
-          "kind": "request",
-          "type": 257,
-          "send": [
+            },
             {
-              "type": 257,
-              "stream_id": "1"
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
             }
           ],
           "events": []
