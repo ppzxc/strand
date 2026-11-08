@@ -102,7 +102,11 @@ class VectorRunnerTest {
     void clientOpeningOutputIsMergedIntoTheFirstStep() {
         ConformanceVector v = vector(
                 "{\"role\":\"client\",\"established\":false}",
-                recv(HELLO_RECV, "[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"}," + HELLO_ACK_SEND + "]", "[]"));
+                recv(
+                        HELLO_RECV,
+                        "[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"}," + HELLO_ACK_SEND
+                                + ",{\"type\":\"AUTH\",\"mechanism\":\"ANONYMOUS\"}]",
+                        "[]"));
 
         assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
     }

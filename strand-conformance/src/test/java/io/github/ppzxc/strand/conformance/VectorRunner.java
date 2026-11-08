@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import io.github.ppzxc.strand.core.internal.AuthDecision;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -36,6 +38,8 @@ final class VectorRunner {
 
     private static final String PREFACE_HEX = "c0de535452300000";
     private static final int HELLO_TYPE = 1;
+    private static final int AUTH_TYPE = 5;
+    private static final String DEFAULT_AUTH_MECHANISM = "ANONYMOUS";
     private static final int ACK_FLAG = 0x01;
     /** 연결 수립에 쓰는 상대 HELLO에 대한 ACK(페이로드 없음). */
     private static final String ACK_HELLO_HEX = controlHeader(HELLO_TYPE, ACK_FLAG, 0);
@@ -49,6 +53,7 @@ final class VectorRunner {
             "peer_hello",
             "config",
             "known_types",
+            "auth",
             "next_stream_id",
             "transport"));
     /** 실행할 수 있는 단계. 지원 여부와 실행이 이 표 하나에서 정해진다. */
@@ -113,6 +118,21 @@ final class VectorRunner {
                 "PING",
                 frame -> "PING flags=" + (VectorSchema.hasFlag(frame, "ACK") ? "ACK" : "-") + " stream_id=0 payload="
                         + frame.get("payload").getAsString());
+        NAMED_FRAMES.put("AUTH", frame -> {
+            if (VectorSchema.hasFlag(frame, "ACK")) {
+                return "AUTH flags=ACK stream_id=0 params="
+                        + (frame.has("params")
+                                        && frame.getAsJsonObject("params").has("credential_lifetime")
+                                ? "credential_lifetime="
+                                        + frame.getAsJsonObject("params")
+                                                .get("credential_lifetime")
+                                                .getAsLong()
+                                : "-");
+            }
+            return "AUTH flags=- stream_id=0 mechanism="
+                    + frame.get("mechanism").getAsString() + " credentials="
+                    + (frame.has("credentials") ? frame.get("credentials").getAsString() : "");
+        });
         NAMED_FRAMES.put(
                 "CLOSE",
                 frame -> "CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code"))
@@ -160,7 +180,7 @@ final class VectorRunner {
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
         List<OutboundMessage> opening = runner.endpoint.drainMessages();
         if (setup.get("established").getAsBoolean()) {
-            runner.establish(opening, setup.getAsJsonObject("peer_hello"));
+            runner.establish(opening, setup.getAsJsonObject("peer_hello"), setup.getAsJsonObject("auth"));
             opening = new ArrayList<>();
         }
         int number = 0;
@@ -242,6 +262,18 @@ final class VectorRunner {
         return Long.parseLong(element.getAsString());
     }
 
+    /** {@code setup.auth}의 메커니즘. 생략하면 {@code ANONYMOUS}다(벡터 형식 5절). */
+    private static String authMechanism(JsonObject setup) {
+        JsonObject auth = setup.getAsJsonObject("auth");
+        return auth.has("mechanism") ? auth.get("mechanism").getAsString() : DEFAULT_AUTH_MECHANISM;
+    }
+
+    /** {@code setup.auth}의 자격 증명. 생략하면 빈 값이다. */
+    private static byte[] authCredentials(JsonObject setup) {
+        JsonObject auth = setup.getAsJsonObject("auth");
+        return Bytes.fromHex(auth.has("credentials") ? auth.get("credentials").getAsString() : "");
+    }
+
     private static EndpointConfig configOf(JsonObject setup) {
         Map<String, Long> hello = helloParams(setup.getAsJsonObject("local_hello"));
         long ackTimeout = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
@@ -258,6 +290,13 @@ final class VectorRunner {
         if (setup.has("next_stream_id")) {
             config = config.nextStreamId(streamId(setup.get("next_stream_id")));
         }
+        if (setup.has("auth")) {
+            config = config.auth(authMechanism(setup), authCredentials(setup))
+                    .authenticator((mechanism, credentials) ->
+                            mechanism.equals(authMechanism(setup)) && Arrays.equals(credentials, authCredentials(setup))
+                                    ? AuthDecision.PASS
+                                    : AuthDecision.REJECT);
+        }
         if (setup.has("known_types")) {
             Set<Integer> known = new HashSet<>();
             for (JsonElement type : setup.getAsJsonArray("known_types")) {
@@ -268,8 +307,16 @@ final class VectorRunner {
         return config;
     }
 
-    /** 규격 3.3절 표준 수립 순서를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. */
-    private void establish(List<OutboundMessage> opening, JsonObject peerHello) {
+    /**
+     * 규격 3.3절 표준 수립 순서(HELLO 교환 뒤 AUTH 왕복)를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. {@code auth}는
+     * {@code setup.auth}이고 없으면 {@code ANONYMOUS}와 빈 자격 증명이다.
+     */
+    private void establish(List<OutboundMessage> opening, JsonObject peerHello, JsonObject auth) {
+        String mechanism =
+                auth != null && auth.has("mechanism") ? auth.get("mechanism").getAsString() : DEFAULT_AUTH_MECHANISM;
+        String credentials = auth != null && auth.has("credentials")
+                ? auth.get("credentials").getAsString()
+                : "";
         List<OutboundMessage> hello = opening;
         if (!client) {
             deliver(Bytes.fromHex(PREFACE_HEX));
@@ -277,12 +324,31 @@ final class VectorRunner {
         }
         assertThat(describeMessages(hello, client)).as("수립: 연결을 연 뒤의 출력").hasSize(client ? 2 : 1);
         deliver(encodeHello(helloParams(peerHello)));
-        assertThat(describeMessages(endpoint.drainMessages(), false))
-                .as("수립: 상대 HELLO에 대한 ACK")
-                .containsExactly("HELLO flags=ACK stream_id=0 params=-");
+        List<String> afterPeerHello = describeMessages(endpoint.drainMessages(), false);
+        if (client) {
+            // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 보낸다(규격 3.3절 4번).
+            assertThat(afterPeerHello)
+                    .as("수립: 상대 HELLO에 대한 ACK와 AUTH")
+                    .containsExactly(
+                            "HELLO flags=ACK stream_id=0 params=-",
+                            "AUTH flags=- stream_id=0 mechanism=" + mechanism + " credentials=" + credentials);
+        } else {
+            assertThat(afterPeerHello)
+                    .as("수립: 상대 HELLO에 대한 ACK")
+                    .containsExactly("HELLO flags=ACK stream_id=0 params=-");
+        }
         deliver(Bytes.fromHex(ACK_HELLO_HEX));
         assertThat(endpoint.drainMessages()).as("수립: ACK 뒤의 출력").isEmpty();
-        assertThat(endpoint.drainEvents()).as("수립: 이벤트").isEmpty();
+        if (client) {
+            deliver(Bytes.fromHex(controlHeader(AUTH_TYPE, ACK_FLAG, 0)));
+        } else {
+            deliver(encodeAuth(mechanism, credentials));
+            assertThat(describeMessages(endpoint.drainMessages(), false))
+                    .as("수립: AUTH에 대한 AUTH(ACK)")
+                    .containsExactly("AUTH flags=ACK stream_id=0 params=-");
+        }
+        assertThat(endpoint.drainMessages()).as("수립: AUTH 관문 통과 뒤의 출력").isEmpty();
+        assertThat(describe(endpoint.drainEvents())).as("수립: 이벤트").isEmpty();
     }
 
     /** 수립에 쓰는 입력 하나를 전송 방식에 맞게 넣는다. WebSocket이면 메시지 하나로, 바이트 스트림이면 바이트로 넣는다. */
@@ -331,6 +397,12 @@ final class VectorRunner {
         return Bytes.concat(Bytes.fromHex(controlHeader(HELLO_TYPE, 0, body.length)), body);
     }
 
+    private static byte[] encodeAuth(String mechanism, String credentialsHex) {
+        byte[] name = mechanism.getBytes(StandardCharsets.US_ASCII);
+        byte[] body = Bytes.concat(Bytes.concat(new byte[] {(byte) name.length}, name), Bytes.fromHex(credentialsHex));
+        return Bytes.concat(Bytes.fromHex(controlHeader(AUTH_TYPE, 0, body.length)), body);
+    }
+
     private static List<String> expectedFrames(JsonObject step) {
         List<String> result = new ArrayList<>();
         for (JsonElement element : step.getAsJsonArray("send")) {
@@ -360,6 +432,10 @@ final class VectorRunner {
     private static List<String> describe(List<Event> events) {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
+            if (event.kind() == Event.Kind.AUTHENTICATED) {
+                // 벡터 형식에 없는 이벤트다(6.2절). 클라이언트의 credential_lifetime 통지는 core 테스트가 본다.
+                continue;
+            }
             if (event.kind() == Event.Kind.RESULT && event.streamId() == 0) {
                 // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). 구현 이슈에서 core가
                 // certainty를 내보내면 이 줄과 certainty 비교를 함께 고친다. 지금은 비교하지 않는다.
@@ -435,6 +511,13 @@ final class VectorRunner {
             } else if (type == 3 && payload.length >= 12) {
                 result.add("CLOSE" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0))
                         + " last_stream_id=" + Long.toUnsignedString(Bytes.readLong(payload, 4)));
+            } else if (type == AUTH_TYPE && (flags & ACK_FLAG) == 0 && payload.length >= 1) {
+                int nameLength = payload[0] & 0xFF;
+                result.add("AUTH" + head + ext + " mechanism="
+                        + new String(payload, 1, nameLength, StandardCharsets.US_ASCII) + " credentials="
+                        + Bytes.toHex(Arrays.copyOfRange(payload, 1 + nameLength, payload.length)));
+            } else if (type == AUTH_TYPE && (flags & ACK_FLAG) != 0) {
+                result.add("AUTH" + head + ext + " params=" + authParamsText(payload));
             } else if (type == 4 && payload.length == 4) {
                 result.add(
                         "RESET" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));
@@ -455,6 +538,22 @@ final class VectorRunner {
             return "-";
         }
         return flags == 1 ? "ACK" : String.format("0x%02x", flags);
+    }
+
+    /** AUTH(ACK) payload의 항목. {@code credential_lifetime}만 이름이 있고 빈 payload는 {@code -}다. */
+    private static String authParamsText(byte[] payload) {
+        if (payload.length == 0) {
+            return "-";
+        }
+        StringBuilder text = new StringBuilder();
+        for (int at = 0; at + 6 <= payload.length; at += 6) {
+            int id = ((payload[at] & 0xFF) << 8) | (payload[at + 1] & 0xFF);
+            text.append(text.length() == 0 ? "" : ",")
+                    .append(id == 1 ? "credential_lifetime" : String.format("0x%04x", id))
+                    .append('=')
+                    .append(Bytes.readUnsignedInt(payload, at + 2));
+        }
+        return text.toString();
     }
 
     private static String paramsText(Map<String, Long> params) {

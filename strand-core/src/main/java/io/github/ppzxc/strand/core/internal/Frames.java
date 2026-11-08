@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 /** 프레임 바이트 인코딩(규격 2.1절). */
@@ -74,6 +75,16 @@ final class Frames {
         writeParam(payload, HelloParams.MAX_CONCURRENT_STREAMS_ID, config.maxConcurrentStreams());
         writeParam(payload, HelloParams.CAPABILITIES_ID, config.capabilities());
         return control(FrameType.HELLO, 0, payload.toByteArray());
+    }
+
+    /** 클라이언트가 보내는 {@code AUTH}: {@code mechanism_length} u8 + {@code mechanism} + {@code credentials}(규격 3.3.1절). */
+    static byte[] auth(String mechanism, byte[] credentials) {
+        byte[] name = mechanism.getBytes(StandardCharsets.US_ASCII);
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        payload.write(name.length);
+        payload.write(name, 0, name.length);
+        payload.write(credentials, 0, credentials.length);
+        return control(FrameType.AUTH, 0, payload.toByteArray());
     }
 
     /** 연결 서문 8바이트(규격 3.1절). */
