@@ -1,6 +1,6 @@
 # strand 도메인 용어집 (Domain Glossary)
 
-strand는 고성능 다중화 이진 메시지 교환 규격(Specification)과 그 규격을 구현한 Java 라이브러리다. 본 문서는 프로젝트 전반에서 통일되게 사용하는 어휘의 언어 규율을 규정한다.
+strand는 서버 사이에서 오래 유지되는 단일 연결 위의 요청·응답을 다중화하는 이진 메시지 교환 규격(Specification)과 그 규격을 구현한 Java 라이브러리다. 본 문서는 프로젝트 전반에서 통일되게 사용하는 어휘의 언어 규율을 규정한다.
 
 규격 용어의 정의는 규격 1.3절이 정본이고, 1.3절에 없는 규격 항목은 해당 절이 정본이다. 이 문서는 정의를 다시 쓰지 않고 정본으로 링크하며, 피해야 할 표현(`_Avoid_`)만 정한다. 규격 문서 자체와 규격에 없는 모듈 용어(`core`, 전송 모듈, 어댑터)만 여기서 정의한다.
 
@@ -13,7 +13,7 @@ strand가 정의하는 바이트 인코딩·디코딩 및 통신 상태 규칙�
 _Avoid_: 프로토콜 스펙, 와이어 프로토콜 스펙, 프로토콜 문서
 
 **연결 (Connection)**:
-정의: 규격 1.3절에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#149](https://github.com/ppzxc/strand/issues/149))
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 세션, 커넥션 세션. strand에는 연결을 넘는 세션이 없다
 
 **연결 서문 (Connection Preface)**:
@@ -65,7 +65,7 @@ _Avoid_: 시스템 프레임, 관리 프레임
 _Avoid_: 데이터 프레임(HTTP/2와 혼동 주의), 비즈니스 프레임
 
 **줄 앞 막힘 (Head-of-Line Blocking)**:
-정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#156](https://github.com/ppzxc/strand/issues/156)). 앞선 프레임을 다 쓰거나 다 읽기 전에는 뒤 프레임을 보내지도 읽지도 못하는 현상이다. 한 연결에서 막히는 시간은 `max_frame_size` 프레임 하나로 묶인다
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: HOL(단독 약어), 단편화(strand에는 없다)
 
 **확장 영역 (Extension Area)**:
@@ -141,7 +141,7 @@ _Avoid_: 처리됨(상대가 `status`로 처리하지 않았다고 답할 수 �
 _Avoid_: `timeout`(받는 쪽에 주는 힌트인 확장 항목의 이름이다), 타임아웃(단독)
 
 **거절 (Refusal)**:
-정의: 규격 4.5절 개정 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#152](https://github.com/ppzxc/strand/issues/152)). 받는 쪽이 새 요청을 애플리케이션에 넘기기 전에 `RESET(REFUSED)`로 돌려보내는 것이다. 보내는 쪽의 결과 확정성은 처리 안 됨이다
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 스로틀링, 거부 응답(`status`를 담은 응답은 거절이 아니다), `RESOURCE_EXHAUSTED`(애플리케이션이 보낸 응답이다)
 
 **연결 인증 (Connection Authentication)**:
