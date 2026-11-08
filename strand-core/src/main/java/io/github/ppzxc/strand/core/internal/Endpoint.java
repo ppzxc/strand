@@ -53,6 +53,10 @@ public final class Endpoint {
      * 하나이므로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 본다.
      */
     private final Map<Long, OutboundMessage> undrainedRequests = new LinkedHashMap<>();
+    /** 대기 중인 내 스트림 번호와 그 요청을 낸 순서(요청 번호표, 0부터)의 짝. {@link #requestState(long)}가 번호표로 요청을 찾는다. */
+    private final Map<Long, Long> ticketOfStream = new LinkedHashMap<>();
+    /** 다음 {@link #request}에 줄 번호표. */
+    private long nextTicket;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
     private final Map<Long, Integer> peerPendingStreams = new LinkedHashMap<>();
     /** AUTH 관문을 통과하기 전이라 미뤄 둔 송신(규격 3.3절). */
@@ -258,13 +262,14 @@ public final class Endpoint {
             failLocally();
             return;
         }
+        long ticket = nextTicket++;
         if (authGatePassed) {
-            if (sendRequest(type, payload) == RequestOutcome.OVERSIZE) {
+            if (sendRequest(ticket, type, payload) == RequestOutcome.OVERSIZE) {
                 throw oversizeFrame("요청");
             }
         } else {
-            deferredSends.add(DeferredSend.request(() -> {
-                if (sendRequest(type, payload) == RequestOutcome.OVERSIZE) {
+            deferredSends.add(DeferredSend.request(ticket, () -> {
+                if (sendRequest(ticket, type, payload) == RequestOutcome.OVERSIZE) {
                     failLocally();
                 }
             }));
@@ -301,7 +306,7 @@ public final class Endpoint {
      * @param streamId 내가 연 스트림 번호
      */
     public void cancel(long streamId) {
-        if (transportClosed || ownPendingStreams.remove(streamId) == null) {
+        if (transportClosed || endOwnStream(streamId) == null) {
             return;
         }
         // 요청 프레임은 이미 쓰기 대기열에 있고 끊지 않고 마저 쓴 뒤 RESET을 보낸다(규격 4.4절). 쓰기 전 취소의 종료 규칙은 #191이 다룬다.
@@ -528,7 +533,7 @@ public final class Endpoint {
             return;
         }
         if (isOwnSpace(streamId)) {
-            if (ownPendingStreams.remove(streamId) != null) {
+            if (endOwnStream(streamId) != null) {
                 long errorCode = Frames.readUnsignedInt(payload, 0);
                 // 거절한 요청은 처리를 시작하지 않았다(규격 4.4절 결과 표).
                 Certainty certainty = errorCode == ErrorCode.REFUSED ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
@@ -629,7 +634,7 @@ public final class Endpoint {
 
     /** 내 요청의 응답. 대기 중인 요청이면 결과를 애플리케이션에 넘긴다. 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). */
     private void handleResponse(byte[] frame, long streamId) {
-        Integer requestType = ownPendingStreams.remove(streamId);
+        Integer requestType = endOwnStream(streamId);
         if (requestType == null) {
             // 대기 중이 아닌 스트림의 프레임은 조용히 버린다(규격 4.3절).
             return;
@@ -880,6 +885,7 @@ public final class Endpoint {
         }
         deferredSends.clear();
         ownPendingStreams.clear();
+        ticketOfStream.clear();
         peerPendingStreams.clear();
         events.add(Event.closed());
     }
@@ -924,9 +930,29 @@ public final class Endpoint {
         WRITING_STARTED
     }
 
+    /**
+     * 요청을 낸 순서(번호표, 0부터)로 요청의 상태를 본다. 번호 없는 대기열 요청도 번호표로 찾는다. 결과가 나와 끝났거나 스트림을 열기 전에
+     * 로컬에서 실패한 요청, 낸 적 없는 번호표는 null이다. 쓰기 전(번호 유무 무관)과 쓰기 시작 뒤를 가르는 기준이다.
+     */
     @Nullable
     RequestState requestState(long ticket) {
+        for (DeferredSend deferred : deferredSends) {
+            if (deferred.request && deferred.ticket == ticket) {
+                return RequestState.QUEUED_WITHOUT_NUMBER;
+            }
+        }
+        for (Map.Entry<Long, Long> entry : ticketOfStream.entrySet()) {
+            if (entry.getValue() == ticket) {
+                return stateOf(entry.getKey());
+            }
+        }
         return null;
+    }
+
+    /** 내 스트림을 끝낸다. 대기 중이던 요청의 type을 돌려주고, 대기 중이 아니면 null이다. */
+    private @Nullable Integer endOwnStream(long streamId) {
+        ticketOfStream.remove(streamId);
+        return ownPendingStreams.remove(streamId);
     }
 
     /** 번호를 받은 내 요청의 상태. 번호 없는 대기열 요청은 번호가 없어 여기 오지 않는다({@link RequestState#QUEUED_WITHOUT_NUMBER}). */
@@ -944,7 +970,7 @@ public final class Endpoint {
         OVERSIZE
     }
 
-    private RequestOutcome sendRequest(int type, byte[] payload) {
+    private RequestOutcome sendRequest(long ticket, int type, byte[] payload) {
         if (failRequestIfRefused()) {
             return RequestOutcome.FAILED_LOCALLY;
         }
@@ -955,6 +981,7 @@ public final class Endpoint {
         }
         nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
         ownPendingStreams.put(streamId, type);
+        ticketOfStream.put(streamId, ticket);
         OutboundMessage message = OutboundMessage.binary(frame);
         outbox.add(message);
         undrainedRequests.put(streamId, message);
@@ -1061,10 +1088,14 @@ public final class Endpoint {
     /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
     private static final class DeferredSend {
         final boolean request;
+        /** 요청이면 요청 번호표, 아니면 -1. */
+        final long ticket;
+
         final Runnable sending;
 
-        private DeferredSend(boolean request, Runnable sending) {
+        private DeferredSend(boolean request, long ticket, Runnable sending) {
             this.request = request;
+            this.ticket = ticket;
             this.sending = sending;
         }
 
@@ -1072,12 +1103,12 @@ public final class Endpoint {
             sending.run();
         }
 
-        static DeferredSend request(Runnable sending) {
-            return new DeferredSend(true, sending);
+        static DeferredSend request(long ticket, Runnable sending) {
+            return new DeferredSend(true, ticket, sending);
         }
 
         static DeferredSend ping(Runnable sending) {
-            return new DeferredSend(false, sending);
+            return new DeferredSend(false, -1, sending);
         }
     }
 
