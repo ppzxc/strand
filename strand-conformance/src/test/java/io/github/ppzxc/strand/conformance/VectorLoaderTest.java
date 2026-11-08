@@ -211,6 +211,12 @@ class VectorLoaderTest {
                 "stream_id",
                 "문자열"));
         t.add(rejected(
+                "on RESET",
+                recvWithSend(
+                        "{\"type\":\"RESET\",\"stream_id\":\"1\",\"error_code\":\"CANCEL\",\"last_stream_id\":\"0\"}"),
+                "알 수 없는 필드",
+                "last_stream_id"));
+        t.add(rejected(
                 "leading zero",
                 fileWithStep("\"kind\":\"cancel\",\"stream_id\":\"01\",\"send\":[],\"events\":[]"),
                 "stream_id"));

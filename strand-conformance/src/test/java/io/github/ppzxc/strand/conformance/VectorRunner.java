@@ -400,9 +400,9 @@ final class VectorRunner {
         for (byte[] frame : frames(rest)) {
             int type = ((frame[4] & 0xFF) << 8) | (frame[5] & 0xFF);
             int flags = frame[6] & 0xFF;
-            long streamId = Bytes.readUnsignedInt(frame, 8);
-            int extensions = ((frame[12] & 0xFF) << 8) | (frame[13] & 0xFF);
-            byte[] payload = Arrays.copyOfRange(frame, 16 + extensions, frame.length);
+            long streamId = Bytes.readLong(frame, 8);
+            int extensions = ((frame[16] & 0xFF) << 8) | (frame[17] & 0xFF);
+            byte[] payload = Arrays.copyOfRange(frame, 20 + extensions, frame.length);
             String head = " flags=" + flagsText(flags) + " stream_id=" + streamId;
             String ext = extensions == 0 ? "" : " extensions=" + extensions;
             if (type == 1) {

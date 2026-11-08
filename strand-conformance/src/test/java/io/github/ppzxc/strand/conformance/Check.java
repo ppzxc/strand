@@ -19,6 +19,9 @@ final class Check {
     /** 검증 대상 객체 자체를 가리키는 경로. 오류 메시지에서는 경로 부분이 생략된다. */
     static final String ROOT = "";
 
+    /** 2^64-1의 자릿수. 이보다 긴 문자열은 파싱하지 않고 거부한다. */
+    private static final int MAX_DECIMAL_DIGITS = 20;
+
     private static final Pattern ID = Pattern.compile("[a-z0-9]+(-[a-z0-9]+)*");
     private static final Pattern PING_PAYLOAD = Pattern.compile("[0-9a-f]{16}");
     private static final Pattern SPEC_SECTION = Pattern.compile("(?:[0-9]+|[A-G])(?:\\.[0-9]+)*");
@@ -237,7 +240,7 @@ final class Check {
             throw failAt(path, "10진수 문자열이어야 한다(JSON 수가 아니다)");
         }
         String text = element.getAsString();
-        if (text.length() > max.toString().length() || !DECIMAL.matcher(text).matches()) {
+        if (text.length() > MAX_DECIMAL_DIGITS || !DECIMAL.matcher(text).matches()) {
             throw failAt(path, "앞자리 0과 부호 없는 10진수 문자열이어야 한다: '" + text + "'");
         }
         BigInteger value = new BigInteger(text);

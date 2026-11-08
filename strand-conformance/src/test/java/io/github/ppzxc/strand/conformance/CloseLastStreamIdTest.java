@@ -213,9 +213,7 @@ class CloseLastStreamIdTest {
                             && "REFUSED".equals(frame.get("error_code").getAsString())) {
                         throw new AssertionError(entry.getKey() + ": CLOSE 뒤의 새 요청은 RESET(REFUSED)가 아니라 조용히 버려진다");
                     }
-                }
-                for (JsonElement item : step.getAsJsonArray("send")) {
-                    if ("CLOSE".equals(item.getAsJsonObject().get("type").getAsString())) {
+                    if ("CLOSE".equals(frame.get("type").getAsString())) {
                         closeSeen = true;
                     }
                 }
