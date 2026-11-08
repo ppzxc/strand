@@ -143,7 +143,7 @@ class VectorLoaderTest {
                 + "\"status\":17,\"extensions\":[{\"tag\":1,\"value\":\"\"}],\"payload\":\"\"},"
                 + "{\"type\":\"HELLO\",\"flags\":[\"ACK\"],\"stream_id\":\"0\",\"params\":{\"max_frame_size\":1}},"
                 + "{\"type\":\"CLOSE\",\"stream_id\":\"0\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"},"
-                + "{\"type\":\"RESET\",\"stream_id\":\"1\",\"error_code\":6}],"
+                + "{\"type\":\"RESET\",\"stream_id\":\"1\",\"error_code\":8}],"
                 + "\"events\":[{\"event\":\"request_received\",\"stream_id\":\"1\",\"type\":257},"
                 + "{\"event\":\"result\",\"stream_id\":\"1\",\"status\":\"OK\",\"certainty\":\"response\"},{\"event\":\"closed\"}]},"
                 + "{\"kind\":\"respond\",\"stream_id\":\"9007199254740993\",\"status\":\"INTERNAL\",\"send\":[],\"events\":[]},"
@@ -525,16 +525,16 @@ class VectorLoaderTest {
         return t.stream();
     }
 
-    /** 이름 대신 쓰는 정수의 예약 값 범위: status는 17~255, error_code는 6~2^32-1. */
+    /** 이름 대신 쓰는 정수의 예약 값 범위: status는 17~255, error_code는 8~2^32-1. */
     @Test
     void namedCodesAcceptOnlyTheReservedIntegerRange() {
         assertThat(parseStatus(17)).hasSize(1);
         assertThat(parseStatus(255)).hasSize(1);
         assertThatThrownBy(() -> parseStatus(16)).isInstanceOf(InvalidVectorException.class);
         assertThatThrownBy(() -> parseStatus(256)).isInstanceOf(InvalidVectorException.class);
-        assertThat(parseErrorCode("6")).hasSize(1);
+        assertThat(parseErrorCode("8")).hasSize(1);
         assertThat(parseErrorCode("4294967295")).hasSize(1);
-        assertThatThrownBy(() -> parseErrorCode("5")).isInstanceOf(InvalidVectorException.class);
+        assertThatThrownBy(() -> parseErrorCode("7")).isInstanceOf(InvalidVectorException.class);
         assertThatThrownBy(() -> parseErrorCode("4294967296")).isInstanceOf(InvalidVectorException.class);
     }
 
@@ -645,8 +645,16 @@ class VectorLoaderTest {
 
     @Test
     void acceptsEveryErrorCodeNameOfSection252() {
-        for (String name :
-                new String[] {"NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "REFUSED", "CANCEL", "OVERLOAD"}) {
+        for (String name : new String[] {
+            "NO_ERROR",
+            "PROTOCOL_ERROR",
+            "INTERNAL_ERROR",
+            "REFUSED",
+            "CANCEL",
+            "EXCESSIVE_USE",
+            "UNRESPONSIVE",
+            "UNAUTHENTICATED"
+        }) {
             assertThat(VectorLoader.parse(
                             "x.json",
                             fileWithStep(

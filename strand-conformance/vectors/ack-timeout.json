@@ -3,7 +3,7 @@
   "vectors": [
     {
       "id": "ping-ack-timeout-before-and-after-limit",
-      "description": "PING을 보낸 뒤 상대의 ACK가 오지 않으면 대기 시간(1,000ms) 직전에는 아무것도 보내지 않고, 지나면 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "description": "PING을 보낸 뒤 상대의 ACK가 오지 않으면 대기 시간(1,000ms) 직전에는 아무것도 보내지 않고, 지나면 CLOSE(UNRESPONSIVE)를 보내고 닫는다",
       "spec": [
         "3.3",
         "3.4"
@@ -39,7 +39,7 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR",
+              "error_code": "UNRESPONSIVE",
               "last_stream_id": "0"
             }
           ],
@@ -53,7 +53,7 @@
     },
     {
       "id": "client-ping-ack-timeout-before-and-after-limit",
-      "description": "클라이언트 역할 구현도 보낸 PING에 ACK가 오지 않으면 대기 시간(1,000ms) 직전에는 조용하고 지나면 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "description": "클라이언트 역할 구현도 보낸 PING에 ACK가 오지 않으면 대기 시간(1,000ms) 직전에는 조용하고 지나면 CLOSE(UNRESPONSIVE)를 보내고 닫는다",
       "spec": [
         "3.3",
         "3.4"
@@ -89,7 +89,7 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR",
+              "error_code": "UNRESPONSIVE",
               "last_stream_id": "0"
             }
           ],
@@ -295,7 +295,7 @@
     },
     {
       "id": "ack-timeout-fails-pending-request-with-unavailable",
-      "description": "확인 대기 초과로 CLOSE(PROTOCOL_ERROR)를 보내고 닫을 때 대기 중인 내 요청 1은 로컬 UNAVAILABLE을 정확히 한 번 받고 그 뒤 closed가 난다",
+      "description": "확인 대기 초과로 CLOSE(UNRESPONSIVE)를 보내고 닫을 때 대기 중인 내 요청 1은 로컬 UNAVAILABLE을 정확히 한 번 받고 그 뒤 closed가 난다",
       "spec": [
         "3.3",
         "3.5"
@@ -342,7 +342,7 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR",
+              "error_code": "UNRESPONSIVE",
               "last_stream_id": "0"
             }
           ],

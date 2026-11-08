@@ -778,7 +778,7 @@
     },
     {
       "id": "server-ack-timeout-before-and-after-limit",
-      "description": "서버가 HELLO를 보낸 뒤 클라이언트 ACK가 오지 않으면, 대기 시간(1,000ms) 직전에는 아무것도 보내지 않고 시간이 지나면 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "description": "서버가 HELLO를 보낸 뒤 클라이언트 ACK가 오지 않으면, 대기 시간(1,000ms) 직전에는 아무것도 보내지 않고 시간이 지나면 CLOSE(UNRESPONSIVE)를 보내고 닫는다",
       "spec": [
         "3.3",
         "5.1"
@@ -826,7 +826,7 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR",
+              "error_code": "UNRESPONSIVE",
               "last_stream_id": "0"
             }
           ],
@@ -1318,7 +1318,7 @@
     },
     {
       "id": "client-ack-timeout-before-and-after-limit",
-      "description": "서버가 아무것도 보내지 않으면 클라이언트는 자기 HELLO를 보낸 시점부터 세어, 대기 시간(1,000ms) 직전에는 아무것도 보내지 않고 시간이 지나면 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "description": "서버가 아무것도 보내지 않으면 클라이언트는 자기 HELLO를 보낸 시점부터 세어, 대기 시간(1,000ms) 직전에는 아무것도 보내지 않고 시간이 지나면 CLOSE(UNRESPONSIVE)를 보내고 닫는다",
       "spec": [
         "3.3",
         "5.1"
@@ -1350,7 +1350,7 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR",
+              "error_code": "UNRESPONSIVE",
               "last_stream_id": "0"
             }
           ],
@@ -1364,7 +1364,7 @@
     },
     {
       "id": "client-ack-timeout-is-not-reset-by-server-hello",
-      "description": "서버 HELLO를 받고 ACK로 답해도 자기 HELLO에 대한 서버 ACK가 오지 않으면 시계는 자기 HELLO를 보낸 시점부터 센다. 대기 시간 직전에는 조용하고 시간이 지나면 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "description": "서버 HELLO를 받고 ACK로 답해도 자기 HELLO에 대한 서버 ACK가 오지 않으면 시계는 자기 HELLO를 보낸 시점부터 센다. 대기 시간 직전에는 조용하고 시간이 지나면 CLOSE(UNRESPONSIVE)를 보낸다",
       "spec": [
         "3.3",
         "5.1"
@@ -1408,7 +1408,7 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR",
+              "error_code": "UNRESPONSIVE",
               "last_stream_id": "0"
             }
           ],

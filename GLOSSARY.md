@@ -137,7 +137,7 @@ _Avoid_: 유휴 스트림, 유예 상태, 진행 중인 스트림
 _Avoid_: 처리됨(상대가 `status`로 처리하지 않았다고 답할 수 있다), 전달 보장, 정확히 한 번(프로토콜이 보장하지 않는다)
 
 **요청 기한 (Request Deadline)**:
-정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#151](https://github.com/ppzxc/strand/issues/151)). 요청한 쪽이 요청마다 정하는 로컬 기한이다
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어). 요청한 쪽이 요청마다 정하는 로컬 기한이다
 _Avoid_: `timeout`(받는 쪽에 주는 힌트인 확장 항목의 이름이다), 타임아웃(단독)
 
 **거절 (Refusal)**:
@@ -153,7 +153,7 @@ _Avoid_: 세션 인증, 로그인, `bind`, 애플리케이션 인증(payload로 
 _Avoid_: 클라이언트가 주장한 이름, 엔드포인트 식별자(연결 재개용으로 쓰는 말이며 strand에는 없다)
 
 **과도한 사용 (Excessive Use)**:
-정의: 규격 2.5.2절 개정 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#152](https://github.com/ppzxc/strand/issues/152)). 상대가 연결을 지나치게 쓰는 것으로, 이 때문에 연결을 끝낼 때 `CLOSE(EXCESSIVE_USE)`를 보낸다
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어). 상대가 연결을 지나치게 써서 더는 받아 줄 수 없는 상태로, 이 때문에 연결을 끝낼 때 `CLOSE(EXCESSIVE_USE)`를 보낸다
 _Avoid_: 과부하, `OVERLOAD`(이전 이름이다. 자기 과부하는 연결을 끝낼 사유가 아니며 거절로 나타낸다)
 
 ---
