@@ -5,7 +5,11 @@ import static io.github.ppzxc.strand.integration.Fixtures.STATUS_OK;
 import static io.github.ppzxc.strand.integration.Fixtures.STATUS_UNAVAILABLE;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.Event;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,6 +40,31 @@ class TransportFailureIntegrationTest {
             assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
             assertThat(events.get(0).streamId()).isEqualTo(FIRST_CLIENT_STREAM_ID);
             assertThat(events.get(0).status()).isEqualTo(STATUS_UNAVAILABLE);
+            assertThat(events.get(0).certainty()).contains(Certainty.UNKNOWN);
+        }
+    }
+
+    /**
+     * 요청 프레임을 전송 계층에 넘기지 못한 채 연결이 끝나면 상대가 요청을 보지 못했음이 확실하므로 처리 안 됨이다(규격 3.5절). 서버가 HELLO에
+     * 답하지 않아 AUTH 관문이 열리지 않은 연결에서 요청을 내면 프레임은 쓰이지 않고, 서버가 TCP를 끊으면 {@code stream_id} 없는 로컬 {@code
+     * UNAVAILABLE}과 처리 안 됨이 한 번 나온다.
+     */
+    @Test
+    @DisplayName("프레임을 보내지 못한 요청은 연결이 끝날 때 처리 안 됨으로 끝난다 (규격 3.5)")
+    void requestNeverWrittenEndsAsNotProcessed() throws Exception {
+        try (ServerSocket silentServer = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+                TestClient client = TestClient.connect(silentServer.getLocalPort())) {
+            Socket accepted = silentServer.accept();
+            client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
+
+            accepted.close();
+            client.awaitFinished();
+
+            List<Event> events = client.events();
+            assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+            assertThat(events.get(0).streamId()).isZero();
+            assertThat(events.get(0).status()).isEqualTo(STATUS_UNAVAILABLE);
+            assertThat(events.get(0).certainty()).contains(Certainty.NOT_PROCESSED);
         }
     }
 

@@ -1,17 +1,6 @@
 # 아직 구현하지 않은 동작에 기대 core로 실패하는 벡터(규격 0.2.0 구현 중). 한 줄에 `파일명/id` 하나, 이름순.
 # 구현한 티켓이 자기 벡터를 지운다. 통과하는 벡터가 남아 있으면 테스트가 실패한다.
 # 수립 전(established: false) 서문·첫 프레임·헤더 판독 벡터는 CLOSE(last_stream_id)만 필요한 것까지 모두 통과한다.
-auth/client-auth-ack-duplicate-identifier-closes
-auth/client-receives-auth-closes
-auth/client-second-auth-ack-closes
-auth/server-auth-mechanism-with-lowercase-closes
-auth/server-auth-wait-is-cancelled-by-auth
-auth/server-auth-wait-times-out-closes-unauthenticated
-auth/server-receives-auth-ack-closes
-auth/server-second-auth-closes
-auth/server-unknown-mechanism-closes-unauthenticated
-auth/server-wrong-credentials-closes-unauthenticated
-backpressure/local-failure-at-peer-limit-sends-nothing-and-keeps-the-number
 backpressure/request-after-close-received-is-dropped-silently
 backpressure/request-after-close-sent-is-dropped-silently
 backpressure/request-after-close-with-regressed-number-closes-silently
@@ -19,11 +8,8 @@ close-races/close-last-stream-id-above-highest-sent-is-malformed
 close-races/close-last-stream-id-ends-crossed-request-as-not-processed
 close-races/close-last-stream-id-in-own-number-space-is-malformed
 close-races/close-last-stream-id-zero-ends-every-request-as-not-processed
-close-races/close-received-blocks-opening-new-stream
 close-races/error-close-last-stream-id-ends-crossed-request-as-not-processed
 close-races/first-close-last-stream-id-is-the-only-one-used
-close-races/request-after-close-received-fails-locally-server
-close-races/request-after-close-sent-fails-locally
 hello-establishment/client-rejects-server-max-frame-size-above-range
 hello-establishment/negotiation-fails-when-client-max-frame-size-above-range
 request-checks/closing-after-close-received-drops-new-request
@@ -33,9 +19,4 @@ request-checks/closing-drops-bad-extension-value-request
 request-checks/closing-drops-unknown-type-request
 request-checks/closing-drops-unknown-type-with-bad-extension-value
 streams/closing-dropped-number-reuse-closes
-streams/exhaustion-after-close-received-sends-no-close
-streams/exhaustion-after-close-sent-sends-no-second-close
-streams/exhaustion-after-last-number-sends-close-client
 streams/exhaustion-after-last-number-sends-close-server
-streams/exhaustion-takes-precedence-over-peer-limit
-streams/exhaustion-with-pending-stream-closes-after-it-ends

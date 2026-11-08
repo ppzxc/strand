@@ -4,6 +4,7 @@ import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 
+import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.Event;
 import java.util.HashMap;
 import java.util.Map;
@@ -41,6 +42,20 @@ class RequestResponseIntegrationTest {
             }
 
             assertThat(statusByStream).containsOnly(entry(1L, STATUS_FOR_FIRST), entry(3L, STATUS_FOR_SECOND));
+        }
+    }
+
+    /** 상대의 응답을 받아 끝난 요청의 결과 확정성은 응답 받음이다(규격 1.3절, 4.1절). */
+    @Test
+    @DisplayName("응답을 받은 요청의 결과 확정성은 응답 받음이다 (규격 1.3)")
+    void answeredRequestHasResponseCertainty() throws Exception {
+        try (TestServer server = TestServer.startResponding(type -> STATUS_FOR_FIRST);
+                TestClient client = TestClient.connect(server.port())) {
+            client.request(FIRST_TYPE, Fixtures.payload("first"));
+
+            Event result = client.awaitEvent(Event.Kind.RESULT);
+
+            assertThat(result.certainty()).contains(Certainty.RESPONSE);
         }
     }
 }

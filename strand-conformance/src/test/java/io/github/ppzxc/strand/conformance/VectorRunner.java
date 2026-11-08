@@ -64,6 +64,7 @@ final class VectorRunner {
     private static final Map<String, Function<JsonObject, String>> EVENTS = new LinkedHashMap<>();
 
     private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
+    private static final long DEFAULT_AUTH_TIMEOUT_MS = 10000L;
     private static final int FIRST_APPLICATION_TYPE = 256;
     private static final int NORMAL_CLOSURE = 1000;
 
@@ -149,7 +150,8 @@ final class VectorRunner {
                 "result",
                 event -> "result stream_id="
                         + (event.has("stream_id") ? streamId(event.get("stream_id")) : "-") + " status="
-                        + nameOfStatus(event.get("status")));
+                        + nameOfStatus(event.get("status")) + " certainty="
+                        + event.get("certainty").getAsString());
         EVENTS.put(
                 "request_received",
                 event -> "request_received stream_id=" + streamId(event.get("stream_id")) + " type="
@@ -207,7 +209,8 @@ final class VectorRunner {
         }
         if (setup.has("config")) {
             for (String key : setup.getAsJsonObject("config").keySet()) {
-                requireSupportedPart(key.equals("ack_timeout_ms"), vector, "config." + key);
+                requireSupportedPart(
+                        key.equals("ack_timeout_ms") || key.equals("auth_timeout_ms"), vector, "config." + key);
             }
         }
         for (JsonObject step : vector.steps()) {
@@ -279,11 +282,16 @@ final class VectorRunner {
         long ackTimeout = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
                 ? setup.getAsJsonObject("config").get("ack_timeout_ms").getAsLong()
                 : DEFAULT_ACK_TIMEOUT_MS;
+        long authTimeout =
+                setup.has("config") && setup.getAsJsonObject("config").has("auth_timeout_ms")
+                        ? setup.getAsJsonObject("config").get("auth_timeout_ms").getAsLong()
+                        : DEFAULT_AUTH_TIMEOUT_MS;
         EndpointConfig config = EndpointConfig.defaults()
                 .maxFrameSize(hello.get("max_frame_size"))
                 .maxConcurrentStreams(hello.get("max_concurrent_streams"))
                 .capabilities(hello.get("capabilities"))
-                .ackTimeoutMs(ackTimeout);
+                .ackTimeoutMs(ackTimeout)
+                .authTimeoutMs(authTimeout);
         if (isWebSocket(setup)) {
             config = config.webSocket();
         }
@@ -429,6 +437,10 @@ final class VectorRunner {
         return result;
     }
 
+    private static String certaintyName(Event event) {
+        return event.certainty().orElseThrow(AssertionError::new).name().toLowerCase(Locale.ROOT);
+    }
+
     private static List<String> describe(List<Event> events) {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
@@ -436,13 +448,11 @@ final class VectorRunner {
                 // 벡터 형식에 없는 이벤트다(6.2절). 클라이언트의 credential_lifetime 통지는 core 테스트가 본다.
                 continue;
             }
-            if (event.kind() == Event.Kind.RESULT && event.streamId() == 0) {
-                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). 구현 이슈에서 core가
-                // certainty를 내보내면 이 줄과 certainty 비교를 함께 고친다. 지금은 비교하지 않는다.
-                continue;
-            }
             if (event.kind() == Event.Kind.RESULT) {
-                result.add("result stream_id=" + event.streamId() + " status=" + nameOfStatus(event.status()));
+                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). core는 번호 0으로 알린다.
+                String id = event.streamId() == 0 ? "-" : String.valueOf(event.streamId());
+                result.add("result stream_id=" + id + " status=" + nameOfStatus(event.status()) + " certainty="
+                        + certaintyName(event));
             } else if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
                 result.add("request_received stream_id=" + event.streamId() + " type=" + event.type());
             } else {

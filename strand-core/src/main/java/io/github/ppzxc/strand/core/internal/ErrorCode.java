@@ -5,10 +5,12 @@ final class ErrorCode {
 
     static final int NO_ERROR = 0;
     static final int PROTOCOL_ERROR = 1;
+    static final int INTERNAL_ERROR = 2;
     static final int REFUSED = 3;
     static final int CANCEL = 4;
     static final int EXCESSIVE_USE = 5;
     static final int UNRESPONSIVE = 6;
+    static final int UNAUTHENTICATED = 7;
 
     private ErrorCode() {}
 }
