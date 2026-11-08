@@ -43,7 +43,14 @@ final class VectorSchema {
             .allow("max_concurrent_streams", FieldKind.U32)
             .allow("capabilities", FieldKind.U32);
 
-    static final Shape SETUP_CONFIG = Shape.EMPTY.allow("ack_timeout_ms", FieldKind.POSITIVE_U32);
+    static final Shape SETUP_CONFIG = Shape.EMPTY
+            .allow("ack_timeout_ms", FieldKind.POSITIVE_U32)
+            .allow("auth_timeout_ms", FieldKind.POSITIVE_U32);
+
+    static final Shape AUTH_SETUP =
+            Shape.EMPTY.allow("mechanism", FieldKind.MECHANISM).allow("credentials", FieldKind.HEX);
+
+    static final Shape AUTH_PARAMS = Shape.EMPTY.allow("credential_lifetime", FieldKind.U32);
 
     private static final Shape SETUP = Shape.EMPTY
             .require("role", FieldKind.ROLE)
@@ -51,6 +58,7 @@ final class VectorSchema {
             .allow("local_hello", FieldKind.HELLO_PARAMS)
             .allow("peer_hello", FieldKind.HELLO_PARAMS)
             .allow("config", FieldKind.SETUP_CONFIG)
+            .allow("auth", FieldKind.AUTH_SETUP)
             .allow("transport", FieldKind.TRANSPORT)
             .allow("next_stream_id", FieldKind.POSITIVE_STREAM_ID)
             .allow("known_types", FieldKind.KNOWN_TYPES);
@@ -116,6 +124,14 @@ final class VectorSchema {
                         .allow("stream_id", FieldKind.ZERO_STREAM_ID)
                         .allow("params", FieldKind.HELLO_PARAMS));
         FRAMES_BY_TYPE.put(
+                "AUTH",
+                FRAME_BASE
+                        .allow("flags", FieldKind.ACK_FLAGS)
+                        .allow("stream_id", FieldKind.ZERO_STREAM_ID)
+                        .allow("mechanism", FieldKind.MECHANISM)
+                        .allow("credentials", FieldKind.HEX)
+                        .allow("params", FieldKind.AUTH_PARAMS));
+        FRAMES_BY_TYPE.put(
                 "PING",
                 FRAME_BASE
                         .require("payload", FieldKind.PING_PAYLOAD)
@@ -179,7 +195,9 @@ final class VectorSchema {
         String transport = setup.has("transport") ? setup.get("transport").getAsString() : DEFAULT_TRANSPORT;
         String forbidden = transport.equals("tcp") ? "recv_message" : "recv";
         JsonArray steps = vector.getAsJsonArray("steps");
-        boolean helloAckSent = false;
+        boolean server = "server".equals(setup.get("role").getAsString());
+        boolean[] authAckReceived = AckWaits.authAckReceivedThrough(vector);
+        boolean authGateOpen = false;
         for (int i = 0; i < steps.size(); i++) {
             JsonObject step = steps.get(i).getAsJsonObject();
             String kind = step.get(STEP_TAG).getAsString();
@@ -188,16 +206,16 @@ final class VectorSchema {
                         Check.child(Check.item("steps", i), STEP_TAG),
                         "transport가 " + transport + "인 벡터에는 " + forbidden + " 단계를 쓸 수 없다");
             }
-            // 벡터 형식 문서 8.1절 3번: 확립 전 벡터는 상대 HELLO에 ACK를 보내기 전에 ping 단계를 쓰지 않는다.
-            if (kind.equals("ping") && !setup.get("established").getAsBoolean() && !helloAckSent) {
+            // 벡터 형식 문서 8.1절 3번: 확립 전 벡터는 AUTH 관문이 열리기 전에 ping 단계를 쓰지 않는다.
+            if (kind.equals("ping") && !setup.get("established").getAsBoolean() && !authGateOpen) {
                 throw c.failAt(
                         Check.child(Check.item("steps", i), STEP_TAG),
-                        "established가 false인 벡터는 상대 HELLO에 대한 ACK 송신(send의 HELLO ACK) 이전에 ping 단계를 쓸 수 없다");
+                        "established가 false인 벡터는 AUTH 관문 통과(서버 역할은 send의 AUTH ACK, 클라이언트 역할은 recv한 AUTH ACK) 이전에 ping 단계를 쓸 수 없다");
             }
             if (transport.equals("tcp")) {
                 rejectWebSocketClose(c, i, step);
             }
-            helloAckSent |= sendsHelloAck(step);
+            authGateOpen |= server ? sendsAuthAck(step) : authAckReceived[i];
         }
     }
 
@@ -213,10 +231,10 @@ final class VectorSchema {
         }
     }
 
-    private static boolean sendsHelloAck(JsonObject step) {
+    private static boolean sendsAuthAck(JsonObject step) {
         for (JsonElement frame : step.getAsJsonArray("send")) {
             JsonObject f = frame.getAsJsonObject();
-            if ("HELLO".equals(frameType(f)) && hasFlag(f, "ACK")) {
+            if ("AUTH".equals(frameType(f)) && hasFlag(f, "ACK")) {
                 return true;
             }
         }
@@ -292,6 +310,27 @@ final class VectorSchema {
             FieldKind.APP_TYPE.check(c, typePath, type);
             shape = APP_FRAME;
         }
-        c.object(path, element, shape);
+        JsonObject frame = c.object(path, element, shape);
+        if ("AUTH".equals(frameType(frame))) {
+            authFrame(c, path, frame);
+        }
+    }
+
+    /** 벡터 형식 문서 6.1절: AUTH는 mechanism·credentials를, AUTH(ACK)는 params를 쓴다. 두 쪽의 필드를 섞을 수 없다. */
+    private static void authFrame(Check c, String path, JsonObject frame) {
+        if (hasFlag(frame, "ACK")) {
+            for (String field : new String[] {"mechanism", "credentials"}) {
+                if (frame.has(field)) {
+                    throw c.failAt(Check.child(path, field), "AUTH(ACK) 항목에는 " + field + "를 쓸 수 없다(ACK이면 params만 쓴다)");
+                }
+            }
+        } else {
+            if (!frame.has("mechanism")) {
+                throw c.failAt(path, "필수 필드 누락: mechanism (ACK가 아닌 AUTH 항목)");
+            }
+            if (frame.has("params")) {
+                throw c.failAt(Check.child(path, "params"), "ACK가 아닌 AUTH 항목에는 params를 쓸 수 없다(params는 ACK일 때만 쓴다)");
+            }
+        }
     }
 }

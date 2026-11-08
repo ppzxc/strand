@@ -12,9 +12,12 @@ import org.junit.jupiter.api.Test;
 /** 확인 대기 초과의 CLOSE 사유와 CLOSE 전용 코드를 담은 RESET을 벡터가 단언하는지 본다(#163). */
 class CloseOnlyCodesTest {
 
-    /** 시계를 흘려보내는 단계(advance)에서 구현이 CLOSE를 보내는 것은 확인 대기 초과뿐이다. */
+    /**
+     * 시계를 흘려보내는 단계(advance)에서 구현이 CLOSE를 보내는 것은 확인 대기 초과(`UNRESPONSIVE`)와, 서버의 AUTH 대기 초과를 다루는
+     * 벡터 하나(`UNAUTHENTICATED`, 규격 3.3절)뿐이다.
+     */
     @Test
-    void everyCloseSentWhenTheClockAdvancesIsUnresponsive() {
+    void everyCloseSentWhenTheClockAdvancesIsUnresponsiveOrTheAuthWaitTimeout() {
         int seen = 0;
         for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
             for (JsonElement step : entry.getValue().getAsJsonArray("steps")) {
@@ -28,7 +31,10 @@ class CloseOnlyCodesTest {
                         seen++;
                         assertThat(frame.get("error_code").getAsString())
                                 .as(entry.getKey())
-                                .isEqualTo("UNRESPONSIVE");
+                                .isEqualTo(
+                                        entry.getKey().equals("auth/server-auth-wait-times-out-closes-unauthenticated")
+                                                ? "UNAUTHENTICATED"
+                                                : "UNRESPONSIVE");
                     }
                 }
             }

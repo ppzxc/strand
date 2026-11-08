@@ -204,4 +204,97 @@ class AckWaitsTest {
 
         assertThat(AckWaits.elapsedAtEachAdvance(v)).isEmpty();
     }
+
+    // ---- AUTH 대기(규격 3.3절, 3.3.1절) ----
+
+    private static final String ZERO_STREAM = "0000000000000000";
+    /** 20바이트 헤더의 AUTH(ACK). payload가 비어 있다. */
+    private static final String AUTH_ACK = "00000010" + "0005" + "01" + "00" + ZERO_STREAM + "0000" + "0000";
+    /** 20바이트 헤더의 AUTH. mechanism `A`, credentials 없음. */
+    private static final String AUTH_FRAME = "00000012" + "0005" + "00" + "00" + ZERO_STREAM + "0000" + "0000" + "0141";
+
+    private static final String CLIENT_AUTH_START =
+            "{\"kind\":\"recv\",\"hex\":\"\",\"send\":[{\"type\":\"AUTH\",\"mechanism\":\"A\"}],\"events\":[]}";
+    private static final String SERVER_HELLO_ACK_START =
+            "{\"kind\":\"recv\",\"hex\":\"\",\"send\":[{\"type\":\"HELLO\",\"flags\":[\"ACK\"]}],\"events\":[]}";
+
+    private static JsonObject authLimit(long ackMs, long authMs, String... steps) {
+        return parseVector("{\"setup\":{\"config\":{\"ack_timeout_ms\":" + ackMs + ",\"auth_timeout_ms\":" + authMs
+                + "}},\"steps\":[" + String.join(",", steps) + "]}");
+    }
+
+    @Test
+    void aClientAuthStartsAnAckWaitThatAuthAckEnds() {
+        JsonObject open = authLimit(1000, 99999, CLIENT_AUTH_START, advance(999));
+        JsonObject ended = authLimit(1000, 99999, CLIENT_AUTH_START, advance(500), recv(AUTH_ACK), advance(500));
+
+        assertThat(AckWaits.startsAnyWait(open)).isTrue();
+        assertThat(AckWaits.elapsedAtEachAdvance(open)).containsExactly(999L);
+        assertThat(AckWaits.elapsedAtEachAdvance(ended)).containsExactly(500L);
+    }
+
+    @Test
+    void aClientAuthWaitUsesTheAckTimeoutLimit() {
+        assertThat(AckWaits.reachesLimitExactly(authLimit(1000, 99999, CLIENT_AUTH_START, advance(1000))))
+                .isTrue();
+        assertThat(AckWaits.reachesLimitExactly(authLimit(99999, 1000, CLIENT_AUTH_START, advance(1000))))
+                .isFalse();
+    }
+
+    @Test
+    void aServerHelloAckStartsAnAuthWaitWithItsOwnLimitThatAnAuthFrameEnds() {
+        JsonObject open = authLimit(99999, 1000, SERVER_HELLO_ACK_START, advance(600), advance(400));
+        JsonObject ended = authLimit(99999, 1000, SERVER_HELLO_ACK_START, advance(600), recv(AUTH_FRAME), advance(400));
+
+        assertThat(AckWaits.startsAuthWait(open)).isTrue();
+        assertThat(AckWaits.reachesLimitExactly(open)).isTrue();
+        assertThat(AckWaits.elapsedAtEachAdvance(ended)).containsExactly(600L);
+        assertThat(AckWaits.reachesLimitExactly(authLimit(1000, 99999, SERVER_HELLO_ACK_START, advance(1000))))
+                .isFalse();
+    }
+
+    @Test
+    void theAuthWaitDefaultLimitDiffersFromTheAckWaitDefault() {
+        JsonObject v = parseVector("{\"setup\":{},\"steps\":[" + SERVER_HELLO_ACK_START + "," + advance(5000) + "]}");
+
+        assertThat(AckWaits.reachesLimitExactly(v)).isFalse();
+        assertThat(AckWaits.reachesLimitExactly(parseVector(
+                        "{\"setup\":{},\"steps\":[" + SERVER_HELLO_ACK_START + "," + advance(10000) + "]}")))
+                .isTrue();
+    }
+
+    @Test
+    void twoWaitsCrossingTheirLimitsInOneAdvanceAreDetected() {
+        JsonObject both = authLimit(1000, 1000, helloAckAndHelloStart(), advance(1500));
+        JsonObject apart = authLimit(1000, 3000, helloAckAndHelloStart(), advance(1500));
+
+        assertThat(AckWaits.maxLimitsCrossedInOneAdvance(both)).isEqualTo(2);
+        assertThat(AckWaits.maxLimitsCrossedInOneAdvance(apart)).isEqualTo(1);
+    }
+
+    @Test
+    void twoWaitsWithTheSameCloseReasonCrossingTogetherCountOnce() {
+        JsonObject v = limit1000(PING_START, pingStart("1111111111111111"), advance(1500));
+
+        assertThat(AckWaits.maxLimitsCrossedInOneAdvance(v)).isEqualTo(1);
+    }
+
+    private static String helloAckAndHelloStart() {
+        return "{\"kind\":\"recv\",\"hex\":\"\",\"send\":[{\"type\":\"HELLO\",\"flags\":[\"ACK\"]},"
+                + "{\"type\":\"HELLO\"}],\"events\":[]}";
+    }
+
+    @Test
+    void authAckReceivedThroughMarksTheStepsFromTheOneThatCarriesIt() {
+        JsonObject v = limit1000(recv(PREFACE), recv(AUTH_ACK), advance(1));
+
+        assertThat(AckWaits.authAckReceivedThrough(v)).containsExactly(false, true, true);
+    }
+
+    @Test
+    void anAuthFrameWithoutTheAckFlagIsNotAnAuthAck() {
+        JsonObject v = limit1000(recv(AUTH_FRAME), advance(1));
+
+        assertThat(AckWaits.authAckReceivedThrough(v)).containsExactly(false, false);
+    }
 }

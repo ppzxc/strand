@@ -161,10 +161,25 @@ class NewVectorCoverageTest {
                         .as("%s: 확인 대기 한도를 보려면 advance 단계가 있어야 한다", entry.getKey())
                         .isTrue();
             }
+            boolean declaresAuthTimeout =
+                    (setup.has("config") && setup.getAsJsonObject("config").has("auth_timeout_ms"))
+                            || entry.getKey().contains("auth-wait");
+            if (declaresAuthTimeout) {
+                assertThat(AckWaits.startsAuthWait(vector))
+                        .as("%s: AUTH 대기 시작(서버의 ACK HELLO 송신이나 클라이언트의 AUTH 송신)을 해석할 수 없다", entry.getKey())
+                        .isTrue();
+                assertThat(AckWaits.hasAdvance(vector))
+                        .as("%s: AUTH 대기 한도를 보려면 advance 단계가 있어야 한다", entry.getKey())
+                        .isTrue();
+            }
             if (AckWaits.startsAnyWait(vector) && AckWaits.hasAdvance(vector)) {
                 assertThat(AckWaits.reachesLimitExactly(vector))
                         .as("%s: 한도에 정확히 닿으면 안 된다", entry.getKey())
                         .isFalse();
+                // 한 advance 단계에서 두 대기가 함께 한도를 넘으면 어느 CLOSE가 나갈지 정해지지 않는다.
+                assertThat(AckWaits.maxLimitsCrossedInOneAdvance(vector))
+                        .as("%s: 한 단계에서 두 대기가 한도를 넘으면 안 된다", entry.getKey())
+                        .isLessThanOrEqualTo(1);
             }
         }
         assertThat(declared).isGreaterThanOrEqualTo(11);

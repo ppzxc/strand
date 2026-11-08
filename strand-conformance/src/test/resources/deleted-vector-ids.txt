@@ -61,3 +61,8 @@ required-extension-request-within-limits-gets-unimplemented
 concurrency-refused-required-extension-request-gets-no-unimplemented
 pending-bytes-refused-required-extension-request-gets-no-unimplemented
 pending-bytes-refused-stream-number-reuse-closes
+# 규격 0.2.0의 AUTH 관문(#166)으로 전제가 사라져 지운 벡터 id. 관문을 통과하기 전에는 서버가 요청·PING을 보낼 수 없고, 대기 중인 요청이 있는 채로 HELLO의 ACK를 기다리는 상태도 만들 수 없다. 이름을 바꿔 되살리지 않는다.
+server-sends-after-acking-client-hello-without-waiting-for-ack
+server-sends-ping-after-acking-client-hello
+ack-gate-while-closing-closes-without-close-frame
+hello-ack-timeout-while-closing-closes-without-close-frame

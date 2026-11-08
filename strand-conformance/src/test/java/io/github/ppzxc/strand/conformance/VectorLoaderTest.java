@@ -133,7 +133,7 @@ class VectorLoaderTest {
 
     @Test
     void acceptsOptionalFieldsWhenPresent() {
-        String setup = "{\"role\":\"client\",\"established\":false,"
+        String setup = "{\"role\":\"client\",\"established\":true,"
                 + "\"local_hello\":{\"max_frame_size\":16384,\"max_concurrent_streams\":1,\"capabilities\":0},"
                 + "\"peer_hello\":{},\"config\":{\"ack_timeout_ms\":5000},"
                 + "\"transport\":\"tcp\",\"next_stream_id\":\"1\",\"known_types\":[256,257]}";
@@ -682,40 +682,160 @@ class VectorLoaderTest {
 
     private static final String PING_STEP =
             "{\"kind\":\"ping\",\"payload\":\"0102030405060708\",\"send\":[],\"events\":[]}";
+    /** 서버 역할이 AUTH(ACK)를 보내 AUTH 관문이 열리는 단계. */
+    private static final String AUTH_ACK_SENT_STEP =
+            "{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[{\"type\":\"AUTH\",\"flags\":[\"ACK\"]}],\"events\":[]}";
+    /** 클라이언트 역할이 서버의 AUTH(ACK)를 받아 AUTH 관문이 열리는 단계. */
+    private static final String AUTH_ACK_RECEIVED_STEP = "{\"kind\":\"recv\","
+            + "\"hex\":\"00000010 0005 01 00 0000000000000000 0000 0000\",\"send\":[],\"events\":[]}";
+    /** 서버 HELLO에 ACK를 보냈을 뿐인 단계: AUTH 관문은 아직 닫혀 있다. */
     private static final String HELLO_ACK_STEP =
             "{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[{\"type\":\"HELLO\",\"flags\":[\"ACK\"]}],\"events\":[]}";
 
     private static String fileWithEstablished(boolean established, String... steps) {
+        return fileWithRole("server", established, steps);
+    }
+
+    private static String fileWithRole(String role, boolean established, String... steps) {
         return file(vector(
                 "a",
                 "[\"3.4\"]",
-                "{\"role\":\"server\",\"established\":" + established + "}",
+                "{\"role\":\"" + role + "\",\"established\":" + established + "}",
                 "[" + String.join(",", steps) + "]"));
     }
 
-    /** 벡터 형식 문서 8.1절 3번: 상대 HELLO에 ACK를 보내기 전에는 ping 단계를 쓰지 않는다. */
+    /** 벡터 형식 문서 8.1절 3번: AUTH 관문이 열리기 전에는 ping 단계를 쓰지 않는다. */
     @TestFactory
-    Stream<DynamicTest> rejectsPingStepBeforeHelloAck() {
+    Stream<DynamicTest> rejectsPingStepBeforeTheAuthGateOpens() {
         List<DynamicTest> t = new ArrayList<>();
         t.add(rejected(
-                "ping as first step before establishment", fileWithEstablished(false, PING_STEP), "ping", "ACK"));
+                "ping as first step before establishment", fileWithEstablished(false, PING_STEP), "ping", "AUTH"));
         t.add(rejected(
-                "ping before the HELLO ACK step",
-                fileWithEstablished(false, RECV_STEP, PING_STEP, HELLO_ACK_STEP),
+                "server ping after only the HELLO ACK",
+                fileWithEstablished(false, HELLO_ACK_STEP, PING_STEP),
                 "steps[1]",
-                "ACK"));
+                "AUTH"));
+        t.add(rejected(
+                "server ping before the AUTH(ACK) step",
+                fileWithEstablished(false, RECV_STEP, PING_STEP, AUTH_ACK_SENT_STEP),
+                "steps[1]",
+                "AUTH"));
+        t.add(rejected(
+                "client ping before AUTH(ACK) arrives",
+                fileWithRole("client", false, RECV_STEP, PING_STEP, AUTH_ACK_RECEIVED_STEP),
+                "steps[1]",
+                "AUTH"));
         return t.stream();
     }
 
     @Test
-    void acceptsPingStepAfterHelloAckOrWhenEstablished() {
-        assertThat(VectorLoader.parse("x.json", fileWithEstablished(false, HELLO_ACK_STEP, PING_STEP)))
+    void acceptsPingStepAfterTheAuthGateOpensOrWhenEstablished() {
+        assertThat(VectorLoader.parse("x.json", fileWithEstablished(false, AUTH_ACK_SENT_STEP, PING_STEP)))
+                .hasSize(1);
+        assertThat(VectorLoader.parse("x.json", fileWithRole("client", false, AUTH_ACK_RECEIVED_STEP, PING_STEP)))
                 .hasSize(1);
         assertThat(VectorLoader.parse("x.json", fileWithEstablished(true, PING_STEP)))
                 .hasSize(1);
         // 확립 전이라도 ping 단계가 없으면 규칙과 무관하다.
         assertThat(VectorLoader.parse("x.json", fileWithEstablished(false, RECV_STEP)))
                 .hasSize(1);
+    }
+
+    // ---- 연결 인증(규격 3.3.1절, 벡터 형식 문서 4절·6.1절) ----
+
+    private static String authFrame(String fields) {
+        return recvWithSend("{\"type\":\"AUTH\"" + (fields.isEmpty() ? "" : "," + fields) + "}");
+    }
+
+    @Test
+    void acceptsSetupAuthAndTheAuthTimeout() {
+        for (String auth : new String[] {
+            "{}",
+            "{\"mechanism\":\"PLAIN\"}",
+            "{\"credentials\":\"0075736572\"}",
+            "{\"mechanism\":\"PLAIN\",\"credentials\":\"00 75 73 65 72 00 70 77\"}",
+            "{\"mechanism\":\"X-A_1\",\"credentials\":\"\"}",
+            "{\"mechanism\":\"ABCDEFGHIJKLMNOPQRST\"}"
+        }) {
+            assertThat(VectorLoader.parse("x.json", setupWith("\"auth\":" + auth)))
+                    .hasSize(1);
+        }
+        assertThat(VectorLoader.parse("x.json", setupWith("\"config\":{\"auth_timeout_ms\":1000}")))
+                .hasSize(1);
+    }
+
+    @TestFactory
+    Stream<DynamicTest> rejectsSetupAuthViolations() {
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(rejected("auth not an object", setupWith("\"auth\":\"PLAIN\""), "auth", "객체"));
+        t.add(rejected("auth unknown field", setupWith("\"auth\":{\"user\":\"x\"}"), "auth", "알 수 없는 필드", "user"));
+        t.add(rejected("empty mechanism", setupWith("\"auth\":{\"mechanism\":\"\"}"), "auth.mechanism"));
+        t.add(rejected(
+                "lowercase mechanism", setupWith("\"auth\":{\"mechanism\":\"plain\"}"), "auth.mechanism", "plain"));
+        t.add(rejected("space in mechanism", setupWith("\"auth\":{\"mechanism\":\"A B\"}"), "auth.mechanism"));
+        t.add(rejected(
+                "21 character mechanism",
+                setupWith("\"auth\":{\"mechanism\":\"ABCDEFGHIJKLMNOPQRSTU\"}"),
+                "auth.mechanism",
+                "20"));
+        t.add(rejected("numeric mechanism", setupWith("\"auth\":{\"mechanism\":1}"), "auth.mechanism"));
+        t.add(rejected("odd credentials hex", setupWith("\"auth\":{\"credentials\":\"0\"}"), "auth.credentials", "홀수"));
+        t.add(rejected(
+                "uppercase credentials hex",
+                setupWith("\"auth\":{\"credentials\":\"0A\"}"),
+                "auth.credentials",
+                "대문자"));
+        t.add(rejected("zero auth timeout", setupWith("\"config\":{\"auth_timeout_ms\":0}"), "config.auth_timeout_ms"));
+        return t.stream();
+    }
+
+    @Test
+    void acceptsAuthItemsInSend() {
+        for (String frame : new String[] {
+            "\"mechanism\":\"PLAIN\"",
+            "\"mechanism\":\"PLAIN\",\"credentials\":\"0075\"",
+            "\"mechanism\":\"ANONYMOUS\",\"credentials\":\"\",\"stream_id\":\"0\",\"flags\":[]",
+            "\"flags\":[\"ACK\"]",
+            "\"flags\":[\"ACK\"],\"params\":{}",
+            "\"flags\":[\"ACK\"],\"params\":{\"credential_lifetime\":4294967295}"
+        }) {
+            assertThat(VectorLoader.parse("x.json", authFrame(frame))).as(frame).hasSize(1);
+        }
+    }
+
+    @TestFactory
+    Stream<DynamicTest> rejectsAuthItemViolations() {
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(rejected("AUTH without mechanism", authFrame(""), "mechanism"));
+        t.add(rejected("AUTH with credentials only", authFrame("\"credentials\":\"00\""), "mechanism"));
+        t.add(rejected("AUTH with params", authFrame("\"mechanism\":\"PLAIN\",\"params\":{}"), "params", "ACK"));
+        t.add(rejected(
+                "AUTH(ACK) with mechanism",
+                authFrame("\"flags\":[\"ACK\"],\"mechanism\":\"PLAIN\""),
+                "mechanism",
+                "ACK"));
+        t.add(rejected(
+                "AUTH(ACK) with credentials",
+                authFrame("\"flags\":[\"ACK\"],\"credentials\":\"00\""),
+                "credentials",
+                "ACK"));
+        t.add(rejected("lowercase mechanism", authFrame("\"mechanism\":\"plain\""), "mechanism", "plain"));
+        t.add(rejected("nonzero stream_id", authFrame("\"mechanism\":\"PLAIN\",\"stream_id\":\"1\""), "stream_id"));
+        t.add(rejected(
+                "unknown identifier name",
+                authFrame("\"flags\":[\"ACK\"],\"params\":{\"lifetime\":1}"),
+                "params",
+                "알 수 없는 필드",
+                "lifetime"));
+        t.add(rejected(
+                "lifetime above u32",
+                authFrame("\"flags\":[\"ACK\"],\"params\":{\"credential_lifetime\":4294967296}"),
+                "credential_lifetime"));
+        t.add(rejected(
+                "lifetime as string",
+                authFrame("\"flags\":[\"ACK\"],\"params\":{\"credential_lifetime\":\"1\"}"),
+                "credential_lifetime"));
+        return t.stream();
     }
 
     @TestFactory

@@ -94,7 +94,30 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "ack_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+        "ack_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "auth_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+      }
+    },
+    "mechanism": {
+      "description": "AUTH의 메커니즘 이름. 규격 3.3.1절(RFC 4422 3.1절의 문법): 대문자, 숫자, 하이픈, 밑줄 1~20자.",
+      "type": "string",
+      "pattern": "^[A-Z0-9_-]{1,20}$"
+    },
+    "auth_setup": {
+      "description": "연결 인증에 쓰는 메커니즘과 자격 증명. 빠진 값은 ANONYMOUS와 빈 자격 증명이다.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mechanism": { "$ref": "#/$defs/mechanism" },
+        "credentials": { "$ref": "#/$defs/hex" }
+      }
+    },
+    "auth_params": {
+      "description": "AUTH(ACK) payload의 항목. 빠진 항목은 payload에 없다.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "credential_lifetime": { "$ref": "#/$defs/u32" }
       }
     },
     "setup": {
@@ -107,6 +130,7 @@
         "peer_hello": { "$ref": "#/$defs/hello_params" },
         "established": { "type": "boolean" },
         "config": { "$ref": "#/$defs/config" },
+        "auth": { "$ref": "#/$defs/auth_setup" },
         "transport": { "enum": ["tcp", "websocket"] },
         "next_stream_id": {
           "description": "10진수 문자열. 1 이상 2^63-1 이하. role이 client이면 홀수, server이면 짝수여야 하지만 스키마로 표현할 수 없어 형식 문서에만 있다.",
@@ -140,6 +164,31 @@
         "flags": { "$ref": "#/$defs/control_flags" },
         "stream_id": { "const": "0" },
         "params": { "$ref": "#/$defs/hello_params" }
+      }
+    },
+    "frame_auth": {
+      "description": "AUTH 출력 항목. ACK가 아니면 mechanism이 필수이고 params를 쓸 수 없다. ACK이면 mechanism과 credentials를 쓸 수 없다(규격 3.3.1절, 형식 문서 6.1절).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "AUTH" },
+        "flags": { "$ref": "#/$defs/control_flags" },
+        "stream_id": { "const": "0" },
+        "mechanism": { "$ref": "#/$defs/mechanism" },
+        "credentials": { "$ref": "#/$defs/hex" },
+        "params": { "$ref": "#/$defs/auth_params" }
+      },
+      "if": {
+        "required": ["flags"],
+        "properties": { "flags": { "contains": { "const": "ACK" } } }
+      },
+      "then": {
+        "not": { "anyOf": [{ "required": ["mechanism"] }, { "required": ["credentials"] }] }
+      },
+      "else": {
+        "required": ["mechanism"],
+        "not": { "required": ["params"] }
       }
     },
     "frame_ping": {
@@ -200,6 +249,7 @@
       "oneOf": [
         { "$ref": "#/$defs/frame_preface" },
         { "$ref": "#/$defs/frame_hello" },
+        { "$ref": "#/$defs/frame_auth" },
         { "$ref": "#/$defs/frame_ping" },
         { "$ref": "#/$defs/frame_close" },
         { "$ref": "#/$defs/frame_reset" },

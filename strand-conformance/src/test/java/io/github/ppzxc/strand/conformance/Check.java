@@ -27,6 +27,8 @@ final class Check {
     private static final Pattern SPEC_SECTION = Pattern.compile("(?:[0-9]+|[A-G])(?:\\.[0-9]+)*");
 
     private static final Pattern DECIMAL = Pattern.compile("0|[1-9][0-9]*");
+    /** 규격 3.3.1절(RFC 4422 3.1절의 문법): 대문자, 숫자, 하이픈, 밑줄로 이뤄진 1~20자. */
+    private static final Pattern MECHANISM = Pattern.compile("[A-Z0-9_-]{1,20}");
 
     private final String fileName;
     private final String location;
@@ -205,6 +207,14 @@ final class Check {
         String value = string(path, element);
         if (!allowed.contains(value)) {
             throw failAt(path, String.join(" 또는 ", allowed) + "여야 한다: " + value);
+        }
+    }
+
+    /** AUTH의 메커니즘 이름: 대문자, 숫자, 하이픈, 밑줄로 이뤄진 1~20자(규격 3.3.1절). */
+    void mechanism(String path, JsonElement element) {
+        String mechanism = string(path, element);
+        if (!MECHANISM.matcher(mechanism).matches()) {
+            throw failAt(path, "대문자·숫자·하이픈·밑줄로 이뤄진 1~20자여야 한다: '" + mechanism + "'");
         }
     }
 

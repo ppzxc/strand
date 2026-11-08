@@ -120,6 +120,27 @@ enum FieldKind {
             c.pingPayload(path, element);
         }
     },
+    /** AUTH의 메커니즘 이름(규격 3.3.1절). */
+    MECHANISM {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.mechanism(path, element);
+        }
+    },
+    /** `setup.auth`: 연결 인증에 쓰는 메커니즘과 자격 증명. */
+    AUTH_SETUP {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.object(path, element, VectorSchema.AUTH_SETUP);
+        }
+    },
+    /** `AUTH(ACK)` payload의 항목. */
+    AUTH_PARAMS {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.object(path, element, VectorSchema.AUTH_PARAMS);
+        }
+    },
     /** 프레임 기대값의 배열. */
     FRAMES {
         @Override
