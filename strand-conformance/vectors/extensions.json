@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "response-unknown-extension-tag-is-ignored",
@@ -18,7 +18,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1
+              "stream_id": "1"
             }
           ],
           "events": []
@@ -30,7 +30,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "OK"
             }
           ]
@@ -54,7 +54,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1
+              "stream_id": "1"
             }
           ],
           "events": []
@@ -66,7 +66,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "OK"
             }
           ]
@@ -90,7 +90,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1
+              "stream_id": "1"
             }
           ],
           "events": []
@@ -102,7 +102,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "OK"
             }
           ]
@@ -113,7 +113,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 3
+              "stream_id": "3"
             }
           ],
           "events": []
@@ -125,7 +125,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 3,
+              "stream_id": "3",
               "status": "OK"
             }
           ]
@@ -151,7 +151,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1
+              "stream_id": "1"
             }
           ],
           "events": []
@@ -168,7 +168,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "UNAVAILABLE"
             },
             {
@@ -197,7 +197,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1
+              "stream_id": "1"
             }
           ],
           "events": []
@@ -214,7 +214,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "UNAVAILABLE"
             },
             {
@@ -243,7 +243,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -269,7 +269,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]

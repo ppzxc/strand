@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "established-ping-is-acknowledged",
@@ -315,7 +315,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -522,7 +522,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -540,12 +540,12 @@
         },
         {
           "kind": "respond",
-          "stream_id": 1,
+          "stream_id": "1",
           "status": "OK",
           "send": [
             {
               "type": 257,
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "OK"
             },
             {
@@ -613,7 +613,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -627,12 +627,12 @@
         },
         {
           "kind": "respond",
-          "stream_id": 1,
+          "stream_id": "1",
           "status": "OK",
           "send": [
             {
               "type": 257,
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "OK"
             },
             {

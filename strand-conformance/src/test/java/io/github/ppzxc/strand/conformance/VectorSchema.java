@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -16,7 +17,7 @@ import java.util.Map;
 final class VectorSchema {
 
     /** 이 스키마가 아는 형식 버전(벡터 형식 문서 2절). */
-    static final int KNOWN_FORMAT = 1;
+    static final int KNOWN_FORMAT = 2;
 
     static final List<String> ROLES = Arrays.asList("client", "server");
     static final String DEFAULT_TRANSPORT = "tcp";
@@ -50,7 +51,7 @@ final class VectorSchema {
             .allow("peer_hello", FieldKind.HELLO_PARAMS)
             .allow("config", FieldKind.SETUP_CONFIG)
             .allow("transport", FieldKind.TRANSPORT)
-            .allow("next_stream_id", FieldKind.STREAM_NUMBER)
+            .allow("next_stream_id", FieldKind.POSITIVE_STREAM_ID)
             .allow("known_types", FieldKind.KNOWN_TYPES);
 
     // ---- 단계: kind별 필드 ----
@@ -79,11 +80,11 @@ final class VectorSchema {
         STEPS_BY_KIND.put(
                 "respond",
                 STEP_BASE
-                        .require("stream_id", FieldKind.U32)
+                        .require("stream_id", FieldKind.STREAM_ID)
                         .require("status", FieldKind.STATUS)
                         .allow("extensions", FieldKind.EXTENSIONS)
                         .allow("payload", FieldKind.HEX));
-        STEPS_BY_KIND.put("cancel", STEP_BASE.require("stream_id", FieldKind.U32));
+        STEPS_BY_KIND.put("cancel", STEP_BASE.require("stream_id", FieldKind.STREAM_ID));
         STEPS_BY_KIND.put("close", STEP_BASE.require("error_code", FieldKind.ERROR_CODE));
         STEPS_BY_KIND.put("advance", STEP_BASE.require("ms", FieldKind.POSITIVE_U32));
         STEPS_BY_KIND.put("disconnect", STEP_BASE);
@@ -100,7 +101,7 @@ final class VectorSchema {
 
     /** type이 256 이상의 정수인 애플리케이션 프레임. */
     private static final Shape APP_FRAME = FRAME_BASE
-            .require("stream_id", FieldKind.U32)
+            .require("stream_id", FieldKind.STREAM_ID)
             .allow("status", FieldKind.STATUS)
             .allow("extensions", FieldKind.EXTENSIONS)
             .allow("payload", FieldKind.HEX);
@@ -111,20 +112,23 @@ final class VectorSchema {
                 "HELLO",
                 FRAME_BASE
                         .allow("flags", FieldKind.ACK_FLAGS)
-                        .allow("stream_id", FieldKind.ZERO)
+                        .allow("stream_id", FieldKind.ZERO_STREAM_ID)
                         .allow("params", FieldKind.HELLO_PARAMS));
         FRAMES_BY_TYPE.put(
                 "PING",
                 FRAME_BASE
                         .require("payload", FieldKind.PING_PAYLOAD)
                         .allow("flags", FieldKind.ACK_FLAGS)
-                        .allow("stream_id", FieldKind.ZERO));
+                        .allow("stream_id", FieldKind.ZERO_STREAM_ID));
         FRAMES_BY_TYPE.put(
-                "CLOSE", FRAME_BASE.require("error_code", FieldKind.ERROR_CODE).allow("stream_id", FieldKind.ZERO));
+                "CLOSE",
+                FRAME_BASE.require("error_code", FieldKind.ERROR_CODE).allow("stream_id", FieldKind.ZERO_STREAM_ID));
         FRAMES_BY_TYPE.put("WEBSOCKET_CLOSE", FRAME_BASE.require("code", FieldKind.WEBSOCKET_CLOSE_CODE));
         FRAMES_BY_TYPE.put(
                 "RESET",
-                FRAME_BASE.require("stream_id", FieldKind.POSITIVE_U32).require("error_code", FieldKind.ERROR_CODE));
+                FRAME_BASE
+                        .require("stream_id", FieldKind.POSITIVE_STREAM_ID)
+                        .require("error_code", FieldKind.ERROR_CODE));
     }
 
     // ---- 이벤트: 이름별 필드 ----
@@ -139,9 +143,9 @@ final class VectorSchema {
     static {
         EVENTS_BY_NAME.put(
                 "request_received",
-                EVENT_BASE.require("stream_id", FieldKind.U32).require("type", FieldKind.APP_TYPE));
+                EVENT_BASE.require("stream_id", FieldKind.STREAM_ID).require("type", FieldKind.APP_TYPE));
         EVENTS_BY_NAME.put(
-                "result", EVENT_BASE.require("stream_id", FieldKind.U32).require("status", FieldKind.STATUS));
+                "result", EVENT_BASE.require("stream_id", FieldKind.STREAM_ID).require("status", FieldKind.STATUS));
         EVENTS_BY_NAME.put("closed", EVENT_BASE);
     }
 
@@ -152,8 +156,8 @@ final class VectorSchema {
         JsonObject setup = c.object(path, element, SETUP);
         if (setup.has("next_stream_id")) {
             boolean client = "client".equals(setup.get("role").getAsString());
-            long next = c.longOf(setup, "next_stream_id");
-            if ((next % 2 == 1) != client) {
+            BigInteger next = new BigInteger(setup.get("next_stream_id").getAsString());
+            if (next.testBit(0) != client) {
                 throw c.failAt(
                         Check.child(path, "next_stream_id"),
                         "role이 " + (client ? "client이면 홀수" : "server이면 짝수") + "여야 한다: " + next);

@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "timeout-length-three-is-invalid-argument",
@@ -19,7 +19,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "INVALID_ARGUMENT"
             }
           ],
@@ -32,7 +32,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]
@@ -57,7 +57,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "INVALID_ARGUMENT"
             }
           ],
@@ -70,7 +70,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]
@@ -95,7 +95,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "INVALID_ARGUMENT"
             }
           ],
@@ -108,7 +108,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]
@@ -133,7 +133,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "INVALID_ARGUMENT"
             }
           ],
@@ -146,7 +146,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]
@@ -172,7 +172,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -184,7 +184,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]
@@ -196,7 +196,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 5,
+              "stream_id": "5",
               "type": 257
             }
           ]
@@ -222,7 +222,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -234,7 +234,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]
@@ -262,7 +262,7 @@
           "send": [
             {
               "type": 258,
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "UNIMPLEMENTED"
             }
           ],
@@ -275,7 +275,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]
@@ -317,7 +317,7 @@
           "send": [
             {
               "type": 258,
-              "stream_id": 2,
+              "stream_id": "2",
               "status": "UNIMPLEMENTED"
             }
           ],
@@ -330,7 +330,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 4,
+              "stream_id": "4",
               "type": 257
             }
           ]
@@ -357,7 +357,7 @@
           "send": [
             {
               "type": 258,
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "UNIMPLEMENTED"
             }
           ],
@@ -390,7 +390,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -401,7 +401,7 @@
           "send": [
             {
               "type": "RESET",
-              "stream_id": 3,
+              "stream_id": "3",
               "error_code": "REFUSED"
             }
           ],
@@ -431,7 +431,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -442,7 +442,7 @@
           "send": [
             {
               "type": "RESET",
-              "stream_id": 3,
+              "stream_id": "3",
               "error_code": "REFUSED"
             }
           ],
@@ -470,7 +470,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -487,7 +487,7 @@
           "send": [
             {
               "type": "RESET",
-              "stream_id": 3,
+              "stream_id": "3",
               "error_code": "REFUSED"
             }
           ],
@@ -515,7 +515,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -537,7 +537,7 @@
           "send": [
             {
               "type": "RESET",
-              "stream_id": 3,
+              "stream_id": "3",
               "error_code": "REFUSED"
             }
           ],
@@ -564,7 +564,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1
+              "stream_id": "1"
             }
           ],
           "events": []
@@ -581,7 +581,7 @@
           "send": [
             {
               "type": "RESET",
-              "stream_id": 2,
+              "stream_id": "2",
               "error_code": "REFUSED"
             }
           ],
@@ -611,7 +611,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -628,7 +628,7 @@
           "send": [
             {
               "type": "RESET",
-              "stream_id": 3,
+              "stream_id": "3",
               "error_code": "REFUSED"
             }
           ],
@@ -655,7 +655,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -672,7 +672,7 @@
           "send": [
             {
               "type": "RESET",
-              "stream_id": 3,
+              "stream_id": "3",
               "error_code": "REFUSED"
             }
           ],
@@ -702,7 +702,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -719,7 +719,7 @@
           "send": [
             {
               "type": "RESET",
-              "stream_id": 3,
+              "stream_id": "3",
               "error_code": "REFUSED"
             }
           ],

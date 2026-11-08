@@ -1,14 +1,14 @@
 # Strand 적합성 벡터 형식
 
 * **문서 상태 (Status)**: 초안 (Draft)
-* **벡터 형식 버전 (Format version)**: 1
+* **벡터 형식 버전 (Format version)**: 2
 * **작성일자 (Date)**: 2026-11-05
 * **편집자 (Editor)**: 조정하 (@ppzxc)
 * **저장소 (Repository)**: ppzxc/strand
 
 ---
 
-이 문서는 규범이다. 와이어 규격(`STRAND_SPECIFICATION.md`)의 규범 참조이며, 벡터 형식 버전 1을 정의한다. 다른 언어로 구현하는 사람이 이 문서와 JSON Schema 파일(`strand-conformance/schema/vector-format-1.schema.json`)만 보고 벡터를 쓰고 러너를 만들 수 있도록, 벡터의 의미를 여기서 정의한다. JSON Schema는 이 문서의 구조를 기계가 검사하게 만든 것이다. 둘이 어긋나면 이 문서가 우선한다. id 유일성, `next_stream_id`의 홀짝, `transport`와 단계 `kind`의 조합, `ping` 단계의 순서(이 문서 8.1절 3번), 번호 할당 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 이 문서에만 있다.
+이 문서는 규범이다. 와이어 규격(`STRAND_SPECIFICATION.md`)의 규범 참조이며, 벡터 형식 버전 2를 정의한다. 다른 언어로 구현하는 사람이 이 문서와 JSON Schema 파일(`strand-conformance/schema/vector-format-2.schema.json`)만 보고 벡터를 쓰고 러너를 만들 수 있도록, 벡터의 의미를 여기서 정의한다. JSON Schema는 이 문서의 구조를 기계가 검사하게 만든 것이다. 둘이 어긋나면 이 문서가 우선한다. id 유일성, 스트림 번호의 범위(2^63-1 이하)와 `next_stream_id`의 홀짝, `transport`와 단계 `kind`의 조합, `ping` 단계의 순서(이 문서 8.1절 3번), 번호 할당 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 이 문서에만 있다.
 
 이 문서에서 **러너**는 벡터를 읽어 테스트 대상 구현에 입력을 넣고 출력을 기대 결과와 비교하는 프로그램이고, **단계**는 시나리오의 한 항목이다. 두 말은 이 문서 안에서만 쓴다.
 
@@ -32,12 +32,12 @@
 
 | 필드 | 의미 |
 | --- | --- |
-| `format` | 형식 버전. 정수. 이 문서는 `1`을 정의한다 |
+| `format` | 형식 버전. 정수. 이 문서는 `2`를 정의한다 |
 | `vectors` | 벡터 배열 |
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "ping-is-acknowledged",
@@ -59,8 +59,8 @@
 
 진화 규칙은 다음과 같다.
 
-1. 같은 `format` 안에서는 필드와 단계 `kind`를 추가만 할 수 있다. 추가하는 필드에는 기본값이 있어야 한다. 그러므로 기본값을 쓰는 옛 벡터는 새 로더가 계속 읽을 수 있다. 와이어 규격 0.1.0 확정 전의 형식 1에는 이 규칙을 적용하지 않는다.
-2. 로더는 자기가 아는 것보다 높은 `format`과 모르는 필드를 거부한다(MUST).
+1. 같은 `format` 안에서는 필드와 단계 `kind`를 추가만 할 수 있다. 추가하는 필드에는 기본값이 있어야 한다. 그러므로 기본값을 쓰는 옛 벡터는 새 로더가 계속 읽을 수 있다. 와이어 규격 0.2.0 확정 전의 형식 2에는 이 규칙을 적용하지 않는다.
+2. 로더는 자기가 아는 것과 다른 `format`(형식 1 포함)과 모르는 필드를 거부한다(MUST).
 
 ## 3. 벡터의 공통 필드
 
@@ -84,7 +84,7 @@
 | `established` | 예 | 연결을 수립한 상태에서 시작하는지 | — |
 | `config` | 아니오 | 설정 항목(이 문서 8.2절) | 항목별 기본값 |
 | `transport` | 아니오 | 전송 계층. `tcp` 또는 `websocket`. 바이트를 넣는 단계가 `tcp`에서는 `recv`, `websocket`에서는 `recv_message`로 갈린다(이 문서 5절) | `tcp` |
-| `next_stream_id` | 아니오 | 구현이 자기 번호 공간에서 다음에 쓸 스트림 번호. 1 이상 2^31-1 이하이고, `role`이 `client`이면 홀수, `server`이면 짝수 | `role`이 `client`이면 1, `server`이면 2 |
+| `next_stream_id` | 아니오 | 구현이 자기 번호 공간에서 다음에 쓸 스트림 번호. 1 이상이고 표기는 이 문서 5절을 따르며, `role`이 `client`이면 홀수, `server`이면 짝수 | `role`이 `client`이면 1, `server`이면 2 |
 | `known_types` | 아니오 | 구현이 아는 애플리케이션 `type`의 목록. 256 이상 정수의 배열이고 같은 값을 두 번 쓸 수 없다 | 256 이상의 모든 `type` |
 
 `established`가 `true`이면 러너가 표준 수립 순서(3.3절)를 실행하고, 성공을 확인한 뒤 구현의 출력과 이벤트를 비운 다음 첫 단계를 시작한다. 표준 수립 순서에서 서버 역할 구현은 연결 서문을 받은 즉시 HELLO를 보내고, 클라이언트 역할 구현은 연결 서문에 이어 HELLO를 보낸다. 러너는 상대 HELLO에 `ACK`를 보내고 구현의 `ACK`를 받아야 수립을 마친 것으로 본다. `transport`가 `websocket`이면 연결 서문과 각 프레임을 바이너리 메시지 하나씩으로 주고받는다. 이때 `local_hello`와 `peer_hello`로는 수립이 성공하는 값만 쓴다. `false`이면 연결이 막 열린 맨 바이트 상태에서 시작한다. 연결 서문과 첫 프레임 검사를 확인하는 벡터가 이 쪽이다. 이 경우 구현이 연결이 열리자마자 내보내는 출력(클라이언트 역할의 연결 서문 등)은 첫 단계의 `send`에 합쳐 비교한다.
@@ -109,7 +109,7 @@
 | `advance` | `ms` | 가상 시계를 `ms`밀리초 앞으로 보낸다(이 문서 8.3절). 1 이상 정수 |
 | `disconnect` | — | 상대 엔드포인트가 CLOSE 없이 전송 계층을 끊게 한다(TCP EOF·RST, WebSocket close). 필드가 없다 |
 
-`stream_id`는 10진수 정수로 쓴다(서버가 연 첫 스트림은 `2`).
+`stream_id`는 10진수 문자열로 쓴다(서버가 연 첫 스트림은 `"2"`). 이 규칙은 프레임, 단계, 이벤트와 `next_stream_id`의 모든 스트림 번호에 같다. 값은 0 이상 2^63-1 이하이고, 앞자리 0과 부호는 쓰지 않는다. JSON 수로 쓰면 거부한다(MUST).
 
 ## 6. 기대 결과
 
@@ -193,7 +193,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "concurrent-streams-boundary-refuse-and-return",
@@ -209,32 +209,32 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
           "kind": "recv",
           "hex": "0000000c 01010000 00000001 00000000",
           "send": [],
-          "events": [{ "event": "request_received", "stream_id": 1, "type": 257 }]
+          "events": [{ "event": "request_received", "stream_id": "1", "type": 257 }]
         },
         {
           "kind": "recv",
           "hex": "0000000c 01010000 00000003 00000000",
           "send": [],
-          "events": [{ "event": "request_received", "stream_id": 3, "type": 257 }]
+          "events": [{ "event": "request_received", "stream_id": "3", "type": 257 }]
         },
         {
           "kind": "recv",
           "hex": "0000000c 01010000 00000005 00000000",
-          "send": [{ "type": "RESET", "stream_id": 5, "error_code": "REFUSED" }],
+          "send": [{ "type": "RESET", "stream_id": "5", "error_code": "REFUSED" }],
           "events": []
         },
         {
           "kind": "respond",
-          "stream_id": 1,
+          "stream_id": "1",
           "status": "OK",
-          "send": [{ "type": 257, "stream_id": 1, "status": "OK" }],
+          "send": [{ "type": 257, "stream_id": "1", "status": "OK" }],
           "events": []
         },
         {
           "kind": "recv",
           "hex": "0000000c 01010000 00000007 00000000",
           "send": [],
-          "events": [{ "event": "request_received", "stream_id": 7, "type": 257 }]
+          "events": [{ "event": "request_received", "stream_id": "7", "type": 257 }]
         }
       ]
     }
@@ -250,7 +250,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "response-type-mismatch",
@@ -261,14 +261,14 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
         {
           "kind": "request",
           "type": 257,
-          "send": [{ "type": 257, "stream_id": 1 }],
+          "send": [{ "type": 257, "stream_id": "1" }],
           "events": []
         },
         {
           "kind": "recv",
           "hex": "0000000c 01020000 00000001 00000000",
           "send": [],
-          "events": [{ "event": "result", "stream_id": 1, "status": "INTERNAL" }]
+          "events": [{ "event": "result", "stream_id": "1", "status": "INTERNAL" }]
         }
       ]
     }
@@ -282,7 +282,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "hello-ack-timeout",

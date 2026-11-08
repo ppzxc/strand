@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "preface-version-mismatch-closes-silently",
@@ -1727,7 +1727,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 2
+              "stream_id": "2"
             }
           ],
           "events": []
@@ -1745,7 +1745,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 2,
+              "stream_id": "2",
               "status": "UNAVAILABLE"
             },
             {
@@ -2336,7 +2336,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 2
+              "stream_id": "2"
             }
           ],
           "events": []
@@ -2427,7 +2427,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1
+              "stream_id": "1"
             }
           ],
           "events": []
