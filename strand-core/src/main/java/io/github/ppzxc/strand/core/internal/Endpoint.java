@@ -1,9 +1,14 @@
 package io.github.ppzxc.strand.core.internal;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Deque;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,7 +62,7 @@ public final class Endpoint {
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
     private final Map<Long, Integer> peerPendingStreams = new LinkedHashMap<>();
     /** AUTH 관문을 통과하기 전이라 미뤄 둔 송신(규격 3.3절). */
-    private final List<DeferredSend> deferredSends = new ArrayList<>();
+    private final Deque<DeferredSend> deferredSends = new ArrayDeque<>();
 
     private byte[] receiveBuffer = new byte[0];
     private boolean prefaceChecked;
@@ -470,9 +475,12 @@ public final class Endpoint {
         List<OutboundMessage> drained = new ArrayList<>(outbox);
         outbox.clear();
         // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
-        for (AckWait wait : ackWaits) {
-            if (!wait.started && drained.contains(wait.message)) {
-                wait.start(now + config.ackTimeoutMs());
+        if (!drained.isEmpty()) {
+            Set<OutboundMessage> drainedSet = identitySet(drained);
+            for (AckWait wait : ackWaits) {
+                if (!wait.started && drainedSet.contains(wait.message)) {
+                    wait.start(now + config.ackTimeoutMs());
+                }
             }
         }
         for (long streamId : undrainedRequests.keySet()) {
@@ -793,10 +801,19 @@ public final class Endpoint {
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
         if (server) {
             authDeadline = now + config.authTimeoutMs();
-        } else {
-            // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
-            sendAwaitingAck(Frames.auth(config.authMechanism(), config.authCredentials()), AUTH_WAIT);
+            return;
         }
+        byte[] auth = Frames.auth(config.authMechanism(), config.authCredentials());
+        if (exceedsPeerFrameSize(auth)) {
+            // 3.2.1절은 상대 max_frame_size를 넘는 프레임을 금지(MUST NOT)하며 AUTH도 예외가 아니다. 상대 HELLO는 유효하므로 ACK는 3.2.3절이
+            // 요구한 대로 보냈다. 그다음 닫는 처리만 규격에 정의가 없다(#196): AUTH도 CLOSE도 보내지 않고 전송 계층만 닫는다. 아무것도 보내지
+            // 않았으므로 대기 요청은 closeTransport가 처리 안 됨으로 끝낸다.
+            closeExchanged = true;
+            closeTransport();
+            return;
+        }
+        // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
+        sendAwaitingAck(auth, AUTH_WAIT);
     }
 
     /**
@@ -871,8 +888,8 @@ public final class Endpoint {
     private void openAuthGate() {
         authGatePassed = true;
         // 보내다가 닫히면 closeTransport가 남은 요청을 closed 이벤트 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
-        while (!deferredSends.isEmpty()) {
-            DeferredSend deferred = deferredSends.remove(0);
+        DeferredSend deferred;
+        while ((deferred = deferredSends.poll()) != null) {
             if (deferred.isRequest() || !closeExchanged) {
                 deferred.sending.run();
             }
@@ -949,6 +966,7 @@ public final class Endpoint {
      * 상대가 처리하지 않은 요청이므로 아직 넘기지 못한 프레임도 보내지 않는다.
      */
     private void endRequestsAfter(long lastStreamId) {
+        Set<OutboundMessage> unsentMessages = newIdentitySet();
         Iterator<Long> pending = ownPendingStreams.keySet().iterator();
         while (pending.hasNext()) {
             long streamId = pending.next();
@@ -956,11 +974,12 @@ public final class Endpoint {
                 pending.remove();
                 OutboundMessage unsent = undrainedRequests.remove(streamId);
                 if (unsent != null) {
-                    outbox.removeIf(message -> message == unsent);
+                    unsentMessages.add(unsent);
                 }
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
             }
         }
+        removeFromOutbox(unsentMessages);
     }
 
     /**
@@ -1049,16 +1068,20 @@ public final class Endpoint {
         transportClosed = true;
         receiveBuffer = new byte[0];
         ackWaits.clear();
+        Set<OutboundMessage> unsentMessages = newIdentitySet();
         for (long streamId : ownPendingStreams.keySet()) {
             // 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절). 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
             if (stateOf(streamId) == RequestState.WRITING_STARTED) {
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.UNKNOWN));
             } else {
                 OutboundMessage unsent = undrainedRequests.get(streamId);
-                outbox.removeIf(message -> message == unsent);
+                if (unsent != null) {
+                    unsentMessages.add(unsent);
+                }
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
             }
         }
+        removeFromOutbox(unsentMessages);
         undrainedRequests.clear();
         for (DeferredSend deferred : deferredSends) {
             if (deferred.isRequest()) {
@@ -1253,11 +1276,33 @@ public final class Endpoint {
     }
 
     private int afterLastUnwrittenRequest() {
-        int last = -1;
-        for (OutboundMessage request : undrainedRequests.values()) {
-            last = Math.max(last, outbox.indexOf(request));
+        if (undrainedRequests.isEmpty()) {
+            return 0;
         }
-        return last + 1;
+        Set<OutboundMessage> requests = identitySet(undrainedRequests.values());
+        for (int i = outbox.size() - 1; i >= 0; i--) {
+            if (requests.contains(outbox.get(i))) {
+                return i + 1;
+            }
+        }
+        return 0;
+    }
+
+    private static Set<OutboundMessage> newIdentitySet() {
+        return Collections.newSetFromMap(new IdentityHashMap<>());
+    }
+
+    private static Set<OutboundMessage> identitySet(Collection<OutboundMessage> messages) {
+        Set<OutboundMessage> set = newIdentitySet();
+        set.addAll(messages);
+        return set;
+    }
+
+    /** 쓰기 대기열에서 주어진 메시지(같은 객체)를 한 번에 거둔다. */
+    private void removeFromOutbox(Set<OutboundMessage> unsent) {
+        if (!unsent.isEmpty()) {
+            outbox.removeIf(unsent::contains);
+        }
     }
 
     /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */

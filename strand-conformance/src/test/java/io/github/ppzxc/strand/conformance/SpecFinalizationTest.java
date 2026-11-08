@@ -52,16 +52,34 @@ class SpecFinalizationTest {
         return terms;
     }
 
-    /** core jar 매니페스트의 Implementation-Version(StrandVersion)은 프로젝트 version에서 오므로, 그 값이 규격 버전과 같아야 한다. */
+    /**
+     * core jar 매니페스트의 Implementation-Version(StrandVersion)은 프로젝트 version에서 온다. 구현만 고친 패치 릴리스(0.2.1)가 규격 버전(0.2.0)과
+     * 달라도 되므로 major.minor만 같으면 된다.
+     */
     @Test
-    void projectVersionEqualsSpecVersion() throws IOException {
+    void projectVersionMatchesSpecMajorMinor() throws IOException {
         Matcher spec =
                 Pattern.compile("\\*\\*규격 버전 \\(Version\\)\\*\\*: (\\S+)").matcher(read(SPEC));
         assertThat(spec.find()).as("규격의 규격 버전 줄").isTrue();
         Matcher project = Pattern.compile("(?m)^version=(\\S+)$").matcher(read(ROOT.resolve("gradle.properties")));
         assertThat(project.find()).as("gradle.properties의 version").isTrue();
 
-        assertThat(project.group(1)).isEqualTo(spec.group(1));
+        assertThat(majorMinor(project.group(1)))
+                .as("프로젝트 version(%s)과 규격 버전(%s)의 major.minor", project.group(1), spec.group(1))
+                .isEqualTo(majorMinor(spec.group(1)));
+    }
+
+    @Test
+    void implementationOnlyPatchReleaseKeepsSpecMajorMinor() {
+        assertThat(majorMinor("0.2.1")).isEqualTo(majorMinor("0.2.0"));
+        assertThat(majorMinor("0.3.0")).isNotEqualTo(majorMinor("0.2.0"));
+        assertThat(majorMinor("0.2.0-SNAPSHOT")).isEqualTo("0.2");
+    }
+
+    private static String majorMinor(String version) {
+        Matcher m = Pattern.compile("^(\\d+\\.\\d+)(?:\\..*|-.*)?$").matcher(version);
+        assertThat(m.matches()).as("version 형식 " + version).isTrue();
+        return m.group(1);
     }
 
     @Test

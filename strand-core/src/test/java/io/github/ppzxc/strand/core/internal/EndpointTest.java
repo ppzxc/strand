@@ -1057,6 +1057,74 @@ class EndpointTest {
                         + "0075736572007077");
     }
 
+    /** 3.2.1절: AUTH도 상대 max_frame_size를 넘지 못한다(MUST NOT). 보내지 않고 CLOSE 없이 로컬로 닫는다(#196). */
+    @Test
+    void clientClosesLocallyWithoutAuthOrCloseWhenItsAuthExceedsThePeerMaxFrameSize() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", new byte[20000]));
+        client.drainMessages();
+        client.request(257, new byte[0]);
+
+        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
+
+        // 상대 HELLO는 유효하므로 ACK는 보내고(3.2.3절), AUTH와 CLOSE는 보내지 않는다.
+        assertThat(sent(client)).isEqualTo(HELLO_ACK);
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(events.get(0).certainty()).hasValue(Certainty.NOT_PROCESSED);
+        assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void clientSendsAuthExactlyAtThePeerMaxFrameSize() {
+        int credentials = MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE - 1 - "PLAIN".length();
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", new byte[credentials]));
+        client.drainMessages();
+
+        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
+
+        assertThat(kinds(client)).isEmpty();
+        assertThat(client.drainMessages()).hasSize(2);
+    }
+
+    /** 쓰기 전 요청이 많아도 상대 CLOSE와 연결 종료가 요청마다 결과를 정확히 한 번씩 내고 프레임을 거둔다. */
+    @Test
+    void manyUnwrittenRequestsEachEndExactlyOnceOnPeerCloseAndOnTransportLoss() {
+        int count = 5000;
+        for (boolean peerClose : new boolean[] {true, false}) {
+            Endpoint client = client();
+            client.receive(bytes(helloWith("0002" + String.format("%08x", count))));
+            client.receive(bytes(HELLO_ACK));
+            client.receive(bytes(AUTH_ACK));
+            client.drainMessages();
+            client.drainEvents();
+            for (int i = 0; i < count; i++) {
+                client.request(257, new byte[0]);
+            }
+            if (peerClose) {
+                client.receive(bytes(closeNoErrorLast(0)));
+            } else {
+                client.disconnect();
+            }
+
+            List<Event> events = client.drainEvents();
+            assertThat(events).hasSize(count + 1);
+            for (int i = 0; i < count; i++) {
+                assertThat(events.get(i).status()).isEqualTo(Status.UNAVAILABLE);
+                assertThat(events.get(i).certainty()).hasValue(Certainty.NOT_PROCESSED);
+            }
+            assertThat(events.get(count).kind()).isEqualTo(Event.Kind.CLOSED);
+            assertThat(events.stream()
+                            .map(Event::streamId)
+                            .filter(id -> id != 0)
+                            .distinct()
+                            .count())
+                    .isEqualTo(count);
+            assertThat(client.drainMessages()).noneMatch(OutboundMessage::isApplication);
+        }
+    }
+
     @Test
     void clientReportsTheCredentialLifetimeAndIgnoresUnknownIdentifiers() {
         Endpoint client = client();
