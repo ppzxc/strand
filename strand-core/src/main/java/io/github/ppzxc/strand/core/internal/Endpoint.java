@@ -48,15 +48,13 @@ public final class Endpoint {
     private final EndpointConfig config;
     private final List<OutboundMessage> outbox = new ArrayList<>();
     private final List<Event> events = new ArrayList<>();
-    /** 대기 중인 스트림 가운데 내가 연 것(결과를 기다리는 내 요청)의 번호와 요청 type. 보낸 순서대로다(규격 1.3절). */
-    private final Map<Long, Integer> ownPendingStreams = new LinkedHashMap<>();
+    /** 대기 중인 스트림 가운데 내가 연 것(결과를 기다리는 내 요청)의 번호와 요청 type·번호표. 보낸 순서대로다(규격 1.3절). */
+    private final Map<Long, OwnStream> ownPendingStreams = new LinkedHashMap<>();
     /**
      * 요청 프레임이 아직 {@link #drainMessages()}로 전송 계층에 넘어가지 않은 내 스트림(규격 3.5절 "연결이 끝날 때"). 프레임 하나가 메시지
      * 하나이므로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 본다.
      */
     private final Map<Long, OutboundMessage> undrainedRequests = new LinkedHashMap<>();
-    /** 대기 중인 내 스트림 번호와 그 요청을 낸 순서(요청 번호표, 0부터)의 짝. {@link #requestState(long)}가 번호표로 요청을 찾는다. */
-    private final Map<Long, Long> ticketOfStream = new LinkedHashMap<>();
     /** 다음 {@link #request}에 줄 번호표. */
     private long nextTicket;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
@@ -976,7 +974,6 @@ public final class Endpoint {
         }
         deferredSends.clear();
         ownPendingStreams.clear();
-        ticketOfStream.clear();
         peerPendingStreams.clear();
         events.add(Event.closed());
     }
@@ -1028,33 +1025,38 @@ public final class Endpoint {
     @Nullable
     RequestState requestState(long ticket) {
         for (DeferredSend deferred : deferredSends) {
-            if (deferred.request && deferred.ticket == ticket) {
+            if (deferred.ticket == ticket) {
                 return RequestState.QUEUED_WITHOUT_NUMBER;
             }
         }
-        for (Map.Entry<Long, Long> entry : ticketOfStream.entrySet()) {
-            if (entry.getValue() == ticket) {
+        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
+            if (entry.getValue().ticket == ticket) {
                 return stateOf(entry.getKey());
             }
         }
         return null;
     }
 
-    /** 아직 끝나지 않은 내 요청의 수(번호 없는 대기열 요청 포함). 요청 기록이 끝난 요청 뒤에 남지 않는지 보는 기준이다. */
-    int openRequestCount() {
-        int queued = 0;
-        for (DeferredSend deferred : deferredSends) {
-            if (deferred.request) {
-                queued++;
-            }
-        }
-        return queued + ticketOfStream.size();
+    /** 번호를 받아 아직 끝나지 않은 내 스트림의 수. 요청 기록이 끝난 요청 뒤에 남지 않는지 보는 기준이다. */
+    int openStreamCount() {
+        return ownPendingStreams.size();
     }
 
     /** 내 스트림을 끝낸다. 대기 중이던 요청의 type을 돌려주고, 대기 중이 아니면 null이다. */
     private @Nullable Integer endOwnStream(long streamId) {
-        ticketOfStream.remove(streamId);
-        return ownPendingStreams.remove(streamId);
+        OwnStream ended = ownPendingStreams.remove(streamId);
+        return ended == null ? null : ended.type;
+    }
+
+    /** 대기 중인 내 스트림 하나. 요청 type과 요청 번호표를 한 기록에 두어, 스트림이 끝나면 번호표 기록도 함께 없어진다. */
+    private static final class OwnStream {
+        final int type;
+        final long ticket;
+
+        OwnStream(int type, long ticket) {
+            this.type = type;
+            this.ticket = ticket;
+        }
     }
 
     /** 번호를 받은 내 요청의 상태. 번호 없는 대기열 요청은 번호가 없어 여기 오지 않는다({@link RequestState#QUEUED_WITHOUT_NUMBER}). */
@@ -1082,8 +1084,7 @@ public final class Endpoint {
             return RequestOutcome.OVERSIZE;
         }
         nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
-        ownPendingStreams.put(streamId, type);
-        ticketOfStream.put(streamId, ticket);
+        ownPendingStreams.put(streamId, new OwnStream(type, ticket));
         OutboundMessage message = OutboundMessage.binary(frame);
         outbox.add(message);
         undrainedRequests.put(streamId, message);
@@ -1147,23 +1148,13 @@ public final class Endpoint {
         return message;
     }
 
-    /** 쓰기 전 요청 프레임 {@code after} 바로 뒤에 제어 프레임을 둔다. {@code after}가 대기열에 없으면 {@link #send(byte[])}와 같다. */
+    /** 쓰기 전 요청 프레임 {@code after} 바로 뒤에 제어 프레임을 둔다. {@code after}가 null이면 {@link #send(byte[])}와 같다. */
     private void sendAfter(@Nullable OutboundMessage after, byte[] frame) {
-        int index = after == null ? -1 : indexInOutbox(after);
-        if (index < 0) {
+        if (after == null) {
             send(frame);
         } else {
-            outbox.add(index + 1, OutboundMessage.binary(frame));
+            outbox.add(outbox.indexOf(after) + 1, OutboundMessage.binary(frame));
         }
-    }
-
-    private int indexInOutbox(OutboundMessage message) {
-        for (int i = 0; i < outbox.size(); i++) {
-            if (outbox.get(i) == message) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     private int firstApplicationIndex() {
@@ -1177,7 +1168,7 @@ public final class Endpoint {
     private int afterLastUnwrittenRequest() {
         int last = -1;
         for (OutboundMessage request : undrainedRequests.values()) {
-            last = Math.max(last, indexInOutbox(request));
+            last = Math.max(last, outbox.indexOf(request));
         }
         return last + 1;
     }

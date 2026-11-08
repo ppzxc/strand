@@ -843,7 +843,7 @@ class EndpointTest {
 
         assertThat(client.requestState(cut)).isNull();
         assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
-        assertThat(client.openRequestCount()).isEqualTo(1);
+        assertThat(client.openStreamCount()).isEqualTo(1);
     }
 
     /** 오래 가는 연결에서 요청을 응답으로 끝낼 때마다 기록이 따라 지워져 쌓이지 않는다. */
@@ -857,7 +857,7 @@ class EndpointTest {
 
             assertThat(client.requestState(ticket)).isNull();
         }
-        assertThat(client.openRequestCount()).isZero();
+        assertThat(client.openStreamCount()).isZero();
     }
 
     @Test
