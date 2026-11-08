@@ -12,33 +12,28 @@ import org.junit.jupiter.api.Test;
 /** 확인 대기 초과의 CLOSE 사유와 CLOSE 전용 코드를 담은 RESET을 벡터가 단언하는지 본다(#163). */
 class CloseOnlyCodesTest {
 
-    private static List<JsonObject> sentFrames(JsonObject vector, String type) {
-        List<JsonObject> frames = new ArrayList<>();
-        for (JsonElement step : vector.getAsJsonArray("steps")) {
-            for (JsonElement f : step.getAsJsonObject().getAsJsonArray("send")) {
-                if (type.equals(f.getAsJsonObject().get("type").getAsString())) {
-                    frames.add(f.getAsJsonObject());
+    /** 시계를 흘려보내는 단계(advance)에서 구현이 CLOSE를 보내는 것은 확인 대기 초과뿐이다. */
+    @Test
+    void everyCloseSentWhenTheClockAdvancesIsUnresponsive() {
+        int seen = 0;
+        for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
+            for (JsonElement step : entry.getValue().getAsJsonArray("steps")) {
+                JsonObject s = step.getAsJsonObject();
+                if (!"advance".equals(s.get("kind").getAsString())) {
+                    continue;
+                }
+                for (JsonElement f : s.getAsJsonArray("send")) {
+                    JsonObject frame = f.getAsJsonObject();
+                    if ("CLOSE".equals(frame.get("type").getAsString())) {
+                        seen++;
+                        assertThat(frame.get("error_code").getAsString())
+                                .as(entry.getKey())
+                                .isEqualTo("UNRESPONSIVE");
+                    }
                 }
             }
         }
-        return frames;
-    }
-
-    @Test
-    void everyAckTimeoutVectorExpectsCloseUnresponsive() {
-        int seen = 0;
-        for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
-            if (!entry.getKey().startsWith("ack-timeout/")) {
-                continue;
-            }
-            for (JsonObject close : sentFrames(entry.getValue(), "CLOSE")) {
-                seen++;
-                assertThat(close.get("error_code").getAsString())
-                        .as(entry.getKey())
-                        .isEqualTo("UNRESPONSIVE");
-            }
-        }
-        assertThat(seen).isGreaterThanOrEqualTo(3);
+        assertThat(seen).isGreaterThanOrEqualTo(6);
     }
 
     @Test
