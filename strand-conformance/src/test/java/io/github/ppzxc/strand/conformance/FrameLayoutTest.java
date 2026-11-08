@@ -4,12 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import java.math.BigInteger;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /** 규격 0.2.0의 20바이트 헤더와 64비트 {@code stream_id}가 벡터 hex에 반영됐는지 본다(#160). core를 실행하지 않는다. */
@@ -87,16 +91,19 @@ class FrameLayoutTest {
 
     @Test
     void streamIdsAreWithin63Bits() {
-        java.util.regex.Pattern field = java.util.regex.Pattern.compile("\"(?:next_)?stream_id\":\"(\\d+)\"");
-        java.math.BigInteger max = java.math.BigInteger.ONE.shiftLeft(63).subtract(java.math.BigInteger.ONE);
-        for (java.util.Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
-            java.util.regex.Matcher m = field.matcher(entry.getValue().toString());
+        Pattern field = Pattern.compile("\"(?:next_)?stream_id\":\"(\\d+)\"");
+        BigInteger max = BigInteger.ONE.shiftLeft(63).subtract(BigInteger.ONE);
+        int found = 0;
+        for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
+            Matcher m = field.matcher(entry.getValue().toString());
             while (m.find()) {
-                assertThat(new java.math.BigInteger(m.group(1)))
+                found++;
+                assertThat(new BigInteger(m.group(1)))
                         .as("%s의 %s", entry.getKey(), m.group())
                         .isLessThanOrEqualTo(max);
             }
         }
+        assertThat(found).isPositive();
     }
 
     @Test
