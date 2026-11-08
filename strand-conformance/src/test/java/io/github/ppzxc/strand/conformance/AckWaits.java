@@ -3,9 +3,13 @@ package io.github.ppzxc.strand.conformance;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 /**
@@ -89,10 +93,16 @@ final class AckWaits {
         return false;
     }
 
-    /** `role`이 `client`가 아니면(없으면 포함) 서버 쪽으로 본다. 서버만 AUTH를 기다린다. */
+    /**
+     * 이 벡터의 서버가 AUTH를 기다리는가. 서버 쪽(`role`이 `client`가 아니면, 없으면 포함)이고 AUTH 관문을 아직 지나지 않은 채
+     * 시작하는(`established`가 `true`가 아닌) 벡터만 해당한다.
+     */
     private static boolean isServerSide(JsonObject vector) {
         JsonObject setup = vector.getAsJsonObject("setup");
-        return !(setup.has("role") && setup.get("role").getAsString().equals("client"));
+        boolean client = setup.has("role") && setup.get("role").getAsString().equals("client");
+        boolean established =
+                setup.has("established") && setup.get("established").getAsBoolean();
+        return !client && !established;
     }
 
     /**
@@ -135,11 +145,11 @@ final class AckWaits {
      * `UNAUTHENTICATED`다. 사유가 둘 이상이면 어느 CLOSE가 나갈지 정해지지 않는다. 같은 사유의 대기가 함께 넘는 것은 센 하나로 본다.
      */
     static int maxLimitsCrossedInOneAdvance(JsonObject vector) {
-        java.util.Map<Integer, java.util.Set<String>> crossed = new java.util.HashMap<>();
+        Map<Integer, Set<String>> crossed = new HashMap<>();
         int max = 0;
         for (Sample sample : samples(vector)) {
             if (sample.elapsed - sample.ms < sample.limit && sample.elapsed > sample.limit) {
-                java.util.Set<String> reasons = crossed.computeIfAbsent(sample.step, k -> new java.util.HashSet<>());
+                Set<String> reasons = crossed.computeIfAbsent(sample.step, k -> new HashSet<>());
                 reasons.add(sample.reason);
                 max = Math.max(max, reasons.size());
             }

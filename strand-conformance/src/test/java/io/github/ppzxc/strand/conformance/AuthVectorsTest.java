@@ -174,8 +174,7 @@ class AuthVectorsTest {
                 for (JsonElement f : step.getAsJsonObject().getAsJsonArray("send")) {
                     JsonObject frame = f.getAsJsonObject();
                     String type = frame.get("type").getAsString();
-                    boolean ack =
-                            frame.has("flags") && frame.getAsJsonArray("flags").size() > 0;
+                    boolean ack = VectorSchema.hasFlag(frame, "ACK");
                     sent.add(type + (ack ? "(ACK)" : ""));
                 }
                 int at = sent.indexOf("HELLO(ACK)");
@@ -205,8 +204,7 @@ class AuthVectorsTest {
                 for (JsonElement f : step.getAsJsonObject().getAsJsonArray("send")) {
                     JsonObject frame = f.getAsJsonObject();
                     String type = frame.get("type").getAsString();
-                    boolean ack =
-                            frame.has("flags") && frame.getAsJsonArray("flags").size() > 0;
+                    boolean ack = VectorSchema.hasFlag(frame, "ACK");
                     if (type.equals("AUTH") && ack) {
                         gateOpen = true;
                         seen++;

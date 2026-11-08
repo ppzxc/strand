@@ -31,15 +31,18 @@ class CloseOnlyCodesTest {
                         seen++;
                         assertThat(frame.get("error_code").getAsString())
                                 .as(entry.getKey())
-                                .isEqualTo(
-                                        entry.getKey().equals("auth/server-auth-wait-times-out-closes-unauthenticated")
-                                                ? "UNAUTHENTICATED"
-                                                : "UNRESPONSIVE");
+                                .isEqualTo(declaresAuthTimeout(entry.getValue()) ? "UNAUTHENTICATED" : "UNRESPONSIVE");
                     }
                 }
             }
         }
         assertThat(seen).isGreaterThanOrEqualTo(6);
+    }
+
+    /** `auth_timeout_ms`를 설정한 벡터는 AUTH 대기 초과(`UNAUTHENTICATED`)를 다룬다. */
+    private static boolean declaresAuthTimeout(JsonObject vector) {
+        JsonObject setup = vector.getAsJsonObject("setup");
+        return setup.has("config") && setup.getAsJsonObject("config").has("auth_timeout_ms");
     }
 
     @Test
