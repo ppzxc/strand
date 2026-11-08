@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.core.internal;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /** 엔드포인트의 설정: 보내는 HELLO의 파라미터(규격 3.2.1절)와 확인 대기 시간. 값을 바꾼 복사본을 돌려주는 불변 객체다. */
@@ -217,7 +218,7 @@ public final class EndpointConfig {
      * @throws IllegalArgumentException 메커니즘이 문법을 어길 때
      */
     public EndpointConfig auth(String mechanism, byte[] credentials) {
-        if (!mechanism.matches("[A-Z0-9_-]{1,20}")) {
+        if (!isValidAuthMechanism(mechanism)) {
             throw new IllegalArgumentException("AUTH 메커니즘이 문법(대문자·숫자·하이픈·밑줄 1~20자)을 어긴다: " + mechanism);
         }
         ConfigDraft draft = draft();
@@ -236,6 +237,18 @@ public final class EndpointConfig {
         ConfigDraft draft = draft();
         draft.authenticator = value;
         return new EndpointConfig(draft);
+    }
+
+    /** AUTH 메커니즘 이름의 최대 길이(규격 3.3.1절). */
+    static final int MAX_AUTH_MECHANISM_LENGTH = 20;
+
+    private static final Pattern AUTH_MECHANISM_GRAMMAR = Pattern.compile("[A-Z0-9_-]+");
+
+    /** AUTH 메커니즘 이름이 문법(대문자·숫자·하이픈·밑줄 1~20자)을 따르는가. */
+    static boolean isValidAuthMechanism(String mechanism) {
+        return mechanism.length() >= 1
+                && mechanism.length() <= MAX_AUTH_MECHANISM_LENGTH
+                && AUTH_MECHANISM_GRAMMAR.matcher(mechanism).matches();
     }
 
     private static AuthDecision passesAnonymousOnly(String mechanism, byte[] credentials) {

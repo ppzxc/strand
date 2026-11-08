@@ -2091,8 +2091,8 @@ class EndpointTest {
         client.receive(bytes(AUTH_ACK));
 
         assertThat(sent(client))
-                .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + requestFrame(257, 1, "0a0b")
-                        + "0000001800020000000000000000000000000000" + "0102030405060708");
+                .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + "0000001800020000000000000000000000000000" + "0102030405060708"
+                        + "00000012010100000000000000000001" + "0000" + "0000" + "0a0b");
     }
 
     @Test
