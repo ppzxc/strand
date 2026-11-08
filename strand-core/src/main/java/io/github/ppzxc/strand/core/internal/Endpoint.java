@@ -273,9 +273,10 @@ public final class Endpoint {
         if (transportClosed || ownPendingStreams.remove(streamId) == null) {
             return;
         }
-        // 요청 프레임은 이미 쓰기 대기열에 있고 끊지 않고 마저 쓴 뒤 RESET을 보낸다(규격 4.4절). 마지막 바이트를 넘기기 전 취소는 #190이 다룬다.
-        undrainedRequests.remove(streamId);
-        send(Frames.reset(streamId, ErrorCode.CANCEL));
+        // 요청 프레임은 이미 쓰기 대기열에 있고 끊지 않고 마저 쓴 뒤 RESET을 보낸다(규격 4.4절). 쓰기 전 취소의 종료 규칙은 #191이 다룬다.
+        OutboundMessage unwritten = undrainedRequests.remove(streamId);
+        // 요청 프레임보다 앞서 가면 안 되므로 쓰기 전이던 요청이면 그 프레임 바로 뒤에 둔다.
+        sendAfter(unwritten, Frames.reset(streamId, ErrorCode.CANCEL));
         events.add(Event.result(streamId, Status.CANCELLED, Certainty.UNKNOWN));
         closeTransportIfNoPendingStreams();
     }
@@ -827,10 +828,10 @@ public final class Endpoint {
         ackWaits.clear();
         for (long streamId : ownPendingStreams.keySet()) {
             // 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절). 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
-            OutboundMessage unsent = undrainedRequests.get(streamId);
-            if (unsent == null) {
+            if (stateOf(streamId) == RequestState.WRITING_STARTED) {
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.UNKNOWN));
             } else {
+                OutboundMessage unsent = undrainedRequests.get(streamId);
                 outbox.removeIf(message -> message == unsent);
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
             }
@@ -874,6 +875,24 @@ public final class Endpoint {
         } else {
             deferredSends.add(sending);
         }
+    }
+
+    /**
+     * 요청이 쓰기 대기열 어디에 있는지(규격 1.3절, 4.4.1절). 입출력 없는(sans-IO) 모델에서는 {@link #drainMessages()}가 프레임을 돌려준 때를 쓰기를
+     * 시작한 때로 본다. 돌려준 프레임은 전송 계층이 이미 받았으므로 끊거나 거둘 수 없다.
+     */
+    private enum RequestState {
+        /** 번호를 받지 못한 대기열 요청. {@code deferredSends}에 있고 프레임이 아직 없다. */
+        QUEUED_WITHOUT_NUMBER,
+        /** 번호를 받았지만 프레임이 아직 {@code drainMessages()}로 나가지 않았다({@code undrainedRequests}). 쓰기 전이다. */
+        NUMBERED_UNWRITTEN,
+        /** 프레임이 {@code drainMessages()}로 나갔다. 쓰기를 시작했고 끝까지 쓴다. */
+        WRITING_STARTED
+    }
+
+    /** 번호를 받은 내 요청의 상태. 번호 없는 대기열 요청은 번호가 없어 여기 오지 않는다({@link RequestState#QUEUED_WITHOUT_NUMBER}). */
+    private RequestState stateOf(long streamId) {
+        return undrainedRequests.containsKey(streamId) ? RequestState.NUMBERED_UNWRITTEN : RequestState.WRITING_STARTED;
     }
 
     /** 요청을 보낸 결과. */
@@ -938,8 +957,57 @@ public final class Endpoint {
         events.add(Event.localUnavailable());
     }
 
+    /**
+     * 프레임을 쓰기 대기열에 넣는다. 제어 프레임은 아직 쓰기를 시작하지 않은 애플리케이션 프레임 앞에 둔다(규격 3.6절). 대기열에 남은 메시지는
+     * 모두 쓰기 전이므로(꺼낸 메시지가 쓰기를 시작한 것이다) 제어 프레임끼리의 순서와 애플리케이션 프레임끼리의 순서는 넣은 순서 그대로다.
+     * CLOSE는 쓰기 전 요청 뒤에 둔다. 앞서 보내면 그 요청이 CLOSE 뒤에 온 새 요청이 되어 상대가 버리기 때문이다(규격 3.5절).
+     */
     private void send(byte[] frame) {
-        outbox.add(OutboundMessage.binary(frame));
+        OutboundMessage message = OutboundMessage.binary(frame);
+        if (message.isApplication()) {
+            outbox.add(message);
+            return;
+        }
+        int at = firstApplicationIndex();
+        if (Frames.typeOf(frame) == FrameType.CLOSE) {
+            at = Math.max(at, afterLastUnwrittenRequest());
+        }
+        outbox.add(at, message);
+    }
+
+    /** 쓰기 전 요청 프레임 {@code after} 바로 뒤에 제어 프레임을 둔다. {@code after}가 대기열에 없으면 {@link #send(byte[])}와 같다. */
+    private void sendAfter(@Nullable OutboundMessage after, byte[] frame) {
+        int index = after == null ? -1 : indexInOutbox(after);
+        if (index < 0) {
+            send(frame);
+        } else {
+            outbox.add(index + 1, OutboundMessage.binary(frame));
+        }
+    }
+
+    private int indexInOutbox(OutboundMessage message) {
+        for (int i = 0; i < outbox.size(); i++) {
+            if (outbox.get(i) == message) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private int firstApplicationIndex() {
+        int i = 0;
+        while (i < outbox.size() && !outbox.get(i).isApplication()) {
+            i++;
+        }
+        return i;
+    }
+
+    private int afterLastUnwrittenRequest() {
+        int last = -1;
+        for (OutboundMessage request : undrainedRequests.values()) {
+            last = Math.max(last, indexInOutbox(request));
+        }
+        return last + 1;
     }
 
     /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */

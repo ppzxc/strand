@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class FrameSizeIntegrationTest {
 
     /** 규격 2.3절: PING의 type. */
-    private static final int PING_TYPE = 4;
+    private static final int PING_TYPE = 2;
 
     /** 기본 {@code max_frame_size}(65,536)에 들어가는 큰 payload. */
     private static final int LARGE_PAYLOAD_BYTES = 60_000;
