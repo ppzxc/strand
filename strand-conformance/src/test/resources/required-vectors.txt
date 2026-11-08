@@ -27,12 +27,12 @@ B-5 hello-establishment/ack-gate-allows-reserved-control-type
 B-6 hello-establishment/hello-duplicate-known-identifier-closes
 B-6 hello-establishment/hello-duplicate-unknown-identifier-closes
 B-6 hello-establishment/client-hello-duplicate-unknown-identifier-closes
-B-7 request-checks/closing-after-close-received-refuses-new-request
-B-7 request-checks/closing-after-close-sent-refuses-new-request
-B-7 request-checks/closing-client-refuses-new-request-from-server
-B-7 request-checks/closing-refuses-unknown-type-request
-B-7 request-checks/closing-refuses-bad-extension-value-request
-B-7 request-checks/closing-refuses-unknown-type-with-bad-extension-value
+B-7 request-checks/closing-after-close-received-drops-new-request
+B-7 request-checks/closing-after-close-sent-drops-new-request
+B-7 request-checks/closing-client-drops-new-request-from-server
+B-7 request-checks/closing-drops-unknown-type-request
+B-7 request-checks/closing-drops-bad-extension-value-request
+B-7 request-checks/closing-drops-unknown-type-with-bad-extension-value
 B-7 request-checks/limit-refusal-precedes-unknown-type
 B-7 request-checks/limit-refusal-precedes-bad-extension-value
 B-7 request-checks/unknown-type-precedes-bad-extension-value
@@ -83,7 +83,7 @@ B-14 streams/regress-to-ended-number-closes
 B-14 streams/regress-to-skipped-number-closes
 B-15 streams/concurrency-refused-stream-number-reuse-closes
 B-15 streams/limit-zero-refused-number-below-highest-closes
-B-15 streams/closing-refused-number-reuse-closes
+B-15 streams/closing-dropped-number-reuse-closes
 B-15 streams/unimplemented-number-is-used
 B-15 streams/invalid-argument-number-is-used
 B-16 streams/even-numbered-frame-at-server-is-dropped

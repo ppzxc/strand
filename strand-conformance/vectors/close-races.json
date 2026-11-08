@@ -29,14 +29,15 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": []
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000002",
           "send": [],
           "events": []
         }
@@ -66,7 +67,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000001",
           "send": [],
           "events": []
         },
@@ -108,7 +109,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000001",
           "send": [],
           "events": []
         },
@@ -158,7 +159,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": []
@@ -217,7 +219,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000001",
           "send": [],
           "events": []
         },
@@ -278,7 +280,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000002",
+          "hex": "0000001c00030000000000000000000000000000000000020000000000000000",
           "send": [],
           "events": [
             {
@@ -301,7 +303,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000005",
+          "hex": "0000001c00030000000000000000000000000000000000050000000000000000",
           "send": [],
           "events": [
             {
@@ -340,7 +342,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "INTERNAL_ERROR"
+              "error_code": "INTERNAL_ERROR",
+              "last_stream_id": "1"
             }
           ],
           "events": [
@@ -376,7 +379,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000002",
+          "hex": "0000001c00030000000000000000000000000000000000020000000000000001",
           "send": [],
           "events": [
             {
@@ -420,7 +423,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "INTERNAL_ERROR"
+              "error_code": "INTERNAL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -465,14 +469,15 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": []
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000002",
+          "hex": "0000001c00030000000000000000000000000000000000020000000000000001",
           "send": [],
           "events": [
             {
@@ -517,14 +522,15 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "1"
             }
           ],
           "events": []
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000002",
+          "hex": "0000001c00030000000000000000000000000000000000020000000000000000",
           "send": [],
           "events": [
             {
@@ -551,7 +557,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -575,7 +582,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
           "send": [],
           "events": [
             {
@@ -659,7 +666,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000001",
+          "hex": "0000001c00030000000000000000000000000000000000010000000000000000",
           "send": [],
           "events": [
             {
@@ -704,7 +711,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": []
@@ -757,7 +765,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": []
@@ -795,7 +804,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "00000018000300000000000000000000000400000009000000000000",
+          "hex": "000000200003000000000000000000000004000000090000000000000000000000000000",
           "send": [],
           "events": [
             {
@@ -807,7 +816,7 @@
     },
     {
       "id": "close-payload-three-bytes-closes-silently",
-      "description": "CLOSE의 payload가 4바이트 미만(3바이트)이면 연결 오류이고, 받은 CLOSE로 보므로 CLOSE 없이 조용히 닫는다",
+      "description": "CLOSE의 payload가 12바이트 미만(3바이트)이면 연결 오류이고, 받은 CLOSE로 보므로 CLOSE 없이 조용히 닫는다",
       "spec": [
         "3.5",
         "5.1"
@@ -868,7 +877,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000010000000000000000",
+          "hex": "0000001c00030000000000000000000100000000000000000000000000000000",
           "send": [],
           "events": [
             {
@@ -1001,7 +1010,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "1"
             }
           ],
           "events": []
@@ -1045,7 +1055,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
           "send": [],
           "events": []
         },
@@ -1092,7 +1102,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "1"
             }
           ],
           "events": []
@@ -1130,7 +1141,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
           "send": [],
           "events": []
         },
@@ -1168,7 +1179,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000006",
+          "hex": "0000001c00030000000000000000000000000000000000060000000000000000",
           "send": [],
           "events": [
             {
@@ -1204,7 +1215,7 @@
         },
         {
           "kind": "recv",
-          "hex": "0000001400030000000000000000000000000000ffffffff",
+          "hex": "0000001c00030000000000000000000000000000ffffffff0000000000000000",
           "send": [],
           "events": [
             {
@@ -1243,7 +1254,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -1284,7 +1296,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000001",
           "send": [],
           "events": []
         },
@@ -1364,7 +1376,7 @@
         },
         {
           "kind": "recv",
-          "hex": "000000170003000000000000000000000000000000000000fffec0",
+          "hex": "0000001f00030000000000000000000000000000000000000000000000000000fffec0",
           "send": [],
           "events": []
         },
@@ -1384,6 +1396,342 @@
               "event": "closed"
             }
           ]
+        }
+      ]
+    },
+    {
+      "id": "close-last-stream-id-ends-crossed-request-as-not-processed",
+      "description": "클라이언트 역할 구현이 요청 1과 3을 대기시킨 채 CLOSE(NO_ERROR, last_stream_id=1)를 받으면, 1보다 큰 요청 3은 받는 즉시 stream_id 3의 로컬 UNAVAILABLE(처리 안 됨) result를 정확히 한 번 받는다. 요청 1은 대기를 이어 가고, 응답을 받은 뒤에 closed가 난다",
+      "spec": [
+        "3.5",
+        "4.3"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "3"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000001",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "3",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001001010000000000000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "OK",
+              "certainty": "response"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "error-close-last-stream-id-ends-crossed-request-as-not-processed",
+      "description": "클라이언트 역할 구현이 요청 1과 3을 대기시킨 채 CLOSE(INTERNAL_ERROR, last_stream_id=1)를 받으면 아무것도 보내지 않고 닫는다. 1보다 큰 요청 3은 CLOSE를 받는 즉시 처리 안 됨, 요청 1은 연결이 끝날 때 결과 모름이고, 그 뒤에 closed가 난다",
+      "spec": [
+        "3.5",
+        "4.3"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "3"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001c00030000000000000000000000000000000000020000000000000001",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "3",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            },
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-last-stream-id-zero-ends-every-request-as-not-processed",
+      "description": "last_stream_id가 0인 CLOSE(NO_ERROR)는 어떤 요청도 받지 않았다는 뜻이다. 대기 중인 요청 1은 받는 즉시 처리 안 됨으로 끝나고, 대기 중인 스트림이 없어졌으므로 그 뒤에 closed가 난다",
+      "spec": [
+        "3.5",
+        "4.3"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-last-stream-id-in-own-number-space-is-malformed",
+      "description": "클라이언트 역할 구현이 받은 CLOSE의 last_stream_id가 0이 아니면서 내 번호 공간(홀수)이 아닌 2이면 형태가 잘못된 CLOSE다. CLOSE 없이 닫고, 대기 중인 내 요청 1은 결과 모름이다",
+      "spec": [
+        "3.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000002",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-last-stream-id-above-highest-sent-is-malformed",
+      "description": "내가 보낸 가장 큰 요청 번호(1)보다 큰 last_stream_id(3)를 담은 CLOSE는 형태가 잘못된 CLOSE다. CLOSE 없이 닫고, 대기 중인 내 요청 1은 결과 모름이다",
+      "spec": [
+        "3.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000003",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "UNAVAILABLE",
+              "certainty": "unknown"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-payload-eleven-bytes-closes-silently",
+      "description": "CLOSE의 payload가 12바이트 미만(11바이트)이면 형태가 잘못된 CLOSE다. 연결 오류이고, 받은 CLOSE로 보므로 CLOSE 없이 조용히 닫는다",
+      "spec": [
+        "3.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001b000300000000000000000000000000000000000000000000000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-close-last-stream-id-is-the-only-one-used",
+      "description": "클라이언트 역할 구현이 요청 1, 3, 5를 대기시킨 채 CLOSE(NO_ERROR, last_stream_id=3)를 받으면 요청 5가 처리 안 됨으로 끝난다. 이어서 받은 두 번째 CLOSE(last_stream_id=1)의 값은 쓰지 않으므로 요청 3은 대기를 이어 가고 아무 이벤트도 나지 않는다",
+      "spec": [
+        "3.5",
+        "4.3"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "3"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "5"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000003",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "5",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000001",
+          "send": [],
+          "events": []
         }
       ]
     }

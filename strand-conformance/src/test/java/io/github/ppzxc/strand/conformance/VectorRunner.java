@@ -107,7 +107,9 @@ final class VectorRunner {
                 frame -> "PING flags=" + (VectorSchema.hasFlag(frame, "ACK") ? "ACK" : "-") + " stream_id=0 payload="
                         + frame.get("payload").getAsString());
         NAMED_FRAMES.put(
-                "CLOSE", frame -> "CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code")));
+                "CLOSE",
+                frame -> "CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code"))
+                        + " last_stream_id=" + frame.get("last_stream_id").getAsString());
         NAMED_FRAMES.put(
                 "WEBSOCKET_CLOSE",
                 frame -> "WEBSOCKET_CLOSE code=" + frame.get("code").getAsInt());
@@ -407,9 +409,9 @@ final class VectorRunner {
                 result.add("HELLO" + head + ext + " params=" + (payload.length == 0 ? "-" : paramsText(payload)));
             } else if (type == 2) {
                 result.add("PING" + head + ext + " payload=" + Bytes.toHex(payload));
-            } else if (type == 3 && payload.length >= 4) {
-                result.add(
-                        "CLOSE" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));
+            } else if (type == 3 && payload.length >= 12) {
+                result.add("CLOSE" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0))
+                        + " last_stream_id=" + Long.toUnsignedString(Bytes.readLong(payload, 4)));
             } else if (type == 4 && payload.length == 4) {
                 result.add(
                         "RESET" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));

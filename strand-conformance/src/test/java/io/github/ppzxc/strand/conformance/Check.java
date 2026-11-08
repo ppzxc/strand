@@ -22,8 +22,8 @@ final class Check {
     private static final Pattern ID = Pattern.compile("[a-z0-9]+(-[a-z0-9]+)*");
     private static final Pattern PING_PAYLOAD = Pattern.compile("[0-9a-f]{16}");
     private static final Pattern SPEC_SECTION = Pattern.compile("(?:[0-9]+|[A-G])(?:\\.[0-9]+)*");
-    /** 2^63-1의 자릿수. 이보다 긴 문자열은 파싱하지 않고 거부한다. */
-    private static final int MAX_DECIMAL_DIGITS = 19;
+    /** 2^64-1의 자릿수. 이보다 긴 문자열은 파싱하지 않고 거부한다. */
+    private static final int MAX_DECIMAL_DIGITS = 20;
 
     private static final Pattern DECIMAL = Pattern.compile("0|[1-9][0-9]*");
 

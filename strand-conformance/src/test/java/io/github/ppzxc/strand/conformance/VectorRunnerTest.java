@@ -92,7 +92,8 @@ class VectorRunnerTest {
     }
 
     private static final String HELLO_ACK_SEND = "{\"type\":\"HELLO\",\"flags\":[\"ACK\"]}";
-    private static final String CLOSE_PE = "{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\"}";
+    private static final String CLOSE_PE =
+            "{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\",\"last_stream_id\":\"0\"}";
     private static final String HELLO_RECV = "0000000c000100000000000000000000";
 
     private static String step(String kind, String fields, String send, String events) {
@@ -150,7 +151,7 @@ class VectorRunnerTest {
                 step(
                         "close",
                         "\"error_code\":\"PROTOCOL_ERROR\",",
-                        "[{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\"}]",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\",\"last_stream_id\":\"0\"}]",
                         "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"UNAVAILABLE\"},{\"event\":\"closed\"}]"));
 
         assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
@@ -197,7 +198,8 @@ class VectorRunnerTest {
     private static final String WEBSOCKET_ESTABLISHED =
             "{\"role\":\"server\",\"established\":true,\"transport\":\"websocket\"}";
     private static final String WEBSOCKET_CLOSE_1000 = "{\"type\":\"WEBSOCKET_CLOSE\",\"code\":1000}";
-    private static final String CLOSE_NO_ERROR = "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\"}";
+    private static final String CLOSE_NO_ERROR =
+            "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}";
     private static final String CLOSE_STEP_NO_ERROR = "\"error_code\":\"NO_ERROR\",";
 
     @Test

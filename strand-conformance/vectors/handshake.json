@@ -54,7 +54,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [

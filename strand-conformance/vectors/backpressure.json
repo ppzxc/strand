@@ -719,6 +719,141 @@
           "events": []
         }
       ]
+    },
+    {
+      "id": "request-after-close-received-is-dropped-silently",
+      "description": "서버 역할 구현이 자기가 연 스트림 2를 대기시킨 채 CLOSE(NO_ERROR, last_stream_id=0)를 받은 뒤 상대의 새 요청 1이 오면, 끝까지 읽고 애플리케이션에 넘기지 않은 채 조용히 버린다. RESET(REFUSED)도 나가지 않는다",
+      "spec": [
+        "3.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "2"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001001010000000000000000000100000000",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "request-after-close-sent-is-dropped-silently",
+      "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 CLOSE(NO_ERROR)를 보낸 뒤 서버의 새 요청 2가 오면, 애플리케이션에 넘기지 않고 조용히 버린다. 보낸 CLOSE의 last_stream_id는 0이다",
+      "spec": [
+        "3.5",
+        "5.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001001010000000000000000000200000000",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "request-after-close-with-regressed-number-closes-silently",
+      "description": "CLOSE(NO_ERROR)를 보낸 뒤 온 새 요청 5도 번호 역행 검사에 쓰인다. 그 뒤 더 작은 번호 3의 요청이 오면 연결 오류이고, 이미 CLOSE를 보냈으므로 CLOSE 없이 닫는다",
+      "spec": [
+        "3.5",
+        "4.2.1",
+        "5.1"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001001010000000000000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "request_received",
+              "stream_id": "1",
+              "type": 257
+            }
+          ]
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR",
+              "last_stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001001010000000000000000000500000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001001010000000000000000000300000000",
+          "send": [],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

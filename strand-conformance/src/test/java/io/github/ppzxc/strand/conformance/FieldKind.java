@@ -79,6 +79,13 @@ enum FieldKind {
             c.decimal(path, element, BigInteger.ZERO, STREAM_ID_MAX);
         }
     },
+    /** CLOSE의 last_stream_id. 0 이상 2^64-1 이하의 10진수 문자열(형태가 잘못된 CLOSE를 위해 번호 범위 밖 값도 쓴다). */
+    LAST_STREAM_ID {
+        @Override
+        void check(Check c, String path, JsonElement element) {
+            c.decimal(path, element, BigInteger.ZERO, U64_MAX);
+        }
+    },
     /** 1 이상 2^63-1 이하의 10진수 문자열. RESET의 stream_id와 next_stream_id에 쓴다(홀짝은 role과 함께 보는 검사라 {@link VectorSchema}가 따로 본다). */
     POSITIVE_STREAM_ID {
         @Override
@@ -218,6 +225,7 @@ enum FieldKind {
     static final long U16_MAX = 65535L;
     static final long U32_MAX = 4294967295L;
     static final long FIRST_APP_TYPE = 256L;
+    static final BigInteger U64_MAX = BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE);
     static final BigInteger STREAM_ID_MAX = BigInteger.ONE.shiftLeft(63).subtract(BigInteger.ONE);
 
     /** 2.5.1절 status 이름, 코드 값 순서. 목록 크기가 곧 첫 예약 정수 값이다. */

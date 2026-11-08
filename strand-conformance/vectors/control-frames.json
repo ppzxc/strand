@@ -42,7 +42,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -71,7 +72,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -100,7 +102,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -130,7 +133,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -350,7 +354,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -379,7 +384,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -408,7 +414,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -437,7 +444,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "PROTOCOL_ERROR"
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
             }
           ],
           "events": [
@@ -462,7 +470,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "000000140003ff0000000000000000000000000000000000",
+          "hex": "0000001c0003ff00000000000000000000000000000000000000000000000000",
           "send": [],
           "events": [
             {
@@ -591,7 +599,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "00000014000300ff00000000000000000000ffff00000000",
+          "hex": "0000001c000300ff00000000000000000000ffff000000000000000000000000",
           "send": [],
           "events": [
             {
