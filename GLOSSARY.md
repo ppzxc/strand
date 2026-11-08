@@ -133,7 +133,7 @@ _Avoid_: 미응답 바이트, 크레딧, 윈도우
 _Avoid_: 유휴 스트림, 유예 상태, 진행 중인 스트림
 
 **결과 확정성 (Outcome Certainty)**:
-정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#150](https://github.com/ppzxc/strand/issues/150)). 값은 **응답 받음**, **처리 안 됨**, **결과 모름** 셋이다
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어). 값은 **응답 받음**, **처리 안 됨**, **결과 모름** 셋이다
 _Avoid_: 처리됨(상대가 `status`로 처리하지 않았다고 답할 수 있다), 전달 보장, 정확히 한 번(프로토콜이 보장하지 않는다)
 
 **요청 기한 (Request Deadline)**:

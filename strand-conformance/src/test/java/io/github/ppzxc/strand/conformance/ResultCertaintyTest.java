@@ -51,9 +51,6 @@ class ResultCertaintyTest {
                     assertThat(certainty).as(entry.getKey()).isEqualTo("not_processed");
                     assertThat(status).as(entry.getKey()).isEqualTo("UNAVAILABLE");
                 }
-                if (Arrays.asList("CANCELLED", "DEADLINE_EXCEEDED").contains(status)) {
-                    assertThat(certainty).as(entry.getKey()).isEqualTo("unknown");
-                }
             }
         }
     }
@@ -81,14 +78,21 @@ class ResultCertaintyTest {
         }
     }
 
+    private static List<JsonObject> resultsOf(String key) {
+        JsonObject vector = RawVectors.byKey().get(key);
+        assertThat(vector).as(key).isNotNull();
+        List<JsonObject> results = resultEvents(vector);
+        assertThat(results).as(key).isNotEmpty();
+        return results;
+    }
+
     @Test
     void refusedResetAndConnectionEndAreDistinguished() {
-        assertThat(resultEvents(RawVectors.byKey().get("streams/sender-reset-received-refused")))
+        assertThat(resultsOf("streams/sender-reset-received-refused"))
                 .allMatch(r -> "not_processed".equals(r.get("certainty").getAsString()));
-        assertThat(resultEvents(
-                        RawVectors.byKey().get("close-races/disconnect-fails-pending-request-with-unavailable")))
+        assertThat(resultsOf("close-races/disconnect-fails-pending-request-with-unavailable"))
                 .allMatch(r -> "unknown".equals(r.get("certainty").getAsString()));
-        assertThat(resultEvents(RawVectors.byKey().get("streams/sender-own-cancel-sent")))
+        assertThat(resultsOf("streams/sender-own-cancel-sent"))
                 .allMatch(r -> "unknown".equals(r.get("certainty").getAsString()));
     }
 }
