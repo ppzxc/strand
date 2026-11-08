@@ -51,7 +51,7 @@ final class VectorSchema {
             .allow("peer_hello", FieldKind.HELLO_PARAMS)
             .allow("config", FieldKind.SETUP_CONFIG)
             .allow("transport", FieldKind.TRANSPORT)
-            .allow("next_stream_id", FieldKind.STREAM_NUMBER)
+            .allow("next_stream_id", FieldKind.POSITIVE_STREAM_ID)
             .allow("known_types", FieldKind.KNOWN_TYPES);
 
     // ---- 단계: kind별 필드 ----

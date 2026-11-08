@@ -79,7 +79,7 @@ enum FieldKind {
             c.decimal(path, element, BigInteger.ZERO, STREAM_ID_MAX);
         }
     },
-    /** 1 이상 2^63-1 이하의 10진수 문자열. 0이 아닌 스트림을 가리키는 RESET에 쓴다. */
+    /** 1 이상 2^63-1 이하의 10진수 문자열. RESET의 stream_id와 next_stream_id에 쓴다(홀짝은 role과 함께 보는 검사라 {@link VectorSchema}가 따로 본다). */
     POSITIVE_STREAM_ID {
         @Override
         void check(Check c, String path, JsonElement element) {
@@ -156,13 +156,6 @@ enum FieldKind {
         @Override
         void check(Check c, String path, JsonElement element) {
             c.oneOf(path, element, VectorSchema.OPCODES);
-        }
-    },
-    /** 클라이언트·서버가 다음에 쓸 스트림 번호. 홀짝은 role과 함께 보는 검사라 {@link VectorSchema}가 따로 본다. */
-    STREAM_NUMBER {
-        @Override
-        void check(Check c, String path, JsonElement element) {
-            c.decimal(path, element, BigInteger.ONE, STREAM_ID_MAX);
         }
     },
     SETUP_CONFIG {
