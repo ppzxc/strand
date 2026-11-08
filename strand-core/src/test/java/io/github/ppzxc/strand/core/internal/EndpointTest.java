@@ -1415,7 +1415,8 @@ class EndpointTest {
         Endpoint server = establishedWith(IDLE_ONE_SECOND);
         server.request(257, new byte[0]);
         server.drainMessages();
-        server.receive(bytes(CLOSE_NO_ERROR));
+        // 요청 번호까지 처리한다는 CLOSE라서 요청이 남고 연결은 종료 중으로 머문다(3.5절).
+        server.receive(bytes(closeNoErrorLast(2)));
         server.drainMessages();
 
         server.advance(1000);
