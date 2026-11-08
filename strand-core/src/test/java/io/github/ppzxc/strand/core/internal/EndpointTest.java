@@ -38,7 +38,7 @@ class EndpointTest {
     private static final String CLOSE_NO_ERROR = "0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM;
     private static final String PING_PAYLOAD = "0102030405060708";
     private static final EndpointConfig ONE_SECOND = EndpointConfig.defaults().ackTimeoutMs(1000);
-    private static final String DEFAULT_HELLO_PARAMS = "0001 00400000 0002 00000064 0003 00000000".replace(" ", "");
+    private static final String DEFAULT_HELLO_PARAMS = "0001 00010000 0002 00000064 0003 00000000".replace(" ", "");
 
     static byte[] bytes(String hex) {
         String clean = hex.replaceAll("\\s", "");
@@ -407,7 +407,7 @@ class EndpointTest {
 
     @Test
     void maxFrameSizeAtTheRangeBoundsIsAccepted() {
-        for (String size : new String[] {"00004000", "01000000"}) {
+        for (String size : new String[] {"00004000", "00100000"}) {
             Endpoint server = serverAfterPreface();
 
             server.receive(bytes(helloWith("0001" + size)));
@@ -418,7 +418,7 @@ class EndpointTest {
 
     @Test
     void maxFrameSizeOutsideTheRangeClosesWithProtocolError() {
-        for (String size : new String[] {"00003fff", "01000001"}) {
+        for (String size : new String[] {"00003fff", "00100001"}) {
             Endpoint server = serverAfterPreface();
 
             server.receive(bytes(helloWith("0001" + size)));
