@@ -992,21 +992,25 @@ public final class Endpoint {
     }
 
     /**
-     * 프레임을 쓰기 대기열에 넣는다. 제어 프레임은 아직 쓰기를 시작하지 않은 애플리케이션 프레임 앞에 둔다(규격 3.6절). 대기열에 남은 메시지는
-     * 모두 쓰기 전이므로(꺼낸 메시지가 쓰기를 시작한 것이다) 제어 프레임끼리의 순서와 애플리케이션 프레임끼리의 순서는 넣은 순서 그대로다.
-     * CLOSE는 쓰기 전 요청 뒤에 둔다. 앞서 보내면 그 요청이 CLOSE 뒤에 온 새 요청이 되어 상대가 버리기 때문이다(규격 3.5절).
+     * 프레임을 쓰기 대기열에 넣는다. 제어 프레임은 아직 쓰기를 시작한 적 없는 애플리케이션 프레임 앞에 둔다(규격 3.6절). 대기열에 남은 메시지는
+     * 모두 쓰기 전이다(꺼낸 메시지가 쓰기를 시작한 것이다). 애플리케이션 프레임끼리는 넣은 순서 그대로다. 제어 프레임은 대부분 넣은 순서 그대로지만,
+     * CLOSE는 쓰기 전 요청 뒤에 두므로 그 뒤에 넣은 다른 제어 프레임(PING, RESET 등)이 그 요청 앞에 있는 CLOSE 앞에 올 수 있다. 제어 프레임끼리의
+     * 순서는 3.6절이 정하지 않고, 3.2.2절과 3.5.1절이 정한 순서(HELLO 먼저, 돌려보내는 RESET이 오류 CLOSE보다 먼저)는 CLOSE를 보내는 때에 이미
+     * 대기열에 들어 있는 RESET과 HELLO가 CLOSE 앞에 남으므로 지켜진다. CLOSE를 쓰기 전 요청 뒤에 두는 까닭은 앞서 보내면 그 요청이 CLOSE 뒤에 온 새
+     * 요청이 되어 상대가 버리기 때문이다(규격 3.5절).
      */
-    private void send(byte[] frame) {
+    private OutboundMessage send(byte[] frame) {
         OutboundMessage message = OutboundMessage.binary(frame);
         if (message.isApplication()) {
             outbox.add(message);
-            return;
+            return message;
         }
         int at = firstApplicationIndex();
         if (Frames.typeOf(frame) == FrameType.CLOSE) {
             at = Math.max(at, afterLastUnwrittenRequest());
         }
         outbox.add(at, message);
+        return message;
     }
 
     /** 쓰기 전 요청 프레임 {@code after} 바로 뒤에 제어 프레임을 둔다. {@code after}가 대기열에 없으면 {@link #send(byte[])}와 같다. */
@@ -1046,9 +1050,7 @@ public final class Endpoint {
 
     /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
     private void sendAwaitingAck(byte[] frame, byte @Nullable [] payload) {
-        OutboundMessage message = OutboundMessage.binary(frame);
-        outbox.add(message);
-        ackWaits.add(new AckWait(payload, message));
+        ackWaits.add(new AckWait(payload, send(frame)));
     }
 
     /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
