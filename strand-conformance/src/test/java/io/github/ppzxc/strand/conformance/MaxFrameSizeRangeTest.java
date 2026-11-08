@@ -51,7 +51,7 @@ class MaxFrameSizeRangeTest {
     }
 
     @Test
-    void specificationDefinesTheDefaultAndTheRangeInSection321() throws IOException {
+    void specificationDefinesTheDefaultAndTheRangeInTheParameterTable() throws IOException {
         String row = null;
         for (String line : Files.readAllLines(SPEC, StandardCharsets.UTF_8)) {
             if (line.startsWith("| `0x0001` | `max_frame_size`")) {
