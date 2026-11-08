@@ -1066,7 +1066,8 @@ class EndpointTest {
 
         client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
 
-        assertThat(client.drainMessages()).isEmpty();
+        // 상대 HELLO는 유효하므로 ACK는 보내고(3.2.3절), AUTH와 CLOSE는 보내지 않는다.
+        assertThat(sent(client)).isEqualTo(HELLO_ACK);
         List<Event> events = client.drainEvents();
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
