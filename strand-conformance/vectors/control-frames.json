@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "hello-with-extensions-closes",
@@ -495,7 +495,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -513,7 +513,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]
@@ -624,7 +624,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -642,7 +642,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]
@@ -669,7 +669,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 1,
+              "stream_id": "1",
               "type": 257
             }
           ]
@@ -681,7 +681,7 @@
           "events": [
             {
               "event": "request_received",
-              "stream_id": 3,
+              "stream_id": "3",
               "type": 257
             }
           ]

@@ -29,7 +29,7 @@ class VectorLoaderTest {
     }
 
     private static String file(String... vectors) {
-        return "{\"format\":1,\"vectors\":[" + String.join(",", vectors) + "]}";
+        return "{\"format\":2,\"vectors\":[" + String.join(",", vectors) + "]}";
     }
 
     /** 유효한 벡터 하나에 단계 하나만 바꿔 넣은 파일. */
@@ -51,7 +51,7 @@ class VectorLoaderTest {
 
     @Test
     void loadsAppendixGExample() {
-        String json = "{\"format\":1,\"vectors\":[{\"id\":\"ping-is-acknowledged\","
+        String json = "{\"format\":2,\"vectors\":[{\"id\":\"ping-is-acknowledged\","
                 + "\"description\":\"PING을 받으면 같은 8바이트에 ACK를 붙여 돌려준다\",\"spec\":[\"3.4\"],"
                 + "\"setup\":{\"role\":\"server\",\"established\":true},\"steps\":[{\"kind\":\"recv\","
                 + "\"hex\":\"00000014 00020000 00000000 00000000 0102030405060708\","
@@ -74,9 +74,9 @@ class VectorLoaderTest {
         String steps = "[" + STEP
                 + ",{\"kind\":\"request\",\"type\":256,\"send\":[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"},"
                 + "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\"},"
-                + "{\"type\":\"RESET\",\"stream_id\":1,\"error_code\":\"CANCEL\"},"
-                + "{\"type\":256,\"stream_id\":1}],\"events\":[]},"
-                + "{\"kind\":\"respond\",\"stream_id\":1,\"status\":\"OK\",\"send\":[],\"events\":[]}]";
+                + "{\"type\":\"RESET\",\"stream_id\":\"1\",\"error_code\":\"CANCEL\"},"
+                + "{\"type\":256,\"stream_id\":\"1\"}],\"events\":[]},"
+                + "{\"kind\":\"respond\",\"stream_id\":\"1\",\"status\":\"OK\",\"send\":[],\"events\":[]}]";
 
         assertThat(VectorLoader.parse("x.json", file(vector("a", "[\"3.4\"]", SETUP, steps))))
                 .hasSize(1);
@@ -87,18 +87,18 @@ class VectorLoaderTest {
         String setup = "{\"role\":\"client\",\"established\":false,"
                 + "\"local_hello\":{\"max_frame_size\":16384,\"max_concurrent_streams\":1,\"capabilities\":0},"
                 + "\"peer_hello\":{},\"config\":{\"ack_timeout_ms\":5000},"
-                + "\"transport\":\"tcp\",\"next_stream_id\":1,\"known_types\":[256,257]}";
+                + "\"transport\":\"tcp\",\"next_stream_id\":\"1\",\"known_types\":[256,257]}";
         String steps = "["
                 + "{\"kind\":\"request\",\"type\":257,\"extensions\":[{\"tag\":1,\"value\":\"0a\"}],\"payload\":\"0b\","
-                + "\"send\":[{\"type\":\"PREFACE\"},{\"type\":257,\"stream_id\":1,"
+                + "\"send\":[{\"type\":\"PREFACE\"},{\"type\":257,\"stream_id\":\"1\","
                 + "\"status\":17,\"extensions\":[{\"tag\":1,\"value\":\"\"}],\"payload\":\"\"},"
-                + "{\"type\":\"HELLO\",\"flags\":[\"ACK\"],\"stream_id\":0,\"params\":{\"max_frame_size\":1}},"
-                + "{\"type\":\"CLOSE\",\"stream_id\":0,\"error_code\":\"NO_ERROR\"},"
-                + "{\"type\":\"RESET\",\"stream_id\":1,\"error_code\":6}],"
-                + "\"events\":[{\"event\":\"request_received\",\"stream_id\":1,\"type\":257},"
-                + "{\"event\":\"result\",\"stream_id\":1,\"status\":\"OK\"},{\"event\":\"closed\"}]},"
-                + "{\"kind\":\"respond\",\"stream_id\":2147483649,\"status\":\"INTERNAL\",\"send\":[],\"events\":[]},"
-                + "{\"kind\":\"cancel\",\"stream_id\":1,\"send\":[],\"events\":[]},"
+                + "{\"type\":\"HELLO\",\"flags\":[\"ACK\"],\"stream_id\":\"0\",\"params\":{\"max_frame_size\":1}},"
+                + "{\"type\":\"CLOSE\",\"stream_id\":\"0\",\"error_code\":\"NO_ERROR\"},"
+                + "{\"type\":\"RESET\",\"stream_id\":\"1\",\"error_code\":6}],"
+                + "\"events\":[{\"event\":\"request_received\",\"stream_id\":\"1\",\"type\":257},"
+                + "{\"event\":\"result\",\"stream_id\":\"1\",\"status\":\"OK\"},{\"event\":\"closed\"}]},"
+                + "{\"kind\":\"respond\",\"stream_id\":\"9007199254740993\",\"status\":\"INTERNAL\",\"send\":[],\"events\":[]},"
+                + "{\"kind\":\"cancel\",\"stream_id\":\"1\",\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"close\",\"error_code\":\"NO_ERROR\",\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"advance\",\"ms\":1,\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"ping\",\"payload\":\"0102030405060708\",\"send\":[],\"events\":[]},"
@@ -106,6 +106,69 @@ class VectorLoaderTest {
 
         assertThat(VectorLoader.parse("x.json", file(vector("a", "[\"2.4.2\",\"5.1\"]", setup, steps))))
                 .hasSize(1);
+    }
+
+    @Test
+    void streamNumbersAboveTwoToThe53AreReadExactly() {
+        String big = "9007199254740993"; // 2^53 + 1: double로는 표현할 수 없다
+        String setup = "{\"role\":\"client\",\"established\":true,\"next_stream_id\":\"" + big + "\"}";
+        String steps = "[{\"kind\":\"respond\",\"stream_id\":\"" + big + "\",\"status\":\"OK\","
+                + "\"send\":[{\"type\":\"RESET\",\"stream_id\":\"" + big + "\",\"error_code\":\"CANCEL\"}],"
+                + "\"events\":[{\"event\":\"result\",\"stream_id\":\"" + big + "\",\"status\":\"OK\"}]}]";
+
+        ConformanceVector vector = VectorLoader.parse("x.json", file(vector("a", "[\"3.4\"]", setup, steps)))
+                .get(0);
+
+        assertThat(vector.setup().get("next_stream_id").getAsString()).isEqualTo(big);
+        assertThat(vector.steps().get(0).get("stream_id").getAsString()).isEqualTo(big);
+        assertThat(vector.steps()
+                        .get(0)
+                        .getAsJsonArray("send")
+                        .get(0)
+                        .getAsJsonObject()
+                        .get("stream_id")
+                        .getAsString())
+                .isEqualTo(big);
+        assertThat(vector.steps()
+                        .get(0)
+                        .getAsJsonArray("events")
+                        .get(0)
+                        .getAsJsonObject()
+                        .get("stream_id")
+                        .getAsString())
+                .isEqualTo(big);
+    }
+
+    @TestFactory
+    Stream<DynamicTest> rejectsNumericStreamNumbers() {
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(rejected(
+                "step stream_id",
+                fileWithStep("\"kind\":\"cancel\",\"stream_id\":1,\"send\":[],\"events\":[]"),
+                "stream_id",
+                "문자열"));
+        t.add(rejected("app frame stream_id", recvWithSend("{\"type\":256,\"stream_id\":1}"), "stream_id", "문자열"));
+        t.add(rejected(
+                "reset stream_id",
+                recvWithSend("{\"type\":\"RESET\",\"stream_id\":1,\"error_code\":\"CANCEL\"}"),
+                "stream_id",
+                "문자열"));
+        t.add(rejected(
+                "control frame stream_id", recvWithSend("{\"type\":\"HELLO\",\"stream_id\":0}"), "stream_id", "문자열"));
+        t.add(rejected(
+                "event stream_id",
+                recvWithEvent("{\"event\":\"result\",\"stream_id\":1,\"status\":\"OK\"}"),
+                "stream_id",
+                "문자열"));
+        t.add(rejected(
+                "leading zero",
+                fileWithStep("\"kind\":\"cancel\",\"stream_id\":\"01\",\"send\":[],\"events\":[]"),
+                "stream_id"));
+        t.add(rejected(
+                "signed",
+                fileWithStep("\"kind\":\"cancel\",\"stream_id\":\"+1\",\"send\":[],\"events\":[]"),
+                "stream_id"));
+        return t.stream();
     }
 
     private static DynamicTest rejected(String name, String json, String... messageParts) {
@@ -120,18 +183,19 @@ class VectorLoaderTest {
     @TestFactory
     Stream<DynamicTest> rejectsTopLevelViolations() {
         List<DynamicTest> t = new ArrayList<>();
-        t.add(rejected("higher format", "{\"format\":2,\"vectors\":[]}", "format"));
-        t.add(rejected("lower format", "{\"format\":0,\"vectors\":[]}", "format"));
-        t.add(rejected("non-integer format", "{\"format\":\"1\",\"vectors\":[]}", "format"));
+        t.add(rejected("higher format", "{\"format\":3,\"vectors\":[]}", "format"));
+        t.add(rejected("format 1", "{\"format\":1,\"vectors\":[]}", "format"));
+        t.add(rejected("zero format", "{\"format\":0,\"vectors\":[]}", "format"));
+        t.add(rejected("non-integer format", "{\"format\":\"2\",\"vectors\":[]}", "format"));
         t.add(rejected("missing format", "{\"vectors\":[]}", "필수 필드 누락", "format"));
-        t.add(rejected("missing vectors", "{\"format\":1}", "필수 필드 누락", "vectors"));
-        t.add(rejected("unknown top-level field", "{\"format\":1,\"vectors\":[],\"x\":1}", "알 수 없는 필드", "x"));
+        t.add(rejected("missing vectors", "{\"format\":2}", "필수 필드 누락", "vectors"));
+        t.add(rejected("unknown top-level field", "{\"format\":2,\"vectors\":[],\"x\":1}", "알 수 없는 필드", "x"));
         t.add(rejected("legacy top-level array", "[]", "객체"));
         t.add(rejected("empty file", "  \n", "비어"));
         t.add(rejected("syntax error", "{\"format\":", "JSON"));
-        t.add(rejected("trailing content", "{\"format\":1,\"vectors\":[]} []", "JSON"));
-        t.add(rejected("duplicate json key", "{\"format\":1,\"format\":1,\"vectors\":[]}", "중복 키", "format"));
-        t.add(rejected("vector not an object", "{\"format\":1,\"vectors\":[\"a\"]}", "[0]", "객체"));
+        t.add(rejected("trailing content", "{\"format\":2,\"vectors\":[]} []", "JSON"));
+        t.add(rejected("duplicate json key", "{\"format\":2,\"format\":2,\"vectors\":[]}", "중복 키", "format"));
+        t.add(rejected("vector not an object", "{\"format\":2,\"vectors\":[\"a\"]}", "[0]", "객체"));
         return t.stream();
     }
 
@@ -232,12 +296,12 @@ class VectorLoaderTest {
                 "a"));
         t.add(rejected(
                 "respond bad status",
-                fileWithStep("\"kind\":\"respond\",\"stream_id\":1,\"status\":\"NOPE\",\"send\":[],\"events\":[]"),
+                fileWithStep("\"kind\":\"respond\",\"stream_id\":\"1\",\"status\":\"NOPE\",\"send\":[],\"events\":[]"),
                 "status",
                 "a"));
         t.add(rejected(
                 "respond reserved status below 17",
-                fileWithStep("\"kind\":\"respond\",\"stream_id\":1,\"status\":16,\"send\":[],\"events\":[]"),
+                fileWithStep("\"kind\":\"respond\",\"stream_id\":\"1\",\"status\":16,\"send\":[],\"events\":[]"),
                 "status",
                 "a"));
         t.add(rejected(
@@ -258,8 +322,8 @@ class VectorLoaderTest {
                 "필수 필드 누락",
                 "events"));
         t.add(rejected(
-                "stream_id out of u32",
-                fileWithStep("\"kind\":\"cancel\",\"stream_id\":4294967296,\"send\":[],\"events\":[]"),
+                "stream_id above 2^63-1",
+                fileWithStep("\"kind\":\"cancel\",\"stream_id\":\"9223372036854775808\",\"send\":[],\"events\":[]"),
                 "stream_id",
                 "a"));
         t.add(rejected(
@@ -306,7 +370,7 @@ class VectorLoaderTest {
     Stream<DynamicTest> rejectsBadExpectations() {
         List<DynamicTest> t = new ArrayList<>();
         t.add(rejected("unknown frame type name", recvWithSend("{\"type\":\"PONG\"}"), "type", "a"));
-        t.add(rejected("app frame type below 256", recvWithSend("{\"type\":3,\"stream_id\":1}"), "type", "a"));
+        t.add(rejected("app frame type below 256", recvWithSend("{\"type\":3,\"stream_id\":\"1\"}"), "type", "a"));
         t.add(rejected("ping missing payload", recvWithSend("{\"type\":\"PING\"}"), "payload", "a"));
         t.add(rejected("ping short payload", recvWithSend("{\"type\":\"PING\",\"payload\":\"01\"}"), "payload", "a"));
         t.add(rejected(
@@ -317,7 +381,10 @@ class VectorLoaderTest {
         t.add(rejected("frame unknown field", recvWithSend("{\"type\":\"PREFACE\",\"x\":1}"), "x", "a"));
         t.add(rejected("unknown event", recvWithEvent("{\"event\":\"opened\"}"), "event", "a"));
         t.add(rejected(
-                "result event missing status", recvWithEvent("{\"event\":\"result\",\"stream_id\":1}"), "status", "a"));
+                "result event missing status",
+                recvWithEvent("{\"event\":\"result\",\"stream_id\":\"1\"}"),
+                "status",
+                "a"));
         t.add(rejected("closed event unknown field", recvWithEvent("{\"event\":\"closed\",\"x\":1}"), "x", "a"));
         return t.stream();
     }
@@ -331,12 +398,12 @@ class VectorLoaderTest {
     /** 오류 메시지의 {@code 파일명: [위치](id=...) 경로: 메시지} 형식을 고정한다. */
     @Test
     void errorMessagesFollowFileLocationPathFormat() {
-        assertMessage("{\"format\":2,\"vectors\":[]}", "x.json: format: 지원하지 않는 format이다(아는 것은 1): 2");
-        assertThatThrownBy(() -> VectorLoader.parse("x.json", "{\"format\":1,\"vectors\":[]"))
+        assertMessage("{\"format\":1,\"vectors\":[]}", "x.json: format: 지원하지 않는 format이다(아는 것은 2): 1");
+        assertThatThrownBy(() -> VectorLoader.parse("x.json", "{\"format\":2,\"vectors\":[]"))
                 .hasMessageStartingWith("x.json: JSON 문법 오류: ");
         assertMessage("  ", "x.json: 파일이 비어 있다");
         assertMessage("[]", "x.json: 객체여야 한다");
-        assertMessage("{\"format\":1,\"vectors\":[1]}", "x.json: [0] 객체여야 한다");
+        assertMessage("{\"format\":2,\"vectors\":[1]}", "x.json: [0] 객체여야 한다");
         assertMessage(
                 file(VALID_VECTOR.replace("\"description\":\"d\"", "\"description\":\"\"")),
                 "x.json: [0](id=a) description: 비어 있으면 안 된다");
@@ -361,14 +428,15 @@ class VectorLoaderTest {
     Stream<DynamicTest> rejectsControlFrameFieldViolations() {
         List<DynamicTest> t = new ArrayList<>();
         t.add(rejected("hello flag other than ACK", recvWithSend("{\"type\":\"HELLO\",\"flags\":[\"END\"]}"), "flags"));
-        t.add(rejected("hello stream_id not zero", recvWithSend("{\"type\":\"HELLO\",\"stream_id\":1}"), "stream_id"));
+        t.add(rejected(
+                "hello stream_id not zero", recvWithSend("{\"type\":\"HELLO\",\"stream_id\":\"1\"}"), "stream_id"));
         t.add(rejected(
                 "ping duplicate flag",
                 recvWithSend("{\"type\":\"PING\",\"flags\":[\"ACK\",\"ACK\"],\"payload\":\"0102030405060708\"}"),
                 "플래그 중복"));
         t.add(rejected(
                 "ping stream_id not zero",
-                recvWithSend("{\"type\":\"PING\",\"stream_id\":2,\"payload\":\"0102030405060708\"}"),
+                recvWithSend("{\"type\":\"PING\",\"stream_id\":\"2\",\"payload\":\"0102030405060708\"}"),
                 "stream_id"));
         t.add(rejected(
                 "ping payload uppercase",
@@ -380,11 +448,11 @@ class VectorLoaderTest {
                 "payload"));
         t.add(rejected(
                 "close stream_id not zero",
-                recvWithSend("{\"type\":\"CLOSE\",\"stream_id\":1,\"error_code\":\"NO_ERROR\"}"),
+                recvWithSend("{\"type\":\"CLOSE\",\"stream_id\":\"1\",\"error_code\":\"NO_ERROR\"}"),
                 "stream_id"));
         t.add(rejected(
                 "reset stream_id zero",
-                recvWithSend("{\"type\":\"RESET\",\"stream_id\":0,\"error_code\":\"CANCEL\"}"),
+                recvWithSend("{\"type\":\"RESET\",\"stream_id\":\"0\",\"error_code\":\"CANCEL\"}"),
                 "stream_id"));
         t.add(rejected("app frame missing stream_id", recvWithSend("{\"type\":256}"), "필수 필드 누락", "stream_id"));
         t.add(rejected("hello params unknown field", recvWithSend("{\"type\":\"HELLO\",\"params\":{\"x\":1}}"), "x"));
@@ -416,8 +484,8 @@ class VectorLoaderTest {
     private static List<ConformanceVector> parseStatus(int status) {
         return VectorLoader.parse(
                 "x.json",
-                fileWithStep(
-                        "\"kind\":\"respond\",\"stream_id\":1,\"status\":" + status + ",\"send\":[],\"events\":[]"));
+                fileWithStep("\"kind\":\"respond\",\"stream_id\":\"1\",\"status\":" + status
+                        + ",\"send\":[],\"events\":[]"));
     }
 
     private static List<ConformanceVector> parseErrorCode(String code) {
@@ -470,7 +538,7 @@ class VectorLoaderTest {
         for (String flag : new String[] {"RESPONSE", "END"}) {
             t.add(rejected(
                     "app frame flag " + flag,
-                    recvWithSend("{\"type\":256,\"flags\":[\"" + flag + "\"],\"stream_id\":1}"),
+                    recvWithSend("{\"type\":256,\"flags\":[\"" + flag + "\"],\"stream_id\":\"1\"}"),
                     "알 수 없는 필드",
                     "flags"));
         }
@@ -627,24 +695,28 @@ class VectorLoaderTest {
     @TestFactory
     Stream<DynamicTest> rejectsNextStreamIdViolations() {
         List<DynamicTest> t = new ArrayList<>();
-        t.add(rejected("zero", clientSetupWith("\"next_stream_id\":0"), "next_stream_id"));
-        t.add(rejected("above 2^31-1", clientSetupWith("\"next_stream_id\":2147483649"), "next_stream_id"));
-        t.add(rejected("2^31", setupWith("\"next_stream_id\":2147483648"), "next_stream_id"));
-        t.add(rejected("non-integer", clientSetupWith("\"next_stream_id\":\"1\""), "next_stream_id"));
-        t.add(rejected("even for client", clientSetupWith("\"next_stream_id\":2"), "next_stream_id", "client", "홀수"));
-        t.add(rejected("odd for server", setupWith("\"next_stream_id\":3"), "next_stream_id", "server", "짝수"));
+        t.add(rejected("zero", clientSetupWith("\"next_stream_id\":\"0\""), "next_stream_id"));
+        t.add(rejected("2^63", setupWith("\"next_stream_id\":\"9223372036854775808\""), "next_stream_id"));
+        t.add(rejected("number instead of string", clientSetupWith("\"next_stream_id\":1"), "next_stream_id", "문자열"));
+        t.add(rejected("not decimal", clientSetupWith("\"next_stream_id\":\"0x1\""), "next_stream_id"));
+        t.add(rejected("leading zero", clientSetupWith("\"next_stream_id\":\"01\""), "next_stream_id"));
+        t.add(rejected(
+                "above 2^63-1", clientSetupWith("\"next_stream_id\":\"9223372036854775809\""), "next_stream_id"));
+        t.add(rejected(
+                "even for client", clientSetupWith("\"next_stream_id\":\"2\""), "next_stream_id", "client", "홀수"));
+        t.add(rejected("odd for server", setupWith("\"next_stream_id\":\"3\""), "next_stream_id", "server", "짝수"));
         return t.stream();
     }
 
     @Test
     void acceptsNextStreamIdAtTheBoundaries() {
-        assertThat(VectorLoader.parse("x.json", clientSetupWith("\"next_stream_id\":1")))
+        assertThat(VectorLoader.parse("x.json", clientSetupWith("\"next_stream_id\":\"1\"")))
                 .hasSize(1);
-        assertThat(VectorLoader.parse("x.json", clientSetupWith("\"next_stream_id\":2147483647")))
+        assertThat(VectorLoader.parse("x.json", clientSetupWith("\"next_stream_id\":\"9223372036854775807\"")))
                 .hasSize(1);
-        assertThat(VectorLoader.parse("x.json", setupWith("\"next_stream_id\":2")))
+        assertThat(VectorLoader.parse("x.json", setupWith("\"next_stream_id\":\"2\"")))
                 .hasSize(1);
-        assertThat(VectorLoader.parse("x.json", setupWith("\"next_stream_id\":2147483646")))
+        assertThat(VectorLoader.parse("x.json", setupWith("\"next_stream_id\":\"9223372036854775806\"")))
                 .hasSize(1);
     }
 

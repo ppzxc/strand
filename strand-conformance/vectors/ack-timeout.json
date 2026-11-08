@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "vectors": [
     {
       "id": "ping-ack-timeout-before-and-after-limit",
@@ -166,7 +166,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1
+              "stream_id": "1"
             }
           ],
           "events": []
@@ -201,7 +201,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "UNAVAILABLE"
             },
             {
@@ -255,7 +255,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 2
+              "stream_id": "2"
             }
           ],
           "events": []
@@ -279,7 +279,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 2,
+              "stream_id": "2",
               "status": "UNAVAILABLE"
             },
             {
@@ -310,7 +310,7 @@
           "send": [
             {
               "type": 257,
-              "stream_id": 1
+              "stream_id": "1"
             }
           ],
           "events": []
@@ -344,7 +344,7 @@
           "events": [
             {
               "event": "result",
-              "stream_id": 1,
+              "stream_id": "1",
               "status": "UNAVAILABLE"
             },
             {

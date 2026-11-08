@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:strand:conformance:vector-format:1",
-  "title": "Strand 적합성 벡터 파일 (format 1)",
-  "description": "규범의 원천은 적합성 벡터 형식 문서(STRAND_CONFORMANCE_VECTORS.md)다. 이 스키마와 문서가 어긋나면 문서가 우선한다. id 유일성, 스트림 번호 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 문서에만 있다.",
+  "$id": "urn:strand:conformance:vector-format:2",
+  "title": "Strand 적합성 벡터 파일 (format 2)",
+  "description": "규범의 원천은 적합성 벡터 형식 문서(STRAND_CONFORMANCE_VECTORS.md)다. 이 스키마와 문서가 어긋나면 문서가 우선한다. id 유일성, 스트림 번호의 범위(2^63-1 이하), 스트림 번호 전제, 가상 시계처럼 스키마로 표현할 수 없는 규칙은 문서에만 있다.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "vectors"],
   "properties": {
-    "format": { "const": 1 },
+    "format": { "const": 2 },
     "vectors": {
       "type": "array",
       "items": { "$ref": "#/$defs/vector" }
@@ -47,7 +47,16 @@
       ]
     },
     "app_type": { "type": "integer", "minimum": 256, "maximum": 65535 },
-    "stream_id": { "$ref": "#/$defs/u32" },
+    "stream_id": {
+      "description": "10진수 문자열(JSON 수가 아니다). 0 이상 2^63-1 이하이지만 범위는 스키마로 표현할 수 없어 형식 문서에만 있다.",
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)$"
+    },
+    "positive_stream_id": {
+      "description": "stream_id와 같되 1 이상이다(0 제외는 형식 문서에만 있다).",
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
     "extension": {
       "type": "object",
       "additionalProperties": false,
@@ -91,8 +100,8 @@
         "config": { "$ref": "#/$defs/config" },
         "transport": { "enum": ["tcp", "websocket"] },
         "next_stream_id": {
-          "description": "1 이상 2^31-1 이하. role이 client이면 홀수, server이면 짝수여야 하지만 스키마로 표현할 수 없어 형식 문서에만 있다.",
-          "type": "integer", "minimum": 1, "maximum": 2147483647
+          "description": "10진수 문자열. 1 이상 2^63-1 이하. role이 client이면 홀수, server이면 짝수여야 하지만 스키마로 표현할 수 없어 형식 문서에만 있다.",
+          "$ref": "#/$defs/positive_stream_id"
         },
         "known_types": {
           "description": "중복 값 금지.",
@@ -120,7 +129,7 @@
       "properties": {
         "type": { "const": "HELLO" },
         "flags": { "$ref": "#/$defs/control_flags" },
-        "stream_id": { "const": 0 },
+        "stream_id": { "const": "0" },
         "params": { "$ref": "#/$defs/hello_params" }
       }
     },
@@ -131,7 +140,7 @@
       "properties": {
         "type": { "const": "PING" },
         "flags": { "$ref": "#/$defs/control_flags" },
-        "stream_id": { "const": 0 },
+        "stream_id": { "const": "0" },
         "payload": { "type": "string", "pattern": "^[0-9a-f]{16}$" }
       }
     },
@@ -141,7 +150,7 @@
       "required": ["type", "error_code"],
       "properties": {
         "type": { "const": "CLOSE" },
-        "stream_id": { "const": 0 },
+        "stream_id": { "const": "0" },
         "error_code": { "$ref": "#/$defs/error_code" }
       }
     },
@@ -151,7 +160,7 @@
       "required": ["type", "stream_id", "error_code"],
       "properties": {
         "type": { "const": "RESET" },
-        "stream_id": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "stream_id": { "$ref": "#/$defs/positive_stream_id" },
         "error_code": { "$ref": "#/$defs/error_code" }
       }
     },

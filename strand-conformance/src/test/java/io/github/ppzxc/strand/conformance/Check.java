@@ -22,6 +22,7 @@ final class Check {
     private static final Pattern ID = Pattern.compile("[a-z0-9]+(-[a-z0-9]+)*");
     private static final Pattern PING_PAYLOAD = Pattern.compile("[0-9a-f]{16}");
     private static final Pattern SPEC_SECTION = Pattern.compile("(?:[0-9]+|[A-G])(?:\\.[0-9]+)*");
+    private static final Pattern DECIMAL = Pattern.compile("0|[1-9][0-9]*");
 
     private final String fileName;
     private final String location;
@@ -227,6 +228,21 @@ final class Check {
 
     private BigInteger integer(JsonElement element) {
         return element.getAsBigDecimal().toBigIntegerExact();
+    }
+
+    /** 10진수 문자열로 쓴 정수. 부호와 앞자리 0은 허용하지 않고, {@code min} 이상 {@code max} 이하여야 한다. */
+    void decimal(String path, JsonElement element, BigInteger min, BigInteger max) {
+        if (!isString(element)) {
+            throw failAt(path, "10진수 문자열이어야 한다(JSON 수가 아니다)");
+        }
+        String text = element.getAsString();
+        if (!DECIMAL.matcher(text).matches()) {
+            throw failAt(path, "앞자리 0과 부호 없는 10진수 문자열이어야 한다: '" + text + "'");
+        }
+        BigInteger value = new BigInteger(text);
+        if (value.compareTo(min) < 0 || value.compareTo(max) > 0) {
+            throw failAt(path, min + " 이상 " + max + " 이하여야 한다: " + value);
+        }
     }
 
     void range(String path, JsonElement element, long min, long max) {
