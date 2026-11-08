@@ -11,6 +11,9 @@ final class Status {
     static final int UNKNOWN = 2;
 
     static final int INVALID_ARGUMENT = 3;
+    /** 요청 기한이 지났다(규격 4.4.1절). */
+    static final int DEADLINE_EXCEEDED = 4;
+
     static final int UNIMPLEMENTED = 12;
     static final int INTERNAL = 13;
     static final int UNAVAILABLE = 14;

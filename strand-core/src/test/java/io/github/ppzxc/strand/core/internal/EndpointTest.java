@@ -2080,6 +2080,199 @@ class EndpointTest {
         assertOpenAndSilent(client);
     }
 
+    private static final String RESET_CANCEL_1 = "00000014000400000000000000000001" + "0000" + "0000" + "00000004";
+
+    private static void assertSingleResult(Endpoint endpoint, long streamId, int status, Certainty certainty) {
+        List<Event> events = endpoint.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).streamId()).isEqualTo(streamId);
+        assertThat(events.get(0).status()).isEqualTo(status);
+        assertThat(events.get(0).certainty()).contains(certainty);
+    }
+
+    /** 규격 4.4.1절: 번호는 받았지만 한 바이트도 쓰기 전에 기한이 지나면 RESET 없이 프레임을 버린다. */
+    @Test
+    void deadlineBeforeAnyByteWrittenDropsTheNumberedFrameWithoutReset() {
+        Endpoint client = establishedClient();
+        long ticket = client.request(257, new byte[0], 100);
+        long kept = client.request(257, new byte[0]);
+
+        client.advance(101);
+
+        assertSingleResult(client, 1, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED);
+        assertThat(client.requestState(ticket)).isNull();
+        // 첫 요청의 프레임만 사라지고 나머지는 그대로 나간다. 쓴 적 없는 번호 1은 건너뛴다.
+        assertThat(sent(client)).isEqualTo("0000001001010000000000000000000300000000");
+        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+    }
+
+    /** 규격 4.4.1절: 번호를 받지 못한 대기열 요청도 기한이 지나면 stream_id 없이 DEADLINE_EXCEEDED(처리 안 됨)로 끝난다. */
+    @Test
+    void deadlineOfAQueuedRequestWithoutNumberEndsItWithoutAStreamId() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+        long ticket = client.request(257, new byte[0], 100);
+        assertThat(client.requestState(ticket)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+
+        client.advance(101);
+
+        assertSingleResult(client, 0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED);
+        assertThat(client.requestState(ticket)).isNull();
+        client.receive(bytes(AUTH_ACK));
+        assertThat(client.drainMessages()).isEmpty();
+    }
+
+    /** 규격 4.4.1절: 쓰기를 시작한 요청은 기한이 지나면 RESET(CANCEL)을 보내고 DEADLINE_EXCEEDED(결과 모름)로 끝난다. */
+    @Test
+    void deadlineAfterWritingStartedSendsResetCancelAndReportsUnknown() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0], 100);
+        client.drainMessages();
+
+        client.advance(99);
+        assertThat(client.drainEvents()).isEmpty();
+        assertThat(client.drainMessages()).isEmpty();
+        client.advance(2);
+
+        assertThat(sent(client)).isEqualTo(RESET_CANCEL_1);
+        assertSingleResult(client, 1, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
+        // 이미 끝난 요청의 응답은 조용히 버려지고, 기한은 다시 울리지 않는다.
+        client.receive(bytes(appFrame(1, 0, "")));
+        client.advance(1000);
+        assertOpenAndSilent(client);
+    }
+
+    /** 요청 기한은 로컬 설정이다. 설정이 없으면 기한이 없고, 응답을 받아 끝난 요청의 기한은 울리지 않는다. */
+    @Test
+    void withoutDeadlineOrAfterResponseNothingExpires() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.request(257, new byte[0], 100);
+        client.drainMessages();
+        client.receive(bytes(appFrame(3, 0, "")));
+        client.drainEvents();
+
+        client.advance(1_000_000);
+
+        assertThat(client.drainMessages()).isEmpty();
+        assertThat(client.drainEvents()).isEmpty();
+    }
+
+    /** 규격 4.4절: 한 바이트도 쓰기 전의 취소는 프레임을 거두고 RESET 없이 CANCELLED(처리 안 됨)로 끝난다. */
+    @Test
+    void cancelBeforeAnyByteWrittenRemovesTheFrameWithoutReset() {
+        Endpoint client = establishedClient();
+        long first = client.request(257, new byte[0]);
+        client.request(257, new byte[0]);
+
+        client.cancelRequest(first);
+
+        assertSingleResult(client, 1, Status.CANCELLED, Certainty.NOT_PROCESSED);
+        assertThat(sent(client)).isEqualTo("0000001001010000000000000000000300000000");
+        client.cancelRequest(first);
+        assertThat(client.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void cancelByStreamIdBeforeAnyByteWrittenAlsoEndsAsNotProcessed() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+
+        client.cancel(1);
+
+        assertThat(client.drainMessages()).isEmpty();
+        assertSingleResult(client, 1, Status.CANCELLED, Certainty.NOT_PROCESSED);
+    }
+
+    /** 규격 4.4절: 번호 없는 대기열 요청의 취소는 stream_id 없이 CANCELLED(처리 안 됨)다. 나중에 관문이 열려도 프레임은 나가지 않는다. */
+    @Test
+    void cancelOfAQueuedRequestWithoutNumberEndsItWithoutAStreamId() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+        long ticket = client.request(257, new byte[0]);
+
+        client.cancelRequest(ticket);
+
+        assertSingleResult(client, 0, Status.CANCELLED, Certainty.NOT_PROCESSED);
+        client.receive(bytes(AUTH_ACK));
+        assertThat(client.drainMessages()).isEmpty();
+    }
+
+    /** 규격 4.4절: 쓰기를 시작한 뒤의 취소는 RESET(CANCEL)을 보내고 CANCELLED(결과 모름)다. */
+    @Test
+    void cancelAfterWritingStartedByTicketSendsResetAndReportsUnknown() {
+        Endpoint client = establishedClient();
+        long ticket = client.request(257, new byte[0]);
+        client.drainMessages();
+
+        client.cancelRequest(ticket);
+
+        assertThat(sent(client)).isEqualTo(RESET_CANCEL_1);
+        assertSingleResult(client, 1, Status.CANCELLED, Certainty.UNKNOWN);
+    }
+
+    @Test
+    void deadlineMustBePositive() {
+        Endpoint client = establishedClient();
+
+        assertThatThrownBy(() -> client.request(257, new byte[0], 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(client.drainMessages()).isEmpty();
+    }
+
+    /** 대기열에서 기다리는 PING과 다른 요청은 기한이나 취소가 건드리지 않는다. */
+    @Test
+    void expiringOrCancellingAQueuedRequestLeavesOtherQueuedSendsAlone() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+        client.ping(bytes(PING_PAYLOAD));
+        long cancelled = client.request(257, new byte[0]);
+        client.request(257, new byte[0], 100);
+        long kept = client.request(257, new byte[0], 10_000);
+
+        client.cancelRequest(cancelled);
+        client.cancelRequest(cancelled);
+        client.advance(101);
+        assertThat(client.drainEvents()).hasSize(2);
+        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+        client.receive(bytes(AUTH_ACK));
+
+        assertThat(sent(client)).contains(PING_PAYLOAD).contains("0000001001010000000000000000000100000000");
+    }
+
+    @Test
+    void cancelAndDeadlineAreIgnoredAfterTheConnectionClosed() {
+        Endpoint client = establishedClient();
+        long ticket = client.request(257, new byte[0], 100);
+        client.disconnect();
+        client.drainEvents();
+
+        client.cancelRequest(ticket);
+        client.cancel(1);
+        client.advance(1000);
+
+        assertThat(client.drainEvents()).isEmpty();
+    }
+
+    /** 규격 4.4.1절: 쓰기 전에 기한이 지난 요청이 마지막 대기 스트림이면 종료 중인 연결이 닫힌다. */
+    @Test
+    void deadlineOfTheLastPendingRequestWhileClosingClosesTheConnection() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0], 100);
+        client.close(0);
+        client.drainMessages();
+
+        client.advance(101);
+
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+    }
+
     @Test
     void lastCancelWhileClosingClosesTheConnection() {
         Endpoint client = establishedClient();

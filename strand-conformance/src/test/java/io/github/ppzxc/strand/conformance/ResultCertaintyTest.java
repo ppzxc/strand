@@ -52,7 +52,7 @@ class ResultCertaintyTest {
                 if (!result.has("stream_id")) {
                     // 스트림을 열기 전에 실패한 요청은 처리 안 됨이다.
                     assertThat(certainty).as(entry.getKey()).isEqualTo("not_processed");
-                    assertThat(status).as(entry.getKey()).isEqualTo("UNAVAILABLE");
+                    assertThat(status).as(entry.getKey()).isIn("UNAVAILABLE", "CANCELLED", "DEADLINE_EXCEEDED");
                 }
             }
         }
@@ -97,5 +97,40 @@ class ResultCertaintyTest {
                 .allMatch(r -> "unknown".equals(r.get("certainty").getAsString()));
         assertThat(resultsOf("streams/sender-own-cancel-sent"))
                 .allMatch(r -> "unknown".equals(r.get("certainty").getAsString()));
+    }
+
+    /** 규격 4.4.1절의 기한 결과를 벡터가 보이는지 본다. 쓰기 전 기한(RESET 없음)은 번호 없는 대기열 요청으로, 쓰기 시작 뒤 기한은 RESET(CANCEL)로 보인다. */
+    @Test
+    void deadlineVectorsAssertBothOutcomesOfSection441() {
+        JsonObject queued = RawVectors.byKey().get("streams/request-deadline-of-queued-request-ends-without-stream-id");
+        assertThat(queued).isNotNull();
+        assertThat(resultEvents(queued)).singleElement().satisfies(r -> {
+            assertThat(r.has("stream_id")).isFalse();
+            assertThat(r.get("status").getAsString()).isEqualTo("DEADLINE_EXCEEDED");
+            assertThat(r.get("certainty").getAsString()).isEqualTo("not_processed");
+        });
+        JsonObject written = RawVectors.byKey().get("streams/request-deadline-after-write-sends-reset-cancel");
+        assertThat(written).isNotNull();
+        assertThat(resultEvents(written)).singleElement().satisfies(r -> {
+            assertThat(r.get("stream_id").getAsString()).isEqualTo("1");
+            assertThat(r.get("status").getAsString()).isEqualTo("DEADLINE_EXCEEDED");
+            assertThat(r.get("certainty").getAsString()).isEqualTo("unknown");
+        });
+    }
+
+    /** 벡터 형식 6.2절과 규격 4.4절·4.4.1절이 어긋나지 않는다: stream_id 없는 result의 status 집합이 세 가지다. */
+    @Test
+    void formatDocumentSection62ListsTheQueuedRequestOutcomes() throws java.io.IOException {
+        java.nio.file.Path doc = VectorSuite.defaultDirectory()
+                .resolve("../..")
+                .normalize()
+                .resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
+        String text = new String(java.nio.file.Files.readAllBytes(doc), java.nio.charset.StandardCharsets.UTF_8);
+        String section = text.substring(text.indexOf("### 6.2"), text.indexOf("## 7."));
+        assertThat(section)
+                .contains("`UNAVAILABLE`", "`CANCELLED`", "`DEADLINE_EXCEEDED`")
+                .doesNotContain("`status`가 `UNAVAILABLE`이고 `certainty`가 `not_processed`여야 한다");
+        assertThat(text.substring(text.indexOf("## 5. 단계"), text.indexOf("## 6.")))
+                .contains("`deadline_ms`");
     }
 }

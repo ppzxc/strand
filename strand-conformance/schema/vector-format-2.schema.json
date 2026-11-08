@@ -282,7 +282,7 @@
           "if": { "not": { "required": ["stream_id"] } },
           "then": {
             "properties": {
-              "status": { "const": "UNAVAILABLE" },
+              "status": { "enum": ["UNAVAILABLE", "CANCELLED", "DEADLINE_EXCEEDED"] },
               "certainty": { "const": "not_processed" }
             }
           }
@@ -349,6 +349,7 @@
             "type": { "$ref": "#/$defs/app_type" },
             "extensions": { "$ref": "#/$defs/extensions" },
             "payload": { "$ref": "#/$defs/hex" },
+            "deadline_ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
             "send": { "$ref": "#/$defs/expect_send" },
             "events": { "$ref": "#/$defs/expect_events" }
           }

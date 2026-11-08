@@ -219,6 +219,7 @@ public final class Endpoint {
                 return;
             }
         }
+        expireRequests();
         sendIdlePingIfDue();
     }
 
@@ -263,23 +264,69 @@ public final class Endpoint {
      *     실패시킨다.
      */
     public long request(int type, byte[] payload) {
+        return requestUntil(type, payload, null);
+    }
+
+    private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
         long ticket = nextTicket++;
         if (transportClosed) {
             failLocally();
             return ticket;
         }
         if (authGatePassed) {
-            if (sendRequest(ticket, type, payload) == RequestOutcome.OVERSIZE) {
+            if (sendRequest(ticket, type, payload, deadlineAt) == RequestOutcome.OVERSIZE) {
                 throw oversizeFrame("요청");
             }
         } else {
-            deferredSends.add(DeferredSend.request(ticket, () -> {
-                if (sendRequest(ticket, type, payload) == RequestOutcome.OVERSIZE) {
+            deferredSends.add(DeferredSend.request(ticket, deadlineAt, () -> {
+                if (sendRequest(ticket, type, payload, deadlineAt) == RequestOutcome.OVERSIZE) {
                     failLocally();
                 }
             }));
         }
         return ticket;
+    }
+
+    /**
+     * 요청 기한을 두고 요청을 보낸다(규격 4.4.1절). 기한은 로컬 설정이고, 기한이 지난 뒤 {@link #advance(long)}가 요청을 끝낸다. 쓰기 전(번호
+     * 유무 무관)이면 {@code RESET} 없이 프레임을 버리고 {@code DEADLINE_EXCEEDED}(처리 안 됨), 쓰기를 시작했으면 {@code RESET(CANCEL)}을
+     * 보내고 {@code DEADLINE_EXCEEDED}(결과 모름)를 넘긴다. 요청 확장 영역의 {@code timeout}은 받는 쪽에 주는 힌트일 뿐 이 기한이 아니다.
+     *
+     * @param deadlineMs 지금부터 센 기한(밀리초, 1 이상)
+     * @throws IllegalArgumentException {@code deadlineMs}가 1보다 작을 때
+     * @see #request(int, byte[])
+     */
+    public long request(int type, byte[] payload, long deadlineMs) {
+        if (deadlineMs < 1) {
+            throw new IllegalArgumentException("deadlineMs는 1 이상이어야 한다: " + deadlineMs);
+        }
+        return requestUntil(type, payload, now + deadlineMs);
+    }
+
+    /**
+     * 번호표로 요청을 취소한다. 번호 없는 대기열 요청도 취소할 수 있다(규격 4.4절). 결과는 {@link #cancel(long)}과 같다. 끝난 요청이나 낸 적 없는
+     * 번호표면 아무것도 하지 않는다.
+     *
+     * @param ticket {@link #request}가 돌려준 번호표
+     */
+    public void cancelRequest(long ticket) {
+        if (transportClosed) {
+            return;
+        }
+        for (Iterator<DeferredSend> it = deferredSends.iterator(); it.hasNext(); ) {
+            DeferredSend deferred = it.next();
+            if (deferred.request && deferred.ticket == ticket) {
+                it.remove();
+                events.add(Event.result(0, Status.CANCELLED, Certainty.NOT_PROCESSED));
+                return;
+            }
+        }
+        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
+            if (entry.getValue().ticket == ticket) {
+                endOwnRequest(entry.getKey(), Status.CANCELLED);
+                return;
+            }
+        }
     }
 
     /**
@@ -312,14 +359,52 @@ public final class Endpoint {
      * @param streamId 내가 연 스트림 번호
      */
     public void cancel(long streamId) {
-        if (transportClosed || endOwnStream(streamId) == null) {
+        if (!transportClosed) {
+            endOwnRequest(streamId, Status.CANCELLED);
+        }
+    }
+
+    /**
+     * 기한이 지난 요청을 끝낸다(규격 4.4.1절). 번호 없는 대기열 요청은 stream_id 없는 결과로, 번호를 받은 요청은 {@link
+     * #endOwnRequest}로 끝낸다.
+     */
+    private void expireRequests() {
+        deferredSends.removeIf(deferred -> {
+            if (deferred.request && deferred.expiredAt(now)) {
+                events.add(Event.result(0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED));
+                return true;
+            }
+            return false;
+        });
+        List<Long> expired = new ArrayList<>();
+        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
+            Long deadlineAt = entry.getValue().deadlineAt;
+            if (deadlineAt != null && now > deadlineAt) {
+                expired.add(entry.getKey());
+            }
+        }
+        for (long streamId : expired) {
+            endOwnRequest(streamId, Status.DEADLINE_EXCEEDED);
+        }
+    }
+
+    /**
+     * 번호를 받은 내 요청을 취소나 기한으로 끝낸다(규격 4.4절, 4.4.1절). 한 바이트도 쓰기 전이면 프레임을 거두고 {@code RESET} 없이
+     * 처리 안 됨으로 끝낸다. 쓰기를 시작했으면 프레임은 이미 끊을 수 없으므로 그대로 두고 {@code RESET(CANCEL)}을 보내 결과 모름으로 끝낸다.
+     * 대기 중이 아닌 스트림이면 아무것도 하지 않는다.
+     */
+    private void endOwnRequest(long streamId, int status) {
+        if (endOwnStream(streamId) == null) {
             return;
         }
-        // 요청 프레임은 이미 쓰기 대기열에 있고 끊지 않고 마저 쓴 뒤 RESET을 보낸다(규격 4.4절). 쓰기 전 취소의 종료 규칙은 #191이 다룬다.
         OutboundMessage unwritten = undrainedRequests.remove(streamId);
-        // 요청 프레임보다 앞서 가면 안 되므로 쓰기 전이던 요청이면 그 프레임 바로 뒤에 둔다.
-        sendAfter(unwritten, Frames.reset(streamId, ErrorCode.CANCEL));
-        events.add(Event.result(streamId, Status.CANCELLED, Certainty.UNKNOWN));
+        if (unwritten != null) {
+            outbox.removeIf(message -> message == unwritten);
+            events.add(Event.result(streamId, status, Certainty.NOT_PROCESSED));
+        } else {
+            send(Frames.reset(streamId, ErrorCode.CANCEL));
+            events.add(Event.result(streamId, status, Certainty.UNKNOWN));
+        }
         closeTransportIfNoPendingStreams();
     }
 
@@ -1052,10 +1137,13 @@ public final class Endpoint {
     private static final class OwnStream {
         final int type;
         final long ticket;
+        /** 요청 기한(가상 시계의 절대 시각). 기한이 없으면 null. */
+        final @Nullable Long deadlineAt;
 
-        OwnStream(int type, long ticket) {
+        OwnStream(int type, long ticket, @Nullable Long deadlineAt) {
             this.type = type;
             this.ticket = ticket;
+            this.deadlineAt = deadlineAt;
         }
     }
 
@@ -1074,7 +1162,7 @@ public final class Endpoint {
         OVERSIZE
     }
 
-    private RequestOutcome sendRequest(long ticket, int type, byte[] payload) {
+    private RequestOutcome sendRequest(long ticket, int type, byte[] payload, @Nullable Long deadlineAt) {
         if (failRequestIfRefused()) {
             return RequestOutcome.FAILED_LOCALLY;
         }
@@ -1084,7 +1172,7 @@ public final class Endpoint {
             return RequestOutcome.OVERSIZE;
         }
         nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
-        ownPendingStreams.put(streamId, new OwnStream(type, ticket));
+        ownPendingStreams.put(streamId, new OwnStream(type, ticket, deadlineAt));
         OutboundMessage message = OutboundMessage.binary(frame);
         outbox.add(message);
         undrainedRequests.put(streamId, message);
@@ -1148,15 +1236,6 @@ public final class Endpoint {
         return message;
     }
 
-    /** 쓰기 전 요청 프레임 {@code after} 바로 뒤에 제어 프레임을 둔다. {@code after}가 null이면 {@link #send(byte[])}와 같다. */
-    private void sendAfter(@Nullable OutboundMessage after, byte[] frame) {
-        if (after == null) {
-            send(frame);
-        } else {
-            outbox.add(outbox.indexOf(after) + 1, OutboundMessage.binary(frame));
-        }
-    }
-
     private int firstApplicationIndex() {
         int i = 0;
         while (i < outbox.size() && !outbox.get(i).isApplication()) {
@@ -1183,25 +1262,32 @@ public final class Endpoint {
         final boolean request;
         /** 요청이면 요청 번호표, 아니면 -1. */
         final long ticket;
+        /** 요청 기한(가상 시계의 절대 시각). 요청이 아니거나 기한이 없으면 null. */
+        final @Nullable Long deadlineAt;
 
         final Runnable sending;
 
-        private DeferredSend(boolean request, long ticket, Runnable sending) {
+        private DeferredSend(boolean request, long ticket, @Nullable Long deadlineAt, Runnable sending) {
             this.request = request;
             this.ticket = ticket;
+            this.deadlineAt = deadlineAt;
             this.sending = sending;
+        }
+
+        boolean expiredAt(long now) {
+            return deadlineAt != null && now > deadlineAt;
         }
 
         void run() {
             sending.run();
         }
 
-        static DeferredSend request(long ticket, Runnable sending) {
-            return new DeferredSend(true, ticket, sending);
+        static DeferredSend request(long ticket, @Nullable Long deadlineAt, Runnable sending) {
+            return new DeferredSend(true, ticket, deadlineAt, sending);
         }
 
         static DeferredSend ping(Runnable sending) {
-            return new DeferredSend(false, -1, sending);
+            return new DeferredSend(false, -1, null, sending);
         }
     }
 

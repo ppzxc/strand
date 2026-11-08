@@ -98,6 +98,35 @@ class VectorLoaderTest {
                 .hasSize(1);
     }
 
+    /** 벡터 형식 6.2절: 번호를 받지 못한 대기열 요청의 CANCELLED와 DEADLINE_EXCEEDED도 stream_id 없는 result다(규격 4.4절, 4.4.1절). */
+    @Test
+    void acceptsQueuedRequestOutcomesWithoutStreamId() {
+        for (String status : new String[] {"UNAVAILABLE", "CANCELLED", "DEADLINE_EXCEEDED"}) {
+            assertThat(VectorLoader.parse(
+                            "x.json",
+                            recvWithEvent("{\"event\":\"result\",\"status\":\"" + status
+                                    + "\",\"certainty\":\"not_processed\"}")))
+                    .as(status)
+                    .hasSize(1);
+            assertThatThrownBy(() -> VectorLoader.parse(
+                            "x.json",
+                            recvWithEvent(
+                                    "{\"event\":\"result\",\"status\":\"" + status + "\",\"certainty\":\"unknown\"}")))
+                    .as(status)
+                    .isInstanceOf(InvalidVectorException.class)
+                    .hasMessageContainingAll("certainty", "not_processed");
+        }
+    }
+
+    @Test
+    void requestStepMayCarryAPositiveDeadline() {
+        String step = "\"kind\":\"request\",\"type\":257,\"deadline_ms\":100,\"send\":[],\"events\":[]";
+        assertThat(VectorLoader.parse("x.json", fileWithStep(step))).hasSize(1);
+        assertThatThrownBy(() -> VectorLoader.parse("x.json", fileWithStep(step.replace("100", "0"))))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("deadline_ms");
+    }
+
     @Test
     void loadsAppendixGExample() {
         String json = "{\"format\":2,\"vectors\":[{\"id\":\"ping-is-acknowledged\","
