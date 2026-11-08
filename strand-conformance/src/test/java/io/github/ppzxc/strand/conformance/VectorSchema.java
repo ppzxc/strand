@@ -22,6 +22,8 @@ final class VectorSchema {
     static final List<String> ROLES = Arrays.asList("client", "server");
     static final String DEFAULT_TRANSPORT = "tcp";
     static final List<String> TRANSPORTS = Arrays.asList("tcp", "websocket");
+    private static final List<String> LOCAL_RESULT_STATUSES =
+            Arrays.asList("UNAVAILABLE", "CANCELLED", "DEADLINE_EXCEEDED");
     static final List<String> CERTAINTIES = Arrays.asList("response", "not_processed", "unknown");
     static final List<String> OPCODES = Arrays.asList("binary", "text");
     static final List<String> ACK_FLAGS = Arrays.asList("ACK");
@@ -85,7 +87,8 @@ final class VectorSchema {
                 STEP_BASE
                         .require("type", FieldKind.APP_TYPE)
                         .allow("extensions", FieldKind.EXTENSIONS)
-                        .allow("payload", FieldKind.HEX));
+                        .allow("payload", FieldKind.HEX)
+                        .allow("deadline_ms", FieldKind.POSITIVE_U32));
         STEPS_BY_KIND.put(
                 "respond",
                 STEP_BASE
@@ -257,13 +260,15 @@ final class VectorSchema {
         return flags != null && flags.isJsonArray() && flags.getAsJsonArray().contains(new JsonPrimitive(flag));
     }
 
-    /** 벡터 형식 문서 6.2절: `stream_id` 없는 result는 UNAVAILABLE이고 not_processed다. */
+    /** 벡터 형식 문서 6.2절: `stream_id` 없는 result는 UNAVAILABLE, CANCELLED, DEADLINE_EXCEEDED 중 하나이고 not_processed다. */
     static void localResult(Check c, String path, JsonObject event) {
         if (event.has("stream_id")) {
             return;
         }
-        if (!"UNAVAILABLE".equals(event.get("status").getAsString())) {
-            throw c.failAt(Check.child(path, "status"), "stream_id 없는 result의 status는 UNAVAILABLE이어야 한다");
+        if (!LOCAL_RESULT_STATUSES.contains(event.get("status").getAsString())) {
+            throw c.failAt(
+                    Check.child(path, "status"),
+                    "stream_id 없는 result의 status는 UNAVAILABLE, CANCELLED, DEADLINE_EXCEEDED 중 하나여야 한다");
         }
         if (!"not_processed".equals(event.get("certainty").getAsString())) {
             throw c.failAt(Check.child(path, "certainty"), "stream_id 없는 result의 certainty는 not_processed여야 한다");

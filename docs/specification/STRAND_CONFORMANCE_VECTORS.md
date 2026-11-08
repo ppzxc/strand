@@ -104,7 +104,7 @@
 | `recv` | `hex` | `transport`가 `tcp`인 벡터에서만 쓴다. 구현에 바이트를 넣는다. 소문자 hex이고 공백·줄바꿈은 허용하며, 모두 지운 뒤 자릿수가 짝수여야 한다. 프레임 경계와 무관하게 아무 위치에서 잘라도 된다. 형식이 깨진 바이트도 쓸 수 있다 |
 | `recv_message` | `opcode`, `hex` | `transport`가 `websocket`인 벡터에서만 쓴다. WebSocket 메시지 하나를 구현에 넣는다. `opcode`는 `binary` 또는 `text`이고, `hex`는 `recv`의 `hex`와 같은 표기다 |
 | `ping` | `payload` | 애플리케이션이 이 `payload`로 PING을 보내게 한다. `payload`는 공백 없는 16자리 소문자 hex(8바이트)다 |
-| `request` | `type`, `extensions`, `payload` | 애플리케이션이 요청을 보내게 한다. `type`은 256 이상 정수, `extensions`는 `{tag, value}` 배열(기본값 빈 배열), `payload`는 hex(기본값 빈 값) |
+| `request` | `type`, `extensions`, `payload`, `deadline_ms` | 애플리케이션이 요청을 보내게 한다. `type`은 256 이상 정수, `extensions`는 `{tag, value}` 배열(기본값 빈 배열), `payload`는 hex(기본값 빈 값). `deadline_ms`는 이 단계 시점의 가상 시계(이 문서 8.3절)에서 센 로컬 요청 기한(규격 4.4.1절)이고 1 이상 정수다. 쓰지 않으면 기한이 없다 |
 | `respond` | `stream_id`, `status`, `extensions`, `payload` | 애플리케이션이 받은 요청에 응답하게 한다. `status`는 2.5.1절의 이름 |
 | `cancel` | `stream_id` | 애플리케이션이 자기가 보낸 요청을 취소하게 한다 |
 | `close` | `error_code` | 애플리케이션이 연결을 닫게 한다. `error_code`는 2.5.2절의 이름 |
@@ -150,7 +150,7 @@
 
 `status`는 2.5.1절의 이름이다. 17~255의 예약 값은 정수로 쓴다.
 
-스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 보냈거나 받은 뒤의 새 요청, 3.5절)의 결과는 `stream_id` 없는 `result`로 쓰고, 이 결과의 `certainty`는 `not_processed`다. `stream_id`가 없는 `result`는 `status`가 `UNAVAILABLE`이고 `certainty`가 `not_processed`여야 한다(MUST). 이 항목은 요청 단계의 `events`에 붙는다. 같은 단계에서 나오는 다른 이벤트(`closed`)와 함께 쓰면 `result`가 먼저다.
+스트림을 열기 전에 로컬에서 끝난 요청의 결과는 `stream_id` 없는 `result`로 쓰고, 이 결과의 `certainty`는 `not_processed`다. 스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 보냈거나 받은 뒤의 새 요청, 3.5절)은 `UNAVAILABLE`이고, 번호를 받지 못한 대기열 요청(규격 1.3절)이 취소되거나 기한이 지나 끝나면 각각 `CANCELLED`, `DEADLINE_EXCEEDED`다(규격 4.4절, 4.4.1절). 그러므로 `stream_id`가 없는 `result`는 `status`가 `UNAVAILABLE`, `CANCELLED`, `DEADLINE_EXCEEDED` 가운데 하나이고 `certainty`가 `not_processed`여야 한다(MUST). 번호를 받은 요청이 끝나는 `result`에는 `stream_id`를 쓴다. 이 항목은 요청 단계의 `events`에 붙는다. 같은 단계에서 나오는 다른 이벤트(`closed`)와 함께 쓰면 `result`가 먼저다.
 
 ## 7. 비교 규칙
 

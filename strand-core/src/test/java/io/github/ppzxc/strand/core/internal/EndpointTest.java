@@ -16,21 +16,33 @@ class EndpointTest {
     /** 규격 3.2.3절이 허용하는 {@code max_frame_size}의 최솟값(16 KiB). */
     private static final int MIN_MAX_FRAME_SIZE = 16384;
     /** 길이 필드(4B)와 헤더·확장 영역 길이를 포함한, payload 없는 프레임의 크기. */
-    private static final int EMPTY_FRAME_SIZE = 16;
+    private static final int EMPTY_FRAME_SIZE = 20;
 
     private static final String PREFACE = "c0de535452300000";
-    private static final String HELLO = "0000000c000100000000000000000000";
+    private static final String HELLO = "0000001000010000000000000000000000000000";
     /** extensions_length의 한도(규격 2.4절). */
     private static final int MAX_EXTENSIONS = 8192;
 
-    private static final String HELLO_ACK = "0000000c000101000000000000000000";
-    private static final String PING = "00000014 00020000 00000000 00000000 0102030405060708";
-    private static final String PING_ACK = "00000014000201000000000000000000" + "0102030405060708";
-    private static final String CLOSE_PROTOCOL_ERROR = "00000010000300000000000000000000" + "00000001";
-    private static final String CLOSE_NO_ERROR = "00000010000300000000000000000000" + "00000000";
+    private static final String HELLO_ACK = "0000001000010100000000000000000000000000";
+    /** 메커니즘 {@code ANONYMOUS}에 빈 자격 증명인 {@code AUTH}(규격 3.3.1절). */
+    private static final String AUTH_ANONYMOUS = "0000001a0005000000000000000000000000000009414e4f4e594d4f5553";
+
+    private static final String AUTH_ACK = "0000001000050100000000000000000000000000";
+    private static final String PING = "00000018 0002 00 00 0000000000000000 0000 0000 0102030405060708";
+    private static final String PING_ACK = "0000001800020100000000000000000000000000" + "0102030405060708";
+    /** CLOSE의 {@code last_stream_id}가 0인 경우(상대 요청이 아직 없다, 규격 3.5절). */
+    private static final String NO_STREAM = "0000000000000000";
+
+    private static final String CLOSE_PROTOCOL_ERROR =
+            "0000001c00030000000000000000000000000000" + "00000001" + NO_STREAM;
+    private static final String CLOSE_UNRESPONSIVE =
+            "0000001c00030000000000000000000000000000" + "00000006" + NO_STREAM;
+    private static final String CLOSE_NO_ERROR = "0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM;
     private static final String PING_PAYLOAD = "0102030405060708";
     private static final EndpointConfig ONE_SECOND = EndpointConfig.defaults().ackTimeoutMs(1000);
-    private static final String DEFAULT_HELLO_PARAMS = "0001 00400000 0002 00000064 0003 00000000".replace(" ", "");
+    private static final EndpointConfig IDLE_ONE_SECOND =
+            EndpointConfig.defaults().ackTimeoutMs(5000).idleIntervalMs(1000);
+    private static final String DEFAULT_HELLO_PARAMS = "0001 00010000 0002 00000064 0003 00000000".replace(" ", "");
 
     static byte[] bytes(String hex) {
         String clean = hex.replaceAll("\\s", "");
@@ -51,7 +63,8 @@ class EndpointTest {
 
     /** 파라미터 HELLO 프레임. payload는 hex. */
     private static String helloWith(String payloadHex) {
-        return String.format("%08x", 12 + payloadHex.length() / 2) + "000100000000000000000000" + payloadHex;
+        return String.format("%08x", 16 + payloadHex.length() / 2) + "00010000" + "0000000000000000" + "00000000"
+                + payloadHex;
     }
 
     private static String sent(Endpoint endpoint) {
@@ -88,6 +101,7 @@ class EndpointTest {
         Endpoint server = serverAfterPreface();
         server.receive(bytes(HELLO));
         server.receive(bytes(HELLO_ACK));
+        server.receive(bytes(AUTH_ANONYMOUS));
         server.drainMessages();
         assertThat(server.drainEvents()).isEmpty();
         return server;
@@ -97,6 +111,7 @@ class EndpointTest {
         Endpoint server = serverAfterPreface(config);
         server.receive(bytes(HELLO));
         server.receive(bytes(HELLO_ACK));
+        server.receive(bytes(AUTH_ANONYMOUS));
         server.drainMessages();
         return server;
     }
@@ -105,13 +120,26 @@ class EndpointTest {
         return Endpoint.client(EndpointConfig.defaults());
     }
 
+    /** 클라이언트가 서버의 {@code AUTH(ACK)}를 받아 AUTH 관문을 통과한다. 알림 이벤트는 비운다. */
+    private static void clientPassesAuthGate(Endpoint client) {
+        client.receive(bytes(AUTH_ACK));
+        assertThat(kinds(client)).containsExactly(Event.Kind.AUTHENTICATED);
+    }
+
+    /** 서버가 클라이언트의 {@code ANONYMOUS AUTH}를 통과시킨다. 보낸 {@code AUTH(ACK)}는 비운다. */
+    private static void serverPassesAuthGate(Endpoint server) {
+        server.receive(bytes(AUTH_ANONYMOUS));
+        server.drainMessages();
+    }
+
     /** 클라이언트: 서버 HELLO에 ACK를 보냈고 서버 ACK도 받은 상태. */
     private static Endpoint establishedClient() {
         Endpoint client = client();
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
+        client.receive(bytes(AUTH_ACK));
         client.drainMessages();
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(kinds(client)).containsExactly(Event.Kind.AUTHENTICATED);
         return client;
     }
 
@@ -119,6 +147,7 @@ class EndpointTest {
         Endpoint client = client();
         client.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
         client.receive(bytes(HELLO_ACK));
+        client.receive(bytes(AUTH_ACK));
         client.drainMessages();
         client.drainEvents();
         return client;
@@ -134,6 +163,20 @@ class EndpointTest {
 
     private static void assertClosedWithProtocolError(Endpoint endpoint) {
         assertThat(sent(endpoint)).isEqualTo(CLOSE_PROTOCOL_ERROR);
+        assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    /** 확인 대기 초과(규격 3.3절). */
+    private static void assertClosedUnresponsive(Endpoint endpoint) {
+        assertThat(sent(endpoint)).isEqualTo(CLOSE_UNRESPONSIVE);
+        assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    /** 상대의 요청 번호가 이미 쓰인 뒤라 {@code last_stream_id}가 0이 아닌 CLOSE(PROTOCOL_ERROR)(규격 3.5절). */
+    private static void assertClosedWithProtocolError(Endpoint endpoint, long lastStreamId) {
+        assertThat(sent(endpoint))
+                .isEqualTo(CLOSE_PROTOCOL_ERROR.substring(0, CLOSE_PROTOCOL_ERROR.length() - NO_STREAM.length())
+                        + String.format("%016x", lastStreamId));
         assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
     }
 
@@ -169,7 +212,7 @@ class EndpointTest {
         server.receive(bytes(PREFACE));
 
         assertThat(sent(server))
-                .isEqualTo("0000001e000100000000000000000000" + "0001000040000002000000640003" + "00000000");
+                .isEqualTo("0000002200010000000000000000000000000000" + "0001000040000002000000640003" + "00000000");
         assertThat(server.drainEvents()).isEmpty();
     }
 
@@ -179,7 +222,7 @@ class EndpointTest {
 
         server.receive(bytes("c0de53545230ffff"));
 
-        assertThat(sent(server)).isEqualTo("0000001e000100000000000000000000" + DEFAULT_HELLO_PARAMS);
+        assertThat(sent(server)).isEqualTo("0000002200010000000000000000000000000000" + DEFAULT_HELLO_PARAMS);
     }
 
     @Test
@@ -283,7 +326,7 @@ class EndpointTest {
     void firstFrameWithAnApplicationTypeClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c010100000000000100000000"));
+        server.receive(bytes("0000001001010000000000000000000100000000"));
 
         assertClosedSilently(server);
     }
@@ -292,7 +335,7 @@ class EndpointTest {
     void firstFrameWithAReservedControlTypeClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c000500000000000000000000"));
+        server.receive(bytes("0000001000050000000000000000000000000000"));
 
         assertClosedSilently(server);
     }
@@ -301,7 +344,7 @@ class EndpointTest {
     void firstFrameWithANonzeroStreamIdClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c000100000000000100000000"));
+        server.receive(bytes("0000001000010000000000000000000100000000"));
 
         assertClosedSilently(server);
     }
@@ -319,7 +362,7 @@ class EndpointTest {
     void firstFrameWithAnUndefinedFlagClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c000180000000000000000000"));
+        server.receive(bytes("0000001000018000000000000000000000000000"));
 
         assertClosedSilently(server);
     }
@@ -337,7 +380,7 @@ class EndpointTest {
     void firstFrameStatusAndReservedAreNotChecked() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000000c000100ff000000000000ffff"));
+        server.receive(bytes("00000010000100ff00000000000000000000ffff"));
 
         assertThat(sent(server)).isEqualTo(HELLO_ACK);
     }
@@ -346,8 +389,8 @@ class EndpointTest {
     void firstFrameHelloAboveTheOwnLimitClosesWithProtocolError() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
 
-        // 헤더 16바이트만으로 판정한다. length = 16381 = 알린 한도 − 4 + 1.
-        server.receive(bytes("00003ffd 0001 00 00 00000000 0000 0000"));
+        // 헤더 20바이트만으로 판정한다. length = 16381 = 알린 한도 − 4 + 1.
+        server.receive(bytes("00003ffd 0001 00 00 0000000000000000 0000 0000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -356,7 +399,7 @@ class EndpointTest {
     void firstFrameOfTheWrongTypeAboveTheOwnLimitClosesSilently() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
 
-        server.receive(bytes("00003ffd 0002 00 00 00000000 0000 0000"));
+        server.receive(bytes("00003ffd 0002 00 00 0000000000000000 0000 0000"));
 
         assertClosedSilently(server);
     }
@@ -365,7 +408,7 @@ class EndpointTest {
     void firstFrameHelloWithExtensionsClosesWithProtocolError() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000001000010000000000000004000000090000"));
+        server.receive(bytes("000000140001000000000000000000000004000000090000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -374,7 +417,7 @@ class EndpointTest {
 
     @Test
     void maxFrameSizeAtTheRangeBoundsIsAccepted() {
-        for (String size : new String[] {"00004000", "01000000"}) {
+        for (String size : new String[] {"00004000", "00100000"}) {
             Endpoint server = serverAfterPreface();
 
             server.receive(bytes(helloWith("0001" + size)));
@@ -385,7 +428,7 @@ class EndpointTest {
 
     @Test
     void maxFrameSizeOutsideTheRangeClosesWithProtocolError() {
-        for (String size : new String[] {"00003fff", "01000001"}) {
+        for (String size : new String[] {"00003fff", "00100001"}) {
             Endpoint server = serverAfterPreface();
 
             server.receive(bytes(helloWith("0001" + size)));
@@ -433,7 +476,7 @@ class EndpointTest {
         server.receive(bytes(HELLO));
         server.drainMessages();
 
-        server.receive(bytes("00000012000101000000000000000000000200000064"));
+        server.receive(bytes("0000001600010100000000000000000000000000000200000064"));
 
         assertClosedWithProtocolError(server);
     }
@@ -444,7 +487,7 @@ class EndpointTest {
         server.receive(bytes(HELLO));
         server.drainMessages();
 
-        server.receive(bytes("0000000c000101000000000100000000"));
+        server.receive(bytes("0000001000010100000000000000000100000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -500,7 +543,7 @@ class EndpointTest {
     void frameLengthBelowTheMinimumClosesWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000b0002"));
+        server.receive(bytes("0000000f0002"));
 
         assertClosedWithProtocolError(server);
     }
@@ -508,7 +551,7 @@ class EndpointTest {
     @Test
     void nothingIsHandledOnceClosed() {
         Endpoint server = established();
-        server.receive(bytes("0000000b0002"));
+        server.receive(bytes("0000000f0002"));
         server.drainMessages();
         server.drainEvents();
 
@@ -521,7 +564,7 @@ class EndpointTest {
     void controlFramesWithExtensionsCloseWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("00000010 0002 00 00 00000000 0004 0000 00000000"));
+        server.receive(bytes("00000014 0002 00 00 0000000000000000 0004 0000 00000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -530,7 +573,7 @@ class EndpointTest {
     void extensionsLongerThanTheFrameCloseWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000c000500000000000000050000"));
+        server.receive(bytes("0000001000050000000000000000000000050000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -539,7 +582,7 @@ class EndpointTest {
     void controlFramesWithANonzeroStreamIdCloseWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("00000014000200000000000100000000" + "0102030405060708"));
+        server.receive(bytes("0000001800020000000000000000000100000000" + "0102030405060708"));
 
         assertClosedWithProtocolError(server);
     }
@@ -547,8 +590,8 @@ class EndpointTest {
     @Test
     void pingPayloadMustBeExactlyEightBytesEvenForAnAck() {
         for (String frame : new String[] {
-            "0000000c000200000000000000000000",
-            "0000000c000201000000000000000000",
+            "0000001000020000000000000000000000000000",
+            "0000001000020100000000000000000000000000",
             "0000001500020100000000000000000001020304050607" + "0809"
         }) {
             Endpoint server = established();
@@ -563,8 +606,9 @@ class EndpointTest {
 
     @Test
     void pingResetAndApplicationFramesBeforeThePeerAckCloseWithProtocolError() {
-        for (String frame :
-                new String[] {PING, "0000001000040000000000010000000000000004", "0000000c010100000000000100000000"}) {
+        for (String frame : new String[] {
+            PING, "000000140004000000000000000000010000000000000004", "0000001001010000000000000000000100000000"
+        }) {
             Endpoint server = serverAfterPreface();
             server.receive(bytes(HELLO));
             server.drainMessages();
@@ -581,12 +625,27 @@ class EndpointTest {
         server.receive(bytes(HELLO));
         server.drainMessages();
 
-        server.receive(bytes("0000000c000500000000000000000000"));
-        assertOpenAndSilent(server);
+        // 예약 범위는 0x0000과 0x0006~0x00FF다. 0x0005는 AUTH라서 예약이 아니다(규격 2.2.2절).
+        for (String type : new String[] {"0000", "0006", "00ff"}) {
+            server.receive(bytes("00000010" + type + "0000" + "0000000000000000" + "00000000"));
+            assertOpenAndSilent(server);
+        }
         server.receive(bytes(HELLO_ACK));
+        serverPassesAuthGate(server);
         server.receive(bytes(PING));
 
         assertThat(sent(server)).isEqualTo(PING_ACK);
+    }
+
+    @Test
+    void authBeforeThePeerAckClosesWithProtocolErrorBecauseItIsNotReserved() {
+        Endpoint server = serverAfterPreface();
+        server.receive(bytes(HELLO));
+        server.drainMessages();
+
+        server.receive(bytes("00000010" + "0005" + "0000" + "0000000000000000" + "00000000"));
+
+        assertClosedWithProtocolError(server);
     }
 
     @Test
@@ -609,7 +668,7 @@ class EndpointTest {
     void aMalformedCloseIsTreatedAsAReceivedCloseAndClosesWithoutSending() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000f 0003 00 00 00000000 0000 0000 000000".replace(" ", "")));
+        server.receive(bytes("00000013 0003 00 00 0000000000000000 0000 0000 000000".replace(" ", "")));
 
         assertClosedSilently(server);
     }
@@ -633,16 +692,14 @@ class EndpointTest {
 
     @Test
     void connectionErrorAfterCloseWasReceivedSendsNoClose() {
-        Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Endpoint server = established();
         server.request(257, new byte[0]);
         server.drainMessages();
-        server.receive(bytes(CLOSE_NO_ERROR));
+        server.receive(bytes(closeNoErrorLast(2)));
         assertOpenAndSilent(server);
 
-        // 상대 ACK 전의 PING은 연결 오류지만 CLOSE를 이미 받았으므로 CLOSE를 보내지 않는다.
-        server.receive(bytes(PING));
+        // payload가 8바이트가 아닌 PING은 연결 오류지만 CLOSE를 이미 받았으므로 CLOSE를 보내지 않는다.
+        server.receive(bytes("00000010 0002 00 00 0000000000000000 0000 0000"));
 
         assertThat(server.drainMessages()).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
@@ -669,12 +726,13 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(2);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
     void theAckCancelsTheWait() {
-        Endpoint server = serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000));
+        Endpoint server =
+                serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000).authTimeoutMs(Long.MAX_VALUE / 2));
         server.receive(bytes(HELLO));
         server.advance(999);
         server.receive(bytes(HELLO_ACK));
@@ -711,12 +769,11 @@ class EndpointTest {
 
     @Test
     void theWaitIsDroppedWhenCloseWasReceivedEarlier() {
-        Endpoint server = serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000));
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
         server.request(257, new byte[0]);
-        server.receive(bytes(CLOSE_NO_ERROR));
         server.drainMessages();
+        server.receive(bytes(closeNoErrorLast(2)));
         server.drainEvents();
 
         server.advance(2000);
@@ -736,7 +793,8 @@ class EndpointTest {
         server.request(258, new byte[0]);
 
         assertThat(sent(server))
-                .isEqualTo("0000000e010100000000000200000000" + "0102" + "0000000c010200000000000400000000");
+                .isEqualTo("0000001201010000000000000000000200000000" + "0102"
+                        + "0000001001020000000000000000000400000000");
     }
 
     @Test
@@ -745,18 +803,76 @@ class EndpointTest {
 
         client.request(257, new byte[0]);
 
-        assertThat(sent(client)).isEqualTo("0000000c010100000000000100000000");
+        assertThat(sent(client)).isEqualTo("0000001001010000000000000000000100000000");
+    }
+
+    /** 요청 상태(규격 1.3절, 4.4.1절): 번호 없는 대기열, 번호는 받았지만 쓰기 전, 쓰기 시작 뒤. 요청은 낸 순서(0부터)로 가리킨다. */
+    @Test
+    void requestStateTellsTheQueueThroughWritingStarted() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+
+        long first = client.request(257, new byte[0]);
+        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+
+        client.receive(bytes(AUTH_ACK));
+        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+
+        client.drainMessages();
+        long second = client.request(257, new byte[0]);
+        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+        assertThat(client.requestState(second)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+
+        client.cancel(1);
+        assertThat(client.requestState(first)).isNull();
+        assertThat(client.requestState(second)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+    }
+
+    /** CLOSE의 {@code last_stream_id} 컷으로 끝난 요청은 기록에서 사라진다(규격 3.5절). */
+    @Test
+    void requestCutByCloseLastStreamIdLeavesNoRecord() {
+        Endpoint client = establishedClient();
+        long kept = client.request(257, new byte[0]);
+        long cut = client.request(257, new byte[0]);
+        client.drainMessages();
+
+        // last_stream_id=1: 번호 1은 상대가 처리했고 3은 처리하지 않았다. 1이 남아 있으니 연결은 종료 중으로 열려 있다.
+        client.receive(
+                bytes(CLOSE_NO_ERROR.substring(0, CLOSE_NO_ERROR.length() - NO_STREAM.length()) + "0000000000000001"));
+
+        assertThat(client.requestState(cut)).isNull();
+        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+        assertThat(client.openStreamCount()).isEqualTo(1);
+    }
+
+    /** 오래 가는 연결에서 요청을 응답으로 끝낼 때마다 기록이 따라 지워져 쌓이지 않는다. */
+    @Test
+    void answeredRequestsDoNotAccumulateOnALongLivedConnection() {
+        Endpoint client = establishedClient();
+        for (int i = 0; i < 500; i++) {
+            long ticket = client.request(257, new byte[0]);
+            client.drainMessages();
+            client.receive(bytes("0000001001010000" + String.format("%016x", 2L * i + 1) + "00000000"));
+
+            assertThat(client.requestState(ticket)).isNull();
+        }
+        assertThat(client.openStreamCount()).isZero();
     }
 
     @Test
-    void requestBeforeAckingThePeerHelloWaitsForTheAck() {
+    void requestBeforeTheAuthGateWaitsForIt() {
         Endpoint server = serverAfterPreface();
 
         server.request(257, new byte[0]);
         assertOpenAndSilent(server);
         server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
 
-        assertThat(sent(server)).isEqualTo(HELLO_ACK + "0000000c010100000000000200000000");
+        assertThat(sent(server)).isEqualTo(HELLO_ACK);
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(AUTH_ACK + "0000001001010000000000000000000200000000");
     }
 
     @Test
@@ -814,7 +930,7 @@ class EndpointTest {
 
     @Test
     void deferredRequestsAfterNumberExhaustionAreFailedLocallyEachOnce() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
         client.drainMessages();
         client.request(257, new byte[0]);
         client.request(257, new byte[0]);
@@ -822,15 +938,21 @@ class EndpointTest {
         client.ping(bytes("0102030405060708"));
 
         client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        assertThat(client.drainEvents()).isEmpty();
+        client.receive(bytes(AUTH_ACK));
 
         List<Event> events = client.drainEvents();
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
+        events = events.subList(1, events.size());
         assertThat(events).hasSize(2);
         for (Event event : events) {
             assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
             assertThat(event.status()).isEqualTo(Status.UNAVAILABLE);
             assertThat(event.streamId()).isZero();
         }
-        assertThat(sent(client)).isEqualTo(HELLO_ACK + requestFrame(257, 2147483647, "") + CLOSE_NO_ERROR);
+        assertThat(sent(client))
+                .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + requestFrame(257, Long.MAX_VALUE, "") + CLOSE_NO_ERROR);
     }
 
     @Test
@@ -839,18 +961,22 @@ class EndpointTest {
 
         server.ping(bytes("0102030405060708"));
 
-        assertThat(sent(server)).isEqualTo("00000014000200000000000000000000" + "0102030405060708");
+        assertThat(sent(server)).isEqualTo("0000001800020000000000000000000000000000" + "0102030405060708");
     }
 
     @Test
-    void pingBeforeAckingThePeerHelloWaitsForTheAck() {
+    void pingBeforeTheAuthGateWaitsForIt() {
         Endpoint server = serverAfterPreface();
 
         server.ping(bytes("0102030405060708"));
         assertOpenAndSilent(server);
         server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
 
-        assertThat(sent(server)).isEqualTo(HELLO_ACK + "00000014000200000000000000000000" + "0102030405060708");
+        assertThat(sent(server)).isEqualTo(HELLO_ACK);
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(AUTH_ACK + "0000001800020000000000000000000000000000" + "0102030405060708");
     }
 
     @Test
@@ -905,7 +1031,7 @@ class EndpointTest {
     void clientSendsThePrefaceAndItsHelloAtOnce() {
         Endpoint client = client();
 
-        assertThat(sent(client)).isEqualTo(PREFACE + "0000001e000100000000000000000000" + DEFAULT_HELLO_PARAMS);
+        assertThat(sent(client)).isEqualTo(PREFACE + "0000002200010000000000000000000000000000" + DEFAULT_HELLO_PARAMS);
         assertThat(client.drainEvents()).isEmpty();
     }
 
@@ -916,13 +1042,219 @@ class EndpointTest {
 
         client.receive(bytes(helloWith("000200000064")));
 
+        assertThat(sent(client)).isEqualTo(HELLO_ACK + AUTH_ANONYMOUS);
+    }
+
+    @Test
+    void clientSendsTheConfiguredMechanismAndCredentialsInAuth() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", bytes("0075736572007077")));
+        client.drainMessages();
+
+        client.receive(bytes(HELLO));
+
+        assertThat(sent(client))
+                .isEqualTo(HELLO_ACK + "0000001e00050000" + "0000000000000000" + "00000000" + "05" + "504c41494e"
+                        + "0075736572007077");
+    }
+
+    /** 3.2.1절: AUTH도 상대 max_frame_size를 넘지 못한다(MUST NOT). 보내지 않고 CLOSE 없이 로컬로 닫는다(#196). */
+    @Test
+    void clientClosesLocallyWithoutAuthOrCloseWhenItsAuthExceedsThePeerMaxFrameSize() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", new byte[20000]));
+        client.drainMessages();
+        client.request(257, new byte[0]);
+
+        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
+
+        // 상대 HELLO는 유효하므로 ACK는 보내고(3.2.3절), AUTH와 CLOSE는 보내지 않는다.
         assertThat(sent(client)).isEqualTo(HELLO_ACK);
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(events.get(0).certainty()).hasValue(Certainty.NOT_PROCESSED);
+        assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void clientSendsAuthExactlyAtThePeerMaxFrameSize() {
+        int credentials = MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE - 1 - "PLAIN".length();
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", new byte[credentials]));
+        client.drainMessages();
+
+        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
+
+        assertThat(kinds(client)).isEmpty();
+        assertThat(client.drainMessages()).hasSize(2);
+    }
+
+    /** 쓰기 전 요청이 많아도 상대 CLOSE와 연결 종료가 요청마다 결과를 정확히 한 번씩 내고 프레임을 거둔다. */
+    @Test
+    void manyUnwrittenRequestsEachEndExactlyOnceOnPeerCloseAndOnTransportLoss() {
+        int count = 5000;
+        for (boolean peerClose : new boolean[] {true, false}) {
+            Endpoint client = client();
+            client.receive(bytes(helloWith("0002" + String.format("%08x", count))));
+            client.receive(bytes(HELLO_ACK));
+            client.receive(bytes(AUTH_ACK));
+            client.drainMessages();
+            client.drainEvents();
+            for (int i = 0; i < count; i++) {
+                client.request(257, new byte[0]);
+            }
+            if (peerClose) {
+                client.receive(bytes(closeNoErrorLast(0)));
+            } else {
+                client.disconnect();
+            }
+
+            List<Event> events = client.drainEvents();
+            assertThat(events).hasSize(count + 1);
+            for (int i = 0; i < count; i++) {
+                assertThat(events.get(i).status()).isEqualTo(Status.UNAVAILABLE);
+                assertThat(events.get(i).certainty()).hasValue(Certainty.NOT_PROCESSED);
+            }
+            assertThat(events.get(count).kind()).isEqualTo(Event.Kind.CLOSED);
+            assertThat(events.stream()
+                            .map(Event::streamId)
+                            .filter(id -> id != 0)
+                            .distinct()
+                            .count())
+                    .isEqualTo(count);
+            assertThat(client.drainMessages()).noneMatch(OutboundMessage::isApplication);
+        }
+    }
+
+    @Test
+    void clientReportsTheCredentialLifetimeAndIgnoresUnknownIdentifiers() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+
+        client.receive(bytes("0000001c0005010000000000000000000000000000010000012c00ff00000001"));
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
+        assertThat(events.get(0).credentialLifetime()).hasValue(300);
+        assertOpenAndSilent(client);
+    }
+
+    @Test
+    void authAckWithoutLifetimeReportsNoLifetime() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+
+        client.receive(bytes(AUTH_ACK));
+
+        assertThat(client.drainEvents().get(0).credentialLifetime()).isEmpty();
+    }
+
+    @Test
+    void serverHandsTheAuthToTheApplicationAndAnswersAuthAckWhenItPasses() {
+        List<String> seen = new ArrayList<>();
+        Endpoint server = serverAfterPreface(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+            seen.add(mechanism + ":" + hex(credentials));
+            return AuthDecision.PASS;
+        }));
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+
+        server.receive(
+                bytes("0000001e00050000" + "0000000000000000" + "00000000" + "05" + "504c41494e" + "0075736572007077"));
+
+        assertThat(seen).containsExactly("PLAIN:0075736572007077");
+        assertThat(sent(server)).isEqualTo(AUTH_ACK);
+    }
+
+    /** {@code last_stream_id}를 지정한 CLOSE(NO_ERROR)(규격 3.5절). */
+    private static String closeNoErrorLast(long lastStreamId) {
+        return "0000001c00030000000000000000000000000000" + "00000000" + String.format("%016x", lastStreamId);
+    }
+
+    private static String closeWith(int errorCode) {
+        return "0000001c00030000000000000000000000000000" + String.format("%08x", errorCode) + NO_STREAM;
+    }
+
+    private static Endpoint serverAwaitingAuth(EndpointConfig config) {
+        Endpoint server = serverAfterPreface(config);
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+        return server;
+    }
+
+    @Test
+    void serverClosesWithUnauthenticatedAndNoReasonWhenTheApplicationRejects() {
+        Endpoint server = serverAwaitingAuth(EndpointConfig.defaults().authenticator((m, c) -> AuthDecision.REJECT));
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(closeWith(7));
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void serverClosesWithInternalErrorWhenTheAuthenticationFailsTransiently() {
+        Endpoint server =
+                serverAwaitingAuth(EndpointConfig.defaults().authenticator((m, c) -> AuthDecision.TRANSIENT_FAILURE));
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(closeWith(2));
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void serverClosesWithInternalErrorWhenTheAuthenticatorThrows() {
+        Endpoint server = serverAwaitingAuth(EndpointConfig.defaults().authenticator((m, c) -> {
+            throw new IllegalStateException("auth backend down");
+        }));
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(closeWith(2));
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void credentialExpiryClosesWithNoErrorAndRevocationWithUnauthenticated() {
+        Endpoint expiring = established();
+        expiring.drainMessages();
+        expiring.drainEvents();
+        expiring.close(0);
+        assertThat(sent(expiring)).isEqualTo(closeWith(0));
+        assertThat(kinds(expiring)).containsExactly(Event.Kind.CLOSED);
+
+        Endpoint revoked = established();
+        revoked.drainMessages();
+        revoked.drainEvents();
+        revoked.close(7);
+        assertThat(sent(revoked)).isEqualTo(closeWith(7));
+        assertThat(kinds(revoked)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void applicationFrameBeforeTheAuthGateIsAProtocolError() {
+        Endpoint server = serverAfterPreface();
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        assertClosedWithProtocolError(server);
     }
 
     @Test
     void clientFirstFrameChecksCloseSilently() {
         for (String frame : new String[] {
-            "0000001000030000000000000000000000000001", HELLO_ACK, "00000012000100000000000100000000000200000064"
+            "0000001c0003000000000000000000000000000000000001" + NO_STREAM,
+            HELLO_ACK,
+            "0000001600010000000000000000000100000000000200000064"
         }) {
             Endpoint client = client();
             client.drainMessages();
@@ -948,7 +1280,7 @@ class EndpointTest {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().maxFrameSize(16384));
         client.drainMessages();
 
-        client.receive(bytes("00003ffd 0001 00 00 00000000 0000 0000"));
+        client.receive(bytes("00003ffd 0001 00 00 0000000000000000 0000 0000"));
 
         assertClosedWithProtocolError(client);
     }
@@ -975,7 +1307,7 @@ class EndpointTest {
 
         client.advance(2);
 
-        assertClosedWithProtocolError(client);
+        assertClosedUnresponsive(client);
     }
 
     @Test
@@ -987,7 +1319,7 @@ class EndpointTest {
         assertOpenAndSilent(client);
         client.advance(2);
 
-        assertClosedWithProtocolError(client);
+        assertClosedUnresponsive(client);
     }
 
     @Test
@@ -1003,7 +1335,7 @@ class EndpointTest {
     // ---- PING의 확인 대기(3.3절, 3.4절) ----
 
     @Test
-    void pingWithoutAnAckClosesWithProtocolErrorAfterTheWait() {
+    void pingWithoutAnAckClosesWithUnresponsiveAfterTheWait() {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
         server.drainMessages();
@@ -1012,11 +1344,11 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(2);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
-    void clientPingWithoutAnAckClosesWithProtocolErrorAfterTheWait() {
+    void clientPingWithoutAnAckClosesWithUnresponsiveAfterTheWait() {
         Endpoint client = Endpoint.client(ONE_SECOND);
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
@@ -1025,7 +1357,7 @@ class EndpointTest {
 
         client.advance(1001);
 
-        assertClosedWithProtocolError(client);
+        assertClosedUnresponsive(client);
     }
 
     @Test
@@ -1051,7 +1383,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(1001);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
@@ -1077,7 +1409,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(600);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
@@ -1093,7 +1425,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(500);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
@@ -1101,16 +1433,193 @@ class EndpointTest {
         Endpoint client = Endpoint.client(ONE_SECOND);
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.request(257, new byte[0]);
         client.ping(bytes(PING_PAYLOAD));
-        client.receive(bytes(CLOSE_NO_ERROR));
         client.drainMessages();
+        client.receive(bytes(closeNoErrorLast(1)));
         assertThat(client.drainEvents()).isEmpty();
 
         client.advance(1001);
 
         assertThat(client.drainMessages()).isEmpty();
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+    }
+
+    // ---- 유휴 시 PING(3.4.1절) ----
+
+    @Test
+    void withoutAnIdleIntervalNoIdlePingIsSent() {
+        Endpoint server = established();
+
+        server.advance(1_000_000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void idlePingIsSentWhenNothingWasReceivedForTheIdleInterval() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(1);
+
+        assertThat(sent(server)).isEqualTo("0000001800020000000000000000000000000000" + "0000000000000000");
+    }
+
+    @Test
+    void aReceivedFrameRestartsTheIdleInterval() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.advance(900);
+        server.receive(bytes(PING));
+        assertThat(sent(server)).isEqualTo(PING_ACK);
+
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(1);
+
+        assertThat(sent(server)).hasSize(40 + 16);
+    }
+
+    @Test
+    void noNewIdlePingIsSentWhileOneIsWaitingForItsAck() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.advance(1000);
+        assertThat(sent(server)).hasSize(40 + 16);
+
+        server.advance(3000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void noIdlePingIsSentWhileAnApplicationPingIsWaitingForItsAck() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
+        server.drainMessages();
+
+        server.advance(2000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void anUnansweredIdlePingClosesWithUnresponsiveAfterTheAckWait() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.advance(1000);
+        server.drainMessages();
+
+        server.advance(4999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedUnresponsive(server);
+    }
+
+    @Test
+    void anotherIdlePingIsSentAfterTheFirstOneIsAcked() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.advance(1000);
+        server.drainMessages();
+        server.receive(bytes("0000001800020100000000000000000000000000" + "0000000000000000"));
+        server.drainMessages();
+
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(1);
+
+        assertThat(sent(server)).isEqualTo("0000001800020000000000000000000000000000" + "0000000000000001");
+    }
+
+    @Test
+    void idlePingWaitsForTheAuthGate() {
+        Endpoint server = serverAfterPreface(IDLE_ONE_SECOND);
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+
+        server.advance(1000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void idlePingContinuesWhileClosing() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.request(257, new byte[0]);
+        server.drainMessages();
+        // 요청 번호까지 처리한다는 CLOSE라서 요청이 남고 연결은 종료 중으로 머문다(3.5절).
+        server.receive(bytes(closeNoErrorLast(2)));
+        server.drainMessages();
+
+        server.advance(1000);
+
+        assertThat(sent(server)).hasSize(40 + 16);
+    }
+
+    // ---- 확인 대기의 시작점: 전송 계층에 넘긴 때(3.3절) ----
+
+    @Test
+    void helloWaitStartsWhenTheFrameIsDrainedNotWhenItIsQueued() {
+        Endpoint server = Endpoint.server(ONE_SECOND);
+        server.receive(bytes(PREFACE));
+
+        server.advance(5000);
+        assertThat(server.drainEvents()).isEmpty();
+        server.drainMessages();
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedUnresponsive(server);
+    }
+
+    @Test
+    void pingWaitStartsWhenTheFrameIsDrainedNotWhenItIsQueued() {
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
+
+        server.advance(5000);
+        assertThat(server.drainEvents()).isEmpty();
+        server.drainMessages();
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedUnresponsive(server);
+    }
+
+    // ---- CLOSE 전용 코드와 EXCESSIVE_USE(2.5.2절, 3.5절, 4.4절) ----
+
+    @Test
+    void closeWithExcessiveUseSendsThatCodeAndClosesTheTransport() {
+        Endpoint server = established();
+
+        server.close(ErrorCode.EXCESSIVE_USE);
+
+        assertThat(sent(server)).isEqualTo("0000001c00030000000000000000000000000000" + "00000005" + NO_STREAM);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void resetWithCloseOnlyOrReservedCodesIsTreatedAsAnyOtherReset() {
+        for (String code : new String[] {"00000005", "00000006", "00000007", "00000008", "ffffffff"}) {
+            Endpoint client = Endpoint.client(EndpointConfig.defaults());
+            client.receive(bytes(HELLO));
+            client.receive(bytes(HELLO_ACK));
+            clientPassesAuthGate(client);
+            client.request(257, new byte[0]);
+            client.drainMessages();
+
+            client.receive(bytes("00000014000400000000000000000001" + "0000" + "0000" + code));
+
+            assertThat(client.drainEvents()).singleElement().satisfies(event -> {
+                assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
+                assertThat(event.status()).isEqualTo(Status.INTERNAL);
+            });
+            assertOpenAndSilent(client);
+        }
     }
 
     @Test
@@ -1120,20 +1629,21 @@ class EndpointTest {
         server.advance(500);
         server.ping(bytes(PING_PAYLOAD));
         server.receive(bytes(HELLO_ACK));
+        serverPassesAuthGate(server);
         server.drainMessages();
 
         server.advance(999);
         assertOpenAndSilent(server);
         server.advance(2);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
     void firstFrameOfAPeerStreamIsReportedAsAReceivedRequest() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000c010100000000000100000000"));
+        server.receive(bytes("0000001001010000000000000000000100000000"));
 
         List<Event> events = server.drainEvents();
         assertThat(events).hasSize(1);
@@ -1145,19 +1655,19 @@ class EndpointTest {
     @Test
     void resetWithAnyFlagsFreesThePeerStreamSoItCanBeOpenedAgain() {
         Endpoint server = established();
-        server.receive(bytes("0000000c010100000000000100000000"));
+        server.receive(bytes("0000001001010000000000000000000100000000"));
         server.drainEvents();
 
-        server.receive(bytes("000000100004ff00000000010000000000000004"));
+        server.receive(bytes("000000140004ff0000000000000000010000000000000004"));
         assertThat(server.drainEvents()).isEmpty();
-        server.receive(bytes("0000000c010100000000000300000000"));
+        server.receive(bytes("0000001001010000000000000000000300000000"));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
     @Test
     void resetWithStreamIdZeroOrTopBitSetClosesWithProtocolError() {
-        for (String streamId : new String[] {"00000000", "80000001"}) {
+        for (String streamId : new String[] {"0000000000000000", "8000000000000001"}) {
             Endpoint server = established();
 
             server.receive(bytes("00000010000400" + "00" + streamId + "0000" + "0000" + "00000004"));
@@ -1167,10 +1677,10 @@ class EndpointTest {
     }
 
     /** 확장 영역이 {@code extHex}이고 payload가 없는 type 0x0101 프레임 hex. */
-    private static String appFrame(int streamId, int status, String extHex) {
+    private static String appFrame(long streamId, int status, String extHex) {
         return String.format(
-                "%08x0101%02x%02x%08x%04x0000%s",
-                12 + extHex.length() / 2, 0, status, streamId, extHex.length() / 2, extHex);
+                "%08x0101%02x%02x%016x%04x0000%s",
+                16 + extHex.length() / 2, 0, status, streamId, extHex.length() / 2, extHex);
     }
 
     private static String unknownTlv(int valueLength) {
@@ -1233,7 +1743,8 @@ class EndpointTest {
     void lastResponseWhileClosingCompletesTheClose() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        client.drainMessages();
+        client.receive(bytes(closeNoErrorLast(1)));
         assertThat(client.drainEvents()).isEmpty();
 
         client.receive(bytes(appFrame(1, 0, "")));
@@ -1281,14 +1792,14 @@ class EndpointTest {
     }
 
     /** 요청 프레임 hex: 확장 영역은 {@code extHex}, payload 없음. */
-    private static String requestFrame(int type, int streamId, String extHex) {
+    private static String requestFrame(int type, long streamId, String extHex) {
         return String.format(
-                "%08x%04x0000%08x%04x0000%s", 12 + extHex.length() / 2, type, streamId, extHex.length() / 2, extHex);
+                "%08x%04x0000%016x%04x0000%s", 16 + extHex.length() / 2, type, streamId, extHex.length() / 2, extHex);
     }
 
-    private static final String RESET_REFUSED_1 = "000000100004000000000001" + "0000" + "0000" + "00000003";
-    private static final String RESET_REFUSED_3 = "000000100004000000000003" + "0000" + "0000" + "00000003";
-    private static final String RESET_REFUSED_5 = "000000100004000000000005" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_1 = "00000014000400000000000000000001" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_3 = "00000014000400000000000000000003" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_5 = "00000014000400000000000000000005" + "0000" + "0000" + "00000003";
 
     private static String keyBytes(int count) {
         StringBuilder hex = new StringBuilder();
@@ -1312,7 +1823,7 @@ class EndpointTest {
 
         server.receive(bytes(requestFrame(258, 1, "")));
 
-        assertThat(sent(server)).isEqualTo("0000000c0102000c000000010000" + "0000");
+        assertThat(sent(server)).isEqualTo("000000100102000c00000000000000010000" + "0000");
         assertOpenAndSilent(server);
         server.receive(bytes(requestFrame(257, 3, "")));
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
@@ -1323,11 +1834,12 @@ class EndpointTest {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().knownTypes(Collections.singleton(257)));
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.drainMessages();
 
         client.receive(bytes(requestFrame(258, 2, "")));
 
-        assertThat(sent(client)).isEqualTo("0000000c0102000c000000020000" + "0000");
+        assertThat(sent(client)).isEqualTo("000000100102000c00000000000000020000" + "0000");
     }
 
     @Test
@@ -1343,7 +1855,7 @@ class EndpointTest {
 
             server.receive(bytes(requestFrame(257, 1, extensions)));
 
-            assertThat(sent(server)).isEqualTo("0000000c0101000300000001" + "0000" + "0000");
+            assertThat(sent(server)).isEqualTo("00000010010100030000000000000001" + "0000" + "0000");
             assertOpenAndSilent(server);
         }
     }
@@ -1367,7 +1879,7 @@ class EndpointTest {
 
         server.receive(bytes(requestFrame(258, 1, "00010003000001")));
 
-        assertThat(sent(server)).isEqualTo("0000000c0102000c000000010000" + "0000");
+        assertThat(sent(server)).isEqualTo("000000100102000c00000000000000010000" + "0000");
     }
 
     @Test
@@ -1395,20 +1907,19 @@ class EndpointTest {
     }
 
     @Test
-    void requestAfterReceivingCloseIsRefusedWhileAPeerStreamKeepsTheConnectionOpen() {
+    void requestAfterReceivingCloseIsDroppedSilentlyWhileAPeerStreamKeepsTheConnectionOpen() {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
-        server.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        server.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
 
         server.receive(bytes(requestFrame(258, 3, "00010003000001")));
 
-        assertThat(sent(server)).isEqualTo(RESET_REFUSED_3);
         assertOpenAndSilent(server);
     }
 
     @Test
-    void requestAfterSendingCloseIsRefused() {
+    void requestAfterSendingCloseIsDroppedSilently() {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
@@ -1417,7 +1928,6 @@ class EndpointTest {
 
         server.receive(bytes(requestFrame(257, 3, "")));
 
-        assertThat(sent(server)).isEqualTo(RESET_REFUSED_3);
         assertOpenAndSilent(server);
     }
 
@@ -1426,7 +1936,7 @@ class EndpointTest {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
-        server.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        server.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
         assertThat(server.drainEvents()).isEmpty();
 
         server.receive(bytes("000000100004000000000001000000000000" + "0004"));
@@ -1442,7 +1952,7 @@ class EndpointTest {
         pending.receive(bytes(requestFrame(257, 1, "")));
         pending.drainEvents();
         pending.receive(bytes(requestFrame(257, 1, "")));
-        assertClosedWithProtocolError(pending);
+        assertClosedWithProtocolError(pending, 1);
 
         Endpoint ended = established();
         ended.receive(bytes(requestFrame(257, 1, "")));
@@ -1450,26 +1960,26 @@ class EndpointTest {
         ended.drainMessages();
         ended.drainEvents();
         ended.receive(bytes(requestFrame(257, 1, "")));
-        assertClosedWithProtocolError(ended);
+        assertClosedWithProtocolError(ended, 1);
 
         Endpoint skipped = established();
         skipped.receive(bytes(requestFrame(257, 5, "")));
         skipped.drainEvents();
         skipped.receive(bytes(requestFrame(257, 3, "")));
-        assertClosedWithProtocolError(skipped);
+        assertClosedWithProtocolError(skipped, 5);
 
         Endpoint refused = establishedWith(EndpointConfig.defaults().maxConcurrentStreams(0));
         refused.receive(bytes(requestFrame(257, 5, "")));
         refused.drainMessages();
         refused.receive(bytes(requestFrame(257, 3, "")));
-        assertClosedWithProtocolError(refused);
+        assertClosedWithProtocolError(refused, 5);
     }
 
     @Test
     void repeatedNumberWhileClosingClosesWithoutSendingClose() {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
-        server.receive(bytes("00000010000300000000000000000000" + "00000000"));
+        server.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
         server.receive(bytes(requestFrame(257, 3, "")));
         server.drainMessages();
         server.drainEvents();
@@ -1481,7 +1991,7 @@ class EndpointTest {
 
     @Test
     void applicationFrameWithStreamIdZeroOrTopBitSetClosesWithProtocolError() {
-        for (int streamId : new int[] {0, 0x80000001}) {
+        for (long streamId : new long[] {0, 0x8000000000000001L}) {
             Endpoint server = established();
 
             server.receive(bytes(requestFrame(257, streamId, "")));
@@ -1495,7 +2005,7 @@ class EndpointTest {
         for (String payload : new String[] {"", "000000", "0000000000"}) {
             Endpoint server = established();
 
-            server.receive(bytes(String.format("%08x00040000%08x00000000", 12 + payload.length() / 2, 1) + payload));
+            server.receive(bytes(String.format("%08x00040000%016x00000000", 16 + payload.length() / 2, 1) + payload));
 
             assertClosedWithProtocolError(server);
         }
@@ -1510,7 +2020,7 @@ class EndpointTest {
         server.respond(1, 0, new byte[0]);
         server.respond(1, 0, new byte[0]);
 
-        assertThat(sent(server)).isEqualTo("0000000c0102000000000001" + "0000" + "0000");
+        assertThat(sent(server)).isEqualTo("00000010010200000000000000000001" + "0000" + "0000");
         server.receive(bytes(requestFrame(257, 3, "")));
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
@@ -1545,14 +2055,14 @@ class EndpointTest {
 
         server.respond(1, 0, bytes("cafe01"));
 
-        assertThat(sent(server)).isEqualTo("0000000f0102000000000001" + "0000" + "0000" + "cafe01");
+        assertThat(sent(server)).isEqualTo("00000013010200000000000000000001" + "0000" + "0000" + "cafe01");
     }
 
     private static Endpoint establishedServerWithPeerFrameSize(int maxFrameSize) {
         Endpoint server = serverAfterPreface();
         server.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
         server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        serverPassesAuthGate(server);
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
         return server;
@@ -1576,7 +2086,7 @@ class EndpointTest {
 
         assertThat(sent(server)).isEmpty();
         server.respond(1, 0, new byte[0]);
-        assertThat(sent(server)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
+        assertThat(sent(server)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
     }
 
     @Test
@@ -1598,11 +2108,11 @@ class EndpointTest {
         assertThat(sent(client)).isEmpty();
         assertThat(client.drainEvents()).isEmpty();
         client.request(257, new byte[0]);
-        assertThat(sent(client)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
+        assertThat(sent(client)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
     }
 
     @Test
-    void requestDeferredBeforeTheAckFailsLocallyWhenItsFrameIsOverThePeerMaxFrameSize() {
+    void requestDeferredBeforeTheAuthGateFailsLocallyWhenItsFrameIsOverThePeerMaxFrameSize() {
         Endpoint client = client();
         client.drainMessages();
         client.request(257, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE + 1]);
@@ -1610,11 +2120,15 @@ class EndpointTest {
 
         client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
 
-        assertThat(sent(client)).isEqualTo(HELLO_ACK);
-        assertLocalUnavailableEvents(client.drainEvents());
+        assertThat(sent(client)).isEqualTo(HELLO_ACK + AUTH_ANONYMOUS);
+        assertThat(client.drainEvents()).isEmpty();
         client.receive(bytes(HELLO_ACK));
+        client.receive(bytes(AUTH_ACK));
+        List<Event> events = client.drainEvents();
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
+        assertLocalUnavailableEvents(events.subList(1, events.size()));
         client.request(257, new byte[0]);
-        assertThat(sent(client)).isEqualTo("0000000c0101000000000001" + "0000" + "0000");
+        assertThat(sent(client)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
     }
 
     @Test
@@ -1630,6 +2144,45 @@ class EndpointTest {
     }
 
     @Test
+    void deferredRequestAndPingKeepTheBytesGivenAtCallTime() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
+        client.drainMessages();
+        byte[] extensions = bytes("0a0b");
+        byte[] pingPayload = bytes("0102030405060708");
+        client.request(257, extensions);
+        client.ping(pingPayload);
+        extensions[0] = 0x7f;
+        pingPayload[0] = 0x7f;
+
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.receive(bytes(AUTH_ACK));
+
+        assertThat(sent(client))
+                .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + "0000001800020000000000000000000000000000" + "0102030405060708"
+                        + "00000012010100000000000000000001" + "0000" + "0000" + "0a0b");
+    }
+
+    @Test
+    void deferredPingIsNotARequestForRequestState() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
+        client.drainMessages();
+        client.ping(bytes("0102030405060708"));
+
+        assertThat(client.requestState(-1)).isNull();
+    }
+
+    @Test
+    void oversizeRequestDoesNotConsumeATicket() {
+        Endpoint client = establishedClientWithPeerFrameSize(MIN_MAX_FRAME_SIZE);
+
+        assertThatThrownBy(() -> client.request(257, new byte[MIN_MAX_FRAME_SIZE]))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(client.request(257, new byte[0])).isZero();
+    }
+
+    @Test
     void cancelSendsResetCancelAndReportsCancelledOnce() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
@@ -1638,12 +2191,205 @@ class EndpointTest {
         client.cancel(1);
         client.cancel(1);
 
-        assertThat(sent(client)).isEqualTo("000000100004000000000001" + "0000" + "0000" + "00000004");
+        assertThat(sent(client)).isEqualTo("00000014000400000000000000000001" + "0000" + "0000" + "00000004");
         List<Event> events = client.drainEvents();
         assertThat(events).hasSize(1);
         assertThat(events.get(0).status()).isEqualTo(1);
         client.receive(bytes(appFrame(1, 0, "")));
         assertOpenAndSilent(client);
+    }
+
+    private static final String RESET_CANCEL_1 = "00000014000400000000000000000001" + "0000" + "0000" + "00000004";
+
+    private static void assertSingleResult(Endpoint endpoint, long streamId, int status, Certainty certainty) {
+        List<Event> events = endpoint.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).streamId()).isEqualTo(streamId);
+        assertThat(events.get(0).status()).isEqualTo(status);
+        assertThat(events.get(0).certainty()).contains(certainty);
+    }
+
+    /** 규격 4.4.1절: 번호는 받았지만 한 바이트도 쓰기 전에 기한이 지나면 RESET 없이 프레임을 버린다. */
+    @Test
+    void deadlineBeforeAnyByteWrittenDropsTheNumberedFrameWithoutReset() {
+        Endpoint client = establishedClient();
+        long ticket = client.request(257, new byte[0], 100);
+        long kept = client.request(257, new byte[0]);
+
+        client.advance(101);
+
+        assertSingleResult(client, 1, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED);
+        assertThat(client.requestState(ticket)).isNull();
+        // 첫 요청의 프레임만 사라지고 나머지는 그대로 나간다. 쓴 적 없는 번호 1은 건너뛴다.
+        assertThat(sent(client)).isEqualTo("0000001001010000000000000000000300000000");
+        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+    }
+
+    /** 규격 4.4.1절: 번호를 받지 못한 대기열 요청도 기한이 지나면 stream_id 없이 DEADLINE_EXCEEDED(처리 안 됨)로 끝난다. */
+    @Test
+    void deadlineOfAQueuedRequestWithoutNumberEndsItWithoutAStreamId() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+        long ticket = client.request(257, new byte[0], 100);
+        assertThat(client.requestState(ticket)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+
+        client.advance(101);
+
+        assertSingleResult(client, 0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED);
+        assertThat(client.requestState(ticket)).isNull();
+        client.receive(bytes(AUTH_ACK));
+        assertThat(client.drainMessages()).isEmpty();
+    }
+
+    /** 규격 4.4.1절: 쓰기를 시작한 요청은 기한이 지나면 RESET(CANCEL)을 보내고 DEADLINE_EXCEEDED(결과 모름)로 끝난다. */
+    @Test
+    void deadlineAfterWritingStartedSendsResetCancelAndReportsUnknown() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0], 100);
+        client.drainMessages();
+
+        client.advance(99);
+        assertThat(client.drainEvents()).isEmpty();
+        assertThat(client.drainMessages()).isEmpty();
+        client.advance(2);
+
+        assertThat(sent(client)).isEqualTo(RESET_CANCEL_1);
+        assertSingleResult(client, 1, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
+        // 이미 끝난 요청의 응답은 조용히 버려지고, 기한은 다시 울리지 않는다.
+        client.receive(bytes(appFrame(1, 0, "")));
+        client.advance(1000);
+        assertOpenAndSilent(client);
+    }
+
+    /** 요청 기한은 로컬 설정이다. 설정이 없으면 기한이 없고, 응답을 받아 끝난 요청의 기한은 울리지 않는다. */
+    @Test
+    void withoutDeadlineOrAfterResponseNothingExpires() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.request(257, new byte[0], 100);
+        client.drainMessages();
+        client.receive(bytes(appFrame(3, 0, "")));
+        client.drainEvents();
+
+        client.advance(1_000_000);
+
+        assertThat(client.drainMessages()).isEmpty();
+        assertThat(client.drainEvents()).isEmpty();
+    }
+
+    /** 규격 4.4절: 한 바이트도 쓰기 전의 취소는 프레임을 거두고 RESET 없이 CANCELLED(처리 안 됨)로 끝난다. */
+    @Test
+    void cancelBeforeAnyByteWrittenRemovesTheFrameWithoutReset() {
+        Endpoint client = establishedClient();
+        long first = client.request(257, new byte[0]);
+        client.request(257, new byte[0]);
+
+        client.cancelRequest(first);
+
+        assertSingleResult(client, 1, Status.CANCELLED, Certainty.NOT_PROCESSED);
+        assertThat(sent(client)).isEqualTo("0000001001010000000000000000000300000000");
+        client.cancelRequest(first);
+        assertThat(client.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void cancelByStreamIdBeforeAnyByteWrittenAlsoEndsAsNotProcessed() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+
+        client.cancel(1);
+
+        assertThat(client.drainMessages()).isEmpty();
+        assertSingleResult(client, 1, Status.CANCELLED, Certainty.NOT_PROCESSED);
+    }
+
+    /** 규격 4.4절: 번호 없는 대기열 요청의 취소는 stream_id 없이 CANCELLED(처리 안 됨)다. 나중에 관문이 열려도 프레임은 나가지 않는다. */
+    @Test
+    void cancelOfAQueuedRequestWithoutNumberEndsItWithoutAStreamId() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+        long ticket = client.request(257, new byte[0]);
+
+        client.cancelRequest(ticket);
+
+        assertSingleResult(client, 0, Status.CANCELLED, Certainty.NOT_PROCESSED);
+        client.receive(bytes(AUTH_ACK));
+        assertThat(client.drainMessages()).isEmpty();
+    }
+
+    /** 규격 4.4절: 쓰기를 시작한 뒤의 취소는 RESET(CANCEL)을 보내고 CANCELLED(결과 모름)다. */
+    @Test
+    void cancelAfterWritingStartedByTicketSendsResetAndReportsUnknown() {
+        Endpoint client = establishedClient();
+        long ticket = client.request(257, new byte[0]);
+        client.drainMessages();
+
+        client.cancelRequest(ticket);
+
+        assertThat(sent(client)).isEqualTo(RESET_CANCEL_1);
+        assertSingleResult(client, 1, Status.CANCELLED, Certainty.UNKNOWN);
+    }
+
+    @Test
+    void deadlineMustBePositive() {
+        Endpoint client = establishedClient();
+
+        assertThatThrownBy(() -> client.request(257, new byte[0], 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(client.drainMessages()).isEmpty();
+    }
+
+    /** 대기열에서 기다리는 PING과 다른 요청은 기한이나 취소가 건드리지 않는다. */
+    @Test
+    void expiringOrCancellingAQueuedRequestLeavesOtherQueuedSendsAlone() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+        client.ping(bytes(PING_PAYLOAD));
+        long cancelled = client.request(257, new byte[0]);
+        client.request(257, new byte[0], 100);
+        long kept = client.request(257, new byte[0], 10_000);
+
+        client.cancelRequest(cancelled);
+        client.cancelRequest(cancelled);
+        client.advance(101);
+        assertThat(client.drainEvents()).hasSize(2);
+        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+        client.receive(bytes(AUTH_ACK));
+
+        assertThat(sent(client)).contains(PING_PAYLOAD).contains("0000001001010000000000000000000100000000");
+    }
+
+    @Test
+    void cancelAndDeadlineAreIgnoredAfterTheConnectionClosed() {
+        Endpoint client = establishedClient();
+        long ticket = client.request(257, new byte[0], 100);
+        client.disconnect();
+        client.drainEvents();
+
+        client.cancelRequest(ticket);
+        client.cancel(1);
+        client.advance(1000);
+
+        assertThat(client.drainEvents()).isEmpty();
+    }
+
+    /** 규격 4.4.1절: 쓰기 전에 기한이 지난 요청이 마지막 대기 스트림이면 종료 중인 연결이 닫힌다. */
+    @Test
+    void deadlineOfTheLastPendingRequestWhileClosingClosesTheConnection() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0], 100);
+        client.close(0);
+        client.drainMessages();
+
+        client.advance(101);
+
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
     @Test
@@ -1666,7 +2412,7 @@ class EndpointTest {
             client.request(257, new byte[0]);
             client.drainMessages();
 
-            client.receive(bytes(String.format("000000100004000000000001000000000000%04x", c[0])));
+            client.receive(bytes(String.format("00000014000400000000000000000001" + "00000000" + "0000%04x", c[0])));
 
             List<Event> events = client.drainEvents();
             assertThat(events).hasSize(1);
@@ -1679,8 +2425,8 @@ class EndpointTest {
     void resetOnAStreamThatIsNotPendingIsDropped() {
         Endpoint server = established();
 
-        server.receive(bytes("000000100004000000000005" + "0000" + "0000" + "00000004"));
-        server.receive(bytes("000000100004000000000004" + "0000" + "0000" + "00000004"));
+        server.receive(bytes("00000014000400000000000000000005" + "0000" + "0000" + "00000004"));
+        server.receive(bytes("00000014000400000000000000000004" + "0000" + "0000" + "00000004"));
         server.receive(bytes(requestFrame(257, 3, "")));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
@@ -1702,13 +2448,15 @@ class EndpointTest {
 
     @Test
     void streamNumbersAreExhaustedAfterTheLastNumberAndTheConnectionCloses() {
-        int[][] roles = {{1, 2147483647}, {0, 2147483646}};
-        for (int[] role : roles) {
+        long[][] roles = {{1, Long.MAX_VALUE}, {0, (Long.MAX_VALUE - 1)}};
+        for (long[] role : roles) {
             EndpointConfig config = EndpointConfig.defaults().nextStreamId(role[1]);
             Endpoint endpoint = role[0] == 1 ? Endpoint.client(config) : serverAfterPreface(config);
             endpoint.receive(bytes(HELLO));
             endpoint.receive(bytes(HELLO_ACK));
+            endpoint.receive(bytes(role[0] == 1 ? AUTH_ACK : AUTH_ANONYMOUS));
             endpoint.drainMessages();
+            endpoint.drainEvents();
             endpoint.request(257, new byte[0]);
             endpoint.drainMessages();
             endpoint.receive(bytes(appFrame(role[1], 0, "")));
@@ -1716,16 +2464,17 @@ class EndpointTest {
 
             endpoint.request(257, new byte[0]);
 
-            assertThat(sent(endpoint)).isEqualTo("00000010000300000000000000000000" + "00000000");
+            assertThat(sent(endpoint)).isEqualTo("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM);
             assertThat(kinds(endpoint)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
         }
     }
 
     @Test
     void exhaustionWithAPendingRequestWaitsForItAndSendsNoSecondClose() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.request(257, new byte[0]);
         client.close(0);
         client.drainMessages();
@@ -1733,22 +2482,23 @@ class EndpointTest {
         client.request(257, new byte[0]);
 
         assertFailedLocally(client);
-        client.receive(bytes(appFrame(2147483647, 0, "")));
+        client.receive(bytes(appFrame(Long.MAX_VALUE, 0, "")));
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
     @Test
     void exhaustionTakesPrecedenceOverReachingThePeerConcurrentStreamLimit() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(2147483647));
+        Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
         client.receive(bytes(helloWith("0002" + String.format("%08x", 1L))));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.request(257, new byte[0]);
         client.drainMessages();
         client.drainEvents();
 
         client.request(257, new byte[0]);
 
-        assertThat(sent(client)).isEqualTo("00000010000300000000000000000000" + "00000000");
+        assertThat(sent(client)).isEqualTo("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM);
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT);
     }
 
@@ -1756,7 +2506,7 @@ class EndpointTest {
     void largestStreamNumberIsAccepted() {
         Endpoint server = established();
 
-        server.receive(bytes(requestFrame(257, 2147483647, "")));
+        server.receive(bytes(requestFrame(257, Long.MAX_VALUE, "")));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
@@ -1765,6 +2515,7 @@ class EndpointTest {
         Endpoint client = client();
         client.receive(bytes(helloWith("0002" + String.format("%08x", maxConcurrentStreams))));
         client.receive(bytes(HELLO_ACK));
+        clientPassesAuthGate(client);
         client.drainMessages();
         return client;
     }
@@ -1819,7 +2570,7 @@ class EndpointTest {
     void closeFrameWithLengthBelowMinimumClosesSilently() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000b0003000000000000000000"));
+        server.receive(bytes("0000000f0003" + "00000000000000000000000000"));
 
         assertThat(sent(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
@@ -1839,7 +2590,7 @@ class EndpointTest {
     void nonCloseFrameWithLengthBelowMinimumStillGetsProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000b0004000000000000000000"));
+        server.receive(bytes("0000000f0004" + "00000000000000000000000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -1858,7 +2609,21 @@ class EndpointTest {
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(events.get(0).certainty()).contains(Certainty.UNKNOWN);
         assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void requestFrameNotYetHandedToTransportEndsAsNotProcessedAndIsNeverSent() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+
+        client.disconnect();
+
+        assertThat(client.drainMessages()).isEmpty();
+        List<Event> events = client.drainEvents();
+        assertThat(events.get(0).streamId()).isEqualTo(1);
+        assertThat(events.get(0).certainty()).contains(Certainty.NOT_PROCESSED);
     }
 
     @Test
@@ -1877,7 +2642,7 @@ class EndpointTest {
     void closeFrameWithBadLengthIsSilentEvenWhenTheTypeArrivesLater() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000b"));
+        server.receive(bytes("0000000f"));
         assertOpenAndSilent(server);
         server.receive(bytes("0003"));
 
@@ -1885,7 +2650,7 @@ class EndpointTest {
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 
-    private static final String PING_MESSAGE = "000000140002000000000000000000000102030405060708";
+    private static final String PING_MESSAGE = "00000018000200000000000000000000000000000102030405060708";
 
     private static Endpoint webSocketServer() {
         return Endpoint.server(EndpointConfig.defaults().webSocket());
@@ -1907,6 +2672,7 @@ class EndpointTest {
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO));
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO_ACK));
+        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(AUTH_ANONYMOUS));
         server.drainMessages();
         return server;
     }
@@ -1920,7 +2686,7 @@ class EndpointTest {
         assertThat(messages).hasSize(2);
         assertThat(hex(messages.get(0).bytes())).isEqualTo(PREFACE);
         assertThat(hex(messages.get(1).bytes()))
-                .isEqualTo("0000001e" + "000100000000000000000000" + DEFAULT_HELLO_PARAMS);
+                .isEqualTo("00000022" + "00010000" + "0000000000000000" + "00000000" + DEFAULT_HELLO_PARAMS);
         assertThat(client.drainMessages()).isEmpty();
     }
 
@@ -1949,7 +2715,7 @@ class EndpointTest {
     @Test
     void webSocketCloseWaitsForTheLastStreamWhenNoErrorCloseIsDraining() {
         Endpoint server = establishedWebSocket();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000000c010100000000000100000000"));
+        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
         server.drainEvents();
         server.close(ErrorCode.NO_ERROR);
         assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Kind.BINARY);
@@ -1974,7 +2740,7 @@ class EndpointTest {
     @Test
     void webSocketCloseWaitsForTheLastStreamWhenReceivedNoErrorCloseIsDraining() {
         Endpoint server = establishedWebSocket();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000000c010100000000000100000000"));
+        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
         server.drainEvents();
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_NO_ERROR));
         assertThat(server.drainMessages()).isEmpty();
@@ -2006,7 +2772,7 @@ class EndpointTest {
     @Test
     void webSocketErrorCloseReceivedWhileDrainingHasNoWebSocketCloseItem() {
         Endpoint server = establishedWebSocket();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000000c010100000000000100000000"));
+        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
         server.drainEvents();
         server.close(ErrorCode.NO_ERROR);
         server.drainMessages();
@@ -2040,7 +2806,7 @@ class EndpointTest {
 
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PING_MESSAGE));
 
-        assertThat(sent(server)).isEqualTo("000000140002010000000000000000000102030405060708");
+        assertThat(sent(server)).isEqualTo("00000018000201000000000000000000000000000102030405060708");
     }
 
     @Test
@@ -2118,6 +2884,7 @@ class EndpointTest {
     void webSocketTextCloseSendsNoSecondCloseAfterOneWasSentOrReceived() {
         Endpoint sentClose = establishedWebSocket();
         sentClose.request(257, new byte[0]);
+        sentClose.drainMessages();
         sentClose.close(ErrorCode.NO_ERROR);
         sentClose.drainMessages();
         sentClose.drainEvents();
@@ -2127,7 +2894,8 @@ class EndpointTest {
 
         Endpoint receivedClose = establishedWebSocket();
         receivedClose.request(257, new byte[0]);
-        receivedClose.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_NO_ERROR));
+        receivedClose.drainMessages();
+        receivedClose.receiveMessage(WebSocketMessageKind.BINARY, bytes(closeNoErrorLast(2)));
         receivedClose.drainMessages();
         receivedClose.drainEvents();
         receivedClose.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
@@ -2161,11 +2929,11 @@ class EndpointTest {
     @Test
     void webSocketMessageAboveTheMaxFrameSizeIsAProtocolError() {
         Endpoint server = establishedWebSocket(EndpointConfig.defaults().maxFrameSize(16384));
-        String payload = new String(new char[16384 - 12 - 4 + 1]).replace("\0", "00");
+        String payload = new String(new char[16384 - 16 - 4 + 1]).replace("\0", "00");
 
         server.receiveMessage(
                 WebSocketMessageKind.BINARY,
-                bytes(String.format("%08x", 12 + payload.length() / 2) + "00020000" + "00000000" + "00000000"
+                bytes(String.format("%08x", 16 + payload.length() / 2) + "00020000" + "0000000000000000" + "00000000"
                         + payload));
 
         assertClosedWithProtocolError(server);
@@ -2206,5 +2974,148 @@ class EndpointTest {
         assertThatThrownBy(() -> webSocketServer().receive(bytes(PREFACE))).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> server().receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE)))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    // ---- CLOSE: 대기열 요청 즉시 종료, 끊기 전 REFUSED (규격 3.5절, 3.5.1절) ----
+
+    @Test
+    void closeSentEndsDeferredRequestsImmediatelyAsNotProcessed() {
+        Endpoint client = client();
+        client.drainMessages();
+        client.request(257, new byte[0]);
+        client.request(257, new byte[0]);
+
+        client.close(ErrorCode.NO_ERROR);
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(3);
+        for (Event event : events.subList(0, 2)) {
+            assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
+            assertThat(event.status()).isEqualTo(Status.UNAVAILABLE);
+            assertThat(event.streamId()).isZero();
+            assertThat(event.certainty()).contains(Certainty.NOT_PROCESSED);
+        }
+        assertThat(events.get(2).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void closeReceivedEndsDeferredRequestsImmediatelyAsNotProcessedBeforeTheAuthGate() {
+        Endpoint client = client();
+        client.drainMessages();
+        client.request(257, new byte[0]);
+
+        client.receive(bytes(CLOSE_NO_ERROR));
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
+        assertThat(events.get(0).streamId()).isZero();
+        assertThat(events.get(0).certainty()).contains(Certainty.NOT_PROCESSED);
+        assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void connectionErrorReturnsUnhandedRequestsAsRefusedBeforeTheClose() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        assertThat(sent(server))
+                .isEqualTo(RESET_REFUSED_1
+                        + CLOSE_PROTOCOL_ERROR.substring(0, CLOSE_PROTOCOL_ERROR.length() - NO_STREAM.length())
+                        + "0000000000000001");
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void errorCloseFromTheApplicationReturnsUnhandedRequestsAsRefusedBeforeTheClose() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        server.close(ErrorCode.INTERNAL_ERROR);
+
+        assertThat(sent(server))
+                .isEqualTo(
+                        RESET_REFUSED_1 + "0000001c00030000000000000000000000000000" + "00000002" + "0000000000000001");
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void connectionErrorDoesNotRefuseRequestsTheApplicationAlreadyReceived() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        assertClosedWithProtocolError(server, 1);
+    }
+
+    @Test
+    void abandoningTheWaitWhileClosingReturnsUnhandedRequestsAsRefusedThenCloses() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.receive(bytes(requestFrame(257, 3, "")));
+        server.drainEvents();
+        server.receive(bytes(requestFrame(257, 5, "")));
+        server.receive(bytes(CLOSE_NO_ERROR));
+        assertThat(server.drainMessages()).isEmpty();
+
+        server.abortClosing();
+
+        assertThat(sent(server)).isEqualTo(RESET_REFUSED_5);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void abandoningTheWaitDoesNothingUnlessTheConnectionIsClosing() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        server.abortClosing();
+
+        assertThat(server.drainMessages()).isEmpty();
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+    }
+
+    @Test
+    void closeLastStreamIdEndsUndrainedRequestsAndTheirFramesAreNeverSent() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.drainMessages();
+        client.request(257, new byte[0]);
+
+        client.receive(bytes(closeNoErrorLast(1)));
+
+        assertThat(client.drainMessages()).isEmpty();
+        List<Event> events = client.drainEvents();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).streamId()).isEqualTo(3);
+        assertThat(events.get(0).certainty()).contains(Certainty.NOT_PROCESSED);
+    }
+
+    @Test
+    void closeWithLastStreamIdHighBitSetIsMalformedAndClosesSilently() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+        client.drainMessages();
+
+        client.receive(bytes(closeNoErrorLast(0x8000000000000001L)));
+
+        assertThat(client.drainMessages()).isEmpty();
+        List<Event> events = client.drainEvents();
+        assertThat(events.get(0).certainty()).contains(Certainty.UNKNOWN);
+        assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void abandoningTheWaitAfterTheConnectionClosedDoesNothing() {
+        Endpoint server = established();
+        server.receive(bytes(CLOSE_NO_ERROR));
+        server.drainEvents();
+
+        server.abortClosing();
+
+        assertOpenAndSilent(server);
     }
 }

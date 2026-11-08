@@ -10,8 +10,11 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.IntUnaryOperator;
@@ -37,12 +40,15 @@ final class Connection implements AutoCloseable {
     private final int readChunkBytes;
     private final BlockingQueue<Event> queue = new LinkedBlockingQueue<>();
     private final List<Event> history = new ArrayList<>();
+    private final CompletableFuture<Event> authenticated = new CompletableFuture<>();
     private final Thread reader;
     private final Object bytesLock = new Object();
     /** 처리를 끝낸 받은 바이트와 소켓에 쓴 바이트의 누계. 상대가 CLOSE 같은 프레임을 처리했는지 API로 볼 수 없어서 바이트 수로 가늠한다. */
     private long receivedBytes;
 
     private long writtenBytes;
+    /** 소켓에 쓴 프레임의 type을 쓴 순서대로 적어 둔다. 전선에 나간 프레임의 순서를 본다. */
+    private final List<Integer> writtenFrameTypes = new ArrayList<>();
     /** 읽기 스레드가 예기치 못한 예외로 멈췄을 때의 원인. 기다리는 쪽 실패 메시지에 붙인다. */
     private volatile Throwable readerFailure;
 
@@ -55,8 +61,9 @@ final class Connection implements AutoCloseable {
         this.reader.setDaemon(true);
     }
 
-    /** 읽기 스레드를 시작한다. 시작 전에 낸 요청은 core가 미뤘다가 보낸다. */
+    /** 클라이언트가 연결을 열자마자 쌓은 서문과 HELLO를 쓰고 읽기 스레드를 시작한다. 시작 전에 낸 요청은 core가 미뤘다가 보낸다. */
     void start() {
+        withEndpoint(endpoint -> {});
         reader.start();
     }
 
@@ -88,6 +95,17 @@ final class Connection implements AutoCloseable {
         synchronized (bytesLock) {
             return writtenBytes;
         }
+    }
+
+    /** 지금까지 소켓에 쓴 프레임의 type을 쓴 순서대로 돌려준다. 프레임 하나를 메시지 하나로 쓴다. 연결 서문은 type이 없는 8바이트라 서문 뒤의 프레임만 본다. */
+    List<Integer> writtenFrameTypes() {
+        synchronized (bytesLock) {
+            return new ArrayList<>(writtenFrameTypes);
+        }
+    }
+
+    private static int frameType(byte[] frame) {
+        return ((frame[4] & 0xff) << 8) | (frame[5] & 0xff);
     }
 
     /** 처리를 끝낸 받은 바이트가 {@code atLeast}에 이를 때까지 기다린다. 이르지 못하면 실패한다. */
@@ -154,6 +172,15 @@ final class Connection implements AutoCloseable {
         }
     }
 
+    /** 클라이언트가 {@code AUTH(ACK)}를 받아 AUTH 관문을 통과할 때까지 기다린다. 통과하지 못하면 실패한다. */
+    Event awaitAuthenticated() throws InterruptedException {
+        try {
+            return authenticated.get(TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new AssertionError("AUTH 관문 통과를 " + TIMEOUT_MS + "ms 안에 보지 못했다", e);
+        }
+    }
+
     /** 지금까지 받은 모든 이벤트를 받은 순서대로 돌려준다. */
     synchronized List<Event> events() {
         return new ArrayList<>(history);
@@ -216,6 +243,11 @@ final class Connection implements AutoCloseable {
     private void flush() {
         writeMessages();
         for (Event event : endpoint.drainEvents()) {
+            if (event.kind() == Event.Kind.AUTHENTICATED) {
+                // 수립 알림은 애플리케이션 이벤트 흐름과 따로 둔다. 요청·응답·종료의 순서를 보는 테스트가 수립 시점에 영향받지 않게 한다.
+                authenticated.complete(event);
+                continue;
+            }
             history.add(event);
             queue.add(event);
             onEvent.accept(endpoint, event);
@@ -231,6 +263,7 @@ final class Connection implements AutoCloseable {
                     out.write(message.bytes());
                     synchronized (bytesLock) {
                         writtenBytes += message.bytes().length;
+                        writtenFrameTypes.add(frameType(message.bytes()));
                     }
                 }
             }

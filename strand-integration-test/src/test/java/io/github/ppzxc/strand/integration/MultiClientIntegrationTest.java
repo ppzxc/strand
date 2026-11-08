@@ -4,6 +4,7 @@ import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static io.github.ppzxc.strand.integration.Fixtures.NO_ERROR;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.Event;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,7 +27,7 @@ class MultiClientIntegrationTest {
 
     private static final int CLIENT_COUNT = 16;
     /** 규격 4.2절: 클라이언트가 처음 여는 스트림은 1번이다. 연결마다 번호 공간이 따로라 모든 클라이언트가 1번을 쓴다. */
-    private static final int FIRST_CLIENT_STREAM_ID = 1;
+    private static final long FIRST_CLIENT_STREAM_ID = 1L;
 
     private static TestServer startServer() throws Exception {
         return TestServer.startResponding(type -> type - APPLICATION_TYPE);
@@ -95,8 +96,9 @@ class MultiClientIntegrationTest {
                 requestFor(clients.get(i), i);
             }
             for (int i = 0; i < CLIENT_COUNT; i++) {
-                assertThat(clients.get(i).awaitEvent(Event.Kind.RESULT).status())
-                        .isEqualTo(i);
+                Event result = clients.get(i).awaitEvent(Event.Kind.RESULT);
+                assertThat(result.status()).isEqualTo(i);
+                assertThat(result.certainty()).contains(Certainty.RESPONSE);
             }
 
             for (int i = 0; i < CLIENT_COUNT; i++) {

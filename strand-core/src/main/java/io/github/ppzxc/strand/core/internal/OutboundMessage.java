@@ -24,8 +24,14 @@ public final class OutboundMessage {
         this.webSocketCloseCode = webSocketCloseCode;
     }
 
+    /** 프레임 하나를 실은 바이너리 메시지. 애플리케이션 프레임인지는 프레임의 type으로 정한다(8바이트 연결 서문은 프레임이 아니다). */
     static OutboundMessage binary(byte[] bytes) {
         return new OutboundMessage(Kind.BINARY, bytes, 0);
+    }
+
+    /** 애플리케이션 프레임(요청·응답)이다. 8바이트 연결 서문은 프레임이 아니라 제어 쪽이다. 제어 프레임이 앞지를 수 있는 쪽이다(규격 3.6절). */
+    boolean isApplication() {
+        return bytes.length >= Frames.HEADER_SIZE && Frames.typeOf(bytes) >= FrameType.FIRST_APPLICATION;
     }
 
     /** {@code NO_ERROR} 종료의 WebSocket Close. 상태 코드는 {@code 1000 Normal Closure}다(규격 1.2절). */

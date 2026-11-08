@@ -6,6 +6,7 @@ import static io.github.ppzxc.strand.integration.Fixtures.NO_ERROR;
 import static io.github.ppzxc.strand.integration.Fixtures.STATUS_OK;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.Event;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -47,6 +48,7 @@ class CloseRaceIntegrationTest {
             List<Event> clientEvents = client.events();
             assertThat(Fixtures.kinds(clientEvents)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
             assertThat(clientEvents.get(0).status()).isEqualTo(STATUS_OK);
+            assertThat(clientEvents.get(0).certainty()).contains(Certainty.RESPONSE);
             assertThat(Fixtures.kinds(serverConnection.events()))
                     .containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.CLOSED);
         }
@@ -56,7 +58,7 @@ class CloseRaceIntegrationTest {
      * 양쪽에 대기 중인 스트림이 있으면 {@code NO_ERROR} CLOSE를 보내도 연결은 닫히지 않고 종료 중이 된다. 이 상태에서 상대의 CLOSE가 오면(엇갈림) 이미 CLOSE를
      * 보냈으므로 답하는 CLOSE를 다시 보내서는 안 된다(규격 3.5절 "CLOSE를 보냈거나 받은 뒤에는 CLOSE를 보내지 않는다(MUST NOT)", "양쪽이 동시에 CLOSE를 보내
      * 엇갈리는 것은 허용한다"). 서로 요청을 낸 뒤 응답을 보류하고, 두 연결의 잠금을 함께 잡아 양쪽이 서로의 CLOSE를 보기 전에 각자 CLOSE를 보내게 한다. 둘 다 상대
-     * CLOSE를 처리한 뒤에 각자 쓴 바이트가 CLOSE 프레임 하나(20바이트)인지 보고, 그다음 서로 응답해 끝낸다. 두 번째 CLOSE를 보내면 그쪽이 쓴 바이트가 40이 되고,
+     * CLOSE를 처리한 뒤에 각자 쓴 바이트가 CLOSE 프레임 하나(32바이트)인지 보고, 그다음 서로 응답해 끝낸다. 두 번째 CLOSE를 보내면 그쪽이 쓴 바이트가 64가 되고,
      * {@code closed}가 중복되면 이벤트 목록에 {@code CLOSED}가 둘이 된다. 대기 스트림이 없으면 CLOSE를 보내는 즉시 닫혀 상대 CLOSE를 처리하지 않으므로 이 경로를
      * 시험할 수 없다.
      */

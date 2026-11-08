@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.integration;
 import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.Event;
 import java.util.HashMap;
 import java.util.Map;
@@ -28,7 +29,7 @@ class RequestVolumeIntegrationTest {
     void sequentialRequestsKeepStreamNumbersAndResponses() throws Exception {
         try (TestServer server = TestServer.startResponding(type -> (type - APPLICATION_TYPE));
                 TestClient client = TestClient.connect(server.port())) {
-            Map<Integer, Integer> statusByStream = new HashMap<>();
+            Map<Long, Integer> statusByStream = new HashMap<>();
             int sent = 0;
             int received = 0;
             while (received < TOTAL_REQUESTS) {
@@ -37,13 +38,14 @@ class RequestVolumeIntegrationTest {
                     sent++;
                 }
                 Event result = client.awaitEvent(Event.Kind.RESULT);
+                assertThat(result.certainty()).contains(Certainty.RESPONSE);
                 statusByStream.put(result.streamId(), result.status());
                 received++;
             }
 
-            Map<Integer, Integer> expected = new HashMap<>();
+            Map<Long, Integer> expected = new HashMap<>();
             for (int i = 0; i < TOTAL_REQUESTS; i++) {
-                expected.put(2 * i + 1, i % STATUS_CYCLE);
+                expected.put(2L * i + 1, i % STATUS_CYCLE);
             }
             assertThat(statusByStream).isEqualTo(expected);
         }

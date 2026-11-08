@@ -20,8 +20,8 @@ final class Fixtures {
     /** 규격 2.5.2절 error_code {@code NO_ERROR}. */
     static final int NO_ERROR = 0;
 
-    /** 규격 2.1절, 3.5절: CLOSE 프레임은 헤더 16바이트에 {@code error_code} 4바이트가 붙은 20바이트다(확장 영역과 {@code reason}이 없을 때). */
-    static final int CLOSE_FRAME_BYTES = 20;
+    /** 규격 2.1절, 3.5절: CLOSE 프레임은 헤더 20바이트에 {@code error_code} 4바이트와 {@code last_stream_id} 8바이트가 붙은 32바이트다(확장 영역과 {@code reason}이 없을 때). */
+    static final int CLOSE_FRAME_BYTES = 32;
 
     private Fixtures() {}
 

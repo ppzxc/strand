@@ -33,7 +33,7 @@ public final class ServerExample {
     }
 
     private static void serve(Socket socket) {
-        Endpoint endpoint = Endpoint.server(EndpointConfig.defaults());
+        Endpoint endpoint = Endpoint.server(ExampleSupport.withAuthenticator(EndpointConfig.defaults()));
         try (Socket s = socket) {
             InputStream in = s.getInputStream();
             OutputStream out = s.getOutputStream();

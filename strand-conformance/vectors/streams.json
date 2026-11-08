@@ -385,7 +385,7 @@
         },
         {
           "kind": "recv",
-          "hex": "0000001001010000000000007ffffffe00000000",
+          "hex": "00000010010100007ffffffffffffffe00000000",
           "send": [],
           "events": [
             {
@@ -1783,6 +1783,173 @@
               "stream_id": "3"
             }
           ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "request-deadline-after-write-sends-reset-cancel",
+      "description": "요청 프레임의 쓰기를 시작한 뒤 요청 기한이 지나면 RESET(CANCEL)을 보내고 애플리케이션에 DEADLINE_EXCEEDED(결과 모름)를 넘긴다. 기한 직전에는 아무 일도 없고, 끝난 요청의 늦은 응답은 조용히 버려지며 결과가 다시 나가지 않는다",
+      "spec": [
+        "4.4",
+        "4.4.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "deadline_ms": 100,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 99,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 2,
+          "send": [
+            {
+              "type": "RESET",
+              "stream_id": "1",
+              "error_code": "CANCEL"
+            }
+          ],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "DEADLINE_EXCEEDED",
+              "certainty": "unknown"
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001001010000000000000000000100000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 1000,
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "request-deadline-of-queued-request-ends-without-stream-id",
+      "description": "AUTH 관문이 열리기 전이라 번호를 받지 못하고 미뤄진 요청의 기한이 지나면 RESET 없이 프레임 없이 stream_id 없는 DEADLINE_EXCEEDED(처리 안 됨)로 끝난다. 관문이 열려도 그 요청의 프레임은 나가지 않는다",
+      "spec": [
+        "4.4",
+        "4.4.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": false
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000010000000000000000000000000000",
+          "send": [
+            {
+              "type": "PREFACE"
+            },
+            {
+              "type": "HELLO"
+            },
+            {
+              "type": "HELLO",
+              "flags": [
+                "ACK"
+              ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000010100000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "deadline_ms": 100,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 99,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 2,
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "status": "DEADLINE_EXCEEDED",
+              "certainty": "not_processed"
+            }
+          ]
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000050100000000000000000000000000",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "request-without-deadline-never-expires",
+      "description": "요청 기한은 로컬 설정이고 설정하지 않으면 없다. 기한 없는 요청은 오랜 시간이 지나도 RESET도 결과도 내지 않는다",
+      "spec": [
+        "4.4.1"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 1000000,
+          "send": [],
           "events": []
         }
       ]

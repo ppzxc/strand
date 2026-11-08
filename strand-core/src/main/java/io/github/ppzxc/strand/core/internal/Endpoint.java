@@ -1,12 +1,19 @@
 package io.github.ppzxc.strand.core.internal;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Deque;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
@@ -22,17 +29,19 @@ public final class Endpoint {
     private static final int FIRST_SERVER_STREAM_ID = 2;
 
     private static final int FIRST_CLIENT_STREAM_ID = 1;
-    private static final int MIN_FRAME_LENGTH = 12;
-    private static final int LENGTH_SIZE = 4;
-    /** type 필드가 끝나는 위치. 길이가 어긋난 프레임도 여기까지는 읽어 type을 본다. */
-    private static final int TYPE_END = 6;
 
     private static final int PING_PAYLOAD_SIZE = 8;
+    private static final int AUTH_ACK_PARAM_SIZE = 6;
+    private static final int CREDENTIAL_LIFETIME_ID = 0x0001;
+    /** AUTH 확인 대기를 PING(8바이트)·HELLO(null)의 대기와 구분하는 표지. */
+    private static final byte[] AUTH_WAIT = new byte[0];
+
     private static final int RESET_PAYLOAD_SIZE = 4;
-    private static final long MAX_STREAM_ID = Integer.MAX_VALUE;
     private static final int TLV_HEADER_SIZE = 4;
     private static final int TIMEOUT_TAG = 0x0001;
     private static final int TIMEOUT_LENGTH = 4;
+    private static final int CLOSE_ERROR_CODE_SIZE = 4;
+    private static final int CLOSE_MIN_PAYLOAD_SIZE = 12;
     private static final int IDEMPOTENCY_KEY_TAG = 0x0003;
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 64;
     /** extensions_length의 한도(규격 2.4절). */
@@ -41,12 +50,19 @@ public final class Endpoint {
     private final EndpointConfig config;
     private final List<OutboundMessage> outbox = new ArrayList<>();
     private final List<Event> events = new ArrayList<>();
-    /** 대기 중인 스트림 가운데 내가 연 것(결과를 기다리는 내 요청)의 번호와 요청 type. 보낸 순서대로다(규격 1.3절). */
-    private final Map<Integer, Integer> ownPendingStreams = new LinkedHashMap<>();
+    /** 대기 중인 스트림 가운데 내가 연 것(결과를 기다리는 내 요청)의 번호와 요청 type·번호표. 보낸 순서대로다(규격 1.3절). */
+    private final Map<Long, OwnStream> ownPendingStreams = new LinkedHashMap<>();
+    /**
+     * 요청 프레임이 아직 {@link #drainMessages()}로 전송 계층에 넘어가지 않은 내 스트림(규격 3.5절 "연결이 끝날 때"). 프레임 하나가 메시지
+     * 하나이므로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 본다.
+     */
+    private final Map<Long, OutboundMessage> undrainedRequests = new LinkedHashMap<>();
+    /** 다음 {@link #request}에 줄 번호표. */
+    private long nextTicket;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
-    private final Map<Integer, Integer> peerPendingStreams = new LinkedHashMap<>();
-    /** 상대 HELLO에 ACK를 보내기 전이라 미뤄 둔 송신(규격 3.3절). */
-    private final List<DeferredSend> deferredSends = new ArrayList<>();
+    private final Map<Long, Integer> peerPendingStreams = new LinkedHashMap<>();
+    /** AUTH 관문을 통과하기 전이라 미뤄 둔 송신(규격 3.3절). */
+    private final Deque<DeferredSend> deferredSends = new ArrayDeque<>();
 
     private byte[] receiveBuffer = new byte[0];
     private boolean prefaceChecked;
@@ -55,23 +71,37 @@ public final class Endpoint {
     private boolean peerHelloAcked;
     /** 내가 보낸 HELLO에 대해 상대가 보낸 ACK를 받았다(규격 3.3절 ACK 관문). */
     private boolean ownHelloAcked;
+    /** 서버는 {@code AUTH(ACK)}를 보냈고 클라이언트는 {@code AUTH(ACK)}를 받았다(규격 3.3절 AUTH 관문). */
+    private boolean authGatePassed;
     /** 상대가 HELLO로 알린 {@code max_concurrent_streams}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
     /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
     /** CLOSE 교환: CLOSE를 보냈거나 받았다(규격 1.3절, 3.5절). */
     private boolean closeExchanged;
+    /** 상대의 CLOSE를 이미 받았다. 처음 받은 CLOSE의 {@code last_stream_id}만 쓴다(규격 3.5절). */
+    private boolean closeReceived;
+    /** 요청 프레임을 전송 계층에 넘긴 내 스트림 가운데 가장 큰 번호. 상대 CLOSE의 {@code last_stream_id} 검사 기준이다(규격 3.5절). */
+    private long highestSentOwnStreamId;
 
     /** 전송 계층이 닫혀 연결이 끝났다(규격 1.3절 연결이 끝남). */
     private boolean transportClosed;
 
     private long now;
+    /** 서버의 AUTH 대기가 끝나는 시각. 대기 중이 아니면 null이다(규격 3.3절 AUTH 대기). */
+    private @Nullable Long authDeadline;
     /** ACK를 기다리는 HELLO와 PING들. 보낸 순서대로다(규격 3.3절). */
     private final List<AckWait> ackWaits = new ArrayList<>();
+    /** 마지막으로 프레임을 받은 가상 시각(규격 3.4.1절 유휴 판단). */
+    private long lastReceivedAt;
+
+    private long idlePingCount;
 
     private long nextStreamId;
     /** 내 번호 공간의 홀짝: 클라이언트는 1, 서버는 0이다(규격 2.2.5절). */
     private final int ownParity;
+
+    private final boolean server;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
     private long highestPeerStreamId;
 
@@ -79,6 +109,7 @@ public final class Endpoint {
         this.config = config;
         this.nextStreamId = config.firstStreamId(server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID);
         this.ownParity = server ? 0 : 1;
+        this.server = server;
     }
 
     /**
@@ -155,14 +186,14 @@ public final class Endpoint {
             closeTransport();
             return;
         }
-        if (kind != WebSocketMessageKind.BINARY || message.length < TYPE_END) {
+        if (kind != WebSocketMessageKind.BINARY || message.length < Frames.TYPE_END) {
             connectionError();
             return;
         }
         long length = Frames.readUnsignedInt(message, 0);
-        if (length < MIN_FRAME_LENGTH
-                || length > config.maxFrameSize() - LENGTH_SIZE
-                || message.length != LENGTH_SIZE + length) {
+        if (length < Frames.MIN_LENGTH
+                || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE
+                || message.length != Frames.LENGTH_FIELD_SIZE + length) {
             rejectBadLength(message);
             return;
         }
@@ -179,43 +210,128 @@ public final class Endpoint {
             return;
         }
         now += ms;
+        if (authDeadline != null && now > authDeadline) {
+            closeWithError(ErrorCode.UNAUTHENTICATED);
+            return;
+        }
         for (AckWait wait : ackWaits) {
-            if (now > wait.deadline) {
+            if (wait.started && now > wait.deadline) {
                 // 닫으면 대기 목록이 비므로 반복을 이어 가지 않고 바로 끝낸다.
-                connectionError();
+                closeWithError(ErrorCode.UNRESPONSIVE);
                 return;
             }
         }
+        expireRequests();
+        sendIdlePingIfDue();
     }
 
     /**
-     * 애플리케이션이 요청을 보내게 한다. 상대 HELLO에 ACK를 보내기 전이면 그 뒤로 미룬다(규격 3.3절). CLOSE를 보냈거나 받은 뒤,
+     * 유휴 간격 동안 받은 프레임이 없고 ACK를 기다리는 PING이 없으면 PING을 보낸다(규격 3.4.1절). 간격이 설정돼 있지 않으면 보내지 않는다.
+     * 보내는 때는 규격 3.3절의 송신 규칙을 따라 AUTH 관문을 통과한 뒤에만 보낸다. 종료 중에도 보낸다.
+     */
+    private void sendIdlePingIfDue() {
+        long idle = config.idleIntervalMs();
+        if (idle <= 0 || !authGatePassed || now - lastReceivedAt < idle || hasOutstandingPing()) {
+            return;
+        }
+        byte[] payload = new byte[PING_PAYLOAD_SIZE];
+        for (int i = PING_PAYLOAD_SIZE - 1; i >= 0; i--) {
+            payload[i] = (byte) (idlePingCount >>> (8 * (PING_PAYLOAD_SIZE - 1 - i)));
+        }
+        idlePingCount++;
+        sendPing(payload);
+    }
+
+    private boolean hasOutstandingPing() {
+        for (AckWait wait : ackWaits) {
+            if (wait.payload != null && wait.payload.length == PING_PAYLOAD_SIZE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 애플리케이션이 요청을 보내게 한다. AUTH 관문을 통과하기 전이면 그 뒤로 미룬다(규격 3.3절). CLOSE를 보냈거나 받은 뒤,
      * 번호 소진(규격 2.2.5절), 상대가 알린 {@code max_concurrent_streams} 도달(규격 3.2.1절)이면 프레임을 보내지 않고 로컬에서
      * 실패시킨다. 이때 스트림 번호 없는 {@link Event.Kind#RESULT} 이벤트(status {@code UNAVAILABLE})가 한 번 나온다. 한도에 닿은
      * 요청은 대기시키지 않고 즉시 실패시키며 스트림 번호를 쓰지 않는다.
      *
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param payload 본문
+     * @return 요청 번호표(낸 순서, 0부터). 로컬에서 실패한 요청에도 번호표가 하나 쓰인다. 크기 검사로 던진 요청은 번호표를 쓰지 않는다. {@link #requestState(long)}가 이 번호표로 요청을 찾는다.
      * @throws IllegalArgumentException 지금 보낼 수 있는 요청의 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런
      *     프레임을 보내지 못하게 하고(MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림 번호도 쓰지 않는다.
-     *     상대 HELLO에 ACK하기 전이라 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고, 보낼 때 넘으면 로컬 {@code UNAVAILABLE}로
+     *     AUTH 관문 전이라 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고, 보낼 때 넘으면 로컬 {@code UNAVAILABLE}로
      *     실패시킨다.
      */
-    public void request(int type, byte[] payload) {
+    public long request(int type, byte[] payload) {
+        return requestUntil(type, payload, null);
+    }
+
+    private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
         if (transportClosed) {
             failLocally();
-            return;
+            return nextTicket++;
         }
-        if (peerHelloAcked) {
-            if (sendRequest(type, payload) == RequestOutcome.OVERSIZE) {
+        if (authGatePassed) {
+            // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
+            long ticket = nextTicket;
+            if (sendRequest(ticket, type, payload, deadlineAt) == RequestOutcome.OVERSIZE) {
                 throw oversizeFrame("요청");
             }
-        } else {
-            deferredSends.add(DeferredSend.request(() -> {
-                if (sendRequest(type, payload) == RequestOutcome.OVERSIZE) {
-                    failLocally();
-                }
-            }));
+            nextTicket++;
+            return ticket;
+        }
+        long ticket = nextTicket++;
+        byte[] copy = payload.clone();
+        deferredSends.add(DeferredSend.request(ticket, deadlineAt, () -> {
+            if (sendRequest(ticket, type, copy, deadlineAt) == RequestOutcome.OVERSIZE) {
+                failLocally();
+            }
+        }));
+        return ticket;
+    }
+
+    /**
+     * 요청 기한을 두고 요청을 보낸다(규격 4.4.1절). 기한은 로컬 설정이고, 기한이 지난 뒤 {@link #advance(long)}가 요청을 끝낸다. 쓰기 전(번호
+     * 유무 무관)이면 {@code RESET} 없이 프레임을 버리고 {@code DEADLINE_EXCEEDED}(처리 안 됨), 쓰기를 시작했으면 {@code RESET(CANCEL)}을
+     * 보내고 {@code DEADLINE_EXCEEDED}(결과 모름)를 넘긴다. 요청 확장 영역의 {@code timeout}은 받는 쪽에 주는 힌트일 뿐 이 기한이 아니다.
+     *
+     * @param deadlineMs 지금부터 센 기한(밀리초, 1 이상)
+     * @throws IllegalArgumentException {@code deadlineMs}가 1보다 작을 때
+     * @see #request(int, byte[])
+     */
+    public long request(int type, byte[] payload, long deadlineMs) {
+        if (deadlineMs < 1) {
+            throw new IllegalArgumentException("deadlineMs는 1 이상이어야 한다: " + deadlineMs);
+        }
+        return requestUntil(type, payload, now + deadlineMs);
+    }
+
+    /**
+     * 번호표로 요청을 취소한다. 번호 없는 대기열 요청도 취소할 수 있다(규격 4.4절). 결과는 {@link #cancel(long)}과 같다. 끝난 요청이나 낸 적 없는
+     * 번호표면 아무것도 하지 않는다.
+     *
+     * @param ticket {@link #request}가 돌려준 번호표
+     */
+    public void cancelRequest(long ticket) {
+        if (transportClosed) {
+            return;
+        }
+        for (Iterator<DeferredSend> it = deferredSends.iterator(); it.hasNext(); ) {
+            DeferredSend deferred = it.next();
+            if (deferred.isRequest() && deferred.ticket == ticket) {
+                it.remove();
+                events.add(Event.result(0, Status.CANCELLED, Certainty.NOT_PROCESSED));
+                return;
+            }
+        }
+        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
+            if (entry.getValue().ticket == ticket) {
+                endOwnRequest(entry.getKey(), Status.CANCELLED);
+                return;
+            }
         }
     }
 
@@ -228,7 +344,7 @@ public final class Endpoint {
      * @throws IllegalArgumentException 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런 프레임을 보내지 못하게 하고
      *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
-    public void respond(int streamId, int status, byte[] payload) {
+    public void respond(long streamId, int status, byte[] payload) {
         Integer type = transportClosed ? null : peerPendingStreams.get(streamId);
         if (type == null) {
             return;
@@ -248,23 +364,65 @@ public final class Endpoint {
      *
      * @param streamId 내가 연 스트림 번호
      */
-    public void cancel(int streamId) {
-        if (transportClosed || ownPendingStreams.remove(streamId) == null) {
+    public void cancel(long streamId) {
+        if (!transportClosed) {
+            endOwnRequest(streamId, Status.CANCELLED);
+        }
+    }
+
+    /**
+     * 기한이 지난 요청을 끝낸다(규격 4.4.1절). 번호 없는 대기열 요청은 stream_id 없는 결과로, 번호를 받은 요청은 {@link
+     * #endOwnRequest}로 끝낸다.
+     */
+    private void expireRequests() {
+        deferredSends.removeIf(deferred -> {
+            if (deferred.isRequest() && deferred.expiredAt(now)) {
+                events.add(Event.result(0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED));
+                return true;
+            }
+            return false;
+        });
+        List<Long> expired = new ArrayList<>();
+        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
+            Long deadlineAt = entry.getValue().deadlineAt;
+            if (deadlineAt != null && now > deadlineAt) {
+                expired.add(entry.getKey());
+            }
+        }
+        for (long streamId : expired) {
+            endOwnRequest(streamId, Status.DEADLINE_EXCEEDED);
+        }
+    }
+
+    /**
+     * 번호를 받은 내 요청을 취소나 기한으로 끝낸다(규격 4.4절, 4.4.1절). 한 바이트도 쓰기 전이면 프레임을 거두고 {@code RESET} 없이
+     * 처리 안 됨으로 끝낸다. 쓰기를 시작했으면 프레임은 이미 끊을 수 없으므로 그대로 두고 {@code RESET(CANCEL)}을 보내 결과 모름으로 끝낸다.
+     * 대기 중이 아닌 스트림이면 아무것도 하지 않는다.
+     */
+    private void endOwnRequest(long streamId, int status) {
+        if (endOwnStream(streamId) == null) {
             return;
         }
-        send(Frames.reset(streamId, ErrorCode.CANCEL));
-        events.add(Event.result(streamId, Status.CANCELLED));
+        OutboundMessage unwritten = undrainedRequests.remove(streamId);
+        if (unwritten != null) {
+            outbox.removeIf(message -> message == unwritten);
+            events.add(Event.result(streamId, status, Certainty.NOT_PROCESSED));
+        } else {
+            send(Frames.reset(streamId, ErrorCode.CANCEL));
+            events.add(Event.result(streamId, status, Certainty.UNKNOWN));
+        }
         closeTransportIfNoPendingStreams();
     }
 
     /**
-     * 애플리케이션이 PING을 보내게 한다. 상대 HELLO에 ACK를 보내기 전이면 그 뒤로 미룬다(규격 3.3절).
+     * 애플리케이션이 PING을 보내게 한다. AUTH 관문을 통과하기 전이면 그 뒤로 미룬다(규격 3.3절).
      *
      * @param payload 정확히 8바이트
      */
     public void ping(byte[] payload) {
         if (!transportClosed) {
-            sendAfterAckingPeerHello(DeferredSend.ping(() -> sendPing(payload)));
+            byte[] copy = payload.clone();
+            sendAfterAuthGate(DeferredSend.ping(() -> sendPing(copy)));
         }
     }
 
@@ -277,8 +435,12 @@ public final class Endpoint {
         if (transportClosed || closeExchanged) {
             return;
         }
-        send(Frames.close(errorCode));
+        if (errorCode != ErrorCode.NO_ERROR) {
+            refuseUnhandedRequests();
+        }
+        send(Frames.close(errorCode, highestPeerStreamId));
         closeExchanged = true;
+        endQueuedRequests();
         closeTransportUnlessClosing(errorCode);
     }
 
@@ -291,6 +453,19 @@ public final class Endpoint {
     }
 
     /**
+     * 종료 중인 연결(CLOSE를 보냈거나 받음)에서 애플리케이션이 더 기다리지 않고 닫기로 했을 때 부른다. 받아들였지만 아직 애플리케이션에
+     * 넘기지 않은 상대의 요청을 {@code RESET(REFUSED)}로 돌려보낸 뒤 전송 계층을 닫는다(규격 3.5.1절). 종료 중이 아니거나 이미 닫혔으면
+     * 아무것도 하지 않는다.
+     */
+    public void abortClosing() {
+        if (transportClosed || !closeExchanged) {
+            return;
+        }
+        refuseUnhandedRequests();
+        closeTransportAfterNoError();
+    }
+
+    /**
      * 지금까지 쌓인, 상대에게 보낼 메시지를 보낸 순서대로 꺼낸다. 프레임 하나가 메시지 하나다. 바이트 스트림 전송은 메시지를 이어 붙여 보내면
      * 된다.
      *
@@ -299,6 +474,19 @@ public final class Endpoint {
     public List<OutboundMessage> drainMessages() {
         List<OutboundMessage> drained = new ArrayList<>(outbox);
         outbox.clear();
+        // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
+        if (!drained.isEmpty()) {
+            Set<OutboundMessage> drainedSet = identitySet(drained);
+            for (AckWait wait : ackWaits) {
+                if (!wait.started && drainedSet.contains(wait.message)) {
+                    wait.start(now + config.ackTimeoutMs());
+                }
+            }
+        }
+        for (long streamId : undrainedRequests.keySet()) {
+            highestSentOwnStreamId = Math.max(highestSentOwnStreamId, streamId);
+        }
+        undrainedRequests.clear();
         return drained;
     }
 
@@ -350,7 +538,7 @@ public final class Endpoint {
     private boolean checkFirstMessage(WebSocketMessageKind kind, byte[] message) {
         boolean valid = kind == WebSocketMessageKind.BINARY
                 && message.length >= Frames.HEADER_SIZE
-                && Frames.readUnsignedInt(message, 0) >= MIN_FRAME_LENGTH
+                && Frames.readUnsignedInt(message, 0) >= Frames.MIN_LENGTH
                 && isFirstFrameHeader(message);
         firstFrameChecked = valid;
         return valid;
@@ -367,13 +555,13 @@ public final class Endpoint {
 
     /** 프레임 하나를 읽어 처리한다. 더 읽을 수 있으면 true. */
     private boolean readFrame() {
-        if (receiveBuffer.length < LENGTH_SIZE) {
+        if (receiveBuffer.length < Frames.LENGTH_FIELD_SIZE) {
             return false;
         }
         long length = Frames.readUnsignedInt(receiveBuffer, 0);
         if (!firstFrameChecked) {
             // 첫 프레임 검사(규격 3.2.4절): 헤더를 읽을 수 없거나 HELLO가 아니면 아무것도 보내지 않고 닫는다.
-            if (length < MIN_FRAME_LENGTH) {
+            if (length < Frames.MIN_LENGTH) {
                 closeTransport();
                 return false;
             }
@@ -386,15 +574,15 @@ public final class Endpoint {
             }
             firstFrameChecked = true;
         }
-        if (length < MIN_FRAME_LENGTH || length > config.maxFrameSize() - LENGTH_SIZE) {
-            if (receiveBuffer.length < TYPE_END) {
+        if (length < Frames.MIN_LENGTH || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE) {
+            if (receiveBuffer.length < Frames.TYPE_END) {
                 // type을 읽을 때까지 기다린다. CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫아야 하므로 도착 단위에 따라 결과가 달라지면 안 된다.
                 return false;
             }
             rejectBadLength(receiveBuffer);
             return false;
         }
-        int frameSize = (int) (LENGTH_SIZE + length);
+        int frameSize = (int) (Frames.LENGTH_FIELD_SIZE + length);
         if (receiveBuffer.length < frameSize) {
             return false;
         }
@@ -405,6 +593,7 @@ public final class Endpoint {
     }
 
     private void handle(byte[] frame) {
+        lastReceivedAt = now;
         int type = Frames.typeOf(frame);
         int extensionsLength = Frames.extensionsLengthOf(frame);
         long streamId = Frames.streamIdOf(frame);
@@ -412,7 +601,7 @@ public final class Endpoint {
             handleClose(frame, extensionsLength, streamId);
             return;
         }
-        if (extensionsLength > frame.length - LENGTH_SIZE - MIN_FRAME_LENGTH) {
+        if (extensionsLength > frame.length - Frames.HEADER_SIZE) {
             connectionError();
             return;
         }
@@ -420,8 +609,8 @@ public final class Endpoint {
             handleApplication(frame, type, extensionsLength, streamId);
             return;
         }
-        if (type != FrameType.HELLO && type != FrameType.PING && type != FrameType.RESET) {
-            // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절).
+        if (FrameType.isReserved(type)) {
+            // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 ACK 관문은 보지 않는다.
             if (extensionsLength != 0) {
                 connectionError();
             }
@@ -431,7 +620,13 @@ public final class Endpoint {
             connectionError();
             return;
         }
-        if (!ownHelloAcked && (type == FrameType.PING || type == FrameType.RESET)) {
+        if (!ownHelloAcked && type != FrameType.HELLO) {
+            // ACK 관문(규격 3.3절): 내 HELLO의 ACK를 받기 전에는 HELLO와 CLOSE만 받는다. AUTH는 예약이 아니라서 여기에 걸린다.
+            connectionError();
+            return;
+        }
+        if (!authGatePassed && type != FrameType.HELLO && type != FrameType.AUTH) {
+            // AUTH 관문(규격 3.3절): 통과 전에는 HELLO·AUTH·CLOSE만 받는다. ACK 관문이 먼저 적용된다.
             connectionError();
             return;
         }
@@ -441,8 +636,10 @@ public final class Endpoint {
             handleHello(ack, payload);
         } else if (type == FrameType.PING) {
             handlePing(ack, payload);
-        } else {
+        } else if (type == FrameType.RESET) {
             handleReset(streamId, payload);
+        } else if (type == FrameType.AUTH) {
+            handleAuth(ack, payload);
         }
     }
 
@@ -456,20 +653,22 @@ public final class Endpoint {
             connectionError();
             return;
         }
-        int id = (int) streamId;
         if (isOwnSpace(streamId)) {
-            if (ownPendingStreams.remove(id) != null) {
-                events.add(Event.result(id, Status.forReset(Frames.readUnsignedInt(payload, 0))));
+            if (endOwnStream(streamId) != null) {
+                long errorCode = Frames.readUnsignedInt(payload, 0);
+                // 거절한 요청은 처리를 시작하지 않았다(규격 4.4절 결과 표).
+                Certainty certainty = errorCode == ErrorCode.REFUSED ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
+                events.add(Event.result(streamId, Status.forReset(errorCode), certainty));
             }
         } else {
-            peerPendingStreams.remove(id);
+            peerPendingStreams.remove(streamId);
         }
         closeTransportIfNoPendingStreams();
     }
 
-    /** {@code stream_id}가 0이거나 최상위 비트가 1이다(규격 2.2.5절). */
+    /** {@code stream_id}가 0이거나 최상위 비트가 1이다(규격 2.2.5절). 최상위 비트가 1이면 {@code long}으로 음수다. */
     private static boolean isInvalidStreamId(long streamId) {
-        return streamId == 0 || streamId > MAX_STREAM_ID;
+        return !Frames.isValidStreamId(streamId);
     }
 
     private boolean isOwnSpace(long streamId) {
@@ -485,12 +684,15 @@ public final class Endpoint {
         Extensions extensionsResult = extensionsLength > MAX_EXTENSIONS_LENGTH
                 ? Extensions.MALFORMED
                 : scanExtensions(frame, extensionsLength);
-        if (extensionsResult == Extensions.MALFORMED || !ownHelloAcked || isInvalidStreamId(streamId)) {
+        if (extensionsResult == Extensions.MALFORMED
+                || !ownHelloAcked
+                || !authGatePassed
+                || isInvalidStreamId(streamId)) {
             connectionError();
         } else if (isOwnSpace(streamId)) {
-            handleResponse(frame, (int) streamId);
+            handleResponse(frame, streamId);
         } else {
-            handleRequest(type, extensionsResult, (int) streamId);
+            handleRequest(type, extensionsResult, streamId);
         }
     }
 
@@ -498,14 +700,18 @@ public final class Endpoint {
      * 상대의 새 요청(규격 5.1절 5번). (가) 거절, (나) 모르는 type, (다) 확장 값 오류 순서로 보고, 모두 지나면 애플리케이션에 넘긴다.
      * 거절한 요청과 오류로 답한 요청은 대기 스트림에 넣지 않지만 번호는 쓰인 것으로 센다(규격 4.5절, 5.1절).
      */
-    private void handleRequest(int type, Extensions extensionsResult, int streamId) {
+    private void handleRequest(int type, Extensions extensionsResult, long streamId) {
         if (streamId <= highestPeerStreamId) {
             // 번호 역행: 재사용한 번호, 건너뛰고 나중에 온 번호, 대기 중인 스트림의 번호 모두 연결 오류다(규격 4.2.1절).
             connectionError();
             return;
         }
         highestPeerStreamId = streamId;
-        if (closeExchanged || peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
+        if (closeExchanged) {
+            // CLOSE를 보냈거나 받은 뒤의 새 요청은 끝까지 읽고 조용히 버린다. 어떤 프레임도 보내지 않는다(규격 3.5절).
+            return;
+        }
+        if (peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
             send(Frames.reset(streamId, ErrorCode.REFUSED));
         } else if (!config.knows(type)) {
             send(Frames.response(type, streamId, Status.UNIMPLEMENTED));
@@ -552,8 +758,8 @@ public final class Endpoint {
     }
 
     /** 내 요청의 응답. 대기 중인 요청이면 결과를 애플리케이션에 넘긴다. 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). */
-    private void handleResponse(byte[] frame, int streamId) {
-        Integer requestType = ownPendingStreams.remove(streamId);
+    private void handleResponse(byte[] frame, long streamId) {
+        Integer requestType = endOwnStream(streamId);
         if (requestType == null) {
             // 대기 중이 아닌 스트림의 프레임은 조용히 버린다(규격 4.3절).
             return;
@@ -562,7 +768,7 @@ public final class Endpoint {
         int status = Frames.typeOf(frame) == requestType
                 ? Status.normalize(Frames.statusOf(frame))
                 : Event.RESPONSE_TYPE_MISMATCH;
-        events.add(Event.result(streamId, status));
+        events.add(Event.result(streamId, status, Certainty.RESPONSE));
         closeTransportIfNoPendingStreams();
     }
 
@@ -593,10 +799,98 @@ public final class Endpoint {
         peerMaxConcurrentStreams = peer.maxConcurrentStreams;
         peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
+        if (server) {
+            authDeadline = now + config.authTimeoutMs();
+            return;
+        }
+        byte[] auth = Frames.auth(config.authMechanism(), config.authCredentials());
+        if (exceedsPeerFrameSize(auth)) {
+            // 3.2.1절은 상대 max_frame_size를 넘는 프레임을 금지(MUST NOT)하며 AUTH도 예외가 아니다. 상대 HELLO는 유효하므로 ACK는 3.2.3절이
+            // 요구한 대로 보냈다. 그다음 닫는 처리만 규격에 정의가 없다(#196): AUTH도 CLOSE도 보내지 않고 전송 계층만 닫는다. 아무것도 보내지
+            // 않았으므로 대기 요청은 closeTransport가 처리 안 됨으로 끝낸다.
+            closeExchanged = true;
+            closeTransport();
+            return;
+        }
+        // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
+        sendAwaitingAck(auth, AUTH_WAIT);
+    }
+
+    /**
+     * 받은 {@code AUTH}와 {@code AUTH(ACK)}(규격 3.3.1절). 서버는 첫 {@code AUTH}를 애플리케이션에 넘기고, 클라이언트는 첫
+     * {@code AUTH(ACK)}에서 {@code credential_lifetime}을 알린다. 방향 위반, 두 번째 {@code AUTH}·{@code AUTH(ACK)},
+     * 형태 위반은 연결 오류다.
+     */
+    private void handleAuth(boolean ack, byte[] payload) {
+        if (server && !ack && !authGatePassed) {
+            handleServerAuth(payload);
+        } else if (!server && ack && peerHelloAcked && !authGatePassed) {
+            handleClientAuthAck(payload);
+        } else {
+            connectionError();
+        }
+    }
+
+    private void handleServerAuth(byte[] payload) {
+        authDeadline = null;
+        int mechanismLength = payload.length == 0 ? 0 : payload[0] & 0xFF;
+        if (mechanismLength < 1
+                || mechanismLength > EndpointConfig.MAX_AUTH_MECHANISM_LENGTH
+                || payload.length < 1 + mechanismLength) {
+            connectionError();
+            return;
+        }
+        String mechanism = new String(payload, 1, mechanismLength, StandardCharsets.US_ASCII);
+        if (!EndpointConfig.isValidAuthMechanism(mechanism)) {
+            connectionError();
+            return;
+        }
+        byte[] credentials = Arrays.copyOfRange(payload, 1 + mechanismLength, payload.length);
+        AuthDecision decision;
+        try {
+            decision = config.authenticator().authenticate(mechanism, credentials);
+        } catch (RuntimeException e) {
+            // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다.
+            decision = AuthDecision.TRANSIENT_FAILURE;
+        }
+        if (decision != AuthDecision.PASS) {
+            // 거부와 모르는 메커니즘은 UNAUTHENTICATED, 일시 실패는 INTERNAL_ERROR. 이유는 비운다(규격 3.3.1절).
+            closeWithError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);
+            return;
+        }
+        send(Frames.control(FrameType.AUTH, Flags.ACK, new byte[0]));
+        openAuthGate();
+    }
+
+    private void handleClientAuthAck(byte[] payload) {
+        if (payload.length % AUTH_ACK_PARAM_SIZE != 0) {
+            connectionError();
+            return;
+        }
+        OptionalLong lifetime = OptionalLong.empty();
+        Set<Integer> seen = new HashSet<>();
+        for (int at = 0; at < payload.length; at += AUTH_ACK_PARAM_SIZE) {
+            if (!seen.add(Frames.readUnsignedShort(payload, at))) {
+                connectionError();
+                return;
+            }
+            // 모르는 identifier는 무시한다(규격 3.3.1절).
+            if (Frames.readUnsignedShort(payload, at) == CREDENTIAL_LIFETIME_ID) {
+                lifetime = OptionalLong.of(Frames.readUnsignedInt(payload, at + 2));
+            }
+        }
+        endOldestWait(AUTH_WAIT);
+        events.add(Event.authenticated(lifetime));
+        openAuthGate();
+    }
+
+    /** AUTH 관문을 연다. 미뤄 둔 송신을 보낸다. */
+    private void openAuthGate() {
+        authGatePassed = true;
         // 보내다가 닫히면 closeTransport가 남은 요청을 closed 이벤트 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
-        while (!deferredSends.isEmpty()) {
-            DeferredSend deferred = deferredSends.remove(0);
-            if (deferred.request || !closeExchanged) {
+        DeferredSend deferred;
+        while ((deferred = deferredSends.poll()) != null) {
+            if (deferred.isRequest() || !closeExchanged) {
                 deferred.sending.run();
             }
         }
@@ -647,12 +941,72 @@ public final class Endpoint {
     /** 받은 CLOSE(규격 3.5절). 형태가 잘못돼도 받은 CLOSE로 치고, 그때는 오류 CLOSE처럼 CLOSE 없이 닫는다. */
     private void handleClose(byte[] frame, int extensionsLength, long streamId) {
         int payloadSize = frame.length - Frames.HEADER_SIZE - extensionsLength;
-        if (extensionsLength != 0 || streamId != 0 || payloadSize < 4) {
+        if (extensionsLength != 0 || streamId != 0 || payloadSize < CLOSE_MIN_PAYLOAD_SIZE) {
+            closeReceivedMalformed();
+            return;
+        }
+        long lastStreamId = Frames.readLong(frame, Frames.HEADER_SIZE + CLOSE_ERROR_CODE_SIZE);
+        if (lastStreamId != 0
+                && (!isOwnSpace(lastStreamId) || lastStreamId < 0 || lastStreamId > highestSentOwnStreamId)) {
+            // 최상위 비트가 1이면 long으로 음수이고 보낸 번호보다 크다. 이 값은 쓰지 않는다.
             closeReceivedMalformed();
             return;
         }
         closeExchanged = true;
+        if (!closeReceived) {
+            closeReceived = true;
+            endRequestsAfter(lastStreamId);
+        }
+        endQueuedRequests();
         closeTransportUnlessClosing(Frames.readUnsignedInt(frame, Frames.HEADER_SIZE));
+    }
+
+    /**
+     * CLOSE의 {@code last_stream_id}보다 큰 번호의 대기 중인 내 요청을 지금 로컬 UNAVAILABLE(처리 안 됨)로 끝낸다(규격 3.5절).
+     * 상대가 처리하지 않은 요청이므로 아직 넘기지 못한 프레임도 보내지 않는다.
+     */
+    private void endRequestsAfter(long lastStreamId) {
+        Set<OutboundMessage> unsentMessages = newIdentitySet();
+        Iterator<Long> pending = ownPendingStreams.keySet().iterator();
+        while (pending.hasNext()) {
+            long streamId = pending.next();
+            if (streamId > lastStreamId) {
+                pending.remove();
+                OutboundMessage unsent = undrainedRequests.remove(streamId);
+                if (unsent != null) {
+                    unsentMessages.add(unsent);
+                }
+                events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
+            }
+        }
+        removeFromOutbox(unsentMessages);
+    }
+
+    /**
+     * CLOSE를 보내거나 받은 즉시, 번호를 받지 못하고 기다리던 요청(AUTH 관문 전에 미룬 요청)을 로컬 UNAVAILABLE(처리 안 됨)로 끝낸다(규격
+     * 3.5절). 미룬 PING은 그대로 둔다.
+     */
+    private void endQueuedRequests() {
+        deferredSends.removeIf(deferred -> {
+            if (deferred.isRequest()) {
+                failLocally();
+            }
+            return deferred.isRequest();
+        });
+    }
+
+    /**
+     * 끊기 전에 돌려보낸다(규격 3.5.1절, SHOULD). 받아들였지만 아직 애플리케이션이 이벤트로 받지 않은 상대의 요청을 {@code
+     * RESET(REFUSED)}로 돌려보내고 스트림을 끝낸다. 오류 CLOSE보다 먼저 호출한다.
+     */
+    private void refuseUnhandedRequests() {
+        events.removeIf(event -> {
+            if (event.kind() != Event.Kind.REQUEST_RECEIVED || peerPendingStreams.remove(event.streamId()) == null) {
+                return false;
+            }
+            send(Frames.reset(event.streamId(), ErrorCode.REFUSED));
+            return true;
+        });
     }
 
     /** 형태가 잘못된 CLOSE를 받았다. 받은 CLOSE로 치고 CLOSE를 보내지 않은 채 닫는다(규격 3.5절). */
@@ -687,8 +1041,17 @@ public final class Endpoint {
      * 이 호출 뒤에는 CLOSE 교환이 된 상태다.
      */
     private void connectionError() {
+        closeWithError(ErrorCode.PROTOCOL_ERROR);
+    }
+
+    /**
+     * 오류 {@code errorCode}의 CLOSE를 보내고 닫는다(연결 오류, 확인 대기 초과, 연결 인증의 거부·일시 실패·대기 초과). 이미 CLOSE를 보냈거나
+     * 받았다면 보내지 않는다(규격 3.5절).
+     */
+    private void closeWithError(int errorCode) {
+        refuseUnhandedRequests();
         if (!closeExchanged) {
-            send(Frames.close(ErrorCode.PROTOCOL_ERROR));
+            send(Frames.close(errorCode, highestPeerStreamId));
         }
         closeExchanged = true;
         closeTransport();
@@ -705,11 +1068,23 @@ public final class Endpoint {
         transportClosed = true;
         receiveBuffer = new byte[0];
         ackWaits.clear();
-        for (int streamId : ownPendingStreams.keySet()) {
-            events.add(Event.result(streamId, Status.UNAVAILABLE));
+        Set<OutboundMessage> unsentMessages = newIdentitySet();
+        for (long streamId : ownPendingStreams.keySet()) {
+            // 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절). 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
+            if (stateOf(streamId) == RequestState.WRITING_STARTED) {
+                events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.UNKNOWN));
+            } else {
+                OutboundMessage unsent = undrainedRequests.get(streamId);
+                if (unsent != null) {
+                    unsentMessages.add(unsent);
+                }
+                events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
+            }
         }
+        removeFromOutbox(unsentMessages);
+        undrainedRequests.clear();
         for (DeferredSend deferred : deferredSends) {
-            if (deferred.request) {
+            if (deferred.isRequest()) {
                 failLocally();
             }
         }
@@ -720,13 +1095,11 @@ public final class Endpoint {
     }
 
     private void sendHello() {
-        send(Frames.hello(config));
-        ackWaits.add(new AckWait(null, now + config.ackTimeoutMs()));
+        sendAwaitingAck(Frames.hello(config), null);
     }
 
     private void sendPing(byte[] payload) {
-        send(Frames.control(FrameType.PING, 0, payload));
-        ackWaits.add(new AckWait(payload, now + config.ackTimeoutMs()));
+        sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), payload);
     }
 
     /** ACK 하나가 끝내는 대기는 가장 먼저 시작한 것 하나다. HELLO 대기는 payload가 null이다. */
@@ -739,13 +1112,75 @@ public final class Endpoint {
         }
     }
 
-    /** 상대 HELLO에 ACK를 보낸 뒤면 바로, 아니면 ACK를 보낼 때까지 미뤄서 보낸다. */
-    private void sendAfterAckingPeerHello(DeferredSend sending) {
-        if (peerHelloAcked) {
+    /** AUTH 관문을 통과한 뒤면 바로, 아니면 통과할 때까지 미뤄서 보낸다. */
+    private void sendAfterAuthGate(DeferredSend sending) {
+        if (authGatePassed) {
             sending.run();
         } else {
             deferredSends.add(sending);
         }
+    }
+
+    /**
+     * 요청이 쓰기 대기열 어디에 있는지(규격 1.3절, 4.4.1절). 입출력 없는(sans-IO) 모델에서는 {@link #drainMessages()}가 프레임을 돌려준 때를 쓰기를
+     * 시작한 때로 본다. 돌려준 프레임은 전송 계층이 이미 받았으므로 끊거나 거둘 수 없다.
+     */
+    enum RequestState {
+        /** 번호를 받지 못한 대기열 요청. {@code deferredSends}에 있고 프레임이 아직 없다. */
+        QUEUED_WITHOUT_NUMBER,
+        /** 번호를 받았지만 프레임이 아직 {@code drainMessages()}로 나가지 않았다({@code undrainedRequests}). 쓰기 전이다. */
+        NUMBERED_UNWRITTEN,
+        /** 프레임이 {@code drainMessages()}로 나갔다. 쓰기를 시작했고 끝까지 쓴다. */
+        WRITING_STARTED
+    }
+
+    /**
+     * 요청을 낸 순서(번호표, 0부터)로 요청의 상태를 본다. 번호 없는 대기열 요청도 번호표로 찾는다. 결과가 나와 끝났거나 스트림을 열기 전에
+     * 로컬에서 실패한 요청, 낸 적 없는 번호표는 null이다. 쓰기 전(번호 유무 무관)과 쓰기 시작 뒤를 가르는 기준이다.
+     */
+    @Nullable
+    RequestState requestState(long ticket) {
+        for (DeferredSend deferred : deferredSends) {
+            if (deferred.isRequest() && deferred.ticket == ticket) {
+                return RequestState.QUEUED_WITHOUT_NUMBER;
+            }
+        }
+        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
+            if (entry.getValue().ticket == ticket) {
+                return stateOf(entry.getKey());
+            }
+        }
+        return null;
+    }
+
+    /** 번호를 받아 아직 끝나지 않은 내 스트림의 수. 요청 기록이 끝난 요청 뒤에 남지 않는지 보는 기준이다. */
+    int openStreamCount() {
+        return ownPendingStreams.size();
+    }
+
+    /** 내 스트림을 끝낸다. 대기 중이던 요청의 type을 돌려주고, 대기 중이 아니면 null이다. */
+    private @Nullable Integer endOwnStream(long streamId) {
+        OwnStream ended = ownPendingStreams.remove(streamId);
+        return ended == null ? null : ended.type;
+    }
+
+    /** 대기 중인 내 스트림 하나. 요청 type과 요청 번호표를 한 기록에 두어, 스트림이 끝나면 번호표 기록도 함께 없어진다. */
+    private static final class OwnStream {
+        final int type;
+        final long ticket;
+        /** 요청 기한(가상 시계의 절대 시각). 기한이 없으면 null. */
+        final @Nullable Long deadlineAt;
+
+        OwnStream(int type, long ticket, @Nullable Long deadlineAt) {
+            this.type = type;
+            this.ticket = ticket;
+            this.deadlineAt = deadlineAt;
+        }
+    }
+
+    /** 번호를 받은 내 요청의 상태. 번호 없는 대기열 요청은 번호가 없어 여기 오지 않는다({@link RequestState#QUEUED_WITHOUT_NUMBER}). */
+    private RequestState stateOf(long streamId) {
+        return undrainedRequests.containsKey(streamId) ? RequestState.NUMBERED_UNWRITTEN : RequestState.WRITING_STARTED;
     }
 
     /** 요청을 보낸 결과. */
@@ -758,18 +1193,20 @@ public final class Endpoint {
         OVERSIZE
     }
 
-    private RequestOutcome sendRequest(int type, byte[] payload) {
+    private RequestOutcome sendRequest(long ticket, int type, byte[] payload, @Nullable Long deadlineAt) {
         if (failRequestIfRefused()) {
             return RequestOutcome.FAILED_LOCALLY;
         }
-        int streamId = (int) nextStreamId;
+        long streamId = nextStreamId;
         byte[] frame = Frames.request(type, streamId, payload);
         if (exceedsPeerFrameSize(frame)) {
             return RequestOutcome.OVERSIZE;
         }
-        nextStreamId += 2;
-        ownPendingStreams.put(streamId, type);
-        send(frame);
+        nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
+        ownPendingStreams.put(streamId, new OwnStream(type, ticket, deadlineAt));
+        OutboundMessage message = OutboundMessage.binary(frame);
+        outbox.add(message);
+        undrainedRequests.put(streamId, message);
         return RequestOutcome.SENT;
     }
 
@@ -780,8 +1217,8 @@ public final class Endpoint {
             failLocally();
             return true;
         }
-        if (nextStreamId > MAX_STREAM_ID) {
-            // 번호가 소진됐다. 상대가 알린 한도보다 먼저 본다. 프레임 없이 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
+        if (!Frames.isValidStreamId(nextStreamId)) {
+            // 번호가 소진됐다(2^63-1을 넘으면 long이 음수로 넘친다). 상대가 알린 한도보다 먼저 본다. 프레임 없이 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
             failLocally();
             close(ErrorCode.NO_ERROR);
             return true;
@@ -808,30 +1245,104 @@ public final class Endpoint {
         events.add(Event.localUnavailable());
     }
 
-    private void send(byte[] frame) {
-        outbox.add(OutboundMessage.binary(frame));
+    /**
+     * 프레임을 쓰기 대기열에 넣는다. 제어 프레임은 아직 쓰기를 시작한 적 없는 애플리케이션 프레임 앞에 둔다(규격 3.6절). 대기열에 남은 메시지는
+     * 모두 쓰기 전이다(꺼낸 메시지가 쓰기를 시작한 것이다). 애플리케이션 프레임끼리는 넣은 순서 그대로다. 제어 프레임은 대부분 넣은 순서 그대로지만,
+     * CLOSE는 쓰기 전 요청 뒤에 두므로 그 뒤에 넣은 다른 제어 프레임(PING, RESET 등)이 그 요청 앞에 있는 CLOSE 앞에 올 수 있다. 제어 프레임끼리의
+     * 순서는 3.6절이 정하지 않고, 3.2.2절과 3.5.1절이 정한 순서(HELLO 먼저, 돌려보내는 RESET이 오류 CLOSE보다 먼저)는 CLOSE를 보내는 때에 이미
+     * 대기열에 들어 있는 RESET과 HELLO가 CLOSE 앞에 남으므로 지켜진다. CLOSE를 쓰기 전 요청 뒤에 두는 까닭은 앞서 보내면 그 요청이 CLOSE 뒤에 온 새
+     * 요청이 되어 상대가 버리기 때문이다(규격 3.5절).
+     */
+    private OutboundMessage send(byte[] frame) {
+        OutboundMessage message = OutboundMessage.binary(frame);
+        if (message.isApplication()) {
+            outbox.add(message);
+            return message;
+        }
+        int at = firstApplicationIndex();
+        if (Frames.typeOf(frame) == FrameType.CLOSE) {
+            at = Math.max(at, afterLastUnwrittenRequest());
+        }
+        outbox.add(at, message);
+        return message;
     }
 
-    /** 상대 HELLO에 ACK를 보낼 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
+    private int firstApplicationIndex() {
+        int i = 0;
+        while (i < outbox.size() && !outbox.get(i).isApplication()) {
+            i++;
+        }
+        return i;
+    }
+
+    private int afterLastUnwrittenRequest() {
+        if (undrainedRequests.isEmpty()) {
+            return 0;
+        }
+        Set<OutboundMessage> requests = identitySet(undrainedRequests.values());
+        for (int i = outbox.size() - 1; i >= 0; i--) {
+            if (requests.contains(outbox.get(i))) {
+                return i + 1;
+            }
+        }
+        return 0;
+    }
+
+    private static Set<OutboundMessage> newIdentitySet() {
+        return Collections.newSetFromMap(new IdentityHashMap<>());
+    }
+
+    private static Set<OutboundMessage> identitySet(Collection<OutboundMessage> messages) {
+        Set<OutboundMessage> set = newIdentitySet();
+        set.addAll(messages);
+        return set;
+    }
+
+    /** 쓰기 대기열에서 주어진 메시지(같은 객체)를 한 번에 거둔다. */
+    private void removeFromOutbox(Set<OutboundMessage> unsent) {
+        if (!unsent.isEmpty()) {
+            outbox.removeIf(unsent::contains);
+        }
+    }
+
+    /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
+    private void sendAwaitingAck(byte[] frame, byte @Nullable [] payload) {
+        ackWaits.add(new AckWait(payload, send(frame)));
+    }
+
+    /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
     private static final class DeferredSend {
-        final boolean request;
+        /** 요청이면 요청 번호표, 아니면 -1. */
+        final long ticket;
+        /** 요청 기한(가상 시계의 절대 시각). 요청이 아니거나 기한이 없으면 null. */
+        final @Nullable Long deadlineAt;
+
         final Runnable sending;
 
-        private DeferredSend(boolean request, Runnable sending) {
-            this.request = request;
+        private DeferredSend(long ticket, @Nullable Long deadlineAt, Runnable sending) {
+            this.ticket = ticket;
+            this.deadlineAt = deadlineAt;
             this.sending = sending;
+        }
+
+        boolean isRequest() {
+            return ticket >= 0;
+        }
+
+        boolean expiredAt(long now) {
+            return deadlineAt != null && now > deadlineAt;
         }
 
         void run() {
             sending.run();
         }
 
-        static DeferredSend request(Runnable sending) {
-            return new DeferredSend(true, sending);
+        static DeferredSend request(long ticket, @Nullable Long deadlineAt, Runnable sending) {
+            return new DeferredSend(ticket, deadlineAt, sending);
         }
 
         static DeferredSend ping(Runnable sending) {
-            return new DeferredSend(false, sending);
+            return new DeferredSend(-1, null, sending);
         }
     }
 
@@ -846,13 +1357,20 @@ public final class Endpoint {
         }
     }
 
-    /** 확인 대기 하나. {@code payload}는 PING이면 보낸 8바이트, HELLO이면 null이다. */
+    /** 확인 대기 하나. {@code payload}는 PING이면 보낸 8바이트, HELLO이면 null이다. 기한은 {@code message}를 넘긴 때부터 센다. */
     private static final class AckWait {
         final byte @Nullable [] payload;
-        final long deadline;
+        final OutboundMessage message;
+        boolean started;
+        long deadline;
 
-        AckWait(byte @Nullable [] payload, long deadline) {
+        AckWait(byte @Nullable [] payload, OutboundMessage message) {
             this.payload = payload;
+            this.message = message;
+        }
+
+        void start(long deadline) {
+            this.started = true;
             this.deadline = deadline;
         }
     }

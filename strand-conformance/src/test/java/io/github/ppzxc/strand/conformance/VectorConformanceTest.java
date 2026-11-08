@@ -10,7 +10,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
@@ -46,8 +45,7 @@ class VectorConformanceTest {
         }
     }
 
-    /** 실제 벡터 디렉터리의 벡터를 core로 실행한다. 벡터 목록은 단언하지 않는다. */
-    @Disabled("규격 0.2.0 구현 전")
+    /** 실제 벡터 디렉터리의 모든 벡터를 core로 실행한다. 모두 통과해야 한다. 벡터 목록은 단언하지 않는다. */
     @TestFactory
     Stream<DynamicTest> vectors() {
         return VectorSuite.dynamicTests(VectorSuite.defaultDirectory());
@@ -84,7 +82,6 @@ class VectorConformanceTest {
         assertThat(names(dir)).containsAll(before).hasSize(before.size() + 1);
     }
 
-    @Disabled("규격 0.2.0 구현 전")
     @Test
     void vectorsAreExecutedAndMismatchesFail(@TempDir Path dir) throws IOException {
         // 아무것도 보내지 않을 입력에 closed를 기대하면 실패해야 한다.

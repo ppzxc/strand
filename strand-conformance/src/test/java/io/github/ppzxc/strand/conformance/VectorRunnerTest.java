@@ -14,14 +14,12 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 /** 러너가 기대와 다른 동작을 놓치지 않는지 본다. 벡터를 직접 만들어 일부러 어긋나게 한다. */
-@Disabled("규격 0.2.0 구현 전")
 class VectorRunnerTest {
 
-    private static final String PING = "00000014 00020000 00000000 00000000 0102030405060708";
+    private static final String PING = "00000018 00020000 0000000000000000 00000000 0102030405060708";
     private static final String PING_ACK_SEND = "[{\"type\":\"PING\",\"flags\":[\"ACK\"],\"payload\":\"%s\"}]";
 
     private static ConformanceVector vector(String setup, String... steps) {
@@ -92,9 +90,9 @@ class VectorRunnerTest {
     }
 
     private static final String HELLO_ACK_SEND = "{\"type\":\"HELLO\",\"flags\":[\"ACK\"]}";
-    private static final String CLOSE_PE =
-            "{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\",\"last_stream_id\":\"0\"}";
-    private static final String HELLO_RECV = "0000000c000100000000000000000000";
+    private static final String CLOSE_UNRESPONSIVE =
+            "{\"type\":\"CLOSE\",\"error_code\":\"UNRESPONSIVE\",\"last_stream_id\":\"0\"}";
+    private static final String HELLO_RECV = "00000010000100000000000000000000" + "00000000";
 
     private static String step(String kind, String fields, String send, String events) {
         return "{\"kind\":\"" + kind + "\"," + fields + "\"send\":" + send + ",\"events\":" + events + "}";
@@ -104,7 +102,11 @@ class VectorRunnerTest {
     void clientOpeningOutputIsMergedIntoTheFirstStep() {
         ConformanceVector v = vector(
                 "{\"role\":\"client\",\"established\":false}",
-                recv(HELLO_RECV, "[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"}," + HELLO_ACK_SEND + "]", "[]"));
+                recv(
+                        HELLO_RECV,
+                        "[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"}," + HELLO_ACK_SEND
+                                + ",{\"type\":\"AUTH\",\"mechanism\":\"ANONYMOUS\"}]",
+                        "[]"));
 
         assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
     }
@@ -133,13 +135,13 @@ class VectorRunnerTest {
                 recv("c0de535452300000", "[{\"type\":\"HELLO\"}]", "[]"),
                 recv(HELLO_RECV, "[" + HELLO_ACK_SEND + "]", "[]"),
                 step("advance", "\"ms\":999,", "[]", "[]"),
-                step("advance", "\"ms\":2,", "[" + CLOSE_PE + "]", "[{\"event\":\"closed\"}]"));
+                step("advance", "\"ms\":2,", "[" + CLOSE_UNRESPONSIVE + "]", "[{\"event\":\"closed\"}]"));
 
         assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
     }
 
     @Test
-    void requestPingAndCloseStepsDriveTheEndpoint() {
+    void requestPingAndDisconnectStepsDriveTheEndpoint() {
         ConformanceVector v = vector(
                 ESTABLISHED,
                 step("request", "\"type\":257,", "[{\"type\":257,\"stream_id\":\"2\"}]", "[]"),
@@ -149,10 +151,10 @@ class VectorRunnerTest {
                         "[{\"type\":\"PING\",\"payload\":\"0102030405060708\"}]",
                         "[]"),
                 step(
-                        "close",
-                        "\"error_code\":\"PROTOCOL_ERROR\",",
-                        "[{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\",\"last_stream_id\":\"0\"}]",
-                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"UNAVAILABLE\"},{\"event\":\"closed\"}]"));
+                        "disconnect",
+                        "",
+                        "[]",
+                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"UNAVAILABLE\",\"certainty\":\"unknown\"},{\"event\":\"closed\"}]"));
 
         assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
     }
@@ -166,15 +168,29 @@ class VectorRunnerTest {
     }
 
     @Test
+    void aWrongResultCertaintyFails() {
+        ConformanceVector v = vector(
+                ESTABLISHED,
+                step("request", "\"type\":257,", "[{\"type\":257,\"stream_id\":\"2\"}]", "[]"),
+                step(
+                        "disconnect",
+                        "",
+                        "[]",
+                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"UNAVAILABLE\",\"certainty\":\"not_processed\"},{\"event\":\"closed\"}]"));
+
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
     void aWrongResultStatusFails() {
         ConformanceVector v = vector(
                 ESTABLISHED,
                 step("request", "\"type\":257,", "[{\"type\":257,\"stream_id\":\"2\"}]", "[]"),
                 step(
-                        "close",
-                        "\"error_code\":\"PROTOCOL_ERROR\",",
-                        "[" + CLOSE_PE + "]",
-                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"INTERNAL\"},{\"event\":\"closed\"}]"));
+                        "disconnect",
+                        "",
+                        "[]",
+                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"INTERNAL\",\"certainty\":\"unknown\"},{\"event\":\"closed\"}]"));
 
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }
@@ -273,7 +289,7 @@ class VectorRunnerTest {
         assertThat(runner.describeMessages(messages, true)).containsExactly("PREFACE");
     }
 
-    private static final String PING_FRAME = "00000014000200000000000000000000" + "0102030405060708";
+    private static final String PING_FRAME = "00000018000200000000000000000000" + "00000000" + "0102030405060708";
 
     @Test
     void aWebSocketMessageCarryingTwoFramesFails() throws ReflectiveOperationException {

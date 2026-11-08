@@ -25,7 +25,7 @@ public final class NioTcpExample {
         int port = Integer.parseInt(ExampleSupport.arg(args, 1, "9000"));
         System.out.println("strand core " + StrandVersion.get());
         try (SocketChannel channel = SocketChannel.open(new InetSocketAddress(host, port))) {
-            Endpoint endpoint = Endpoint.client(EndpointConfig.defaults());
+            Endpoint endpoint = Endpoint.client(ExampleSupport.withAuth(EndpointConfig.defaults()));
             endpoint.request(ExampleSupport.DEMO_REQUEST_TYPE, "hello".getBytes(StandardCharsets.UTF_8));
             endpoint.ping(new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
             flush(endpoint, channel);
@@ -46,7 +46,10 @@ public final class NioTcpExample {
                 }
                 for (Event event : endpoint.drainEvents()) {
                     System.out.println("[클라이언트] " + ExampleSupport.describe(event));
-                    resultReceived |= event.kind() == Event.Kind.RESULT;
+                    if (event.kind() == Event.Kind.RESULT) {
+                        ExampleSupport.handleResult(event);
+                        resultReceived = true;
+                    }
                     closed |= event.kind() == Event.Kind.CLOSED;
                 }
                 if (resultReceived && !closed) {
