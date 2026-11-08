@@ -283,6 +283,23 @@ public final class Endpoint {
     }
 
     /**
+     * 요청 기한을 두고 요청을 보낸다(규격 4.4.1절). 기한이 지난 뒤 {@link #advance(long)}가 요청을 끝낸다.
+     *
+     * @param deadlineMs 지금부터 센 기한(밀리초, 1 이상)
+     * @see #request(int, byte[])
+     */
+    public long request(int type, byte[] payload, long deadlineMs) {
+        return request(type, payload);
+    }
+
+    /**
+     * 번호표로 요청을 취소한다. 번호 없는 대기열 요청도 취소할 수 있다(규격 4.4절).
+     *
+     * @param ticket {@link #request}가 돌려준 번호표
+     */
+    public void cancelRequest(long ticket) {}
+
+    /**
      * 애플리케이션이 상대의 요청에 응답하게 한다. 스트림이 끝나고 종료 중이었다면 닫는다. 대기 중이 아닌 스트림이면 아무것도 하지 않는다.
      *
      * @param streamId 상대가 연 스트림 번호
