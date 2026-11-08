@@ -96,6 +96,12 @@ public final class WebSocketExample {
                 .subprotocols("strand")
                 .buildAsync(uri, listener)
                 .join();
+        // 서버가 strand를 고르지 않았다면 strand 서버가 아니므로 더 진행하지 않는다(JDK는 이 경우를 거부하지 않는다).
+        if (!"strand".equals(socket.getSubprotocol())) {
+            System.out.println("[클라이언트] 서버가 하위 프로토콜 strand를 고르지 않아 닫는다: '" + socket.getSubprotocol() + "'");
+            socket.abort();
+            return;
+        }
         synchronized (endpoint) {
             endpoint.request(ExampleSupport.DEMO_REQUEST_TYPE, "hello".getBytes(StandardCharsets.UTF_8));
             handle(socket, endpoint, finished);
