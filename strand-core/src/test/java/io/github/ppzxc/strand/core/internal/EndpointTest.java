@@ -1418,6 +1418,70 @@ class EndpointTest {
         assertThat(sent(server)).hasSize(40 + 16);
     }
 
+    // ---- 확인 대기의 시작점: 전송 계층에 넘긴 때(3.3절) ----
+
+    @Test
+    void helloWaitStartsWhenTheFrameIsDrainedNotWhenItIsQueued() {
+        Endpoint server = serverAfterPreface(ONE_SECOND);
+        server.receive(bytes(HELLO));
+
+        server.advance(5000);
+        assertThat(server.drainEvents()).isEmpty();
+        server.drainMessages();
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedUnresponsive(server);
+    }
+
+    @Test
+    void pingWaitStartsWhenTheFrameIsDrainedNotWhenItIsQueued() {
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
+
+        server.advance(5000);
+        assertThat(server.drainEvents()).isEmpty();
+        server.drainMessages();
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedUnresponsive(server);
+    }
+
+    // ---- CLOSE 전용 코드와 EXCESSIVE_USE(2.5.2절, 3.5절, 4.4절) ----
+
+    @Test
+    void closeWithExcessiveUseSendsThatCodeAndClosesTheTransport() {
+        Endpoint server = established();
+
+        server.close(ErrorCode.EXCESSIVE_USE);
+
+        assertThat(sent(server)).isEqualTo("0000001c00030000000000000000000000000000" + "00000005" + NO_STREAM);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void resetWithCloseOnlyOrReservedCodesIsTreatedAsAnyOtherReset() {
+        for (String code : new String[] {"00000005", "00000006", "00000007", "00000008", "ffffffff"}) {
+            Endpoint client = Endpoint.client(EndpointConfig.defaults());
+            client.receive(bytes(HELLO));
+            client.receive(bytes(HELLO_ACK));
+            clientPassesAuthGate(client);
+            client.request(257, new byte[0]);
+            client.drainMessages();
+
+            client.receive(bytes("00000014000400000000000000000001" + "0000" + "0000" + code));
+
+            assertThat(client.drainEvents()).singleElement().satisfies(event -> {
+                assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
+                assertThat(event.status()).isEqualTo(Status.INTERNAL);
+            });
+            assertOpenAndSilent(client);
+        }
+    }
+
     @Test
     void helloAndPingWaitsAreIndependent() {
         Endpoint server = serverAfterPreface(ONE_SECOND);
