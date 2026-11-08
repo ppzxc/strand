@@ -87,8 +87,15 @@ class FrameLayoutTest {
 
     @Test
     void streamIdsAreWithin63Bits() {
-        for (JsonObject vector : RawVectors.byKey().values()) {
-            assertThat(vector.toString()).doesNotContain("2147483647", "2147483646", "2^31");
+        java.util.regex.Pattern field = java.util.regex.Pattern.compile("\"(?:next_)?stream_id\":\"(\\d+)\"");
+        java.math.BigInteger max = java.math.BigInteger.ONE.shiftLeft(63).subtract(java.math.BigInteger.ONE);
+        for (java.util.Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
+            java.util.regex.Matcher m = field.matcher(entry.getValue().toString());
+            while (m.find()) {
+                assertThat(new java.math.BigInteger(m.group(1)))
+                        .as("%s의 %s", entry.getKey(), m.group())
+                        .isLessThanOrEqualTo(max);
+            }
         }
     }
 
