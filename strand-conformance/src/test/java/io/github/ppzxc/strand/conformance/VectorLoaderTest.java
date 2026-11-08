@@ -110,8 +110,8 @@ class VectorLoaderTest {
                     .hasSize(1);
             assertThatThrownBy(() -> VectorLoader.parse(
                             "x.json",
-                            recvWithEvent("{\"event\":\"result\",\"status\":\"" + status
-                                    + "\",\"certainty\":\"unknown\"}")))
+                            recvWithEvent(
+                                    "{\"event\":\"result\",\"status\":\"" + status + "\",\"certainty\":\"unknown\"}")))
                     .as(status)
                     .isInstanceOf(InvalidVectorException.class)
                     .hasMessageContainingAll("certainty", "not_processed");

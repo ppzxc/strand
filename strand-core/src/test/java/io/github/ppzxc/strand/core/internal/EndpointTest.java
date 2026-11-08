@@ -2082,8 +2082,7 @@ class EndpointTest {
 
     private static final String RESET_CANCEL_1 = "00000014000400000000000000000001" + "0000" + "0000" + "00000004";
 
-    private static void assertSingleResult(
-            Endpoint endpoint, long streamId, int status, Certainty certainty) {
+    private static void assertSingleResult(Endpoint endpoint, long streamId, int status, Certainty certainty) {
         List<Event> events = endpoint.drainEvents();
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
@@ -2215,6 +2214,63 @@ class EndpointTest {
 
         assertThat(sent(client)).isEqualTo(RESET_CANCEL_1);
         assertSingleResult(client, 1, Status.CANCELLED, Certainty.UNKNOWN);
+    }
+
+    @Test
+    void deadlineMustBePositive() {
+        Endpoint client = establishedClient();
+
+        assertThatThrownBy(() -> client.request(257, new byte[0], 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(client.drainMessages()).isEmpty();
+    }
+
+    /** 대기열에서 기다리는 PING과 다른 요청은 기한이나 취소가 건드리지 않는다. */
+    @Test
+    void expiringOrCancellingAQueuedRequestLeavesOtherQueuedSendsAlone() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.drainMessages();
+        client.ping(bytes(PING_PAYLOAD));
+        long cancelled = client.request(257, new byte[0]);
+        client.request(257, new byte[0], 100);
+        long kept = client.request(257, new byte[0], 10_000);
+
+        client.cancelRequest(cancelled);
+        client.cancelRequest(cancelled);
+        client.advance(101);
+        assertThat(client.drainEvents()).hasSize(2);
+        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+        client.receive(bytes(AUTH_ACK));
+
+        assertThat(sent(client)).contains(PING_PAYLOAD).contains("0000001001010000000000000000000100000000");
+    }
+
+    @Test
+    void cancelAndDeadlineAreIgnoredAfterTheConnectionClosed() {
+        Endpoint client = establishedClient();
+        long ticket = client.request(257, new byte[0], 100);
+        client.disconnect();
+        client.drainEvents();
+
+        client.cancelRequest(ticket);
+        client.cancel(1);
+        client.advance(1000);
+
+        assertThat(client.drainEvents()).isEmpty();
+    }
+
+    /** 규격 4.4.1절: 쓰기 전에 기한이 지난 요청이 마지막 대기 스트림이면 종료 중인 연결이 닫힌다. */
+    @Test
+    void deadlineOfTheLastPendingRequestWhileClosingClosesTheConnection() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0], 100);
+        client.close(0);
+        client.drainMessages();
+
+        client.advance(101);
+
+        assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
     @Test

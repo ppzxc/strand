@@ -94,11 +94,18 @@ final class VectorRunner {
                 "ping",
                 (runner, step) ->
                         runner.endpoint.ping(Bytes.fromHex(step.get("payload").getAsString())));
-        STEPS.put(
-                "request",
-                (runner, step) -> runner.endpoint.request(
+        STEPS.put("request", (runner, step) -> {
+            byte[] payload =
+                    Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "");
+            if (step.has("deadline_ms")) {
+                runner.endpoint.request(
                         step.get("type").getAsInt(),
-                        Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
+                        payload,
+                        step.get("deadline_ms").getAsLong());
+            } else {
+                runner.endpoint.request(step.get("type").getAsInt(), payload);
+            }
+        });
         STEPS.put("cancel", (runner, step) -> runner.endpoint.cancel(streamId(step.get("stream_id"))));
         STEPS.put(
                 "respond",

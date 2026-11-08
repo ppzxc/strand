@@ -104,22 +104,18 @@ class ResultCertaintyTest {
     void deadlineVectorsAssertBothOutcomesOfSection441() {
         JsonObject queued = RawVectors.byKey().get("streams/request-deadline-of-queued-request-ends-without-stream-id");
         assertThat(queued).isNotNull();
-        assertThat(resultEvents(queued))
-                .singleElement()
-                .satisfies(r -> {
-                    assertThat(r.has("stream_id")).isFalse();
-                    assertThat(r.get("status").getAsString()).isEqualTo("DEADLINE_EXCEEDED");
-                    assertThat(r.get("certainty").getAsString()).isEqualTo("not_processed");
-                });
+        assertThat(resultEvents(queued)).singleElement().satisfies(r -> {
+            assertThat(r.has("stream_id")).isFalse();
+            assertThat(r.get("status").getAsString()).isEqualTo("DEADLINE_EXCEEDED");
+            assertThat(r.get("certainty").getAsString()).isEqualTo("not_processed");
+        });
         JsonObject written = RawVectors.byKey().get("streams/request-deadline-after-write-sends-reset-cancel");
         assertThat(written).isNotNull();
-        assertThat(resultEvents(written))
-                .singleElement()
-                .satisfies(r -> {
-                    assertThat(r.get("stream_id").getAsString()).isEqualTo("1");
-                    assertThat(r.get("status").getAsString()).isEqualTo("DEADLINE_EXCEEDED");
-                    assertThat(r.get("certainty").getAsString()).isEqualTo("unknown");
-                });
+        assertThat(resultEvents(written)).singleElement().satisfies(r -> {
+            assertThat(r.get("stream_id").getAsString()).isEqualTo("1");
+            assertThat(r.get("status").getAsString()).isEqualTo("DEADLINE_EXCEEDED");
+            assertThat(r.get("certainty").getAsString()).isEqualTo("unknown");
+        });
     }
 
     /** 벡터 형식 6.2절과 규격 4.4절·4.4.1절이 어긋나지 않는다: stream_id 없는 result의 status 집합이 세 가지다. */

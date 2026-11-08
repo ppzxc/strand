@@ -132,10 +132,9 @@ class QueuedRequestOutcomeSpecTest {
     @Test
     void uncoveredReasonsNameTheUnobservableItems() throws IOException {
         List<String> uncovered = Files.readAllLines(UNCOVERED, StandardCharsets.UTF_8);
+        // 요청 기한 벡터(deadline_ms)가 4.4.1절을 가리키므로 이 절은 목록에 없다(#191).
         assertThat(uncovered.stream().filter(l -> l.startsWith("4.4.1 ")).collect(Collectors.toList()))
-                .singleElement()
-                .asString()
-                .contains("대기열");
+                .isEmpty();
         assertThat(uncovered.stream().filter(l -> l.startsWith("3.4.1 ")).collect(Collectors.toList()))
                 .singleElement()
                 .asString()
