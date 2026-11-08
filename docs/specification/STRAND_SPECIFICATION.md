@@ -496,7 +496,7 @@ CLOSE payload
 
 **받은 CLOSE.** `type`이 CLOSE인 프레임은 형태가 잘못돼도 받은 CLOSE로 치고, 형태가 잘못된 CLOSE는 오류 CLOSE처럼 다룬다. 예외는 없다. 따라서 형태가 잘못된 CLOSE를 받으면 CLOSE를 보내지 않고 즉시 닫는다. 이 CLOSE의 `last_stream_id`는 쓰지 않으므로, 내 요청은 아래 "연결이 끝날 때"의 규칙을 따른다. 번호가 있고 전송 계층에 넘긴 요청은 결과 모름, 번호가 없거나 아직 넘기지 못한 요청은 처리 안 됨이다.
 
-CLOSE를 받으면 그 즉시, 대기 중인 내 요청 가운데 `stream_id`가 그 CLOSE의 `last_stream_id`보다 큰 것마다, 그리고 아직 번호를 받지 못한 대기열 요청마다(1.3절) 애플리케이션에 로컬 `status` = `UNAVAILABLE`(처리 안 됨) 결과를 정확히 한 번 넘기고 끝낸다(MUST). CLOSE를 둘 이상 받으면 처음 받은 CLOSE의 `last_stream_id`만 쓴다(MUST).
+CLOSE를 받으면 그 즉시, 대기 중인 내 요청 가운데 `stream_id`가 그 CLOSE의 `last_stream_id`보다 큰 것마다 애플리케이션에 로컬 `status` = `UNAVAILABLE`(처리 안 됨) 결과를 정확히 한 번 넘기고 그 스트림을 끝낸다(MUST). CLOSE를 보내거나 받으면 그 즉시, 아직 번호를 받지 못한 대기열 요청마다(1.3절) 같은 결과를 정확히 한 번 넘기고 끝낸다(MUST). CLOSE를 둘 이상 받으면 처음 받은 CLOSE의 `last_stream_id`만 쓴다(MUST).
 
 엔드포인트는 CLOSE를 보내거나 받기 전이라면 로컬 판단으로 언제든 CLOSE를 보낼 수 있다(MAY). 과도한 사용 때문이면 `EXCESSIVE_USE`, 자격 증명을 폐기했다면 `UNAUTHENTICATED`(3.3.1절), 그 밖에는 `NO_ERROR`를 쓴다. 규격이 보내라고 정한 CLOSE의 사유는 각 절이 정한다. 연결 오류의 `PROTOCOL_ERROR`는 5.1절, 확인 대기 초과의 `UNRESPONSIVE`는 3.3절, 연결 인증의 `UNAUTHENTICATED`와 `INTERNAL_ERROR`는 3.3절과 3.3.1절이 정한다. CLOSE를 보냈거나 받은 뒤에는 CLOSE를 보내지 않고(MUST NOT) 새 스트림도 열지 않는다(MUST). 그 뒤에 보내야 할 오류 CLOSE(5.1절의 연결 오류, 확인 대기 초과, 연결 인증의 거부·폐기·대기 초과)도 보내지 않고 전송 계층만 닫는다. 상대는 이를 CLOSE 없이 끊긴 것으로 처리한다. 양쪽이 동시에 CLOSE를 보내 엇갈리는 것은 허용한다.
 
@@ -624,7 +624,7 @@ RESET의 `error_code`에는 CLOSE 전용 코드(2.5.2절의 5\~7)를 쓰지 않�
 
 | 사건 | 애플리케이션에 넘기는 `status` | 결과 확정성 |
 | --- | --- | --- |
-| 요청 기한이 지나 내가 `RESET(CANCEL)`을 보냄(4.4.1절) | `DEADLINE_EXCEEDED` | 결과 모름 |
+| 요청 프레임의 쓰기를 시작한 뒤 요청 기한이 지나 내가 `RESET(CANCEL)`을 보냄(4.4.1절) | `DEADLINE_EXCEEDED` | 결과 모름 |
 | 요청 프레임의 마지막 바이트를 전송 계층에 넘기기 전에 내가 요청을 취소함(대기열 요청 포함, 넘겼는지의 기준은 3.5절) | `CANCELLED` | 처리 안 됨 |
 | 요청 프레임의 마지막 바이트를 전송 계층에 넘긴 뒤 그 요청에 내가 RESET을 보냄 (`error_code` 무관) | `CANCELLED` | 결과 모름 |
 | `RESET(CANCEL)`을 받음 | `CANCELLED` | 결과 모름 |
@@ -635,7 +635,7 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 #### 4.4.1 요청 기한
 
-요청한 쪽은 요청마다 로컬 기한을 둘 수 있다(MAY). 기한이 지났을 때 그 스트림이 아직 대기 중이면 `RESET(CANCEL)`을 보내고(MUST) 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(결과 모름)를 넘긴다. 아직 번호를 받지 못한 대기열 요청(1.3절)이 기한을 넘기면 `RESET(CANCEL)` 없이 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(처리 안 됨)를 넘기고 끝낸다(MUST). 기한의 값은 로컬 설정이다.
+요청한 쪽은 요청마다 로컬 기한을 둘 수 있다(MAY). 기한이 지났을 때 요청 프레임을 아직 한 바이트도 쓰지 않았다면(번호를 받지 못한 대기열 요청(1.3절)과, 번호는 받았지만 쓰기 전인 요청) `RESET` 없이 쓰지 않은 프레임을 버리고 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(처리 안 됨)를 넘기고 끝낸다(MUST). 쓰기를 시작했고 그 스트림이 아직 대기 중이면 `RESET(CANCEL)`을 보내고(MUST) 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(결과 모름)를 넘긴다. 기한의 값은 로컬 설정이다.
 
 ### 4.5 배압 (Backpressure)
 

@@ -64,14 +64,12 @@ class QueuedRequestOutcomeSpecTest {
     }
 
     @Test
-    void closeReceivedEndsQueuedRequestsAsNotProcessed() throws IOException {
-        String close = section("3.5 연결 종료");
-        assertThat(linesWith("CLOSE를 받으면 그 즉시"))
+    void closeSentOrReceivedEndsQueuedRequestsAsNotProcessed() throws IOException {
+        assertThat(linesWith("CLOSE를 보내거나 받으면 그 즉시"))
                 .singleElement()
                 .asString()
                 .contains("대기열 요청마다")
                 .contains("로컬 `status` = `UNAVAILABLE`(처리 안 됨)");
-        assertThat(close).contains("대기열 요청마다");
         // 규칙 문장이 한 곳에만 있다.
         assertThat(linesWith("대기열 요청마다")).hasSize(1);
     }
@@ -99,9 +97,23 @@ class QueuedRequestOutcomeSpecTest {
     }
 
     @Test
-    void queuedRequestPastDeadlineEndsLocallyWithoutReset() throws IOException {
+    void deadlineBeforeAnyByteWrittenDiscardsFrameWithoutReset() throws IOException {
         String deadline = section("4.4.1 요청 기한");
-        assertThat(deadline).contains("대기열 요청").contains("`RESET(CANCEL)` 없이").contains("`DEADLINE_EXCEEDED`(처리 안 됨)");
+        assertThat(deadline)
+                .contains("한 바이트도 쓰지 않았")
+                .contains("대기열 요청")
+                .contains("`RESET` 없이")
+                .contains("`DEADLINE_EXCEEDED`(처리 안 됨)")
+                // 쓰기를 시작한 요청은 그대로다.
+                .contains("`RESET(CANCEL)`")
+                .contains("`DEADLINE_EXCEEDED`(결과 모름)");
+        assertThat(rows(section("4.4 스트림 중단")).stream()
+                        .filter(l -> l.contains("`DEADLINE_EXCEEDED`"))
+                        .collect(Collectors.toList()))
+                .singleElement()
+                .asString()
+                .contains("쓰기를 시작한")
+                .contains("결과 모름");
     }
 
     @Test
