@@ -668,7 +668,7 @@ CLOSE의 `reason`과 오류 상세 메시지는 상대에게 그대로 전달된
 
 ## 부록 A. Protobuf 매핑 (비규범)
 
-이 부록은 비규범이다. 애플리케이션이 payload를 Protocol Buffers 메시지로 정할 때 서비스 정의(`.proto`)의 메서드를 `type`에 대응시키는 방법의 예다. 메서드마다 `type` 하나를 붙이고, payload에는 요청이나 응답 메시지의 직렬화 바이트열을 싣는다.
+이 부록은 비규범이다. 애플리케이션이 payload를 Protocol Buffers 메시지로 정할 때 서비스 정의(`.proto`)의 메서드를 `type`에 대응시키는 방법의 예다. 메서드마다 `type` 하나를 붙이고(아래 번호는 예일 뿐이며 애플리케이션이 정한다), payload에는 요청이나 응답 메시지의 직렬화 바이트열을 싣는다.
 
 ```protobuf
 syntax = "proto3";

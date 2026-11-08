@@ -21,7 +21,7 @@ class PayloadOpaqueSpecTest {
 
     private static final String APPENDIX_HEADING = "## 부록 A. Protobuf 매핑 (비규범)";
     private static final Pattern PROTOBUF =
-            Pattern.compile("Protobuf|Protocol Buffers|\\.proto|PROTOBUF", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("Protobuf|Protocol Buffers|\\.proto(?![A-Za-z0-9])|PROTOBUF", Pattern.CASE_INSENSITIVE);
     private static final Pattern FOOTNOTE_DEFINITION = Pattern.compile("^\\[\\^([A-Za-z0-9-]+)\\]:");
 
     private static List<String> lines() throws IOException {
