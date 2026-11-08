@@ -201,6 +201,11 @@ class CloseLastStreamIdTest {
         for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
             boolean closeSeen = false;
             for (JsonObject step : steps(entry.getValue())) {
+                for (String hex : receivedHex(step)) {
+                    if (!closeFrames(hex).isEmpty()) {
+                        closeSeen = true;
+                    }
+                }
                 for (JsonElement item : step.getAsJsonArray("send")) {
                     JsonObject frame = item.getAsJsonObject();
                     if (closeSeen
@@ -214,17 +219,12 @@ class CloseLastStreamIdTest {
                         closeSeen = true;
                     }
                 }
-                for (String hex : receivedHex(step)) {
-                    if (!closeFrames(hex).isEmpty()) {
-                        closeSeen = true;
-                    }
-                }
             }
         }
     }
 
     @Test
-    void specificationDefinesLastStreamIdOnce() throws IOException {
+    void specificationHasTheClosePayloadAndTheGiveBackSubsection() throws IOException {
         String spec = new String(Files.readAllBytes(SPEC), StandardCharsets.UTF_8);
         assertThat(spec).contains("`last_stream_id` u64").contains("## 3.5").contains("#### 3.5.1");
     }
