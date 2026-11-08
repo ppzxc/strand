@@ -66,7 +66,12 @@ class QueuedRequestOutcomeSpecTest {
     @Test
     void closeReceivedEndsQueuedRequestsAsNotProcessed() throws IOException {
         String close = section("3.5 연결 종료");
-        assertThat(close).contains("대기열 요청").contains("로컬 `status` = `UNAVAILABLE`(처리 안 됨)");
+        assertThat(linesWith("CLOSE를 받으면 그 즉시"))
+                .singleElement()
+                .asString()
+                .contains("대기열 요청마다")
+                .contains("로컬 `status` = `UNAVAILABLE`(처리 안 됨)");
+        assertThat(close).contains("대기열 요청마다");
         // 규칙 문장이 한 곳에만 있다.
         assertThat(linesWith("대기열 요청마다")).hasSize(1);
     }
