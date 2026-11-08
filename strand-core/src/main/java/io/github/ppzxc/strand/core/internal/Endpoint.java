@@ -915,13 +915,18 @@ public final class Endpoint {
      * 요청이 쓰기 대기열 어디에 있는지(규격 1.3절, 4.4.1절). 입출력 없는(sans-IO) 모델에서는 {@link #drainMessages()}가 프레임을 돌려준 때를 쓰기를
      * 시작한 때로 본다. 돌려준 프레임은 전송 계층이 이미 받았으므로 끊거나 거둘 수 없다.
      */
-    private enum RequestState {
+    enum RequestState {
         /** 번호를 받지 못한 대기열 요청. {@code deferredSends}에 있고 프레임이 아직 없다. */
         QUEUED_WITHOUT_NUMBER,
         /** 번호를 받았지만 프레임이 아직 {@code drainMessages()}로 나가지 않았다({@code undrainedRequests}). 쓰기 전이다. */
         NUMBERED_UNWRITTEN,
         /** 프레임이 {@code drainMessages()}로 나갔다. 쓰기를 시작했고 끝까지 쓴다. */
         WRITING_STARTED
+    }
+
+    @Nullable
+    RequestState requestState(long ticket) {
+        return null;
     }
 
     /** 번호를 받은 내 요청의 상태. 번호 없는 대기열 요청은 번호가 없어 여기 오지 않는다({@link RequestState#QUEUED_WITHOUT_NUMBER}). */

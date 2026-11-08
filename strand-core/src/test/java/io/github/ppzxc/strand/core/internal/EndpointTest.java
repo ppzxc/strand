@@ -806,6 +806,29 @@ class EndpointTest {
         assertThat(sent(client)).isEqualTo("0000001001010000000000000000000100000000");
     }
 
+    /** 요청 상태(규격 1.3절, 4.4.1절): 번호 없는 대기열, 번호는 받았지만 쓰기 전, 쓰기 시작 뒤. 요청은 낸 순서(0부터)로 가리킨다. */
+    @Test
+    void requestStateTellsTheQueueThroughWritingStarted() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+
+        client.request(257, new byte[0]);
+        assertThat(client.requestState(0)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+
+        client.receive(bytes(AUTH_ACK));
+        assertThat(client.requestState(0)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+
+        client.drainMessages();
+        client.request(257, new byte[0]);
+        assertThat(client.requestState(0)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+        assertThat(client.requestState(1)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+
+        client.cancel(1);
+        assertThat(client.requestState(0)).isNull();
+        assertThat(client.requestState(1)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+    }
+
     @Test
     void requestBeforeTheAuthGateWaitsForIt() {
         Endpoint server = serverAfterPreface();
