@@ -46,9 +46,9 @@ class CloseLastStreamIdTest {
         return new ArrayList<>();
     }
 
-    /** hex에서 완전한 프레임만 풀어 (type, stream_id 16자리 hex, payload 바이트 수)를 돌려준다. */
-    private static List<long[]> closeFrames(String hex) {
-        List<long[]> result = new ArrayList<>();
+    /** hex에서 완전한 프레임만 풀어, CLOSE 프레임마다 payload 바이트 수를 돌려준다. */
+    private static List<Long> closeFrames(String hex) {
+        List<Long> result = new ArrayList<>();
         int pos = 0;
         while (hex.length() - pos >= 40) {
             long length = Long.parseLong(hex.substring(pos, pos + 8), 16);
@@ -59,7 +59,7 @@ class CloseLastStreamIdTest {
             }
             long extensions = Long.parseLong(hex.substring(pos + 32, pos + 36), 16);
             if (type == 3) {
-                result.add(new long[] {length - 16 - extensions});
+                result.add(length - 16 - extensions);
             }
             pos += (int) total;
         }
@@ -94,10 +94,10 @@ class CloseLastStreamIdTest {
         for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
             for (JsonObject step : steps(entry.getValue())) {
                 for (String hex : receivedHex(step)) {
-                    for (long[] close : closeFrames(hex)) {
+                    for (long close : closeFrames(hex)) {
                         seen++;
                         if (!SHORT_CLOSE_VECTORS.contains(entry.getKey())) {
-                            assertThat(close[0]).as(entry.getKey()).isGreaterThanOrEqualTo(12);
+                            assertThat(close).as(entry.getKey()).isGreaterThanOrEqualTo(12);
                         }
                     }
                 }
@@ -114,9 +114,9 @@ class CloseLastStreamIdTest {
             boolean found = false;
             for (JsonObject step : steps(vector)) {
                 for (String hex : receivedHex(step)) {
-                    for (long[] close : closeFrames(hex)) {
+                    for (long close : closeFrames(hex)) {
                         found = true;
-                        assertThat(close[0]).as(key).isLessThan(12);
+                        assertThat(close).as(key).isLessThan(12);
                     }
                 }
             }
@@ -140,7 +140,7 @@ class CloseLastStreamIdTest {
             "backpressure/request-after-close-with-regressed-number-closes-silently");
 
     @Test
-    void newVectorsExistAndDoNotReuseDeletedIds() throws IOException {
+    void newVectorsExist() {
         for (String key : NEW_VECTORS) {
             assertThat(RawVectors.byKey()).as(key).containsKey(key);
         }
@@ -190,17 +190,36 @@ class CloseLastStreamIdTest {
     }
 
     @Test
-    void oldRefusalAfterCloseRuleIsGoneFromSpecificationAndVectors() throws IOException {
+    void oldRefusalAfterCloseRuleIsGoneFromSpecification() throws IOException {
         String spec = new String(Files.readAllBytes(SPEC), StandardCharsets.UTF_8);
         assertThat(spec).doesNotContain("보내기로 한 `RESET(REFUSED)`");
         assertThat(spec).doesNotContain("CLOSE를 보냈거나 받은 뒤이거나 `n + 1");
+    }
+
+    @Test
+    void noVectorRefusesARequestWithResetAfterAnyCloseWasSentOrReceived() {
         for (Map.Entry<String, JsonObject> entry : RawVectors.byKey().entrySet()) {
-            // CLOSE 뒤의 새 요청에는 RESET(REFUSED)가 나가지 않는다. 그 벡터는 요청 단계 전에 CLOSE가 오간 벡터다.
-            if (!entry.getValue().get("id").getAsString().contains("after-close")
-                    && !entry.getValue().get("id").getAsString().startsWith("closing-")) {
-                continue;
+            boolean closeSeen = false;
+            for (JsonObject step : steps(entry.getValue())) {
+                for (JsonElement item : step.getAsJsonArray("send")) {
+                    JsonObject frame = item.getAsJsonObject();
+                    if (closeSeen
+                            && "RESET".equals(frame.get("type").getAsString())
+                            && "REFUSED".equals(frame.get("error_code").getAsString())) {
+                        throw new AssertionError(entry.getKey() + ": CLOSE 뒤의 새 요청은 RESET(REFUSED)가 아니라 조용히 버려진다");
+                    }
+                }
+                for (JsonElement item : step.getAsJsonArray("send")) {
+                    if ("CLOSE".equals(item.getAsJsonObject().get("type").getAsString())) {
+                        closeSeen = true;
+                    }
+                }
+                for (String hex : receivedHex(step)) {
+                    if (!closeFrames(hex).isEmpty()) {
+                        closeSeen = true;
+                    }
+                }
             }
-            assertThat(entry.getValue().toString()).as(entry.getKey()).doesNotContain("\"error_code\":\"REFUSED\"");
         }
     }
 
