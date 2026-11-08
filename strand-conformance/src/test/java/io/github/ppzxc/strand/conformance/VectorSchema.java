@@ -22,6 +22,7 @@ final class VectorSchema {
     static final List<String> ROLES = Arrays.asList("client", "server");
     static final String DEFAULT_TRANSPORT = "tcp";
     static final List<String> TRANSPORTS = Arrays.asList("tcp", "websocket");
+    static final List<String> CERTAINTIES = Arrays.asList("response", "not_processed", "unknown");
     static final List<String> OPCODES = Arrays.asList("binary", "text");
     static final List<String> ACK_FLAGS = Arrays.asList("ACK");
 
@@ -145,7 +146,11 @@ final class VectorSchema {
                 "request_received",
                 EVENT_BASE.require("stream_id", FieldKind.STREAM_ID).require("type", FieldKind.APP_TYPE));
         EVENTS_BY_NAME.put(
-                "result", EVENT_BASE.require("stream_id", FieldKind.STREAM_ID).require("status", FieldKind.STATUS));
+                "result",
+                EVENT_BASE
+                        .allow("stream_id", FieldKind.STREAM_ID)
+                        .require("status", FieldKind.STATUS)
+                        .require("certainty", FieldKind.CERTAINTY));
         EVENTS_BY_NAME.put("closed", EVENT_BASE);
     }
 

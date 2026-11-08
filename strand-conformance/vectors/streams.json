@@ -73,7 +73,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNAVAILABLE"
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
             }
           ]
         },
@@ -122,7 +123,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "CANCELLED"
+              "status": "CANCELLED",
+              "certainty": "unknown"
             }
           ]
         },
@@ -171,7 +173,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "CANCELLED"
+              "status": "CANCELLED",
+              "certainty": "unknown"
             }
           ]
         },
@@ -221,7 +224,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "INTERNAL"
+              "status": "INTERNAL",
+              "certainty": "response"
             }
           ]
         },
@@ -298,7 +302,7 @@
     },
     {
       "id": "exhaustion-after-last-number-sends-close-client",
-      "description": "클라이언트 역할 구현의 다음 번호가 2^63-1이면 그 번호로 요청을 보낼 수 있다. 응답을 받은 뒤 다음 요청은 번호가 2^63-1을 넘으므로 프레임을 보내지 않고 로컬 UNAVAILABLE로 실패하고(stream_id 없음, result 이벤트 아님), CLOSE(NO_ERROR)를 보낸다. 대기 중인 스트림이 없으므로 곧바로 닫힌다",
+      "description": "클라이언트 역할 구현의 다음 번호가 2^63-1이면 그 번호로 요청을 보낼 수 있다. 응답을 받은 뒤 다음 요청은 번호가 2^63-1을 넘으므로 프레임을 보내지 않고 로컬 UNAVAILABLE로 실패하고(stream_id 없는 result, 처리 안 됨), CLOSE(NO_ERROR)를 보낸다. 대기 중인 스트림이 없으므로 곧바로 닫힌다",
       "spec": [
         "2.2.5"
       ],
@@ -327,7 +331,8 @@
             {
               "event": "result",
               "stream_id": "9223372036854775807",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         },
@@ -341,6 +346,11 @@
             }
           ],
           "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            },
             {
               "event": "closed"
             }
@@ -379,7 +389,8 @@
             {
               "event": "result",
               "stream_id": "9223372036854775806",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         },
@@ -393,6 +404,11 @@
             }
           ],
           "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            },
             {
               "event": "closed"
             }
@@ -433,7 +449,13 @@
               "error_code": "NO_ERROR"
             }
           ],
-          "events": []
+          "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            }
+          ]
         },
         {
           "kind": "recv",
@@ -443,7 +465,8 @@
             {
               "event": "result",
               "stream_id": "9223372036854775807",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             },
             {
               "event": "closed"
@@ -486,7 +509,13 @@
           "kind": "request",
           "type": 257,
           "send": [],
-          "events": []
+          "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            }
+          ]
         }
       ]
     },
@@ -526,7 +555,13 @@
               "error_code": "NO_ERROR"
             }
           ],
-          "events": []
+          "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            }
+          ]
         },
         {
           "kind": "recv",
@@ -536,7 +571,8 @@
             {
               "event": "result",
               "stream_id": "9223372036854775807",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             },
             {
               "event": "closed"
@@ -584,7 +620,13 @@
           "kind": "request",
           "type": 257,
           "send": [],
-          "events": []
+          "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            }
+          ]
         }
       ]
     },
@@ -1177,7 +1219,8 @@
             {
               "event": "result",
               "stream_id": "2",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         },
@@ -1291,7 +1334,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "INTERNAL"
+              "status": "INTERNAL",
+              "certainty": "unknown"
             }
           ]
         },
@@ -1314,7 +1358,8 @@
             {
               "event": "result",
               "stream_id": "3",
-              "status": "INTERNAL"
+              "status": "INTERNAL",
+              "certainty": "unknown"
             }
           ]
         },
@@ -1337,7 +1382,8 @@
             {
               "event": "result",
               "stream_id": "5",
-              "status": "INTERNAL"
+              "status": "INTERNAL",
+              "certainty": "unknown"
             }
           ]
         },
@@ -1360,7 +1406,8 @@
             {
               "event": "result",
               "stream_id": "7",
-              "status": "INTERNAL"
+              "status": "INTERNAL",
+              "certainty": "unknown"
             }
           ]
         }
@@ -1397,7 +1444,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "INTERNAL"
+              "status": "INTERNAL",
+              "certainty": "unknown"
             }
           ]
         },
@@ -1420,7 +1468,8 @@
             {
               "event": "result",
               "stream_id": "3",
-              "status": "INTERNAL"
+              "status": "INTERNAL",
+              "certainty": "unknown"
             }
           ]
         }
@@ -1456,7 +1505,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNKNOWN"
+              "status": "UNKNOWN",
+              "certainty": "response"
             }
           ]
         }
@@ -1492,7 +1542,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "UNKNOWN"
+              "status": "UNKNOWN",
+              "certainty": "response"
             }
           ]
         }
@@ -1529,7 +1580,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         }
@@ -1566,7 +1618,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "OK"
+              "status": "OK",
+              "certainty": "response"
             }
           ]
         }
@@ -1603,7 +1656,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "INTERNAL"
+              "status": "INTERNAL",
+              "certainty": "response"
             }
           ]
         }
@@ -1644,7 +1698,8 @@
             {
               "event": "result",
               "stream_id": "1",
-              "status": "INTERNAL"
+              "status": "INTERNAL",
+              "certainty": "response"
             }
           ]
         },

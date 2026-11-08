@@ -138,12 +138,12 @@
 | `event` | 필드 | 뜻 |
 | --- | --- | --- |
 | `request_received` | `stream_id`, `type` | 상대가 연 스트림의 새 요청이 애플리케이션에 전달됨 |
-| `result` | `stream_id`, `status` | 자기가 보낸 요청의 결과가 애플리케이션에 전달됨. 상대가 보낸 `status`인지 로컬에서 만든 `status`인지는 구분하지 않는다 |
+| `result` | `stream_id`(선택), `status`, `certainty` | 자기가 보낸 요청의 결과가 애플리케이션에 전달됨. 상대가 보낸 `status`인지 로컬에서 만든 `status`인지는 구분하지 않는다. `certainty`는 필수이고 결과 확정성(규격 1.3절)을 `response`(응답 받음), `not_processed`(처리 안 됨), `unknown`(결과 모름) 중 하나로 쓴다 |
 | `closed` | — | 연결이 닫혔음이 애플리케이션에 전달됨 |
 
 `status`는 2.5.1절의 이름이다. 17~255의 예약 값은 정수로 쓴다.
 
-스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 보냈거나 받은 뒤의 새 요청, 3.5절)은 `stream_id`가 없으므로 `result` 이벤트가 아니다. 이런 실패는 `events`에 항목을 만들지 않는다. 같은 단계에서 나오는 다른 이벤트(보류된 요청의 `result`, `closed`)는 그대로 쓴다.
+스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 보냈거나 받은 뒤의 새 요청, 3.5절)의 결과는 `stream_id` 없는 `result`로 쓰고, 이 결과의 `certainty`는 `not_processed`다. 이 항목은 요청 단계의 `events`에 붙는다. 같은 단계에서 나오는 다른 이벤트(`closed`)와 함께 쓰면 `result`가 먼저다.
 
 ## 7. 비교 규칙
 
@@ -268,7 +268,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
           "kind": "recv",
           "hex": "00000010 01020000 0000000000000001 00000000",
           "send": [],
-          "events": [{ "event": "result", "stream_id": "1", "status": "INTERNAL" }]
+          "events": [{ "event": "result", "stream_id": "1", "status": "INTERNAL", "certainty": "response" }]
         }
       ]
     }
