@@ -181,7 +181,9 @@ final class VectorRunner {
         requireSupported(vector, setup);
 
         boolean client = setup.get("role").getAsString().equals("client");
-        EndpointConfig config = configOf(setup);
+        String authMechanism = authMechanism(setup);
+        String authCredentials = authCredentialsHex(setup);
+        EndpointConfig config = configOf(setup, authMechanism, authCredentials);
         boolean webSocket =
                 setup.has("transport") && setup.get("transport").getAsString().equals("websocket");
         VectorRunner runner =
@@ -189,7 +191,7 @@ final class VectorRunner {
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
         List<OutboundMessage> opening = runner.endpoint.drainMessages();
         if (setup.get("established").getAsBoolean()) {
-            runner.establish(opening, setup.getAsJsonObject("peer_hello"), setup.getAsJsonObject("auth"));
+            runner.establish(opening, setup.getAsJsonObject("peer_hello"), authMechanism, authCredentials);
             opening = new ArrayList<>();
         }
         int number = 0;
@@ -274,17 +276,17 @@ final class VectorRunner {
 
     /** {@code setup.auth}의 메커니즘. 생략하면 {@code ANONYMOUS}다(벡터 형식 5절). */
     private static String authMechanism(JsonObject setup) {
-        JsonObject auth = setup.getAsJsonObject("auth");
-        return auth.has("mechanism") ? auth.get("mechanism").getAsString() : DEFAULT_AUTH_MECHANISM;
+        JsonObject auth = setup.has("auth") ? setup.getAsJsonObject("auth") : null;
+        return auth != null && auth.has("mechanism") ? auth.get("mechanism").getAsString() : DEFAULT_AUTH_MECHANISM;
     }
 
-    /** {@code setup.auth}의 자격 증명. 생략하면 빈 값이다. */
-    private static byte[] authCredentials(JsonObject setup) {
-        JsonObject auth = setup.getAsJsonObject("auth");
-        return Bytes.fromHex(auth.has("credentials") ? auth.get("credentials").getAsString() : "");
+    /** {@code setup.auth}의 자격 증명(hex). 생략하면 빈 값이다. */
+    private static String authCredentialsHex(JsonObject setup) {
+        JsonObject auth = setup.has("auth") ? setup.getAsJsonObject("auth") : null;
+        return auth != null && auth.has("credentials") ? auth.get("credentials").getAsString() : "";
     }
 
-    private static EndpointConfig configOf(JsonObject setup) {
+    private static EndpointConfig configOf(JsonObject setup, String authMechanism, String authCredentialsHex) {
         Map<String, Long> hello = helloParams(setup.getAsJsonObject("local_hello"));
         long ackTimeout = setup.has("config") && setup.getAsJsonObject("config").has("ack_timeout_ms")
                 ? setup.getAsJsonObject("config").get("ack_timeout_ms").getAsLong()
@@ -306,9 +308,10 @@ final class VectorRunner {
             config = config.nextStreamId(streamId(setup.get("next_stream_id")));
         }
         if (setup.has("auth")) {
-            config = config.auth(authMechanism(setup), authCredentials(setup))
+            byte[] expectedCredentials = Bytes.fromHex(authCredentialsHex);
+            config = config.auth(authMechanism, expectedCredentials)
                     .authenticator((mechanism, credentials) ->
-                            mechanism.equals(authMechanism(setup)) && Arrays.equals(credentials, authCredentials(setup))
+                            mechanism.equals(authMechanism) && Arrays.equals(credentials, expectedCredentials)
                                     ? AuthDecision.PASS
                                     : AuthDecision.REJECT);
         }
@@ -323,15 +326,10 @@ final class VectorRunner {
     }
 
     /**
-     * 규격 3.3절 표준 수립 순서(HELLO 교환 뒤 AUTH 왕복)를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. {@code auth}는
-     * {@code setup.auth}이고 없으면 {@code ANONYMOUS}와 빈 자격 증명이다.
+     * 규격 3.3절 표준 수립 순서(HELLO 교환 뒤 AUTH 왕복)를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. 메커니즘과 자격 증명은
+     * {@code setup.auth}에서 정했고 없으면 {@code ANONYMOUS}와 빈 자격 증명이다.
      */
-    private void establish(List<OutboundMessage> opening, JsonObject peerHello, JsonObject auth) {
-        String mechanism =
-                auth != null && auth.has("mechanism") ? auth.get("mechanism").getAsString() : DEFAULT_AUTH_MECHANISM;
-        String credentials = auth != null && auth.has("credentials")
-                ? auth.get("credentials").getAsString()
-                : "";
+    private void establish(List<OutboundMessage> opening, JsonObject peerHello, String mechanism, String credentials) {
         List<OutboundMessage> hello = opening;
         if (!client) {
             deliver(Bytes.fromHex(PREFACE_HEX));

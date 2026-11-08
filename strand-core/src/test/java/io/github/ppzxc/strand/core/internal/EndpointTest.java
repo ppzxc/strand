@@ -1141,6 +1141,18 @@ class EndpointTest {
     }
 
     @Test
+    void serverClosesWithInternalErrorWhenTheAuthenticatorThrows() {
+        Endpoint server = serverAwaitingAuth(EndpointConfig.defaults().authenticator((m, c) -> {
+            throw new IllegalStateException("auth backend down");
+        }));
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo(closeWith(2));
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
     void credentialExpiryClosesWithNoErrorAndRevocationWithUnauthenticated() {
         Endpoint expiring = established();
         expiring.drainMessages();
@@ -2061,6 +2073,45 @@ class EndpointTest {
         client.request(257, new byte[MIN_MAX_FRAME_SIZE]);
 
         assertFailedLocally(client);
+    }
+
+    @Test
+    void deferredRequestAndPingKeepTheBytesGivenAtCallTime() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
+        client.drainMessages();
+        byte[] extensions = bytes("0a0b");
+        byte[] pingPayload = bytes("0102030405060708");
+        client.request(257, extensions);
+        client.ping(pingPayload);
+        extensions[0] = 0x7f;
+        pingPayload[0] = 0x7f;
+
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+        client.receive(bytes(AUTH_ACK));
+
+        assertThat(sent(client))
+                .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + "0000001800020000000000000000000000000000" + "0102030405060708"
+                        + "00000012010100000000000000000001" + "0000" + "0000" + "0a0b");
+    }
+
+    @Test
+    void deferredPingIsNotARequestForRequestState() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
+        client.drainMessages();
+        client.ping(bytes("0102030405060708"));
+
+        assertThat(client.requestState(-1)).isNull();
+    }
+
+    @Test
+    void oversizeRequestDoesNotConsumeATicket() {
+        Endpoint client = establishedClientWithPeerFrameSize(MIN_MAX_FRAME_SIZE);
+
+        assertThatThrownBy(() -> client.request(257, new byte[MIN_MAX_FRAME_SIZE]))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(client.request(257, new byte[0])).isZero();
     }
 
     @Test

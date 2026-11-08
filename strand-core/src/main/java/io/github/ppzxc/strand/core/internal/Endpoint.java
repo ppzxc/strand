@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
-import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -27,9 +26,7 @@ public final class Endpoint {
     private static final int FIRST_CLIENT_STREAM_ID = 1;
 
     private static final int PING_PAYLOAD_SIZE = 8;
-    private static final int MAX_AUTH_MECHANISM_LENGTH = 20;
     private static final int AUTH_ACK_PARAM_SIZE = 6;
-    private static final Pattern AUTH_MECHANISM_GRAMMAR = Pattern.compile("[A-Z0-9_-]+");
     private static final int CREDENTIAL_LIFETIME_ID = 0x0001;
     /** AUTH 확인 대기를 PING(8바이트)·HELLO(null)의 대기와 구분하는 표지. */
     private static final byte[] AUTH_WAIT = new byte[0];
@@ -257,7 +254,7 @@ public final class Endpoint {
      *
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param payload 본문
-     * @return 요청 번호표(낸 순서, 0부터). 로컬에서 실패한 요청에도 번호표가 하나 쓰인다. {@link #requestState(long)}가 이 번호표로 요청을 찾는다.
+     * @return 요청 번호표(낸 순서, 0부터). 로컬에서 실패한 요청에도 번호표가 하나 쓰인다. 크기 검사로 던진 요청은 번호표를 쓰지 않는다. {@link #requestState(long)}가 이 번호표로 요청을 찾는다.
      * @throws IllegalArgumentException 지금 보낼 수 있는 요청의 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런
      *     프레임을 보내지 못하게 하고(MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림 번호도 쓰지 않는다.
      *     AUTH 관문 전이라 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고, 보낼 때 넘으면 로컬 {@code UNAVAILABLE}로
@@ -268,22 +265,26 @@ public final class Endpoint {
     }
 
     private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
-        long ticket = nextTicket++;
         if (transportClosed) {
             failLocally();
-            return ticket;
+            return nextTicket++;
         }
         if (authGatePassed) {
+            // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
+            long ticket = nextTicket;
             if (sendRequest(ticket, type, payload, deadlineAt) == RequestOutcome.OVERSIZE) {
                 throw oversizeFrame("요청");
             }
-        } else {
-            deferredSends.add(DeferredSend.request(ticket, deadlineAt, () -> {
-                if (sendRequest(ticket, type, payload, deadlineAt) == RequestOutcome.OVERSIZE) {
-                    failLocally();
-                }
-            }));
+            nextTicket++;
+            return ticket;
         }
+        long ticket = nextTicket++;
+        byte[] copy = payload.clone();
+        deferredSends.add(DeferredSend.request(ticket, deadlineAt, () -> {
+            if (sendRequest(ticket, type, copy, deadlineAt) == RequestOutcome.OVERSIZE) {
+                failLocally();
+            }
+        }));
         return ticket;
     }
 
@@ -315,7 +316,7 @@ public final class Endpoint {
         }
         for (Iterator<DeferredSend> it = deferredSends.iterator(); it.hasNext(); ) {
             DeferredSend deferred = it.next();
-            if (deferred.request && deferred.ticket == ticket) {
+            if (deferred.isRequest() && deferred.ticket == ticket) {
                 it.remove();
                 events.add(Event.result(0, Status.CANCELLED, Certainty.NOT_PROCESSED));
                 return;
@@ -370,7 +371,7 @@ public final class Endpoint {
      */
     private void expireRequests() {
         deferredSends.removeIf(deferred -> {
-            if (deferred.request && deferred.expiredAt(now)) {
+            if (deferred.isRequest() && deferred.expiredAt(now)) {
                 events.add(Event.result(0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED));
                 return true;
             }
@@ -415,7 +416,8 @@ public final class Endpoint {
      */
     public void ping(byte[] payload) {
         if (!transportClosed) {
-            sendAfterAuthGate(DeferredSend.ping(() -> sendPing(payload)));
+            byte[] copy = payload.clone();
+            sendAfterAuthGate(DeferredSend.ping(() -> sendPing(copy)));
         }
     }
 
@@ -816,18 +818,24 @@ public final class Endpoint {
         authDeadline = null;
         int mechanismLength = payload.length == 0 ? 0 : payload[0] & 0xFF;
         if (mechanismLength < 1
-                || mechanismLength > MAX_AUTH_MECHANISM_LENGTH
+                || mechanismLength > EndpointConfig.MAX_AUTH_MECHANISM_LENGTH
                 || payload.length < 1 + mechanismLength) {
             connectionError();
             return;
         }
         String mechanism = new String(payload, 1, mechanismLength, StandardCharsets.US_ASCII);
-        if (!AUTH_MECHANISM_GRAMMAR.matcher(mechanism).matches()) {
+        if (!EndpointConfig.isValidAuthMechanism(mechanism)) {
             connectionError();
             return;
         }
         byte[] credentials = Arrays.copyOfRange(payload, 1 + mechanismLength, payload.length);
-        AuthDecision decision = config.authenticator().authenticate(mechanism, credentials);
+        AuthDecision decision;
+        try {
+            decision = config.authenticator().authenticate(mechanism, credentials);
+        } catch (RuntimeException e) {
+            // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다.
+            decision = AuthDecision.TRANSIENT_FAILURE;
+        }
         if (decision != AuthDecision.PASS) {
             // 거부와 모르는 메커니즘은 UNAUTHENTICATED, 일시 실패는 INTERNAL_ERROR. 이유는 비운다(규격 3.3.1절).
             closeWithError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);
@@ -865,7 +873,7 @@ public final class Endpoint {
         // 보내다가 닫히면 closeTransport가 남은 요청을 closed 이벤트 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
         while (!deferredSends.isEmpty()) {
             DeferredSend deferred = deferredSends.remove(0);
-            if (deferred.request || !closeExchanged) {
+            if (deferred.isRequest() || !closeExchanged) {
                 deferred.sending.run();
             }
         }
@@ -961,10 +969,10 @@ public final class Endpoint {
      */
     private void endQueuedRequests() {
         deferredSends.removeIf(deferred -> {
-            if (deferred.request) {
+            if (deferred.isRequest()) {
                 failLocally();
             }
-            return deferred.request;
+            return deferred.isRequest();
         });
     }
 
@@ -1053,7 +1061,7 @@ public final class Endpoint {
         }
         undrainedRequests.clear();
         for (DeferredSend deferred : deferredSends) {
-            if (deferred.request) {
+            if (deferred.isRequest()) {
                 failLocally();
             }
         }
@@ -1110,7 +1118,7 @@ public final class Endpoint {
     @Nullable
     RequestState requestState(long ticket) {
         for (DeferredSend deferred : deferredSends) {
-            if (deferred.ticket == ticket) {
+            if (deferred.isRequest() && deferred.ticket == ticket) {
                 return RequestState.QUEUED_WITHOUT_NUMBER;
             }
         }
@@ -1259,7 +1267,6 @@ public final class Endpoint {
 
     /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
     private static final class DeferredSend {
-        final boolean request;
         /** 요청이면 요청 번호표, 아니면 -1. */
         final long ticket;
         /** 요청 기한(가상 시계의 절대 시각). 요청이 아니거나 기한이 없으면 null. */
@@ -1267,11 +1274,14 @@ public final class Endpoint {
 
         final Runnable sending;
 
-        private DeferredSend(boolean request, long ticket, @Nullable Long deadlineAt, Runnable sending) {
-            this.request = request;
+        private DeferredSend(long ticket, @Nullable Long deadlineAt, Runnable sending) {
             this.ticket = ticket;
             this.deadlineAt = deadlineAt;
             this.sending = sending;
+        }
+
+        boolean isRequest() {
+            return ticket >= 0;
         }
 
         boolean expiredAt(long now) {
@@ -1283,11 +1293,11 @@ public final class Endpoint {
         }
 
         static DeferredSend request(long ticket, @Nullable Long deadlineAt, Runnable sending) {
-            return new DeferredSend(true, ticket, deadlineAt, sending);
+            return new DeferredSend(ticket, deadlineAt, sending);
         }
 
         static DeferredSend ping(Runnable sending) {
-            return new DeferredSend(false, -1, null, sending);
+            return new DeferredSend(-1, null, sending);
         }
     }
 
