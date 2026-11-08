@@ -813,20 +813,51 @@ class EndpointTest {
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
 
-        client.request(257, new byte[0]);
-        assertThat(client.requestState(0)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+        long first = client.request(257, new byte[0]);
+        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
 
         client.receive(bytes(AUTH_ACK));
-        assertThat(client.requestState(0)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
 
         client.drainMessages();
-        client.request(257, new byte[0]);
-        assertThat(client.requestState(0)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
-        assertThat(client.requestState(1)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+        long second = client.request(257, new byte[0]);
+        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+        assertThat(client.requestState(second)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
 
         client.cancel(1);
-        assertThat(client.requestState(0)).isNull();
-        assertThat(client.requestState(1)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+        assertThat(client.requestState(first)).isNull();
+        assertThat(client.requestState(second)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+    }
+
+    /** CLOSE의 {@code last_stream_id} 컷으로 끝난 요청은 기록에서 사라진다(규격 3.5절). */
+    @Test
+    void requestCutByCloseLastStreamIdLeavesNoRecord() {
+        Endpoint client = establishedClient();
+        long kept = client.request(257, new byte[0]);
+        long cut = client.request(257, new byte[0]);
+        client.drainMessages();
+
+        // last_stream_id=1: 번호 1은 상대가 처리했고 3은 처리하지 않았다. 1이 남아 있으니 연결은 종료 중으로 열려 있다.
+        client.receive(
+                bytes(CLOSE_NO_ERROR.substring(0, CLOSE_NO_ERROR.length() - NO_STREAM.length()) + "0000000000000001"));
+
+        assertThat(client.requestState(cut)).isNull();
+        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+        assertThat(client.openRequestCount()).isEqualTo(1);
+    }
+
+    /** 오래 가는 연결에서 요청을 응답으로 끝낼 때마다 기록이 따라 지워져 쌓이지 않는다. */
+    @Test
+    void answeredRequestsDoNotAccumulateOnALongLivedConnection() {
+        Endpoint client = establishedClient();
+        for (int i = 0; i < 500; i++) {
+            long ticket = client.request(257, new byte[0]);
+            client.drainMessages();
+            client.receive(bytes("0000001001010000" + String.format("%016x", 2L * i + 1) + "00000000"));
+
+            assertThat(client.requestState(ticket)).isNull();
+        }
+        assertThat(client.openRequestCount()).isZero();
     }
 
     @Test

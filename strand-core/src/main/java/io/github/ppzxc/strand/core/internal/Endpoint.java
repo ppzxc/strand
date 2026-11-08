@@ -258,17 +258,18 @@ public final class Endpoint {
      *
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param payload 본문
+     * @return 요청 번호표(낸 순서, 0부터). 로컬에서 실패한 요청에도 번호표가 하나 쓰인다. {@link #requestState(long)}가 이 번호표로 요청을 찾는다.
      * @throws IllegalArgumentException 지금 보낼 수 있는 요청의 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런
      *     프레임을 보내지 못하게 하고(MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림 번호도 쓰지 않는다.
      *     AUTH 관문 전이라 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고, 보낼 때 넘으면 로컬 {@code UNAVAILABLE}로
      *     실패시킨다.
      */
-    public void request(int type, byte[] payload) {
+    public long request(int type, byte[] payload) {
+        long ticket = nextTicket++;
         if (transportClosed) {
             failLocally();
-            return;
+            return ticket;
         }
-        long ticket = nextTicket++;
         if (authGatePassed) {
             if (sendRequest(ticket, type, payload) == RequestOutcome.OVERSIZE) {
                 throw oversizeFrame("요청");
@@ -280,6 +281,7 @@ public final class Endpoint {
                 }
             }));
         }
+        return ticket;
     }
 
     /**
@@ -1036,6 +1038,17 @@ public final class Endpoint {
             }
         }
         return null;
+    }
+
+    /** 아직 끝나지 않은 내 요청의 수(번호 없는 대기열 요청 포함). 요청 기록이 끝난 요청 뒤에 남지 않는지 보는 기준이다. */
+    int openRequestCount() {
+        int queued = 0;
+        for (DeferredSend deferred : deferredSends) {
+            if (deferred.request) {
+                queued++;
+            }
+        }
+        return queued + ticketOfStream.size();
     }
 
     /** 내 스트림을 끝낸다. 대기 중이던 요청의 type을 돌려주고, 대기 중이 아니면 null이다. */
