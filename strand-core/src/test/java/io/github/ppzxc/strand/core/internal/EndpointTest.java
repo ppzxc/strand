@@ -42,7 +42,7 @@ class EndpointTest {
     private static final EndpointConfig ONE_SECOND = EndpointConfig.defaults().ackTimeoutMs(1000);
     private static final EndpointConfig IDLE_ONE_SECOND =
             EndpointConfig.defaults().ackTimeoutMs(5000).idleIntervalMs(1000);
-    private static final String DEFAULT_HELLO_PARAMS = "0001 00400000 0002 00000064 0003 00000000".replace(" ", "");
+    private static final String DEFAULT_HELLO_PARAMS = "0001 00010000 0002 00000064 0003 00000000".replace(" ", "");
 
     static byte[] bytes(String hex) {
         String clean = hex.replaceAll("\\s", "");
@@ -417,7 +417,7 @@ class EndpointTest {
 
     @Test
     void maxFrameSizeAtTheRangeBoundsIsAccepted() {
-        for (String size : new String[] {"00004000", "01000000"}) {
+        for (String size : new String[] {"00004000", "00100000"}) {
             Endpoint server = serverAfterPreface();
 
             server.receive(bytes(helloWith("0001" + size)));
@@ -428,7 +428,7 @@ class EndpointTest {
 
     @Test
     void maxFrameSizeOutsideTheRangeClosesWithProtocolError() {
-        for (String size : new String[] {"00003fff", "01000001"}) {
+        for (String size : new String[] {"00003fff", "00100001"}) {
             Endpoint server = serverAfterPreface();
 
             server.receive(bytes(helloWith("0001" + size)));
@@ -804,6 +804,60 @@ class EndpointTest {
         client.request(257, new byte[0]);
 
         assertThat(sent(client)).isEqualTo("0000001001010000000000000000000100000000");
+    }
+
+    /** 요청 상태(규격 1.3절, 4.4.1절): 번호 없는 대기열, 번호는 받았지만 쓰기 전, 쓰기 시작 뒤. 요청은 낸 순서(0부터)로 가리킨다. */
+    @Test
+    void requestStateTellsTheQueueThroughWritingStarted() {
+        Endpoint client = client();
+        client.receive(bytes(HELLO));
+        client.receive(bytes(HELLO_ACK));
+
+        long first = client.request(257, new byte[0]);
+        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+
+        client.receive(bytes(AUTH_ACK));
+        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+
+        client.drainMessages();
+        long second = client.request(257, new byte[0]);
+        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+        assertThat(client.requestState(second)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+
+        client.cancel(1);
+        assertThat(client.requestState(first)).isNull();
+        assertThat(client.requestState(second)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+    }
+
+    /** CLOSE의 {@code last_stream_id} 컷으로 끝난 요청은 기록에서 사라진다(규격 3.5절). */
+    @Test
+    void requestCutByCloseLastStreamIdLeavesNoRecord() {
+        Endpoint client = establishedClient();
+        long kept = client.request(257, new byte[0]);
+        long cut = client.request(257, new byte[0]);
+        client.drainMessages();
+
+        // last_stream_id=1: 번호 1은 상대가 처리했고 3은 처리하지 않았다. 1이 남아 있으니 연결은 종료 중으로 열려 있다.
+        client.receive(
+                bytes(CLOSE_NO_ERROR.substring(0, CLOSE_NO_ERROR.length() - NO_STREAM.length()) + "0000000000000001"));
+
+        assertThat(client.requestState(cut)).isNull();
+        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+        assertThat(client.openStreamCount()).isEqualTo(1);
+    }
+
+    /** 오래 가는 연결에서 요청을 응답으로 끝낼 때마다 기록이 따라 지워져 쌓이지 않는다. */
+    @Test
+    void answeredRequestsDoNotAccumulateOnALongLivedConnection() {
+        Endpoint client = establishedClient();
+        for (int i = 0; i < 500; i++) {
+            long ticket = client.request(257, new byte[0]);
+            client.drainMessages();
+            client.receive(bytes("0000001001010000" + String.format("%016x", 2L * i + 1) + "00000000"));
+
+            assertThat(client.requestState(ticket)).isNull();
+        }
+        assertThat(client.openStreamCount()).isZero();
     }
 
     @Test

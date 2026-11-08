@@ -48,13 +48,15 @@ public final class Endpoint {
     private final EndpointConfig config;
     private final List<OutboundMessage> outbox = new ArrayList<>();
     private final List<Event> events = new ArrayList<>();
-    /** 대기 중인 스트림 가운데 내가 연 것(결과를 기다리는 내 요청)의 번호와 요청 type. 보낸 순서대로다(규격 1.3절). */
-    private final Map<Long, Integer> ownPendingStreams = new LinkedHashMap<>();
+    /** 대기 중인 스트림 가운데 내가 연 것(결과를 기다리는 내 요청)의 번호와 요청 type·번호표. 보낸 순서대로다(규격 1.3절). */
+    private final Map<Long, OwnStream> ownPendingStreams = new LinkedHashMap<>();
     /**
      * 요청 프레임이 아직 {@link #drainMessages()}로 전송 계층에 넘어가지 않은 내 스트림(규격 3.5절 "연결이 끝날 때"). 프레임 하나가 메시지
      * 하나이므로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 본다.
      */
     private final Map<Long, OutboundMessage> undrainedRequests = new LinkedHashMap<>();
+    /** 다음 {@link #request}에 줄 번호표. */
+    private long nextTicket;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
     private final Map<Long, Integer> peerPendingStreams = new LinkedHashMap<>();
     /** AUTH 관문을 통과하기 전이라 미뤄 둔 송신(규격 3.3절). */
@@ -254,27 +256,30 @@ public final class Endpoint {
      *
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param payload 본문
+     * @return 요청 번호표(낸 순서, 0부터). 로컬에서 실패한 요청에도 번호표가 하나 쓰인다. {@link #requestState(long)}가 이 번호표로 요청을 찾는다.
      * @throws IllegalArgumentException 지금 보낼 수 있는 요청의 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런
      *     프레임을 보내지 못하게 하고(MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림 번호도 쓰지 않는다.
      *     AUTH 관문 전이라 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고, 보낼 때 넘으면 로컬 {@code UNAVAILABLE}로
      *     실패시킨다.
      */
-    public void request(int type, byte[] payload) {
+    public long request(int type, byte[] payload) {
+        long ticket = nextTicket++;
         if (transportClosed) {
             failLocally();
-            return;
+            return ticket;
         }
         if (authGatePassed) {
-            if (sendRequest(type, payload) == RequestOutcome.OVERSIZE) {
+            if (sendRequest(ticket, type, payload) == RequestOutcome.OVERSIZE) {
                 throw oversizeFrame("요청");
             }
         } else {
-            deferredSends.add(DeferredSend.request(() -> {
-                if (sendRequest(type, payload) == RequestOutcome.OVERSIZE) {
+            deferredSends.add(DeferredSend.request(ticket, () -> {
+                if (sendRequest(ticket, type, payload) == RequestOutcome.OVERSIZE) {
                     failLocally();
                 }
             }));
         }
+        return ticket;
     }
 
     /**
@@ -307,12 +312,13 @@ public final class Endpoint {
      * @param streamId 내가 연 스트림 번호
      */
     public void cancel(long streamId) {
-        if (transportClosed || ownPendingStreams.remove(streamId) == null) {
+        if (transportClosed || endOwnStream(streamId) == null) {
             return;
         }
-        // 요청 프레임은 이미 쓰기 대기열에 있고 끊지 않고 마저 쓴 뒤 RESET을 보낸다(규격 4.4절). 마지막 바이트를 넘기기 전 취소는 #190이 다룬다.
-        undrainedRequests.remove(streamId);
-        send(Frames.reset(streamId, ErrorCode.CANCEL));
+        // 요청 프레임은 이미 쓰기 대기열에 있고 끊지 않고 마저 쓴 뒤 RESET을 보낸다(규격 4.4절). 쓰기 전 취소의 종료 규칙은 #191이 다룬다.
+        OutboundMessage unwritten = undrainedRequests.remove(streamId);
+        // 요청 프레임보다 앞서 가면 안 되므로 쓰기 전이던 요청이면 그 프레임 바로 뒤에 둔다.
+        sendAfter(unwritten, Frames.reset(streamId, ErrorCode.CANCEL));
         events.add(Event.result(streamId, Status.CANCELLED, Certainty.UNKNOWN));
         closeTransportIfNoPendingStreams();
     }
@@ -553,7 +559,7 @@ public final class Endpoint {
             return;
         }
         if (isOwnSpace(streamId)) {
-            if (ownPendingStreams.remove(streamId) != null) {
+            if (endOwnStream(streamId) != null) {
                 long errorCode = Frames.readUnsignedInt(payload, 0);
                 // 거절한 요청은 처리를 시작하지 않았다(규격 4.4절 결과 표).
                 Certainty certainty = errorCode == ErrorCode.REFUSED ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
@@ -658,7 +664,7 @@ public final class Endpoint {
 
     /** 내 요청의 응답. 대기 중인 요청이면 결과를 애플리케이션에 넘긴다. 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). */
     private void handleResponse(byte[] frame, long streamId) {
-        Integer requestType = ownPendingStreams.remove(streamId);
+        Integer requestType = endOwnStream(streamId);
         if (requestType == null) {
             // 대기 중이 아닌 스트림의 프레임은 조용히 버린다(규격 4.3절).
             return;
@@ -952,10 +958,10 @@ public final class Endpoint {
         ackWaits.clear();
         for (long streamId : ownPendingStreams.keySet()) {
             // 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절). 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
-            OutboundMessage unsent = undrainedRequests.get(streamId);
-            if (unsent == null) {
+            if (stateOf(streamId) == RequestState.WRITING_STARTED) {
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.UNKNOWN));
             } else {
+                OutboundMessage unsent = undrainedRequests.get(streamId);
                 outbox.removeIf(message -> message == unsent);
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
             }
@@ -999,6 +1005,65 @@ public final class Endpoint {
         }
     }
 
+    /**
+     * 요청이 쓰기 대기열 어디에 있는지(규격 1.3절, 4.4.1절). 입출력 없는(sans-IO) 모델에서는 {@link #drainMessages()}가 프레임을 돌려준 때를 쓰기를
+     * 시작한 때로 본다. 돌려준 프레임은 전송 계층이 이미 받았으므로 끊거나 거둘 수 없다.
+     */
+    enum RequestState {
+        /** 번호를 받지 못한 대기열 요청. {@code deferredSends}에 있고 프레임이 아직 없다. */
+        QUEUED_WITHOUT_NUMBER,
+        /** 번호를 받았지만 프레임이 아직 {@code drainMessages()}로 나가지 않았다({@code undrainedRequests}). 쓰기 전이다. */
+        NUMBERED_UNWRITTEN,
+        /** 프레임이 {@code drainMessages()}로 나갔다. 쓰기를 시작했고 끝까지 쓴다. */
+        WRITING_STARTED
+    }
+
+    /**
+     * 요청을 낸 순서(번호표, 0부터)로 요청의 상태를 본다. 번호 없는 대기열 요청도 번호표로 찾는다. 결과가 나와 끝났거나 스트림을 열기 전에
+     * 로컬에서 실패한 요청, 낸 적 없는 번호표는 null이다. 쓰기 전(번호 유무 무관)과 쓰기 시작 뒤를 가르는 기준이다.
+     */
+    @Nullable
+    RequestState requestState(long ticket) {
+        for (DeferredSend deferred : deferredSends) {
+            if (deferred.ticket == ticket) {
+                return RequestState.QUEUED_WITHOUT_NUMBER;
+            }
+        }
+        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
+            if (entry.getValue().ticket == ticket) {
+                return stateOf(entry.getKey());
+            }
+        }
+        return null;
+    }
+
+    /** 번호를 받아 아직 끝나지 않은 내 스트림의 수. 요청 기록이 끝난 요청 뒤에 남지 않는지 보는 기준이다. */
+    int openStreamCount() {
+        return ownPendingStreams.size();
+    }
+
+    /** 내 스트림을 끝낸다. 대기 중이던 요청의 type을 돌려주고, 대기 중이 아니면 null이다. */
+    private @Nullable Integer endOwnStream(long streamId) {
+        OwnStream ended = ownPendingStreams.remove(streamId);
+        return ended == null ? null : ended.type;
+    }
+
+    /** 대기 중인 내 스트림 하나. 요청 type과 요청 번호표를 한 기록에 두어, 스트림이 끝나면 번호표 기록도 함께 없어진다. */
+    private static final class OwnStream {
+        final int type;
+        final long ticket;
+
+        OwnStream(int type, long ticket) {
+            this.type = type;
+            this.ticket = ticket;
+        }
+    }
+
+    /** 번호를 받은 내 요청의 상태. 번호 없는 대기열 요청은 번호가 없어 여기 오지 않는다({@link RequestState#QUEUED_WITHOUT_NUMBER}). */
+    private RequestState stateOf(long streamId) {
+        return undrainedRequests.containsKey(streamId) ? RequestState.NUMBERED_UNWRITTEN : RequestState.WRITING_STARTED;
+    }
+
     /** 요청을 보낸 결과. */
     private enum RequestOutcome {
         /** 요청 프레임을 보냈다. */
@@ -1009,7 +1074,7 @@ public final class Endpoint {
         OVERSIZE
     }
 
-    private RequestOutcome sendRequest(int type, byte[] payload) {
+    private RequestOutcome sendRequest(long ticket, int type, byte[] payload) {
         if (failRequestIfRefused()) {
             return RequestOutcome.FAILED_LOCALLY;
         }
@@ -1019,7 +1084,7 @@ public final class Endpoint {
             return RequestOutcome.OVERSIZE;
         }
         nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
-        ownPendingStreams.put(streamId, type);
+        ownPendingStreams.put(streamId, new OwnStream(type, ticket));
         OutboundMessage message = OutboundMessage.binary(frame);
         outbox.add(message);
         undrainedRequests.put(streamId, message);
@@ -1061,24 +1126,69 @@ public final class Endpoint {
         events.add(Event.localUnavailable());
     }
 
-    private void send(byte[] frame) {
-        outbox.add(OutboundMessage.binary(frame));
+    /**
+     * 프레임을 쓰기 대기열에 넣는다. 제어 프레임은 아직 쓰기를 시작한 적 없는 애플리케이션 프레임 앞에 둔다(규격 3.6절). 대기열에 남은 메시지는
+     * 모두 쓰기 전이다(꺼낸 메시지가 쓰기를 시작한 것이다). 애플리케이션 프레임끼리는 넣은 순서 그대로다. 제어 프레임은 대부분 넣은 순서 그대로지만,
+     * CLOSE는 쓰기 전 요청 뒤에 두므로 그 뒤에 넣은 다른 제어 프레임(PING, RESET 등)이 그 요청 앞에 있는 CLOSE 앞에 올 수 있다. 제어 프레임끼리의
+     * 순서는 3.6절이 정하지 않고, 3.2.2절과 3.5.1절이 정한 순서(HELLO 먼저, 돌려보내는 RESET이 오류 CLOSE보다 먼저)는 CLOSE를 보내는 때에 이미
+     * 대기열에 들어 있는 RESET과 HELLO가 CLOSE 앞에 남으므로 지켜진다. CLOSE를 쓰기 전 요청 뒤에 두는 까닭은 앞서 보내면 그 요청이 CLOSE 뒤에 온 새
+     * 요청이 되어 상대가 버리기 때문이다(규격 3.5절).
+     */
+    private OutboundMessage send(byte[] frame) {
+        OutboundMessage message = OutboundMessage.binary(frame);
+        if (message.isApplication()) {
+            outbox.add(message);
+            return message;
+        }
+        int at = firstApplicationIndex();
+        if (Frames.typeOf(frame) == FrameType.CLOSE) {
+            at = Math.max(at, afterLastUnwrittenRequest());
+        }
+        outbox.add(at, message);
+        return message;
+    }
+
+    /** 쓰기 전 요청 프레임 {@code after} 바로 뒤에 제어 프레임을 둔다. {@code after}가 null이면 {@link #send(byte[])}와 같다. */
+    private void sendAfter(@Nullable OutboundMessage after, byte[] frame) {
+        if (after == null) {
+            send(frame);
+        } else {
+            outbox.add(outbox.indexOf(after) + 1, OutboundMessage.binary(frame));
+        }
+    }
+
+    private int firstApplicationIndex() {
+        int i = 0;
+        while (i < outbox.size() && !outbox.get(i).isApplication()) {
+            i++;
+        }
+        return i;
+    }
+
+    private int afterLastUnwrittenRequest() {
+        int last = -1;
+        for (OutboundMessage request : undrainedRequests.values()) {
+            last = Math.max(last, outbox.indexOf(request));
+        }
+        return last + 1;
     }
 
     /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
     private void sendAwaitingAck(byte[] frame, byte @Nullable [] payload) {
-        OutboundMessage message = OutboundMessage.binary(frame);
-        outbox.add(message);
-        ackWaits.add(new AckWait(payload, message));
+        ackWaits.add(new AckWait(payload, send(frame)));
     }
 
     /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
     private static final class DeferredSend {
         final boolean request;
+        /** 요청이면 요청 번호표, 아니면 -1. */
+        final long ticket;
+
         final Runnable sending;
 
-        private DeferredSend(boolean request, Runnable sending) {
+        private DeferredSend(boolean request, long ticket, Runnable sending) {
             this.request = request;
+            this.ticket = ticket;
             this.sending = sending;
         }
 
@@ -1086,12 +1196,12 @@ public final class Endpoint {
             sending.run();
         }
 
-        static DeferredSend request(Runnable sending) {
-            return new DeferredSend(true, sending);
+        static DeferredSend request(long ticket, Runnable sending) {
+            return new DeferredSend(true, ticket, sending);
         }
 
         static DeferredSend ping(Runnable sending) {
-            return new DeferredSend(false, sending);
+            return new DeferredSend(false, -1, sending);
         }
     }
 
