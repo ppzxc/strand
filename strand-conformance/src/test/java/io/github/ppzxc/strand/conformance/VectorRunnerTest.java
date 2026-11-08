@@ -154,7 +154,7 @@ class VectorRunnerTest {
                         "disconnect",
                         "",
                         "[]",
-                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"UNAVAILABLE\"},{\"event\":\"closed\"}]"));
+                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"UNAVAILABLE\",\"certainty\":\"unknown\"},{\"event\":\"closed\"}]"));
 
         assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
     }
@@ -168,6 +168,20 @@ class VectorRunnerTest {
     }
 
     @Test
+    void aWrongResultCertaintyFails() {
+        ConformanceVector v = vector(
+                ESTABLISHED,
+                step("request", "\"type\":257,", "[{\"type\":257,\"stream_id\":\"2\"}]", "[]"),
+                step(
+                        "disconnect",
+                        "",
+                        "[]",
+                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"UNAVAILABLE\",\"certainty\":\"not_processed\"},{\"event\":\"closed\"}]"));
+
+        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
     void aWrongResultStatusFails() {
         ConformanceVector v = vector(
                 ESTABLISHED,
@@ -176,7 +190,7 @@ class VectorRunnerTest {
                         "disconnect",
                         "",
                         "[]",
-                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"INTERNAL\"},{\"event\":\"closed\"}]"));
+                        "[{\"event\":\"result\",\"stream_id\":\"2\",\"status\":\"INTERNAL\",\"certainty\":\"unknown\"},{\"event\":\"closed\"}]"));
 
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }

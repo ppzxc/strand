@@ -5,7 +5,6 @@ ack-timeout/ack-timeout-fails-pending-request-with-unavailable
 ack-timeout/client-ping-ack-timeout-before-and-after-limit
 ack-timeout/ping-ack-timeout-before-and-after-limit
 auth/client-auth-ack-wait-times-out-closes-unresponsive
-backpressure/local-failure-at-peer-limit-sends-nothing-and-keeps-the-number
 backpressure/request-after-close-received-is-dropped-silently
 backpressure/request-after-close-sent-is-dropped-silently
 backpressure/request-after-close-with-regressed-number-closes-silently
@@ -13,11 +12,8 @@ close-races/close-last-stream-id-above-highest-sent-is-malformed
 close-races/close-last-stream-id-ends-crossed-request-as-not-processed
 close-races/close-last-stream-id-in-own-number-space-is-malformed
 close-races/close-last-stream-id-zero-ends-every-request-as-not-processed
-close-races/close-received-blocks-opening-new-stream
 close-races/error-close-last-stream-id-ends-crossed-request-as-not-processed
 close-races/first-close-last-stream-id-is-the-only-one-used
-close-races/request-after-close-received-fails-locally-server
-close-races/request-after-close-sent-fails-locally
 hello-establishment/client-ack-timeout-before-and-after-limit
 hello-establishment/client-ack-timeout-is-not-reset-by-server-hello
 hello-establishment/client-rejects-server-max-frame-size-above-range
@@ -30,9 +26,4 @@ request-checks/closing-drops-bad-extension-value-request
 request-checks/closing-drops-unknown-type-request
 request-checks/closing-drops-unknown-type-with-bad-extension-value
 streams/closing-dropped-number-reuse-closes
-streams/exhaustion-after-close-received-sends-no-close
-streams/exhaustion-after-close-sent-sends-no-second-close
-streams/exhaustion-after-last-number-sends-close-client
 streams/exhaustion-after-last-number-sends-close-server
-streams/exhaustion-takes-precedence-over-peer-limit
-streams/exhaustion-with-pending-stream-closes-after-it-ends
