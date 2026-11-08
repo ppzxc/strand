@@ -41,7 +41,7 @@ checked: 2026-11-08
 | RFC9440 | RFC 9440, *Client-Cert HTTP Header Field*, 2023 | https://www.rfc-editor.org/rfc/rfc9440.txt | **Informational**(표준 아님) |
 | MQTT5 | MQTT Version 5.0, OASIS Standard, 2019-03-07 | https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html | 규범 문장 번호 `[MQTT-x.y.z-n]`로 인용 |
 | AMQP1-SEC | OASIS AMQP 1.0 Part 5: Security | http://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-security-v1.0-os.html | |
-| KIP-43 / KIP-152 / KIP-368 | Apache Kafka 개선 제안 | https://cwiki.apache.org/confluence/display/KAFKA/ (각 KIP 페이지) | KIP-368 상태 "Adopted (in 2.2)", KIP-152는 SaslAuthenticate 도입 |
+| KIP-152 / KIP-368 | Apache Kafka 개선 제안 | https://cwiki.apache.org/confluence/display/KAFKA/ (각 KIP 페이지) | KIP-368 상태 "Adopted (in 2.2)", KIP-152는 SaslAuthenticate 도입 |
 | KAFKA-PROTO | Apache Kafka 4.1 문서, *Protocol* | https://kafka.apache.org/41/design/protocol/ | 페이지에 "older version (4.1)" 표기. 더 새 판이 있다 |
 | PG18 | PostgreSQL 18 문서 54.2 *Message Flow*, 54.3 *SASL Authentication* | https://www.postgresql.org/docs/current/protocol-flow.html , .../sasl-authentication.html | `current`가 18을 가리킴(2026-11-08) |
 | NATS-PROTO | NATS 문서, *Client Protocol* | https://docs.nats.io/reference/reference-protocols/nats-protocol | |
@@ -62,8 +62,8 @@ checked: 2026-11-08
 | 3 | AUTH 한 번 왕복, challenge-response 없음 | **부분 부합** | 단일 메시지 메커니즘(PLAIN RFC 4616 §2, ANONYMOUS RFC 4505 §2, EXTERNAL RFC 4422 부록 A.1, OAUTHBEARER 성공 경로 RFC 7628 §3)과 단순 B2B 로그인(FIX Logon, SMPP bind, NATS CONNECT, MQTT 기본 인증)은 한 번 왕복이다. 그러나 SASL을 받는 프로토콜(AMQP, Kafka, PostgreSQL, MQTT 확장 인증)은 모두 여러 단계를 지원하고, SCRAM(RFC 5802 §5.2: client-first, 성공 시 추가 데이터)은 들어가지 못한다 |
 | 4 | 프로토콜 안에서는 클라이언트만 인증, 서버는 TLS가 인증 | **표준 부합** | RFC 8446 §1("server side ... always authenticated; the client side is optionally authenticated"). MQTT §5.4.3. SMPP, FIX, Kafka, NATS, PostgreSQL 기본 흐름 모두 같다. 보강 수단으로 채널 바인딩(RFC 5802 §6, RFC 9266, PostgreSQL SCRAM-SHA-256-PLUS)이 있다 |
 | 5 | 연결당 1회 인증, 재인증 없음, 만료·취소 시 서버가 CLOSE | **부분 부합** | 기본값으로는 RFC 4422 §3.8과 같고, NATS(만료 시 `-ERR 'User Authentication Expired'` 후 끊음), PostgreSQL, AMQP, FIX도 재인증이 없다. 다중화 프로토콜에서는 TLS 사후 인증을 피하라는 지침도 있다(RFC 9325 §3.6 → RFC 9113 §9.2.3). 그러나 장기 연결을 이유로 재인증을 넣은 Kafka KIP-368과 MQTT §4.12.1이 있고, KIP-368은 재인증 없이 서버가 끊기만 하는 방식을 명시적으로 기각했다 |
-| 6 | `CLOSE(UNAUTHENTICATED)`, 빈 reason, 타임아웃도 같은 코드 | **표준 부합** (보완 필요) | 명시적 실패 신호: Kafka KIP-152, AMQP `sasl-outcome`, PostgreSQL ErrorResponse, NATS `-ERR 'Authorization Violation'`, MQTT 0x86/0x87(MAY). 이유를 숨김: RFC 4422 §3.6, OWASP. 반례: MQTT §3.1.4 비규범 주석과 FIX §4.6.4는 조용히 끊기를 권한다. 빠진 것: 인증 시스템 장애(일시적)와 자격 증명 거부(영구적)의 구분(AMQP `sys-temp`/`auth`, RFC 4422 §3.6) |
-| 7 | 기밀성·무결성·서버 인증을 조건 없이 MUST, 중간자 허용, TLS 1.3 SHOULD | **표준 부합** (보완 필요) | FIX §4.3.1(TCP면 FIXS MUST), RFC 7628 §3("TLS MUST be used for OAUTHBEARER"), RFC 4616 §1, RFC 9325 §3.1.1, §5.1. MQTT, SMPP보다 엄격하다. 빠진 것: 호스트 이름 검증(RFC 9325 §7.1), 0-RTT 금지(RFC 9325 §3.10, RFC 8446 부록 E.5), TLS 사후 인증·재협상 금지(RFC 9325 §3.6), 평문 대체 금지(RFC 9325 §3.2). "TLS 1.3 SHOULD"는 BCP 195를 인용하는 편이 정확하다(1.2 MUST 지원) |
+| 6 | `CLOSE(UNAUTHENTICATED)`, 빈 reason, 타임아웃도 같은 코드 | **부분 부합** | 명시적 실패 신호: Kafka KIP-152, AMQP `sasl-outcome`, PostgreSQL ErrorResponse, NATS `-ERR 'Authorization Violation'`, MQTT 0x86/0x87(MAY). 이유를 숨김: RFC 4422 §3.6, OWASP. 반례: MQTT §3.1.4 비규범 주석과 FIX §4.6.4는 조용히 끊기를 권한다. 빠진 것: 인증 시스템 장애(일시적)와 자격 증명 거부(영구적)의 구분(AMQP `sys-temp`/`auth`, RFC 4422 §3.6) |
+| 7 | 기밀성·무결성·서버 인증을 조건 없이 MUST, 중간자 허용, TLS 1.3 SHOULD | **부분 부합** | FIX §4.3.1(TCP면 FIXS MUST), RFC 7628 §3("TLS MUST be used for OAUTHBEARER"), RFC 4616 §1, RFC 9325 §3.1.1, §5.1. MQTT, SMPP보다 엄격하다. 빠진 것: 호스트 이름 검증(RFC 9325 §7.1), 0-RTT 금지(RFC 9325 §3.10, RFC 8446 부록 E.5), TLS 사후 인증·재협상 금지(RFC 9325 §3.6), 평문 대체 금지(RFC 9325 §3.2). "TLS 1.3 SHOULD"는 BCP 195를 인용하는 편이 정확하다(1.2 MUST 지원) |
 | 8 | ALPN 식별자 정의 안 함 | **이탈** | RFC 9325 §3.8 "Protocol developers are strongly encouraged to register an ALPN identifier ... This applies both to new protocols". HTTP/2는 서문이 있는데도 TLS 위에서는 ALPN이 MUST다(RFC 9113 §3.3, §10.2). PostgreSQL은 직접 TLS 모드에서 ALPN `postgresql`을 요구한다(PG18 54.2.10). MQTT, PostgreSQL, IMAP, XMPP가 IANA에 등록돼 있다 |
 
 ---
@@ -256,10 +256,10 @@ RFC 4422 §3.6: "The outcome message provided by the server can provide a way fo
 
 ### 6.4 판정과 위험
 
-**표준 부합(보완 필요).** "실패를 하나의 일반 코드로 알리고 이유는 숨긴다"는 Kafka(KIP-152), AMQP, PostgreSQL, NATS, SASL §3.6, OWASP를 합친 방향과 같다. 조용히 끊으라는 MQTT 주석과 FIX §4.6.4는 공개 인터넷에서 서버 존재 자체를 숨기려는 목적이다. Strand는 서문과 HELLO를 이미 주고받은 뒤에 AUTH를 보므로, 이 시점에서 조용히 끊어도 숨길 것이 거의 없다 **(추론)**.
+**부분 부합.** "실패를 하나의 일반 코드로 알리고 이유는 숨긴다"는 Kafka(KIP-152), AMQP, PostgreSQL, NATS, SASL §3.6, OWASP를 합친 방향과 같다. 조용히 끊으라는 MQTT 주석과 FIX §4.6.4는 공개 인터넷에서 서버 존재 자체를 숨기려는 목적이다. Strand는 서문과 HELLO를 이미 주고받은 뒤에 AUTH를 보므로, 이 시점에서 조용히 끊어도 숨길 것이 거의 없다 **(추론)**. 다만 일시적 실패와 영구적 실패를 구분하지 않는다는 요소가 빠져 있어(6.3절) 부분 부합으로 본다.
 
 위험:
-- 인증 백엔드(LDAP, IdP, HSM)가 장애일 때도 `UNAUTHENTICATED`를 보내면, KIP-152 취지대로 이 코드를 "재시도 불가"로 다루는 클라이언트는 장애가 끝나도 다시 붙지 않는다. 반대로 재시도 가능으로 다루면 잘못된 자격 증명으로 무한히 재시도한다. 이 구분이 없다.
+- 인증 백엔드(LDAP, IdP, HSM)가 장애일 때도 `UNAUTHENTICATED`를 보내면, KIP-152 취지대로 이 코드를 "재시도 불가"로 다루는 클라이언트는 장애가 끝나도 다시 붙지 않는다. 반대로 재시도 가능으로 다루면 잘못된 자격 증명으로 무한히 재시도한다 **(추론)**. 설계에는 이 구분이 없다.
 - 타임아웃에 같은 코드를 쓰는 것은 NATS("Authorization Timeout"도 복구 불가 인증 오류로 분류)와 맞는다. 다만 현재 규격의 확인 대기 초과는 `PROTOCOL_ERROR`(3.3절)라서, 같은 "기다리다 만료" 사건에 두 코드가 생긴다. 의도를 규격에 적어 둘 필요가 있다 **(추론)**.
 - 규격 2.5.2절은 모르는 코드(6\~)를 `INTERNAL_ERROR`로 취급한다. 새 코드를 6으로 정의하면 구현 간 버전 차이가 있을 때 받는 쪽이 이를 내부 오류로 볼 수 있다. 0.1.0 초안 단계라 실제 위험은 작다 **(추론)**.
 
@@ -292,7 +292,7 @@ RFC 4422 §3.6: "The outcome message provided by the server can provide a way fo
 
 ### 7.2 판정과 위험
 
-**표준 부합(보완 필요).** 조건 없는 MUST는 FIX, OAUTHBEARER, gRPC 구현 관행과 같고 MQTT, SMPP보다 엄격하다. 클라이언트 인증서를 선택으로 두는 것도 RFC 8446 §1, MQTT §5.4.12.3과 맞는다.
+**부분 부합.** 조건 없는 MUST는 FIX, OAUTHBEARER, gRPC 구현 관행과 같고 MQTT, SMPP보다 엄격하다. 클라이언트 인증서를 선택으로 두는 것도 RFC 8446 §1, MQTT §5.4.12.3과 맞는다. 그러나 BCP 195가 MUST 수준으로 요구하는 세부 요건(0-RTT 회피 등)이 빠져 있어 부분 부합으로 본다.
 
 위험과 차이:
 - "TLS 1.3 SHOULD"만 적으면 BCP 195의 나머지(1.2 지원 MUST, 1.0·1.1 금지, 1.3 우선 MUST)가 빠진다.
@@ -309,7 +309,7 @@ RFC 4422 §3.6: "The outcome message provided by the server can provide a way fo
 - PostgreSQL 18 §54.2.10: 직접 TLS 모드에서 "the client is required to use the ALPN extension defined by RFC 7301 to protect against protocol confusion attacks. The PostgreSQL protocol is 'postgresql' as registered at IANA TLS ALPN Protocol IDs registry." PostgreSQL도 자체 시작 메시지가 있는 프로토콜이다.
 - IANA-ALPN 레지스트리에 등록된 메시징·데이터베이스 프로토콜: `mqtt`(OASIS MQTT), `postgresql`, `imap`, `pop3`, `xmpp-client`, `xmpp-server`, `ftp`, `coap`, `sunrpc` 등.
 
-**ALPN 없이 자체 헤더만 쓰는 쪽.** AMQP 1.0은 `"AMQP" %d2`/`%d3`/`%d0` 헤더로 계층을 구분하고 별도 TLS 포트(`amqps`, 5671)를 둔다(Part 5 §5.2, §5.2.1). Kafka, NATS, FIX, SMPP 문서에도 ALPN 식별자 규정이 없다. 이들은 모두 RFC 9325(2022) 이전에 설계됐다.
+**ALPN 없이 자체 헤더만 쓰는 쪽.** AMQP 1.0은 `"AMQP" %d2`/`%d3`/`%d0` 헤더로 계층을 구분하고 별도 TLS 포트(`amqps`, 5671)를 둔다(Part 5 §5.2, §5.2.1). Kafka, NATS, FIX, SMPP 문서에도 ALPN 식별자 규정이 없다. 이들은 모두 RFC 9325(2022) 이전에 설계됐다 **(추론: 각 프로토콜의 최초 발표 시기 기준)**.
 
 **WebSocket.** strand over WebSocket에서는 TLS ALPN이 HTTP의 것(`http/1.1`, `h2`)이므로 Strand 식별자를 ALPN에 둘 수 없다. 대응물은 WebSocket 하위 프로토콜(`Sec-WebSocket-Protocol`, RFC 6455 §1.9 "Subprotocols Using the WebSocket Protocol")이다.
 
@@ -338,5 +338,5 @@ RFC 4422 §3.6: "The outcome message provided by the server can provide a way fo
 11. **(6) 타임아웃 코드의 의도를 적는다.** 확인 대기 초과는 `PROTOCOL_ERROR`, AUTH 대기 초과는 `UNAUTHENTICATED`인 이유를 적어 둔다. NATS도 인증 타임아웃을 인증 오류로 분류한다.
 12. **(7) TLS 요건은 BCP 195를 인용하고 빠진 네 가지를 더한다.** "TLS 1.3 SHOULD" 대신 RFC 9325 준수를 요구하고, 호스트 이름(서버 신원) 검증 MUST(§7.1), 0-RTT 사용 금지(§3.10, RFC 8446 부록 E.5), TLS 사후 인증·재협상 금지(§3.6, RFC 9113 §9.2.1·§9.2.3), 평문 대체 금지(§3.2)를 명시할 만하다. 0-RTT는 금융·문자 도메인의 중복 실행 위험과 직결된다.
 13. **(7) WebSocket 환경의 채널 요건을 따로 적는다.** `wss`와 TLS 종료 프록시가 흔하고, HTTP 핸드셰이크 단계 인증(RFC 6455 §10.5)과 Strand AUTH의 관계(둘 다 쓸지, AUTH만 신원으로 인정할지)가 정해져 있지 않다.
-14. **(8) ALPN 식별자를 정의하고 WebSocket 하위 프로토콜 이름도 정한다.** RFC 9325 §3.8을 따라 TLS용 ALPN 식별자(예: 버전을 담은 `strand/0` 같은 형태, 이름은 미정)를 정하고, 서버는 ALPN이 오면 일치를 강제하며(RFC 7301 §3.2), WebSocket에서는 `Sec-WebSocket-Protocol` 토큰을 정하는 방안이다. IANA 등록은 Expert Review라 부담이 작다. 정의하지 않는다면 HTTP/2와 PostgreSQL 선례를 반박하는 근거가 필요하다.
+14. **(8) ALPN 식별자를 정의하고 WebSocket 하위 프로토콜 이름도 정한다.** RFC 9325 §3.8을 따라 TLS용 ALPN 식별자(예: 버전을 담은 `strand/0` 같은 형태, 이름은 미정)를 정하고, 서버는 ALPN이 오면 일치를 강제하며(RFC 7301 §3.2), WebSocket에서는 `Sec-WebSocket-Protocol` 토큰을 정하는 방안이다. IANA 등록 정책은 Expert Review다(RFC 7301 §6). 절차 부담은 작을 것으로 본다 **(추론)**. 정의하지 않는다면 HTTP/2와 PostgreSQL 선례를 반박하는 근거가 필요하다.
 15. **(4, 7) 채널 바인딩은 중간자 허용과 함께 쓸 수 없음을 인지한다.** SCRAM-PLUS나 `tls-exporter`(RFC 9266) 같은 결합은 TLS가 끝에서 끝까지 이어질 때만 성립한다. 중간자 허용을 유지하면 bearer 자격 증명이 중간자에서 보인다는 점을 보안 고려사항에 적어 둘 만하다.
