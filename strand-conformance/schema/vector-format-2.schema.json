@@ -36,14 +36,15 @@
       ]
     },
     "error_code": {
-      "description": "2.5.2절의 이름. 6 이상은 예약 값이다.",
+      "description": "2.5.2절의 이름. 8 이상은 예약 값이다.",
       "oneOf": [
         {
           "enum": [
-            "NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "REFUSED", "CANCEL", "OVERLOAD"
+            "NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "REFUSED", "CANCEL",
+            "EXCESSIVE_USE", "UNRESPONSIVE", "UNAUTHENTICATED"
           ]
         },
-        { "type": "integer", "minimum": 6, "maximum": 4294967295 }
+        { "type": "integer", "minimum": 8, "maximum": 4294967295 }
       ]
     },
     "app_type": { "type": "integer", "minimum": 256, "maximum": 65535 },

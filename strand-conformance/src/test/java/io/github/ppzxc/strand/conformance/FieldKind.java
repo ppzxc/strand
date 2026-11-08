@@ -249,8 +249,15 @@ enum FieldKind {
             "UNAUTHENTICATED");
 
     /** 2.5.2절 error_code 이름, 코드 값 순서. 목록 크기가 곧 첫 예약 정수 값이다. */
-    static final List<String> ERROR_CODE_NAMES =
-            Arrays.asList("NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "REFUSED", "CANCEL", "OVERLOAD");
+    static final List<String> ERROR_CODE_NAMES = Arrays.asList(
+            "NO_ERROR",
+            "PROTOCOL_ERROR",
+            "INTERNAL_ERROR",
+            "REFUSED",
+            "CANCEL",
+            "EXCESSIVE_USE",
+            "UNRESPONSIVE",
+            "UNAUTHENTICATED");
 
     abstract void check(Check c, String path, JsonElement element);
 }

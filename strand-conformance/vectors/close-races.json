@@ -292,7 +292,7 @@
     },
     {
       "id": "close-received-with-error-code-and-no-pending-streams-closes",
-      "description": "서버 역할 구현이 대기 중인 스트림이 없을 때 비-NO_ERROR CLOSE(OVERLOAD)를 받아도 아무것도 보내지 않고 연결을 닫고 closed 이벤트를 낸다. CLOSE로 답하지 않는다",
+      "description": "서버 역할 구현이 대기 중인 스트림이 없을 때 비-NO_ERROR CLOSE(EXCESSIVE_USE)를 받아도 아무것도 보내지 않고 연결을 닫고 closed 이벤트를 낸다. CLOSE로 답하지 않는다",
       "spec": [
         "3.5"
       ],

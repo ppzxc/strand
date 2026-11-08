@@ -42,7 +42,7 @@ class VectorRevisionTest {
 
     /** 삭제된 열거형·플래그·오류 코드 값. */
     private static final List<String> REMOVED_ENUM_VALUES =
-            Arrays.asList("END", "RESPONSE", "STREAM_CLOSED", "FRAME_SIZE_ERROR", "HELLO_TIMEOUT");
+            Arrays.asList("END", "RESPONSE", "STREAM_CLOSED", "FRAME_SIZE_ERROR", "HELLO_TIMEOUT", "OVERLOAD");
 
     /** 삭제된 개념이 들어간 id 조각. 새 용어로 바꿔야 한다. */
     private static final List<String> REMOVED_ID_WORDS = Arrays.asList(
@@ -153,6 +153,9 @@ class VectorRevisionTest {
         assertThat(removedConceptPaths(
                         JsonParser.parseString("{\"send\":[{\"type\":\"CLOSE\",\"error_code\":\"HELLO_TIMEOUT\"}]}")))
                 .hasSize(1);
+        assertThat(removedConceptPaths(
+                        JsonParser.parseString("{\"send\":[{\"type\":\"CLOSE\",\"error_code\":\"OVERLOAD\"}]}")))
+                .hasSize(1);
         assertThat(removedConceptPaths(JsonParser.parseString("{\"send\":[{\"type\":256,\"flags\":[\"END\"]}]}")))
                 .hasSize(1);
         assertThat(removedConceptPaths(JsonParser.parseString("{\"send\":[{\"type\":\"RESPONSE\"}]}")))
@@ -176,6 +179,21 @@ class VectorRevisionTest {
                             .contains(ref.getAsString());
                 }
             }
+        }
+    }
+
+    @Test
+    void specificationDoesNotUseTheRemovedErrorCodeName() throws IOException {
+        assertThat(String.join("\n", Files.readAllLines(SPEC, StandardCharsets.UTF_8)))
+                .doesNotContain("OVERLOAD");
+    }
+
+    @Test
+    void vectorFilesDoNotMentionTheRemovedErrorCodeName() throws IOException {
+        for (Path file : RawVectors.files()) {
+            assertThat(String.join("\n", Files.readAllLines(file, StandardCharsets.UTF_8)))
+                    .as("%s", file.getFileName())
+                    .doesNotContain("OVERLOAD");
         }
     }
 

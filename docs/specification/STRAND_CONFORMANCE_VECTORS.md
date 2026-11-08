@@ -281,7 +281,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
 
 ### 10.3 가상 시계와 확인 대기 시간 초과
 
-서버 역할 구현은 연결 서문을 확인한 즉시 자기 HELLO를 보내고(클라이언트 HELLO를 기다리지 않는다), 클라이언트 HELLO를 받으면 `ACK`로 답한다. 이후 상대의 `ACK`가 오지 않는다. 대기 시간(1,000밀리초) 직전에는 아무것도 보내지 않고, 지나면 `CLOSE(PROTOCOL_ERROR)`를 보낸다.
+서버 역할 구현은 연결 서문을 확인한 즉시 자기 HELLO를 보내고(클라이언트 HELLO를 기다리지 않는다), 클라이언트 HELLO를 받으면 `ACK`로 답한다. 이후 상대의 `ACK`가 오지 않는다. 대기 시간(1,000밀리초) 직전에는 아무것도 보내지 않고, 지나면 `CLOSE(UNRESPONSIVE)`를 보낸다.
 
 ```json
 {
@@ -289,7 +289,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
   "vectors": [
     {
       "id": "hello-ack-timeout",
-      "description": "서버가 연결 서문을 확인한 즉시 HELLO를 보내고, 그 HELLO에 대한 ACK가 오지 않은 채 대기 시간이 지나면 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "description": "서버가 연결 서문을 확인한 즉시 HELLO를 보내고, 그 HELLO에 대한 ACK가 오지 않은 채 대기 시간이 지나면 CLOSE(UNRESPONSIVE)를 보내고 닫는다",
       "spec": ["3.3"],
       "setup": {
         "role": "server",
@@ -318,7 +318,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
         {
           "kind": "advance",
           "ms": 2,
-          "send": [{ "type": "CLOSE", "error_code": "PROTOCOL_ERROR", "last_stream_id": "0" }],
+          "send": [{ "type": "CLOSE", "error_code": "UNRESPONSIVE", "last_stream_id": "0" }],
           "events": [{ "event": "closed" }]
         }
       ]
