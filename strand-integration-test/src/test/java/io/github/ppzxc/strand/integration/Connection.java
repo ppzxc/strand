@@ -47,6 +47,8 @@ final class Connection implements AutoCloseable {
     private long receivedBytes;
 
     private long writtenBytes;
+    /** 소켓에 쓴 프레임의 type을 쓴 순서대로 적어 둔다. 전선에 나간 프레임의 순서를 본다. */
+    private final List<Integer> writtenFrameTypes = new ArrayList<>();
     /** 읽기 스레드가 예기치 못한 예외로 멈췄을 때의 원인. 기다리는 쪽 실패 메시지에 붙인다. */
     private volatile Throwable readerFailure;
 
@@ -93,6 +95,17 @@ final class Connection implements AutoCloseable {
         synchronized (bytesLock) {
             return writtenBytes;
         }
+    }
+
+    /** 지금까지 소켓에 쓴 프레임의 type을 쓴 순서대로 돌려준다. 프레임 하나를 메시지 하나로 쓴다. 연결 서문은 type이 없는 8바이트라 서문 뒤의 프레임만 본다. */
+    List<Integer> writtenFrameTypes() {
+        synchronized (bytesLock) {
+            return new ArrayList<>(writtenFrameTypes);
+        }
+    }
+
+    private static int frameType(byte[] frame) {
+        return ((frame[4] & 0xff) << 8) | (frame[5] & 0xff);
     }
 
     /** 처리를 끝낸 받은 바이트가 {@code atLeast}에 이를 때까지 기다린다. 이르지 못하면 실패한다. */
@@ -250,6 +263,7 @@ final class Connection implements AutoCloseable {
                     out.write(message.bytes());
                     synchronized (bytesLock) {
                         writtenBytes += message.bytes().length;
+                        writtenFrameTypes.add(frameType(message.bytes()));
                     }
                 }
             }
