@@ -52,7 +52,7 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 | **제어 프레임 (Control Frame)** | 연결 수명주기, 생존 확인, 연결 종료, 스트림 중단 등 연결 상태를 관리하는 프레임 (`type` < `0x0100`) |
 | **애플리케이션 프레임 (Application Frame)** | 실제 비즈니스 서비스의 요청 및 응답 데이터를 운반하는 프레임 (`type` ≥ `0x0100`) |
 | **확장 영역 (Extension Area)** | 헤더와 본문 사이에 위치하는 선택적 메타데이터 영역. TLV(`tag`, `length`, `value`) 구조로 인코딩 |
-| **본문 (Payload)** | 프레임에 실리는 실제 데이터 바이트열. 제어 프레임은 고정 바이너리 형식을, 애플리케이션 프레임은 Protocol Buffers 이진 인코딩을 따름 |
+| **본문 (Payload)** | 프레임에 실리는 실제 데이터 바이트열. 제어 프레임은 고정 바이너리 형식을 따르고, 애플리케이션 프레임은 불투명 바이트열(4.1절) |
 | **기능 비트 (Capabilities Bitset)** | HELLO 프레임에서 교환하는 32비트 비트셋. 양 엔드포인트가 모두 켠 비트의 기능만 해당 연결에서 활성화 |
 | **배압 (Backpressure)** | 수신자의 처리 용량을 초과하지 않도록 송신량을 제어하는 메커니즘. 소켓 읽기를 멈추지 않고 한도를 넘는 새 요청이나 로컬 사유로 받지 않는 새 요청을 즉시 거절한다(4.5절) |
 | **거절 (Refusal)** | 받는 쪽이 새 요청을 애플리케이션에 넘기기 전에 `RESET(REFUSED)`로 돌려보내는 것. 거절한 요청은 처리를 시작하지 않은 것이라 결과 확정성이 늘 처리 안 됨이다(4.4절, 4.5절) |
@@ -69,7 +69,7 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
 
 ### 1.4 표기 규칙
 
-- 연결 서문, 프레임 헤더, 확장 영역, 제어 프레임 payload에 들어가는 고정 길이 정수는 모두 big-endian, unsigned로 읽는다. 애플리케이션 payload는 Protocol Buffers 이진 인코딩 규칙을 따른다 [^PROTOBUF-ENCODING].
+- 연결 서문, 프레임 헤더, 확장 영역, 제어 프레임 payload에 들어가는 고정 길이 정수는 모두 big-endian, unsigned로 읽는다.
 - 필드와 파라미터 이름은 `snake_case`, 프레임 타입·플래그·코드 상수는 `UPPER_SNAKE_CASE`로 쓴다.
 - MUST, MUST NOT, SHOULD, SHOULD NOT, MAY는 대문자로 쓴 경우에만 요구 수준을 뜻한다 [^RFC2119] [^RFC8174].
 - `0x`가 붙은 수는 16진수이고, KiB·MiB는 1,024의 배수다.
@@ -482,29 +482,13 @@ sequenceDiagram
 
 ### 4.1 애플리케이션 프레임
 
-애플리케이션 프레임의 `type`은 `0x0100` 이상의 값으로, 서비스 정의(`.proto`)의 메서드마다 하나씩 붙인다. payload에는 Protocol Buffers 이진 인코딩 [^PROTOBUF-ENCODING]으로 만든 요청이나 응답 메시지가 들어간다.
+애플리케이션 프레임의 `type`은 `0x0100` 이상의 값으로, 애플리케이션이 요청 종류마다 하나씩 붙인다. payload는 불투명 바이트열이다. 프로토콜은 payload의 형식을 요구하지 않는다.
 
 모르는 `type`으로 요청이 오면 연결은 그대로 두고 `status` = `UNIMPLEMENTED`로 답한다(MUST). 메시지 형식을 호환되지 않게 바꿔야 할 때는 기존 `type`을 고치지 말고 새 번호를 받는다.
 
 프로토콜은 애플리케이션 payload를 해석하지 않고 그대로 넘긴다. 애플리케이션은 요청 payload를 해석하지 못하면 `status` = `INVALID_ARGUMENT`로 답하는 것이 좋다(SHOULD).
 
 **응답 해석.** 응답의 `type`이 요청과 다르면(2.2.2절) 애플리케이션에 로컬 `status` = `INTERNAL`을 넘기고, 와이어로는 아무것도 보내지 않는다(RESET도 CLOSE도 보내지 않는다). 이 결과의 결과 확정성은 응답 받음이고, 이 응답도 정상 응답을 받은 것과 같게 다룬다(4.3절). 받은 응답의 `status`와 payload는 버린다.
-
-```protobuf
-syntax = "proto3";
-package strand.v1;
-
-import "google/protobuf/descriptor.proto";
-
-extend google.protobuf.MethodOptions {
-  uint32 type_code = 50001;   // 50000~99999는 내부 용도용 옵션 번호
-}
-
-service MessageService {
-  rpc Send(SendRequest) returns (SendResponse) { option (type_code) = 0x0101; }
-  rpc Query(QueryRequest) returns (QueryResponse) { option (type_code) = 0x0102; }
-}
-```
 
 ### 4.2 스트림 다중화 및 식별
 
@@ -676,7 +660,28 @@ CLOSE의 `reason`과 오류 상세 메시지는 상대에게 그대로 전달된
 
 [^RFC2119]: RFC 2119, *Key words for use in RFCs to Indicate Requirement Levels*
 [^RFC8174]: RFC 8174, *Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words*
-[^PROTOBUF-ENCODING]: Protocol Buffers, *Encoding*
 [^GOOGLE-RPC]: googleapis, `google/rpc/code.proto`, `google/rpc/status.proto`
 [^W3C-TRACE-CONTEXT]: W3C, *Trace Context*
 [^RFC6455]: RFC 6455, *The WebSocket Protocol*
+
+---
+
+## 부록 A. Protobuf 매핑 (비규범)
+
+이 부록은 비규범이다. 애플리케이션이 payload를 Protocol Buffers 메시지로 정할 때 서비스 정의(`.proto`)의 메서드를 `type`에 대응시키는 방법의 예다. 메서드마다 `type` 하나를 붙이고, payload에는 요청이나 응답 메시지의 직렬화 바이트열을 싣는다.
+
+```protobuf
+syntax = "proto3";
+package strand.v1;
+
+import "google/protobuf/descriptor.proto";
+
+extend google.protobuf.MethodOptions {
+  uint32 type_code = 50001;   // 50000~99999는 내부 용도용 옵션 번호
+}
+
+service MessageService {
+  rpc Send(SendRequest) returns (SendResponse) { option (type_code) = 0x0101; }
+  rpc Query(QueryRequest) returns (QueryResponse) { option (type_code) = 0x0102; }
+}
+```
