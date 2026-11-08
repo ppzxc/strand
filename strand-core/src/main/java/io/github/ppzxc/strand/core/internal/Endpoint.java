@@ -272,7 +272,7 @@ public final class Endpoint {
         if (transportClosed || closeExchanged) {
             return;
         }
-        send(Frames.close(errorCode));
+        send(Frames.close(errorCode, highestPeerStreamId));
         closeExchanged = true;
         closeTransportUnlessClosing(errorCode);
     }
@@ -415,9 +415,8 @@ public final class Endpoint {
             handleApplication(frame, type, extensionsLength, streamId);
             return;
         }
-        if (type != FrameType.HELLO && type != FrameType.PING && type != FrameType.RESET) {
-            // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). AUTH는 예약이 아니지만 처리를 아직 구현하지 않아
-            // 같은 길로 지나간다.
+        if (FrameType.isReserved(type)) {
+            // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 ACK 관문은 보지 않는다.
             if (extensionsLength != 0) {
                 connectionError();
             }
@@ -427,7 +426,8 @@ public final class Endpoint {
             connectionError();
             return;
         }
-        if (!ownHelloAcked && (type == FrameType.PING || type == FrameType.RESET)) {
+        if (!ownHelloAcked && type != FrameType.HELLO) {
+            // ACK 관문(규격 3.3절): 내 HELLO의 ACK를 받기 전에는 HELLO와 CLOSE만 받는다. AUTH는 예약이 아니라서 여기에 걸린다.
             connectionError();
             return;
         }
@@ -437,9 +437,10 @@ public final class Endpoint {
             handleHello(ack, payload);
         } else if (type == FrameType.PING) {
             handlePing(ack, payload);
-        } else {
+        } else if (type == FrameType.RESET) {
             handleReset(streamId, payload);
         }
+        // AUTH의 처리는 아직 없다(TICKET-2).
     }
 
     /**
@@ -464,7 +465,7 @@ public final class Endpoint {
 
     /** {@code stream_id}가 0이거나 최상위 비트가 1이다(규격 2.2.5절). 최상위 비트가 1이면 {@code long}으로 음수다. */
     private static boolean isInvalidStreamId(long streamId) {
-        return streamId <= 0;
+        return !Frames.isValidStreamId(streamId);
     }
 
     private boolean isOwnSpace(long streamId) {
@@ -683,7 +684,7 @@ public final class Endpoint {
      */
     private void connectionError() {
         if (!closeExchanged) {
-            send(Frames.close(ErrorCode.PROTOCOL_ERROR));
+            send(Frames.close(ErrorCode.PROTOCOL_ERROR, highestPeerStreamId));
         }
         closeExchanged = true;
         closeTransport();
@@ -775,7 +776,7 @@ public final class Endpoint {
             failLocally();
             return true;
         }
-        if (nextStreamId <= 0) {
+        if (!Frames.isValidStreamId(nextStreamId)) {
             // 번호가 소진됐다(2^63-1을 넘으면 long이 음수로 넘친다). 상대가 알린 한도보다 먼저 본다. 프레임 없이 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
             failLocally();
             close(ErrorCode.NO_ERROR);

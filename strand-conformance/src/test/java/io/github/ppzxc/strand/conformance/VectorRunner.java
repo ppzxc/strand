@@ -29,8 +29,17 @@ import java.util.function.Function;
  */
 final class VectorRunner {
 
+    /** 헤더 크기(규격 2.1절). 러너는 core의 상수가 아니라 규격의 값을 따로 둔다. */
+    private static final int HEADER_SIZE = 20;
+    /** extensions_length 필드의 위치(규격 2.1절). */
+    private static final int EXTENSIONS_LENGTH_AT = 16;
+
     private static final String PREFACE_HEX = "c0de535452300000";
-    private static final String ACK_HELLO_HEX = "00000010000101000000000000000000" + "00000000";
+    private static final int HELLO_TYPE = 1;
+    private static final int ACK_FLAG = 0x01;
+    /** 연결 수립에 쓰는 상대 HELLO에 대한 ACK(페이로드 없음). */
+    private static final String ACK_HELLO_HEX = controlHeader(HELLO_TYPE, ACK_FLAG, 0);
+
     private static final Map<String, Long> HELLO_DEFAULTS = new LinkedHashMap<>();
     private static final Map<Integer, String> HELLO_PARAMS = new LinkedHashMap<>();
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(Arrays.asList(
@@ -300,6 +309,14 @@ final class VectorRunner {
         return params;
     }
 
+    /**
+     * 확장 영역이 없고 {@code status}와 {@code stream_id}가 0인 제어 프레임의 헤더 hex(20바이트, 규격 2.1절). {@code length}는 header 뒤 payload
+     * 크기로 채운다.
+     */
+    private static String controlHeader(int type, int flags, int payloadSize) {
+        return String.format("%08x%04x%02x%02x%016x%04x%04x", HEADER_SIZE - 4 + payloadSize, type, flags, 0, 0L, 0, 0);
+    }
+
     private static byte[] encodeHello(Map<String, Long> params) {
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
         for (Map.Entry<Integer, String> param : HELLO_PARAMS.entrySet()) {
@@ -311,8 +328,7 @@ final class VectorRunner {
             }
         }
         byte[] body = payload.toByteArray();
-        return Bytes.concat(
-                Bytes.fromHex(String.format("%08x000100000000000000000000" + "00000000", 16 + body.length)), body);
+        return Bytes.concat(Bytes.fromHex(controlHeader(HELLO_TYPE, 0, body.length)), body);
     }
 
     private static List<String> expectedFrames(JsonObject step) {
@@ -408,8 +424,8 @@ final class VectorRunner {
             int type = ((frame[4] & 0xFF) << 8) | (frame[5] & 0xFF);
             int flags = frame[6] & 0xFF;
             long streamId = Bytes.readLong(frame, 8);
-            int extensions = ((frame[16] & 0xFF) << 8) | (frame[17] & 0xFF);
-            byte[] payload = Arrays.copyOfRange(frame, 20 + extensions, frame.length);
+            int extensions = ((frame[EXTENSIONS_LENGTH_AT] & 0xFF) << 8) | (frame[EXTENSIONS_LENGTH_AT + 1] & 0xFF);
+            byte[] payload = Arrays.copyOfRange(frame, HEADER_SIZE + extensions, frame.length);
             String head = " flags=" + flagsText(flags) + " stream_id=" + Long.toUnsignedString(streamId);
             String ext = extensions == 0 ? "" : " extensions=" + extensions;
             if (type == 1) {

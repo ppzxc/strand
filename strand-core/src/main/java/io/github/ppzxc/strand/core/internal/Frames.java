@@ -14,10 +14,16 @@ final class Frames {
     static final int MIN_LENGTH = HEADER_SIZE - LENGTH_FIELD_SIZE;
     /** {@code type}이 끝나는 위치. 길이가 어긋난 프레임도 여기까지는 읽어 type을 본다. */
     static final int TYPE_END = 6;
-    /** {@code stream_id}의 최댓값(규격 2.2.5절). 최상위 비트는 항상 0이다. */
-    static final long MAX_STREAM_ID = Long.MAX_VALUE;
 
     private Frames() {}
+
+    /**
+     * 쓸 수 있는 {@code stream_id}인가: {@code 1}~{@code 2^63-1}(규격 2.2.5절). 최상위 비트가 1이면 {@code long}으로 음수라서 걸러지고,
+     * 다음 번호를 2씩 더하다 {@code 2^63-1}을 넘어 넘친 값도 음수라서 걸러진다(번호 소진).
+     */
+    static boolean isValidStreamId(long streamId) {
+        return streamId > 0;
+    }
 
     /** 확장 영역이 없고 status·stream_id가 0인 제어 프레임. */
     static byte[] control(int type, int flags, byte[] payload) {
@@ -75,9 +81,11 @@ final class Frames {
         return new byte[] {(byte) 0xC0, (byte) 0xDE, 0x53, 0x54, 0x52, 0x30, 0x00, 0x00};
     }
 
-    static byte[] close(int errorCode) {
+    /** CLOSE. {@code last_stream_id}는 보내는 순간의 {@code highest_peer_stream_id}다(규격 3.5절). {@code reason}은 비운다. */
+    static byte[] close(int errorCode, long lastStreamId) {
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
         writeInt(payload, errorCode);
+        writeLong(payload, lastStreamId);
         return control(FrameType.CLOSE, 0, payload.toByteArray());
     }
 

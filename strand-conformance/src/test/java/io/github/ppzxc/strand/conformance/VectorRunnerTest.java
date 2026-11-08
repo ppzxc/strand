@@ -14,7 +14,6 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 /** 러너가 기대와 다른 동작을 놓치지 않는지 본다. 벡터를 직접 만들어 일부러 어긋나게 한다. */
@@ -35,9 +34,6 @@ class VectorRunnerTest {
     private static String recv(String hex, String send, String events) {
         return "{\"kind\":\"recv\",\"hex\":\"" + hex + "\",\"send\":" + send + ",\"events\":" + events + "}";
     }
-
-    /** core가 CLOSE에 last_stream_id를 싣기 전에는 CLOSE 프레임을 기대하는 통과 시나리오를 만들 수 없다. */
-    private static final String CLOSE_LAST_STREAM_ID_PENDING = "CLOSE last_stream_id 구현 전(#188)";
 
     private static final String ESTABLISHED = "{\"role\":\"server\",\"established\":true}";
 
@@ -128,7 +124,6 @@ class VectorRunnerTest {
         assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
     }
 
-    @Disabled(CLOSE_LAST_STREAM_ID_PENDING)
     @Test
     void advanceMovesTheVirtualClockAndTheAckTimeoutIsConfigurable() {
         ConformanceVector v = vector(
@@ -205,7 +200,6 @@ class VectorRunnerTest {
             "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}";
     private static final String CLOSE_STEP_NO_ERROR = "\"error_code\":\"NO_ERROR\",";
 
-    @Disabled(CLOSE_LAST_STREAM_ID_PENDING)
     @Test
     void webSocketCloseItemIsComparedAfterTheCloseFrame() {
         ConformanceVector v = vector(

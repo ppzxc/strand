@@ -26,8 +26,12 @@ class EndpointTest {
     private static final String HELLO_ACK = "0000001000010100000000000000000000000000";
     private static final String PING = "00000018 0002 00 00 0000000000000000 0000 0000 0102030405060708";
     private static final String PING_ACK = "0000001800020100000000000000000000000000" + "0102030405060708";
-    private static final String CLOSE_PROTOCOL_ERROR = "0000001400030000000000000000000000000000" + "00000001";
-    private static final String CLOSE_NO_ERROR = "0000001400030000000000000000000000000000" + "00000000";
+    /** CLOSE의 {@code last_stream_id}가 0인 경우(상대 요청이 아직 없다, 규격 3.5절). */
+    private static final String NO_STREAM = "0000000000000000";
+
+    private static final String CLOSE_PROTOCOL_ERROR =
+            "0000001c00030000000000000000000000000000" + "00000001" + NO_STREAM;
+    private static final String CLOSE_NO_ERROR = "0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM;
     private static final String PING_PAYLOAD = "0102030405060708";
     private static final EndpointConfig ONE_SECOND = EndpointConfig.defaults().ackTimeoutMs(1000);
     private static final String DEFAULT_HELLO_PARAMS = "0001 00400000 0002 00000064 0003 00000000".replace(" ", "");
@@ -135,6 +139,14 @@ class EndpointTest {
 
     private static void assertClosedWithProtocolError(Endpoint endpoint) {
         assertThat(sent(endpoint)).isEqualTo(CLOSE_PROTOCOL_ERROR);
+        assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    /** 상대의 요청 번호가 이미 쓰인 뒤라 {@code last_stream_id}가 0이 아닌 CLOSE(PROTOCOL_ERROR)(규격 3.5절). */
+    private static void assertClosedWithProtocolError(Endpoint endpoint, long lastStreamId) {
+        assertThat(sent(endpoint))
+                .isEqualTo(CLOSE_PROTOCOL_ERROR.substring(0, CLOSE_PROTOCOL_ERROR.length() - NO_STREAM.length())
+                        + String.format("%016x", lastStreamId));
         assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
     }
 
@@ -583,12 +595,26 @@ class EndpointTest {
         server.receive(bytes(HELLO));
         server.drainMessages();
 
-        server.receive(bytes("0000001000050000000000000000000000000000"));
-        assertOpenAndSilent(server);
+        // 예약 범위는 0x0000과 0x0006~0x00FF다. 0x0005는 AUTH라서 예약이 아니다(규격 2.2.2절).
+        for (String type : new String[] {"0000", "0006", "00ff"}) {
+            server.receive(bytes("00000010" + type + "0000" + "0000000000000000" + "00000000"));
+            assertOpenAndSilent(server);
+        }
         server.receive(bytes(HELLO_ACK));
         server.receive(bytes(PING));
 
         assertThat(sent(server)).isEqualTo(PING_ACK);
+    }
+
+    @Test
+    void authBeforeThePeerAckClosesWithProtocolErrorBecauseItIsNotReserved() {
+        Endpoint server = serverAfterPreface();
+        server.receive(bytes(HELLO));
+        server.drainMessages();
+
+        server.receive(bytes("00000010" + "0005" + "0000" + "0000000000000000" + "00000000"));
+
+        assertClosedWithProtocolError(server);
     }
 
     @Test
@@ -925,7 +951,7 @@ class EndpointTest {
     @Test
     void clientFirstFrameChecksCloseSilently() {
         for (String frame : new String[] {
-            "000000140003000000000000000000000000000000000001",
+            "0000001c0003000000000000000000000000000000000001" + NO_STREAM,
             HELLO_ACK,
             "0000001600010000000000000000000100000000000200000064"
         }) {
@@ -1238,7 +1264,7 @@ class EndpointTest {
     void lastResponseWhileClosingCompletesTheClose() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.receive(bytes("0000001400030000000000000000000000000000" + "00000000"));
+        client.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
         assertThat(client.drainEvents()).isEmpty();
 
         client.receive(bytes(appFrame(1, 0, "")));
@@ -1404,7 +1430,7 @@ class EndpointTest {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
-        server.receive(bytes("0000001400030000000000000000000000000000" + "00000000"));
+        server.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
 
         server.receive(bytes(requestFrame(258, 3, "00010003000001")));
 
@@ -1431,7 +1457,7 @@ class EndpointTest {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
         server.drainEvents();
-        server.receive(bytes("0000001400030000000000000000000000000000" + "00000000"));
+        server.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
         assertThat(server.drainEvents()).isEmpty();
 
         server.receive(bytes("000000100004000000000001000000000000" + "0004"));
@@ -1447,7 +1473,7 @@ class EndpointTest {
         pending.receive(bytes(requestFrame(257, 1, "")));
         pending.drainEvents();
         pending.receive(bytes(requestFrame(257, 1, "")));
-        assertClosedWithProtocolError(pending);
+        assertClosedWithProtocolError(pending, 1);
 
         Endpoint ended = established();
         ended.receive(bytes(requestFrame(257, 1, "")));
@@ -1455,26 +1481,26 @@ class EndpointTest {
         ended.drainMessages();
         ended.drainEvents();
         ended.receive(bytes(requestFrame(257, 1, "")));
-        assertClosedWithProtocolError(ended);
+        assertClosedWithProtocolError(ended, 1);
 
         Endpoint skipped = established();
         skipped.receive(bytes(requestFrame(257, 5, "")));
         skipped.drainEvents();
         skipped.receive(bytes(requestFrame(257, 3, "")));
-        assertClosedWithProtocolError(skipped);
+        assertClosedWithProtocolError(skipped, 5);
 
         Endpoint refused = establishedWith(EndpointConfig.defaults().maxConcurrentStreams(0));
         refused.receive(bytes(requestFrame(257, 5, "")));
         refused.drainMessages();
         refused.receive(bytes(requestFrame(257, 3, "")));
-        assertClosedWithProtocolError(refused);
+        assertClosedWithProtocolError(refused, 5);
     }
 
     @Test
     void repeatedNumberWhileClosingClosesWithoutSendingClose() {
         Endpoint server = established();
         server.receive(bytes(requestFrame(257, 1, "")));
-        server.receive(bytes("0000001400030000000000000000000000000000" + "00000000"));
+        server.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
         server.receive(bytes(requestFrame(257, 3, "")));
         server.drainMessages();
         server.drainEvents();
@@ -1721,7 +1747,7 @@ class EndpointTest {
 
             endpoint.request(257, new byte[0]);
 
-            assertThat(sent(endpoint)).isEqualTo("0000001400030000000000000000000000000000" + "00000000");
+            assertThat(sent(endpoint)).isEqualTo("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM);
             assertThat(kinds(endpoint)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
         }
     }
@@ -1753,7 +1779,7 @@ class EndpointTest {
 
         client.request(257, new byte[0]);
 
-        assertThat(sent(client)).isEqualTo("0000001400030000000000000000000000000000" + "00000000");
+        assertThat(sent(client)).isEqualTo("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM);
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT);
     }
 
