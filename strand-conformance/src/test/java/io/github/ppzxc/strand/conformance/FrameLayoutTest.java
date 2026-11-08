@@ -96,6 +96,7 @@ class FrameLayoutTest {
     @Test
     void largestStreamIdIs2Pow63Minus1() {
         JsonObject largest = RawVectors.byKey().get("streams/request-with-largest-stream-id-is-accepted");
-        assertThat(hexes(largest).get(0)).contains("7fffffffffffffff");
+        // 20바이트 헤더에서 stream_id는 8~15바이트(16진 문자 16~31)다.
+        assertThat(hexes(largest).get(0).substring(16, 32)).isEqualTo("7fffffffffffffff");
     }
 }
