@@ -2002,7 +2002,21 @@ class EndpointTest {
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(events.get(0).certainty()).contains(Certainty.UNKNOWN);
         assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void requestFrameNotYetHandedToTransportEndsAsNotProcessedAndIsNeverSent() {
+        Endpoint client = establishedClient();
+        client.request(257, new byte[0]);
+
+        client.disconnect();
+
+        assertThat(client.drainMessages()).isEmpty();
+        List<Event> events = client.drainEvents();
+        assertThat(events.get(0).streamId()).isEqualTo(1);
+        assertThat(events.get(0).certainty()).contains(Certainty.NOT_PROCESSED);
     }
 
     @Test

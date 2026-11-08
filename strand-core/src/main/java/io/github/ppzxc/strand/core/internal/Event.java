@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.core.internal;
 
 import java.util.Optional;
 import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /** 엔드포인트가 애플리케이션에 전달하는 이벤트(적합성 벡터 형식 6.2절). */
 public final class Event {
@@ -29,12 +30,15 @@ public final class Event {
     private final int status;
     private final int type;
     private final long credentialLifetime;
+    private final @Nullable Certainty certainty;
 
     private Event(Kind kind, long streamId, int status, int type) {
-        this(kind, streamId, status, type, NO_CREDENTIAL_LIFETIME);
+        this(kind, streamId, status, type, NO_CREDENTIAL_LIFETIME, null);
     }
 
-    private Event(Kind kind, long streamId, int status, int type, long credentialLifetime) {
+    private Event(
+            Kind kind, long streamId, int status, int type, long credentialLifetime, @Nullable Certainty certainty) {
+        this.certainty = certainty;
         this.kind = kind;
         this.streamId = streamId;
         this.status = status;
@@ -48,20 +52,21 @@ public final class Event {
                 0,
                 0,
                 0,
-                credentialLifetime.isPresent() ? credentialLifetime.getAsLong() : NO_CREDENTIAL_LIFETIME);
+                credentialLifetime.isPresent() ? credentialLifetime.getAsLong() : NO_CREDENTIAL_LIFETIME,
+                null);
     }
 
     static Event closed() {
         return new Event(Kind.CLOSED, 0, 0, 0);
     }
 
-    static Event result(long streamId, int status) {
-        return new Event(Kind.RESULT, streamId, status, 0);
+    static Event result(long streamId, int status, Certainty certainty) {
+        return new Event(Kind.RESULT, streamId, status, 0, NO_CREDENTIAL_LIFETIME, certainty);
     }
 
     /** 스트림을 열기 전에 로컬에서 실패한 요청의 결과. 스트림 번호가 없다(규격 2.2.5절, 3.2.1절, 3.5절). */
     static Event localUnavailable() {
-        return new Event(Kind.RESULT, 0, Status.UNAVAILABLE, 0);
+        return new Event(Kind.RESULT, 0, Status.UNAVAILABLE, 0, NO_CREDENTIAL_LIFETIME, Certainty.NOT_PROCESSED);
     }
 
     static Event requestReceived(long streamId, int type) {
@@ -102,7 +107,7 @@ public final class Event {
      * @return 결과 확정성
      */
     public Optional<Certainty> certainty() {
-        return kind == Kind.RESULT ? Optional.of(Certainty.RESPONSE) : Optional.empty();
+        return Optional.ofNullable(certainty);
     }
 
     /**

@@ -22,11 +22,8 @@ close-races/close-last-stream-id-above-highest-sent-is-malformed
 close-races/close-last-stream-id-ends-crossed-request-as-not-processed
 close-races/close-last-stream-id-in-own-number-space-is-malformed
 close-races/close-last-stream-id-zero-ends-every-request-as-not-processed
-close-races/close-received-blocks-opening-new-stream
 close-races/error-close-last-stream-id-ends-crossed-request-as-not-processed
 close-races/first-close-last-stream-id-is-the-only-one-used
-close-races/request-after-close-received-fails-locally-server
-close-races/request-after-close-sent-fails-locally
 hello-establishment/client-ack-timeout-before-and-after-limit
 hello-establishment/client-ack-timeout-is-not-reset-by-server-hello
 hello-establishment/client-rejects-server-max-frame-size-above-range
@@ -39,6 +36,4 @@ request-checks/closing-drops-bad-extension-value-request
 request-checks/closing-drops-unknown-type-request
 request-checks/closing-drops-unknown-type-with-bad-extension-value
 streams/closing-dropped-number-reuse-closes
-streams/exhaustion-after-close-received-sends-no-close
-streams/exhaustion-after-close-sent-sends-no-second-close
 streams/exhaustion-after-last-number-sends-close-server

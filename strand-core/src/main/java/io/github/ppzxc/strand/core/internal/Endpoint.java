@@ -46,6 +46,11 @@ public final class Endpoint {
     private final List<Event> events = new ArrayList<>();
     /** 대기 중인 스트림 가운데 내가 연 것(결과를 기다리는 내 요청)의 번호와 요청 type. 보낸 순서대로다(규격 1.3절). */
     private final Map<Long, Integer> ownPendingStreams = new LinkedHashMap<>();
+    /**
+     * 요청 프레임이 아직 {@link #drainMessages()}로 전송 계층에 넘어가지 않은 내 스트림(규격 3.5절 "연결이 끝날 때"). 프레임 하나가 메시지
+     * 하나이므로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 본다.
+     */
+    private final Map<Long, OutboundMessage> undrainedRequests = new LinkedHashMap<>();
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
     private final Map<Long, Integer> peerPendingStreams = new LinkedHashMap<>();
     /** AUTH 관문을 통과하기 전이라 미뤄 둔 송신(규격 3.3절). */
@@ -260,8 +265,10 @@ public final class Endpoint {
         if (transportClosed || ownPendingStreams.remove(streamId) == null) {
             return;
         }
+        // 요청 프레임은 이미 쓰기 대기열에 있고 끊지 않고 마저 쓴 뒤 RESET을 보낸다(규격 4.4절). 마지막 바이트를 넘기기 전 취소는 #190이 다룬다.
+        undrainedRequests.remove(streamId);
         send(Frames.reset(streamId, ErrorCode.CANCEL));
-        events.add(Event.result(streamId, Status.CANCELLED));
+        events.add(Event.result(streamId, Status.CANCELLED, Certainty.UNKNOWN));
         closeTransportIfNoPendingStreams();
     }
 
@@ -307,6 +314,7 @@ public final class Endpoint {
     public List<OutboundMessage> drainMessages() {
         List<OutboundMessage> drained = new ArrayList<>(outbox);
         outbox.clear();
+        undrainedRequests.clear();
         return drained;
     }
 
@@ -474,7 +482,10 @@ public final class Endpoint {
         }
         if (isOwnSpace(streamId)) {
             if (ownPendingStreams.remove(streamId) != null) {
-                events.add(Event.result(streamId, Status.forReset(Frames.readUnsignedInt(payload, 0))));
+                long errorCode = Frames.readUnsignedInt(payload, 0);
+                // 거절한 요청은 처리를 시작하지 않았다(규격 4.4절 결과 표).
+                Certainty certainty = errorCode == ErrorCode.REFUSED ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
+                events.add(Event.result(streamId, Status.forReset(errorCode), certainty));
             }
         } else {
             peerPendingStreams.remove(streamId);
@@ -580,7 +591,7 @@ public final class Endpoint {
         int status = Frames.typeOf(frame) == requestType
                 ? Status.normalize(Frames.statusOf(frame))
                 : Event.RESPONSE_TYPE_MISMATCH;
-        events.add(Event.result(streamId, status));
+        events.add(Event.result(streamId, status, Certainty.RESPONSE));
         closeTransportIfNoPendingStreams();
     }
 
@@ -782,8 +793,16 @@ public final class Endpoint {
         receiveBuffer = new byte[0];
         ackWaits.clear();
         for (long streamId : ownPendingStreams.keySet()) {
-            events.add(Event.result(streamId, Status.UNAVAILABLE));
+            // 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절). 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
+            OutboundMessage unsent = undrainedRequests.get(streamId);
+            if (unsent == null) {
+                events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.UNKNOWN));
+            } else {
+                outbox.removeIf(message -> message == unsent);
+                events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
+            }
         }
+        undrainedRequests.clear();
         for (DeferredSend deferred : deferredSends) {
             if (deferred.request) {
                 failLocally();
@@ -845,7 +864,9 @@ public final class Endpoint {
         }
         nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
         ownPendingStreams.put(streamId, type);
-        send(frame);
+        OutboundMessage message = OutboundMessage.binary(frame);
+        outbox.add(message);
+        undrainedRequests.put(streamId, message);
         return RequestOutcome.SENT;
     }
 
