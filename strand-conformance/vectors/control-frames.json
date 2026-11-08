@@ -257,7 +257,7 @@
       "steps": [
         {
           "kind": "recv",
-          "hex": "000000150010ff00800000007fffffff000000003132333435",
+          "hex": "000000150010ff00ffffffffffffffff000000003132333435",
           "send": [],
           "events": []
         },
