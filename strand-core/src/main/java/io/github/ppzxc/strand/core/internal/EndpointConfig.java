@@ -16,6 +16,8 @@ public final class EndpointConfig {
     private final long maxConcurrentStreams;
     private final long capabilities;
     private final long ackTimeoutMs;
+    /** 이 시간 동안 받은 프레임이 없으면 PING을 보낸다(규격 3.4.1절). 0이면 유휴 PING을 보내지 않는다. */
+    private final long idleIntervalMs;
     /** 서버가 상대 HELLO에 ACK를 보낸 때부터 {@code AUTH}를 기다리는 시간(규격 3.3절 AUTH 대기). */
     private final long authTimeoutMs;
     /** 구현이 아는 애플리케이션 {@code type}. null이면 모든 type을 안다(규격 4.1절). */
@@ -36,6 +38,7 @@ public final class EndpointConfig {
         this.maxConcurrentStreams = draft.maxConcurrentStreams;
         this.capabilities = draft.capabilities;
         this.ackTimeoutMs = draft.ackTimeoutMs;
+        this.idleIntervalMs = draft.idleIntervalMs;
         this.authTimeoutMs = draft.authTimeoutMs;
         this.knownTypes = draft.knownTypes;
         this.nextStreamId = draft.nextStreamId;
@@ -51,6 +54,7 @@ public final class EndpointConfig {
         long maxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
         long capabilities;
         long ackTimeoutMs = DEFAULT_ACK_TIMEOUT_MS;
+        long idleIntervalMs;
         long authTimeoutMs = DEFAULT_AUTH_TIMEOUT_MS;
 
         @Nullable
@@ -71,6 +75,7 @@ public final class EndpointConfig {
         draft.maxConcurrentStreams = maxConcurrentStreams;
         draft.capabilities = capabilities;
         draft.ackTimeoutMs = ackTimeoutMs;
+        draft.idleIntervalMs = idleIntervalMs;
         draft.authTimeoutMs = authTimeoutMs;
         draft.knownTypes = knownTypes;
         draft.nextStreamId = nextStreamId;
@@ -135,6 +140,19 @@ public final class EndpointConfig {
     public EndpointConfig ackTimeoutMs(long value) {
         ConfigDraft draft = draft();
         draft.ackTimeoutMs = value;
+        return new EndpointConfig(draft);
+    }
+
+    /**
+     * 유휴 간격(규격 3.4.1절)을 바꾼 복사본. 이 시간 동안 상대에게서 받은 프레임이 없으면 PING을 보낸다. 정하지 않으면(0) 유휴 PING을
+     * 보내지 않는다. 규격은 값을 정하지 않는다.
+     *
+     * @param value 밀리초. 0이면 유휴 PING을 끈다
+     * @return 새 설정
+     */
+    public EndpointConfig idleIntervalMs(long value) {
+        ConfigDraft draft = draft();
+        draft.idleIntervalMs = value;
         return new EndpointConfig(draft);
     }
 
@@ -250,6 +268,10 @@ public final class EndpointConfig {
 
     long ackTimeoutMs() {
         return ackTimeoutMs;
+    }
+
+    long idleIntervalMs() {
+        return idleIntervalMs;
     }
 
     long authTimeoutMs() {

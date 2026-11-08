@@ -35,9 +35,13 @@ class EndpointTest {
 
     private static final String CLOSE_PROTOCOL_ERROR =
             "0000001c00030000000000000000000000000000" + "00000001" + NO_STREAM;
+    private static final String CLOSE_UNRESPONSIVE =
+            "0000001c00030000000000000000000000000000" + "00000006" + NO_STREAM;
     private static final String CLOSE_NO_ERROR = "0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM;
     private static final String PING_PAYLOAD = "0102030405060708";
     private static final EndpointConfig ONE_SECOND = EndpointConfig.defaults().ackTimeoutMs(1000);
+    private static final EndpointConfig IDLE_ONE_SECOND =
+            EndpointConfig.defaults().ackTimeoutMs(5000).idleIntervalMs(1000);
     private static final String DEFAULT_HELLO_PARAMS = "0001 00400000 0002 00000064 0003 00000000".replace(" ", "");
 
     static byte[] bytes(String hex) {
@@ -159,6 +163,12 @@ class EndpointTest {
 
     private static void assertClosedWithProtocolError(Endpoint endpoint) {
         assertThat(sent(endpoint)).isEqualTo(CLOSE_PROTOCOL_ERROR);
+        assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    /** 확인 대기 초과(규격 3.3절). */
+    private static void assertClosedUnresponsive(Endpoint endpoint) {
+        assertThat(sent(endpoint)).isEqualTo(CLOSE_UNRESPONSIVE);
         assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
     }
 
@@ -716,7 +726,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(2);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
@@ -1158,7 +1168,7 @@ class EndpointTest {
 
         client.advance(2);
 
-        assertClosedWithProtocolError(client);
+        assertClosedUnresponsive(client);
     }
 
     @Test
@@ -1170,7 +1180,7 @@ class EndpointTest {
         assertOpenAndSilent(client);
         client.advance(2);
 
-        assertClosedWithProtocolError(client);
+        assertClosedUnresponsive(client);
     }
 
     @Test
@@ -1186,7 +1196,7 @@ class EndpointTest {
     // ---- PING의 확인 대기(3.3절, 3.4절) ----
 
     @Test
-    void pingWithoutAnAckClosesWithProtocolErrorAfterTheWait() {
+    void pingWithoutAnAckClosesWithUnresponsiveAfterTheWait() {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
         server.drainMessages();
@@ -1195,11 +1205,11 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(2);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
-    void clientPingWithoutAnAckClosesWithProtocolErrorAfterTheWait() {
+    void clientPingWithoutAnAckClosesWithUnresponsiveAfterTheWait() {
         Endpoint client = Endpoint.client(ONE_SECOND);
         client.receive(bytes(HELLO));
         client.receive(bytes(HELLO_ACK));
@@ -1208,7 +1218,7 @@ class EndpointTest {
 
         client.advance(1001);
 
-        assertClosedWithProtocolError(client);
+        assertClosedUnresponsive(client);
     }
 
     @Test
@@ -1234,7 +1244,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(1001);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
@@ -1260,7 +1270,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(600);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
@@ -1276,7 +1286,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(500);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test
@@ -1297,6 +1307,181 @@ class EndpointTest {
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
+    // ---- 유휴 시 PING(3.4.1절) ----
+
+    @Test
+    void withoutAnIdleIntervalNoIdlePingIsSent() {
+        Endpoint server = established();
+
+        server.advance(1_000_000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void idlePingIsSentWhenNothingWasReceivedForTheIdleInterval() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(1);
+
+        assertThat(sent(server)).isEqualTo("0000001800020000000000000000000000000000" + "0000000000000000");
+    }
+
+    @Test
+    void aReceivedFrameRestartsTheIdleInterval() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.advance(900);
+        server.receive(bytes(PING));
+        assertThat(sent(server)).isEqualTo(PING_ACK);
+
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(1);
+
+        assertThat(sent(server)).hasSize(40 + 16);
+    }
+
+    @Test
+    void noNewIdlePingIsSentWhileOneIsWaitingForItsAck() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.advance(1000);
+        assertThat(sent(server)).hasSize(40 + 16);
+
+        server.advance(3000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void noIdlePingIsSentWhileAnApplicationPingIsWaitingForItsAck() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
+        server.drainMessages();
+
+        server.advance(2000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void anUnansweredIdlePingClosesWithUnresponsiveAfterTheAckWait() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.advance(1000);
+        server.drainMessages();
+
+        server.advance(4999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedUnresponsive(server);
+    }
+
+    @Test
+    void anotherIdlePingIsSentAfterTheFirstOneIsAcked() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.advance(1000);
+        server.drainMessages();
+        server.receive(bytes("0000001800020100000000000000000000000000" + "0000000000000000"));
+        server.drainMessages();
+
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(1);
+
+        assertThat(sent(server)).isEqualTo("0000001800020000000000000000000000000000" + "0000000000000001");
+    }
+
+    @Test
+    void idlePingWaitsForTheAuthGate() {
+        Endpoint server = serverAfterPreface(IDLE_ONE_SECOND);
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+
+        server.advance(1000);
+
+        assertOpenAndSilent(server);
+    }
+
+    @Test
+    void idlePingContinuesWhileClosing() {
+        Endpoint server = establishedWith(IDLE_ONE_SECOND);
+        server.request(257, new byte[0]);
+        server.drainMessages();
+        server.receive(bytes(CLOSE_NO_ERROR));
+        server.drainMessages();
+
+        server.advance(1000);
+
+        assertThat(sent(server)).hasSize(40 + 16);
+    }
+
+    // ---- 확인 대기의 시작점: 전송 계층에 넘긴 때(3.3절) ----
+
+    @Test
+    void helloWaitStartsWhenTheFrameIsDrainedNotWhenItIsQueued() {
+        Endpoint server = Endpoint.server(ONE_SECOND);
+        server.receive(bytes(PREFACE));
+
+        server.advance(5000);
+        assertThat(server.drainEvents()).isEmpty();
+        server.drainMessages();
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedUnresponsive(server);
+    }
+
+    @Test
+    void pingWaitStartsWhenTheFrameIsDrainedNotWhenItIsQueued() {
+        Endpoint server = establishedWith(ONE_SECOND);
+        server.ping(bytes(PING_PAYLOAD));
+
+        server.advance(5000);
+        assertThat(server.drainEvents()).isEmpty();
+        server.drainMessages();
+        server.advance(999);
+        assertOpenAndSilent(server);
+        server.advance(2);
+
+        assertClosedUnresponsive(server);
+    }
+
+    // ---- CLOSE 전용 코드와 EXCESSIVE_USE(2.5.2절, 3.5절, 4.4절) ----
+
+    @Test
+    void closeWithExcessiveUseSendsThatCodeAndClosesTheTransport() {
+        Endpoint server = established();
+
+        server.close(ErrorCode.EXCESSIVE_USE);
+
+        assertThat(sent(server)).isEqualTo("0000001c00030000000000000000000000000000" + "00000005" + NO_STREAM);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void resetWithCloseOnlyOrReservedCodesIsTreatedAsAnyOtherReset() {
+        for (String code : new String[] {"00000005", "00000006", "00000007", "00000008", "ffffffff"}) {
+            Endpoint client = Endpoint.client(EndpointConfig.defaults());
+            client.receive(bytes(HELLO));
+            client.receive(bytes(HELLO_ACK));
+            clientPassesAuthGate(client);
+            client.request(257, new byte[0]);
+            client.drainMessages();
+
+            client.receive(bytes("00000014000400000000000000000001" + "0000" + "0000" + code));
+
+            assertThat(client.drainEvents()).singleElement().satisfies(event -> {
+                assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
+                assertThat(event.status()).isEqualTo(Status.INTERNAL);
+            });
+            assertOpenAndSilent(client);
+        }
+    }
+
     @Test
     void helloAndPingWaitsAreIndependent() {
         Endpoint server = serverAfterPreface(ONE_SECOND);
@@ -1311,7 +1496,7 @@ class EndpointTest {
         assertOpenAndSilent(server);
         server.advance(2);
 
-        assertClosedWithProtocolError(server);
+        assertClosedUnresponsive(server);
     }
 
     @Test

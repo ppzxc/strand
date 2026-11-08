@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class AckWaitsTest {
 
     private static final String PREFACE = "c0de535452300000";
-    private static final String PING_ACK_0102 = "000000140002010000000000000000000102030405060708";
+    private static final String PING_ACK_0102 = "00000018000201000000000000000000" + "00000000" + "0102030405060708";
 
     private static JsonObject parseVector(String json) {
         return JsonParser.parseString(json).getAsJsonObject();
@@ -87,7 +87,7 @@ class AckWaitsTest {
 
     @Test
     void aPrefaceWithReservedBytesIsSkippedAndTheFramesAfterItAreRead() {
-        String helloAck = "0000000c" + "0001" + "01" + "00" + "00000000" + "0000" + "0000";
+        String helloAck = "00000010" + "0001" + "01" + "00" + "0000000000000000" + "0000" + "0000";
         String helloStart = "{\"kind\":\"recv\",\"hex\":\"\",\"send\":[{\"type\":\"HELLO\"}],\"events\":[]}";
         JsonObject v = limit1000(helloStart, advance(999), recv("c0de53545230ffff" + helloAck), advance(1));
 
@@ -108,7 +108,7 @@ class AckWaitsTest {
     void bytesInsideAPayloadAreNotReadAsAFrameHeader() {
         // 첫 recv는 프레임 하나의 앞부분이고, 둘째 recv의 앞 14자리는 ACK PING 모양이지만 같은 프레임의 payload다.
         String fakeAck = "0002010000000000";
-        String frame = "00000014" + "0063" + "00" + "00" + "00000000" + "0000" + "0000" + fakeAck;
+        String frame = "00000018" + "0063" + "00" + "00" + "0000000000000000" + "0000" + "0000" + fakeAck;
         JsonObject v = limit1000(PING_START, recv(frame.substring(0, 12)), recv(frame.substring(12)), advance(1000));
 
         assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1000L);
@@ -145,8 +145,8 @@ class AckWaitsTest {
 
     @Test
     void aPingAckShorterThanARealPingFrameDoesNotEndTheWait() {
-        // length 0x10인 짧은 프레임은 payload가 8바이트가 아니라 payload를 맞춰 볼 수 없다.
-        String shortAck = "00000010" + "0002" + "01" + "00" + "00000000" + "0000" + "0000" + "01020304";
+        // length 0x14인 짧은 프레임은 payload가 8바이트가 아니라 payload를 맞춰 볼 수 없다.
+        String shortAck = "00000014" + "0002" + "01" + "00" + "0000000000000000" + "0000" + "0000" + "01020304";
         JsonObject v = limit1000(PING_START, recv(shortAck), advance(1000));
 
         assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(1000L);
