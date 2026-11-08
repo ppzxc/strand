@@ -1114,7 +1114,11 @@ class EndpointTest {
                 assertThat(events.get(i).certainty()).hasValue(Certainty.NOT_PROCESSED);
             }
             assertThat(events.get(count).kind()).isEqualTo(Event.Kind.CLOSED);
-            assertThat(events.stream().map(Event::streamId).filter(id -> id != 0).distinct().count())
+            assertThat(events.stream()
+                            .map(Event::streamId)
+                            .filter(id -> id != 0)
+                            .distinct()
+                            .count())
                     .isEqualTo(count);
             assertThat(client.drainMessages()).noneMatch(OutboundMessage::isApplication);
         }
