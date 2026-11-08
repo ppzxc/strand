@@ -31,7 +31,7 @@ public final class BlockingTcpExample {
             InputStream in = socket.getInputStream();
 
             Endpoint endpoint = Endpoint.client(ExampleSupport.withAuth(EndpointConfig.defaults()));
-            // 서버 HELLO를 ACK하기 전의 요청은 core가 미뤘다가 보낸다.
+            // AUTH 관문을 지나기 전의 요청은 core가 미뤘다가 AUTH(ACK) 뒤에 보낸다(규격 3.3절).
             endpoint.request(ExampleSupport.DEMO_REQUEST_TYPE, "hello".getBytes(StandardCharsets.UTF_8));
             endpoint.ping(new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
             flush(endpoint, out);
