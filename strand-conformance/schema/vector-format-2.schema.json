@@ -53,6 +53,12 @@
       "maxLength": 19,
       "pattern": "^(?:0|[1-9][0-9]*)$"
     },
+    "last_stream_id": {
+      "description": "CLOSE의 last_stream_id. 10진수 문자열(JSON 수가 아니다). 0 이상 2^64-1 이하이지만 범위는 스키마로 표현할 수 없어 형식 문서에만 있다. 형태가 잘못된 CLOSE를 만들려고 번호 공간 밖의 값도 쓴다.",
+      "type": "string",
+      "maxLength": 20,
+      "pattern": "^(?:0|[1-9][0-9]*)$"
+    },
     "positive_stream_id": {
       "description": "stream_id와 같되 1 이상이다(0 제외는 형식 문서에만 있다).",
       "type": "string",
@@ -149,11 +155,12 @@
     "frame_close": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "error_code"],
+      "required": ["type", "error_code", "last_stream_id"],
       "properties": {
         "type": { "const": "CLOSE" },
         "stream_id": { "const": "0" },
-        "error_code": { "$ref": "#/$defs/error_code" }
+        "error_code": { "$ref": "#/$defs/error_code" },
+        "last_stream_id": { "$ref": "#/$defs/last_stream_id" }
       }
     },
     "frame_reset": {

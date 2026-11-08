@@ -174,13 +174,17 @@ class NewVectorCoverageTest {
     @Test
     void requestCheckOrderIsRefusedThenUnimplementedThenInvalidArgument() {
         for (String key : Arrays.asList(
-                "request-checks/closing-refuses-unknown-type-request",
-                "request-checks/closing-refuses-bad-extension-value-request",
-                "request-checks/closing-refuses-unknown-type-with-bad-extension-value",
                 "request-checks/limit-refusal-precedes-unknown-type",
                 "request-checks/limit-refusal-precedes-bad-extension-value")) {
             // (가) 거절만 나간다. (나)·(다)의 응답은 나가지 않는다.
             assertThat(sentFrames(vector(key))).as(key).containsExactly("RESET/REFUSED");
+        }
+        // CLOSE 뒤의 새 요청은 (가)에서 조용히 버려지므로 (나)·(다)의 응답도 나가지 않는다.
+        for (String key : Arrays.asList(
+                "request-checks/closing-drops-unknown-type-request",
+                "request-checks/closing-drops-bad-extension-value-request",
+                "request-checks/closing-drops-unknown-type-with-bad-extension-value")) {
+            assertThat(sentFrames(vector(key))).as(key).isEmpty();
         }
         // (나)가 (다)보다 먼저 걸린다.
         assertThat(sentFrames(vector("request-checks/unknown-type-precedes-bad-extension-value")))

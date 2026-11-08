@@ -107,7 +107,9 @@ final class VectorRunner {
                 frame -> "PING flags=" + (VectorSchema.hasFlag(frame, "ACK") ? "ACK" : "-") + " stream_id=0 payload="
                         + frame.get("payload").getAsString());
         NAMED_FRAMES.put(
-                "CLOSE", frame -> "CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code")));
+                "CLOSE",
+                frame -> "CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code"))
+                        + " last_stream_id=" + frame.get("last_stream_id").getAsString());
         NAMED_FRAMES.put(
                 "WEBSOCKET_CLOSE",
                 frame -> "WEBSOCKET_CLOSE code=" + frame.get("code").getAsInt());
@@ -398,18 +400,18 @@ final class VectorRunner {
         for (byte[] frame : frames(rest)) {
             int type = ((frame[4] & 0xFF) << 8) | (frame[5] & 0xFF);
             int flags = frame[6] & 0xFF;
-            long streamId = Bytes.readUnsignedInt(frame, 8);
-            int extensions = ((frame[12] & 0xFF) << 8) | (frame[13] & 0xFF);
-            byte[] payload = Arrays.copyOfRange(frame, 16 + extensions, frame.length);
+            long streamId = Bytes.readLong(frame, 8);
+            int extensions = ((frame[16] & 0xFF) << 8) | (frame[17] & 0xFF);
+            byte[] payload = Arrays.copyOfRange(frame, 20 + extensions, frame.length);
             String head = " flags=" + flagsText(flags) + " stream_id=" + streamId;
             String ext = extensions == 0 ? "" : " extensions=" + extensions;
             if (type == 1) {
                 result.add("HELLO" + head + ext + " params=" + (payload.length == 0 ? "-" : paramsText(payload)));
             } else if (type == 2) {
                 result.add("PING" + head + ext + " payload=" + Bytes.toHex(payload));
-            } else if (type == 3 && payload.length >= 4) {
-                result.add(
-                        "CLOSE" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));
+            } else if (type == 3 && payload.length >= 12) {
+                result.add("CLOSE" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0))
+                        + " last_stream_id=" + Long.toUnsignedString(Bytes.readLong(payload, 4)));
             } else if (type == 4 && payload.length == 4) {
                 result.add(
                         "RESET" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));

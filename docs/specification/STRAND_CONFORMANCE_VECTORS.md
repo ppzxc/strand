@@ -25,6 +25,7 @@
 | 끝남 (대기 중이 아닌 스트림) | 끝난 스트림으로 늦게 도착한 프레임이 조용히 버려지는지(`send: []`) |
 | 대기 → 끝남 전이(동시 스트림 수 반환) | 전이 사건 직후 새 요청이 다시 수락되는지 |
 | 거절된 요청이 동시 스트림 수에 들지 않음 | 거절 직후 경계에서 새 요청이 수락되는지 |
+| CLOSE의 `last_stream_id`로 끝난 요청 | 받는 즉시 그 요청의 `result`(`certainty`가 `not_processed`)가 나오는지, `last_stream_id` 이하인 요청은 대기를 이어 가는지 |
 
 ## 2. 파일 구조와 진화 규칙
 
@@ -111,6 +112,8 @@
 
 `stream_id`는 10진수 문자열로 쓴다(서버가 연 첫 스트림은 `"2"`). 이 규칙은 프레임, 단계, 이벤트와 `next_stream_id`의 모든 스트림 번호에 같다. 값은 0 이상 2^63-1 이하이고, 앞자리 0과 부호는 쓰지 않는다. JSON 수로 쓰면 거부한다(MUST).
 
+`CLOSE`의 `last_stream_id`도 같은 표기이고, 값은 0 이상 2^64-1 이하다. 형태가 잘못된 CLOSE(규격 3.5절)를 보여 주려고 번호 범위 밖의 값도 쓸 수 있다. `send`의 `CLOSE`에서는 필수이고, 값은 CLOSE를 보내는 순간의 `highest_peer_stream_id`다.
+
 ## 6. 기대 결과
 
 ### 6.1 `send`: 송신 프레임
@@ -124,7 +127,7 @@
 | `PREFACE` | 8바이트 연결 서문 전체 | — |
 | `HELLO` | `flags`(`ACK` 여부), `stream_id`(0), `params`(빠진 값은 규격 기본값으로 채워 비교. `ACK`이면 payload가 비어 있어야 함), 확장 영역(비어 있어야 함) | — |
 | `PING` | `flags`(`ACK` 여부), `stream_id`(0), `payload`(공백 없는 16자리 hex), 확장 영역(비어 있어야 함) | — |
-| `CLOSE` | `stream_id`(0), `error_code`, `flags`(0), 확장 영역(비어 있어야 함) | `reason` |
+| `CLOSE` | `stream_id`(0), `error_code`, `last_stream_id`, `flags`(0), 확장 영역(비어 있어야 함) | `reason` |
 | `RESET` | `stream_id`, `error_code`, `flags`(0), 확장 영역(비어 있어야 함) | — |
 | `WEBSOCKET_CLOSE` | `code`(`1000`만 쓴다) | — |
 | 애플리케이션 프레임 (`type` 256 이상 정수) | `type`, `flags`(0), `stream_id`, `status`(응답 프레임, 곧 `stream_id`가 상대 엔드포인트의 번호 공간인 프레임만. 생략하면 `OK`), `extensions`(tag별 값. 순서는 비교하지 않음), `payload`(생략하면 빈 값) | 요청 프레임의 `status` |
@@ -315,7 +318,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
         {
           "kind": "advance",
           "ms": 2,
-          "send": [{ "type": "CLOSE", "error_code": "PROTOCOL_ERROR" }],
+          "send": [{ "type": "CLOSE", "error_code": "PROTOCOL_ERROR", "last_stream_id": "0" }],
           "events": [{ "event": "closed" }]
         }
       ]

@@ -38,6 +38,11 @@ final class Bytes {
                 | (bytes[at + 3] & 0xFF);
     }
 
+    /** 8바이트 빅 엔디언 정수. 부호 없는 값으로 쓰려면 {@code Long.toUnsignedString}을 쓴다. */
+    static long readLong(byte[] bytes, int at) {
+        return (readUnsignedInt(bytes, at) << 32) | readUnsignedInt(bytes, at + 4);
+    }
+
     static byte[] concat(byte[] a, byte[] b) {
         byte[] out = Arrays.copyOf(a, a.length + b.length);
         System.arraycopy(b, 0, out, a.length, b.length);

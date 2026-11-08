@@ -451,11 +451,10 @@
       ]
     },
     {
-      "id": "closing-after-close-received-refuses-new-request",
-      "description": "CLOSE(NO_ERROR)를 받아 종료 중인 서버는 상대가 CLOSE를 받기 전에 보낸 새 요청 3을 RESET(REFUSED)로 거절한다. 스트림 1이 대기 중이라 연결은 열려 있다",
+      "id": "closing-after-close-received-drops-new-request",
+      "description": "CLOSE(NO_ERROR)를 받아 종료 중인 서버는 상대가 CLOSE를 받기 전에 보낸 새 요청 3을 애플리케이션에 넘기지 않고 조용히 버린다. RESET(REFUSED)도 나가지 않는다. 스트림 1이 대기 중이라 연결은 열려 있다",
       "spec": [
         "3.5",
-        "4.5",
         "5.1"
       ],
       "setup": {
@@ -477,30 +476,23 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
           "send": [],
           "events": []
         },
         {
           "kind": "recv",
           "hex": "0000001001010000000000000000000300000000",
-          "send": [
-            {
-              "type": "RESET",
-              "stream_id": "3",
-              "error_code": "REFUSED"
-            }
-          ],
+          "send": [],
           "events": []
         }
       ]
     },
     {
-      "id": "closing-after-close-sent-refuses-new-request",
-      "description": "CLOSE(NO_ERROR)를 보낸 뒤 도착한 상대의 새 요청 3도 RESET(REFUSED)로 거절한다",
+      "id": "closing-after-close-sent-drops-new-request",
+      "description": "CLOSE(NO_ERROR)를 보낸 뒤 도착한 상대의 새 요청 3도 조용히 버린다",
       "spec": [
         "3.5",
-        "4.5",
         "5.1"
       ],
       "setup": {
@@ -526,7 +518,8 @@
           "send": [
             {
               "type": "CLOSE",
-              "error_code": "NO_ERROR"
+              "error_code": "NO_ERROR",
+              "last_stream_id": "1"
             }
           ],
           "events": []
@@ -534,23 +527,16 @@
         {
           "kind": "recv",
           "hex": "0000001001010000000000000000000300000000",
-          "send": [
-            {
-              "type": "RESET",
-              "stream_id": "3",
-              "error_code": "REFUSED"
-            }
-          ],
+          "send": [],
           "events": []
         }
       ]
     },
     {
-      "id": "closing-client-refuses-new-request-from-server",
-      "description": "클라이언트 역할 구현도 CLOSE를 받은 뒤 서버가 연 새 요청 2를 RESET(REFUSED)로 거절한다",
+      "id": "closing-client-drops-new-request-from-server",
+      "description": "클라이언트 역할 구현도 CLOSE를 받은 뒤 서버가 연 새 요청 2를 조용히 버린다",
       "spec": [
         "3.5",
-        "4.5",
         "5.1"
       ],
       "setup": {
@@ -571,29 +557,23 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000001",
           "send": [],
           "events": []
         },
         {
           "kind": "recv",
           "hex": "0000001001010000000000000000000200000000",
-          "send": [
-            {
-              "type": "RESET",
-              "stream_id": "2",
-              "error_code": "REFUSED"
-            }
-          ],
+          "send": [],
           "events": []
         }
       ]
     },
     {
-      "id": "closing-refuses-unknown-type-request",
-      "description": "종료 중인 연결에서는 모르는 type의 새 요청도 거절이 먼저다. type을 보기 전에 RESET(REFUSED)로 거절한다",
+      "id": "closing-drops-unknown-type-request",
+      "description": "종료 중인 연결에서는 모르는 type의 새 요청도 버리는 것이 먼저다. type을 보기 전에 조용히 버리므로 UNIMPLEMENTED 응답이 나가지 않는다",
       "spec": [
-        "4.5",
+        "3.5",
         "5.1"
       ],
       "setup": {
@@ -618,29 +598,23 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
           "send": [],
           "events": []
         },
         {
           "kind": "recv",
           "hex": "0000001001020000000000000000000300000000",
-          "send": [
-            {
-              "type": "RESET",
-              "stream_id": "3",
-              "error_code": "REFUSED"
-            }
-          ],
+          "send": [],
           "events": []
         }
       ]
     },
     {
-      "id": "closing-refuses-bad-extension-value-request",
-      "description": "종료 중인 연결에서는 확장 값이 잘못된 새 요청도 거절이 먼저다. RESET(REFUSED)로 거절한다",
+      "id": "closing-drops-bad-extension-value-request",
+      "description": "종료 중인 연결에서는 확장 값이 잘못된 새 요청도 버리는 것이 먼저다. INVALID_ARGUMENT 응답 없이 조용히 버린다",
       "spec": [
-        "4.5",
+        "3.5",
         "5.1"
       ],
       "setup": {
@@ -662,29 +636,23 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
           "send": [],
           "events": []
         },
         {
           "kind": "recv",
           "hex": "000000170101000000000000000000030007000000010003000001",
-          "send": [
-            {
-              "type": "RESET",
-              "stream_id": "3",
-              "error_code": "REFUSED"
-            }
-          ],
+          "send": [],
           "events": []
         }
       ]
     },
     {
-      "id": "closing-refuses-unknown-type-with-bad-extension-value",
-      "description": "종료 중인 연결에서 모르는 type과 잘못된 확장 값이 함께 있는 새 요청도 거절이 가장 먼저다. RESET(REFUSED)만 나간다",
+      "id": "closing-drops-unknown-type-with-bad-extension-value",
+      "description": "종료 중인 연결에서 모르는 type과 잘못된 확장 값이 함께 있는 새 요청도 버리는 것이 가장 먼저다. 아무것도 나가지 않는다",
       "spec": [
-        "4.5",
+        "3.5",
         "5.1"
       ],
       "setup": {
@@ -709,20 +677,14 @@
         },
         {
           "kind": "recv",
-          "hex": "000000140003000000000000000000000000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
           "send": [],
           "events": []
         },
         {
           "kind": "recv",
           "hex": "000000170102000000000000000000030007000000010003000001",
-          "send": [
-            {
-              "type": "RESET",
-              "stream_id": "3",
-              "error_code": "REFUSED"
-            }
-          ],
+          "send": [],
           "events": []
         }
       ]

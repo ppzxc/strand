@@ -122,7 +122,7 @@ class VectorLoaderTest {
         // setup의 local_hello/peer_hello/config, request의 extensions/payload, 프레임의 flags/params 등을 생략한다.
         String steps = "[" + STEP
                 + ",{\"kind\":\"request\",\"type\":256,\"send\":[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"},"
-                + "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\"},"
+                + "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"},"
                 + "{\"type\":\"RESET\",\"stream_id\":\"1\",\"error_code\":\"CANCEL\"},"
                 + "{\"type\":256,\"stream_id\":\"1\"}],\"events\":[]},"
                 + "{\"kind\":\"respond\",\"stream_id\":\"1\",\"status\":\"OK\",\"send\":[],\"events\":[]}]";
@@ -142,7 +142,7 @@ class VectorLoaderTest {
                 + "\"send\":[{\"type\":\"PREFACE\"},{\"type\":257,\"stream_id\":\"1\","
                 + "\"status\":17,\"extensions\":[{\"tag\":1,\"value\":\"\"}],\"payload\":\"\"},"
                 + "{\"type\":\"HELLO\",\"flags\":[\"ACK\"],\"stream_id\":\"0\",\"params\":{\"max_frame_size\":1}},"
-                + "{\"type\":\"CLOSE\",\"stream_id\":\"0\",\"error_code\":\"NO_ERROR\"},"
+                + "{\"type\":\"CLOSE\",\"stream_id\":\"0\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"},"
                 + "{\"type\":\"RESET\",\"stream_id\":\"1\",\"error_code\":6}],"
                 + "\"events\":[{\"event\":\"request_received\",\"stream_id\":\"1\",\"type\":257},"
                 + "{\"event\":\"result\",\"stream_id\":\"1\",\"status\":\"OK\",\"certainty\":\"response\"},{\"event\":\"closed\"}]},"
@@ -210,6 +210,12 @@ class VectorLoaderTest {
                 recvWithEvent("{\"event\":\"result\",\"stream_id\":1,\"status\":\"OK\",\"certainty\":\"response\"}"),
                 "stream_id",
                 "문자열"));
+        t.add(rejected(
+                "on RESET",
+                recvWithSend(
+                        "{\"type\":\"RESET\",\"stream_id\":\"1\",\"error_code\":\"CANCEL\",\"last_stream_id\":\"0\"}"),
+                "알 수 없는 필드",
+                "last_stream_id"));
         t.add(rejected(
                 "leading zero",
                 fileWithStep("\"kind\":\"cancel\",\"stream_id\":\"01\",\"send\":[],\"events\":[]"),
@@ -498,7 +504,8 @@ class VectorLoaderTest {
                 "payload"));
         t.add(rejected(
                 "close stream_id not zero",
-                recvWithSend("{\"type\":\"CLOSE\",\"stream_id\":\"1\",\"error_code\":\"NO_ERROR\"}"),
+                recvWithSend(
+                        "{\"type\":\"CLOSE\",\"stream_id\":\"1\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}"),
                 "stream_id"));
         t.add(rejected(
                 "reset stream_id zero",
@@ -563,6 +570,45 @@ class VectorLoaderTest {
                 "[" + step + "]"));
     }
 
+    @Test
+    void closeRequiresLastStreamIdAsDecimalString() {
+        assertThat(
+                        VectorLoader.parse(
+                                "x.json",
+                                recvWithSend(
+                                        "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"18446744073709551615\"}")))
+                .hasSize(1);
+        assertThat(VectorLoader.parse(
+                        "x.json",
+                        recvWithSend("{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}")))
+                .hasSize(1);
+    }
+
+    @TestFactory
+    Stream<DynamicTest> rejectsInvalidCloseLastStreamId() {
+        List<DynamicTest> t = new ArrayList<>();
+        t.add(rejected(
+                "missing",
+                recvWithSend("{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\"}"),
+                "필수 필드 누락",
+                "last_stream_id"));
+        t.add(rejected(
+                "json number",
+                recvWithSend("{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":1}"),
+                "last_stream_id",
+                "문자열"));
+        t.add(rejected(
+                "above u64",
+                recvWithSend(
+                        "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"18446744073709551616\"}"),
+                "last_stream_id"));
+        t.add(rejected(
+                "leading zero",
+                recvWithSend("{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"01\"}"),
+                "last_stream_id"));
+        return t.stream();
+    }
+
     @TestFactory
     Stream<DynamicTest> rejectsFieldsRemovedInSpecification010() {
         List<DynamicTest> t = new ArrayList<>();
@@ -580,11 +626,6 @@ class VectorLoaderTest {
                 setupWith("\"config\":{\"hello_timeout_ms\":1000}"),
                 "알 수 없는 필드",
                 "hello_timeout_ms"));
-        t.add(rejected(
-                "CLOSE.last_stream_id",
-                recvWithSend("{\"type\":\"CLOSE\",\"last_stream_id\":0,\"error_code\":\"NO_ERROR\"}"),
-                "알 수 없는 필드",
-                "last_stream_id"));
         for (String flag : new String[] {"RESPONSE", "END"}) {
             t.add(rejected(
                     "app frame flag " + flag,

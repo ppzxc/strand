@@ -29,7 +29,6 @@ class VectorRevisionTest {
 
     /** 삭제된 개념의 JSON 키 이름. 어느 깊이의 객체에도 나오면 안 된다. */
     private static final List<String> REMOVED_KEYS = Arrays.asList(
-            "last_stream_id",
             "content_type",
             "content_types",
             "max_pending_bytes",
@@ -51,7 +50,6 @@ class VectorRevisionTest {
             "hello-timeout",
             "pending-bytes",
             "pending-return",
-            "last-stream-id",
             "draining",
             "stream-closed",
             "content-type");
@@ -145,8 +143,6 @@ class VectorRevisionTest {
         // 키 이름
         assertThat(removedConceptPaths(
                         JsonParser.parseString("{\"setup\":{\"local_hello\":{\"max_pending_bytes\":1}}}")))
-                .hasSize(1);
-        assertThat(removedConceptPaths(JsonParser.parseString("{\"send\":[{\"last_stream_id\":0}]}")))
                 .hasSize(1);
         assertThat(removedConceptPaths(JsonParser.parseString("{\"setup\":{\"draining\":true}}")))
                 .hasSize(1);

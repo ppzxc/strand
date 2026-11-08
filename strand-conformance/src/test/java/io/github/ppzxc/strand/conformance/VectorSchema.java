@@ -123,7 +123,10 @@ final class VectorSchema {
                         .allow("stream_id", FieldKind.ZERO_STREAM_ID));
         FRAMES_BY_TYPE.put(
                 "CLOSE",
-                FRAME_BASE.require("error_code", FieldKind.ERROR_CODE).allow("stream_id", FieldKind.ZERO_STREAM_ID));
+                FRAME_BASE
+                        .require("error_code", FieldKind.ERROR_CODE)
+                        .require("last_stream_id", FieldKind.LAST_STREAM_ID)
+                        .allow("stream_id", FieldKind.ZERO_STREAM_ID));
         FRAMES_BY_TYPE.put("WEBSOCKET_CLOSE", FRAME_BASE.require("code", FieldKind.WEBSOCKET_CLOSE_CODE));
         FRAMES_BY_TYPE.put(
                 "RESET",
