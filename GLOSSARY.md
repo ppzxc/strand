@@ -12,6 +12,10 @@ strand는 고성능 다중화 이진 메시지 교환 규격(Specification)과 �
 strand가 정의하는 바이트 인코딩·디코딩 및 통신 상태 규칙을 담은 문서(`docs/specification/STRAND_SPECIFICATION.md`). 언어 중립적이며 Java 구현체는 여러 가능한 구현 중 하나다.
 _Avoid_: 프로토콜 스펙, 와이어 프로토콜 스펙, 프로토콜 문서
 
+**연결 (Connection)**:
+정의: 규격 1.3절에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#149](https://github.com/ppzxc/strand/issues/149))
+_Avoid_: 세션, 커넥션 세션. strand에는 연결을 넘는 세션이 없다
+
 **연결 서문 (Connection Preface)**:
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 핸드셰이크 매직, 프리페이스(단독 비표준 표기), 매직 쿠키, `magic`(식별자). 서버가 비교하는 앞 6바이트는 `prefix`로 부른다. 규격 3.1절의 "식별값"은 `C0 DE` 2바이트의 이름이다
@@ -59,6 +63,10 @@ _Avoid_: 시스템 프레임, 관리 프레임
 **애플리케이션 프레임 (Application Frame)**:
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 데이터 프레임(HTTP/2와 혼동 주의), 비즈니스 프레임
+
+**줄 앞 막힘 (Head-of-Line Blocking)**:
+정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#156](https://github.com/ppzxc/strand/issues/156)). 앞선 프레임을 다 쓰거나 다 읽기 전에는 뒤 프레임을 보내지도 읽지도 못하는 현상이다. 한 연결에서 막히는 시간은 `max_frame_size` 프레임 하나로 묶인다
+_Avoid_: HOL(단독 약어), 단편화(strand에는 없다)
 
 **확장 영역 (Extension Area)**:
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
@@ -123,6 +131,30 @@ _Avoid_: 미응답 바이트, 크레딧, 윈도우
 **대기 중인 스트림 (Pending Stream)**:
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 유휴 스트림, 유예 상태, 진행 중인 스트림
+
+**결과 확정성 (Outcome Certainty)**:
+정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#150](https://github.com/ppzxc/strand/issues/150)). 값은 **응답 받음**, **처리 안 됨**, **결과 모름** 셋이다
+_Avoid_: 처리됨(상대가 `status`로 처리하지 않았다고 답할 수 있다), 전달 보장, 정확히 한 번(프로토콜이 보장하지 않는다)
+
+**요청 기한 (Request Deadline)**:
+정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#151](https://github.com/ppzxc/strand/issues/151)). 요청한 쪽이 요청마다 정하는 로컬 기한이다
+_Avoid_: `timeout`(받는 쪽에 주는 힌트인 확장 항목의 이름이다), 타임아웃(단독)
+
+**거절 (Refusal)**:
+정의: 규격 4.5절 개정 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#152](https://github.com/ppzxc/strand/issues/152)). 받는 쪽이 새 요청을 애플리케이션에 넘기기 전에 `RESET(REFUSED)`로 돌려보내는 것이다. 보내는 쪽의 결과 확정성은 처리 안 됨이다
+_Avoid_: 스로틀링, 거부 응답(`status`를 담은 응답은 거절이 아니다), `RESOURCE_EXHAUSTED`(애플리케이션이 보낸 응답이다)
+
+**연결 인증 (Connection Authentication)**:
+정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#153](https://github.com/ppzxc/strand/issues/153)). 연결을 맺을 때 클라이언트가 `AUTH`로 자격 증명을 한 번 보내고 서버가 확인하는 것이다. 통과하기 전에는 애플리케이션 프레임을 주고받지 않는다
+_Avoid_: 세션 인증, 로그인, `bind`, 애플리케이션 인증(payload로 하는 인증은 규격이 다루지 않는다), 재인증(없다)
+
+**인증된 상대 (Authenticated Peer)**:
+정의: 규격에 추가 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#153](https://github.com/ppzxc/strand/issues/153)). 서버에게는 연결 인증에서 서버가 확정한 클라이언트의 신원이고, 클라이언트에게는 채널이 확인한 서버의 신원이다. 연결이 끝날 때까지 바뀌지 않는다. 익명 연결은 연결마다 서로 다른 상대다
+_Avoid_: 클라이언트가 주장한 이름, 엔드포인트 식별자(연결 재개용으로 쓰는 말이며 strand에는 없다)
+
+**과도한 사용 (Excessive Use)**:
+정의: 규격 2.5.2절 개정 예정([MAP #146](https://github.com/ppzxc/strand/issues/146), [#152](https://github.com/ppzxc/strand/issues/152)). 상대가 연결을 지나치게 쓰는 것으로, 이 때문에 연결을 끝낼 때 `CLOSE(EXCESSIVE_USE)`를 보낸다
+_Avoid_: 과부하, `OVERLOAD`(이전 이름이다. 자기 과부하는 연결을 끝낼 사유가 아니며 거절로 나타낸다)
 
 ---
 
