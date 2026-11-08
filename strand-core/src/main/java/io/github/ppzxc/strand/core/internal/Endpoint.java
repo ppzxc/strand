@@ -73,6 +73,10 @@ public final class Endpoint {
     private long now;
     /** ACK를 기다리는 HELLO와 PING들. 보낸 순서대로다(규격 3.3절). */
     private final List<AckWait> ackWaits = new ArrayList<>();
+    /** 마지막으로 프레임을 받은 가상 시각(규격 3.4.1절 유휴 판단). */
+    private long lastReceivedAt;
+
+    private long idlePingCount;
 
     private long nextStreamId;
     /** 내 번호 공간의 홀짝: 클라이언트는 1, 서버는 0이다(규격 2.2.5절). */
@@ -190,10 +194,37 @@ public final class Endpoint {
         for (AckWait wait : ackWaits) {
             if (now > wait.deadline) {
                 // 닫으면 대기 목록이 비므로 반복을 이어 가지 않고 바로 끝낸다.
-                connectionError();
+                closeWithError(ErrorCode.UNRESPONSIVE);
                 return;
             }
         }
+        sendIdlePingIfDue();
+    }
+
+    /**
+     * 유휴 간격 동안 받은 프레임이 없고 ACK를 기다리는 PING이 없으면 PING을 보낸다(규격 3.4.1절). 간격이 설정돼 있지 않으면 보내지 않는다.
+     * 보내는 때는 규격 3.3절의 송신 규칙을 따라 AUTH 관문을 통과한 뒤에만 보낸다. 종료 중에도 보낸다.
+     */
+    private void sendIdlePingIfDue() {
+        long idle = config.idleIntervalMs();
+        if (idle <= 0 || !authGatePassed || now - lastReceivedAt < idle || hasOutstandingPing()) {
+            return;
+        }
+        byte[] payload = new byte[PING_PAYLOAD_SIZE];
+        for (int i = PING_PAYLOAD_SIZE - 1; i >= 0; i--) {
+            payload[i] = (byte) (idlePingCount >>> (8 * (PING_PAYLOAD_SIZE - 1 - i)));
+        }
+        idlePingCount++;
+        sendPing(payload);
+    }
+
+    private boolean hasOutstandingPing() {
+        for (AckWait wait : ackWaits) {
+            if (wait.payload != null && wait.payload.length == PING_PAYLOAD_SIZE) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -413,6 +444,7 @@ public final class Endpoint {
     }
 
     private void handle(byte[] frame) {
+        lastReceivedAt = now;
         int type = Frames.typeOf(frame);
         int extensionsLength = Frames.extensionsLengthOf(frame);
         long streamId = Frames.streamIdOf(frame);
@@ -763,8 +795,13 @@ public final class Endpoint {
      * 이 호출 뒤에는 CLOSE 교환이 된 상태다.
      */
     private void connectionError() {
+        closeWithError(ErrorCode.PROTOCOL_ERROR);
+    }
+
+    /** 오류 {@code errorCode}의 CLOSE를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절). */
+    private void closeWithError(int errorCode) {
         if (!closeExchanged) {
-            send(Frames.close(ErrorCode.PROTOCOL_ERROR, highestPeerStreamId));
+            send(Frames.close(errorCode, highestPeerStreamId));
         }
         closeExchanged = true;
         closeTransport();

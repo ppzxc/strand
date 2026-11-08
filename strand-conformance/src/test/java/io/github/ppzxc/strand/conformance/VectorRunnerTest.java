@@ -90,8 +90,8 @@ class VectorRunnerTest {
     }
 
     private static final String HELLO_ACK_SEND = "{\"type\":\"HELLO\",\"flags\":[\"ACK\"]}";
-    private static final String CLOSE_PE =
-            "{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\",\"last_stream_id\":\"0\"}";
+    private static final String CLOSE_UNRESPONSIVE =
+            "{\"type\":\"CLOSE\",\"error_code\":\"UNRESPONSIVE\",\"last_stream_id\":\"0\"}";
     private static final String HELLO_RECV = "00000010000100000000000000000000" + "00000000";
 
     private static String step(String kind, String fields, String send, String events) {
@@ -135,7 +135,7 @@ class VectorRunnerTest {
                 recv("c0de535452300000", "[{\"type\":\"HELLO\"}]", "[]"),
                 recv(HELLO_RECV, "[" + HELLO_ACK_SEND + "]", "[]"),
                 step("advance", "\"ms\":999,", "[]", "[]"),
-                step("advance", "\"ms\":2,", "[" + CLOSE_PE + "]", "[{\"event\":\"closed\"}]"));
+                step("advance", "\"ms\":2,", "[" + CLOSE_UNRESPONSIVE + "]", "[{\"event\":\"closed\"}]"));
 
         assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
     }
