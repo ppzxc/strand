@@ -2498,4 +2498,31 @@ class EndpointTest {
 
         assertClosedWithProtocolError(server, 1);
     }
+
+    @Test
+    void abandoningTheWaitWhileClosingReturnsUnhandedRequestsAsRefusedThenCloses() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.receive(bytes(requestFrame(257, 3, "")));
+        server.drainEvents();
+        server.receive(bytes(requestFrame(257, 5, "")));
+        server.receive(bytes(CLOSE_NO_ERROR));
+        assertThat(server.drainMessages()).isEmpty();
+
+        server.abortClosing();
+
+        assertThat(sent(server)).isEqualTo(RESET_REFUSED_5);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void abandoningTheWaitDoesNothingUnlessTheConnectionIsClosing() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+
+        server.abortClosing();
+
+        assertThat(server.drainMessages()).isEmpty();
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
+    }
 }
