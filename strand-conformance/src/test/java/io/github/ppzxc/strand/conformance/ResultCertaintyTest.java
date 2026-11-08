@@ -46,6 +46,9 @@ class ResultCertaintyTest {
             for (JsonObject result : resultEvents(entry.getValue())) {
                 String status = result.get("status").getAsString();
                 String certainty = result.get("certainty").getAsString();
+                if ("OK".equals(status)) {
+                    assertThat(certainty).as(entry.getKey()).isEqualTo("response");
+                }
                 if (!result.has("stream_id")) {
                     // 스트림을 열기 전에 실패한 요청은 처리 안 됨이다.
                     assertThat(certainty).as(entry.getKey()).isEqualTo("not_processed");

@@ -143,7 +143,7 @@
 
 `status`는 2.5.1절의 이름이다. 17~255의 예약 값은 정수로 쓴다.
 
-스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 보냈거나 받은 뒤의 새 요청, 3.5절)의 결과는 `stream_id` 없는 `result`로 쓰고, 이 결과의 `certainty`는 `not_processed`다. 이 항목은 요청 단계의 `events`에 붙는다. 같은 단계에서 나오는 다른 이벤트(`closed`)와 함께 쓰면 `result`가 먼저다.
+스트림을 열기 전에 로컬에서 실패한 요청(예: CLOSE를 보냈거나 받은 뒤의 새 요청, 3.5절)의 결과는 `stream_id` 없는 `result`로 쓰고, 이 결과의 `certainty`는 `not_processed`다. `stream_id`가 없는 `result`는 `status`가 `UNAVAILABLE`이고 `certainty`가 `not_processed`여야 한다(MUST). 이 항목은 요청 단계의 `events`에 붙는다. 같은 단계에서 나오는 다른 이벤트(`closed`)와 함께 쓰면 `result`가 먼저다.
 
 ## 7. 비교 규칙
 

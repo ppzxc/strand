@@ -69,6 +69,20 @@ class VectorLoaderTest {
     }
 
     @Test
+    void rejectsAResultWithoutStreamIdThatIsNotAnUnavailableNotProcessed() {
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "x.json",
+                        recvWithEvent("{\"event\":\"result\",\"status\":\"OK\",\"certainty\":\"not_processed\"}")))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContainingAll("status", "UNAVAILABLE");
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "x.json",
+                        recvWithEvent("{\"event\":\"result\",\"status\":\"UNAVAILABLE\",\"certainty\":\"unknown\"}")))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContainingAll("certainty", "not_processed");
+    }
+
+    @Test
     void acceptsEveryCertaintyValueAndAResultWithoutStreamId() {
         for (String certainty : new String[] {"response", "not_processed", "unknown"}) {
             assertThat(VectorLoader.parse(
