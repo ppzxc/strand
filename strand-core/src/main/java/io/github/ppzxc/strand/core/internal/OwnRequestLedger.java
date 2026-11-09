@@ -581,11 +581,11 @@ final class OwnRequestLedger {
         if (!record.linked) {
             return;
         }
-        record.linked = false;
         Outbox.Node node = record.node;
         if (node != null) {
             outbox.remove(node);
         }
+        record.linked = false;
         Record prev = record.prevUnwritten;
         Record next = record.nextUnwritten;
         if (prev == null) {

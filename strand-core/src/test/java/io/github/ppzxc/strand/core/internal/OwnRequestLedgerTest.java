@@ -284,7 +284,7 @@ class OwnRequestLedgerTest {
         long unwritten = m.byTicket.values().stream()
                 .filter(r -> r.phase == Phase.UNWRITTEN)
                 .count();
-        assertThat(box.drain(0)).as("쓰기 전 요청의 프레임만 쓰기 대기열에 있다 " + at).hasSize((int) unwritten);
+        assertThat(box.drain(id -> {})).as("쓰기 전 요청의 프레임만 쓰기 대기열에 있다 " + at).hasSize((int) unwritten);
         l.onWriteStarted();
         m.byTicket.values().stream().filter(r -> r.phase == Phase.UNWRITTEN).forEach(r -> r.phase = Phase.WRITTEN);
     }
@@ -746,11 +746,11 @@ class OwnRequestLedgerTest {
 
     /** Endpoint가 메시지를 꺼낸 뒤 쓰기 시작 사건을 알리는 순서를 따른다. */
     private void startWrite() {
-        outbox.drain(0);
+        outbox.drain(id -> {});
         ledger.onWriteStarted();
     }
 
     private List<OutboundMessage> drain() {
-        return new ArrayList<>(outbox.drain(0));
+        return new ArrayList<>(outbox.drain(id -> {}));
     }
 }

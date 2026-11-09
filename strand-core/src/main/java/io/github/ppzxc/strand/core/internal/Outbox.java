@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.core.internal;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.LongConsumer;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -23,13 +24,13 @@ import org.jspecify.annotations.Nullable;
  */
 final class Outbox {
 
-    /** 쓰기 대기열의 노드. 메시지 하나와 그 메시지가 시작시킬 확인 대기를 이어 둔다. */
+    /** 쓰기 대기열의 노드. 메시지 하나와 그 메시지가 시작시킬 확인 대기의 식별자를 들고 있다. */
     static final class Node {
         final OutboundMessage message;
         final boolean application;
 
-        @Nullable
-        AckWait ackWait;
+        /** 이 메시지가 시작시킬 확인 대기의 식별자({@link LivenessTimers}). 대기가 없으면 {@link LivenessTimers#NO_WAIT}. */
+        long waitId = LivenessTimers.NO_WAIT;
 
         @Nullable
         Node prev;
@@ -85,9 +86,14 @@ final class Outbox {
 
     /**
      * 애플리케이션 노드를 대기열에서 거둔다. 첫 애플리케이션 노드였다면 그 뒤에 이어진 비애플리케이션 노드(앞서 보내지 못해 남은 CLOSE 등)가
-     * 제어 구간에 들어온다.
+     * 제어 구간에 들어온다. 확인 대기가 붙은 노드(HELLO·AUTH·PING)는 거두지 않는다. 대기는 {@link #drain}이 시작시키므로, 거두면 시작하지 못한 채 남는다.
+     *
+     * @throws IllegalStateException 노드에 확인 대기가 붙어 있을 때
      */
     void remove(Node node) {
+        if (node.waitId != LivenessTimers.NO_WAIT) {
+            throw new IllegalStateException("확인 대기가 붙은 노드는 거둘 수 없다: " + node.waitId);
+        }
         Node before = node.prev;
         Node after = node.next;
         if (before == null) {
@@ -119,17 +125,17 @@ final class Outbox {
     }
 
     /**
-     * 쌓인 메시지를 순서대로 모두 꺼내 대기열을 비운다. 꺼낸 메시지의 확인 대기는 이때부터 센다(규격 3.3절).
+     * 쌓인 메시지를 순서대로 모두 꺼내 대기열을 비운다. 확인 대기가 매인 메시지는 그 대기 식별자를 {@code onWaitingDrained}에 알린다(대기를
+     * 시작하는 일은 받는 쪽 몫이다, 규격 3.3절).
      *
-     * @param ackDeadline 확인 대기의 기한. 아직 시작하지 않은 대기가 이 기한으로 시작한다
+     * @param onWaitingDrained 꺼낸 메시지의 확인 대기 식별자를 받는다
      */
-    List<OutboundMessage> drain(long ackDeadline) {
+    List<OutboundMessage> drain(LongConsumer onWaitingDrained) {
         List<OutboundMessage> drained = new ArrayList<>(size);
         for (Node node = head; node != null; node = node.next) {
             drained.add(node.message);
-            AckWait ackWait = node.ackWait;
-            if (ackWait != null && !ackWait.started) {
-                ackWait.start(ackDeadline);
+            if (node.waitId != LivenessTimers.NO_WAIT) {
+                onWaitingDrained.accept(node.waitId);
             }
         }
         head = null;
