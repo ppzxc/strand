@@ -63,7 +63,6 @@ final class LivenessTimers {
     /** 서버의 AUTH 대기가 끝나는 시각. 대기 중이 아니면 null이다. */
     private @Nullable Long authDeadline;
 
-    private boolean authGatePassed;
     private boolean ended;
     private long lastReceivedAt;
     private long idlePingCount;
@@ -82,11 +81,6 @@ final class LivenessTimers {
     /** AUTH를 받아 AUTH 대기가 끝났다. */
     void authWaitEnded() {
         authDeadline = null;
-    }
-
-    /** AUTH 관문을 통과했다. 이때부터 유휴 PING을 보낼 수 있다. */
-    void authGatePassed() {
-        authGatePassed = true;
     }
 
     /** 프레임을 받았다. 유휴 간격은 이 시각부터 센다. */
@@ -160,12 +154,12 @@ final class LivenessTimers {
     }
 
     /**
-     * 지금 보낼 유휴 PING의 payload(횟수 카운터, 빅엔디언 8바이트). 보낼 때가 아니면 null이다. 간격이 설정되지 않았거나, AUTH 관문 통과 전이거나,
+     * 지금 보낼 유휴 PING의 payload(횟수 카운터, 빅엔디언 8바이트). 보낼 때가 아니면 null이다. 간격이 설정되지 않았거나,
      * 마지막 수신 뒤 간격이 차지 않았거나, 기다리는 PING이 있거나, 연결이 끝났으면 보내지 않는다. payload를 돌려주면 보내는 것으로 세고 횟수가
      * 오른다.
      */
     byte @Nullable [] idlePing(long now) {
-        if (ended || idleIntervalMs <= 0 || !authGatePassed || now - lastReceivedAt < idleIntervalMs || hasPing()) {
+        if (ended || idleIntervalMs <= 0 || now - lastReceivedAt < idleIntervalMs || hasPing()) {
             return null;
         }
         byte[] payload = new byte[PING_PAYLOAD_SIZE];
