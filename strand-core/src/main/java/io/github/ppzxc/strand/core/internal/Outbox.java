@@ -86,9 +86,14 @@ final class Outbox {
 
     /**
      * 애플리케이션 노드를 대기열에서 거둔다. 첫 애플리케이션 노드였다면 그 뒤에 이어진 비애플리케이션 노드(앞서 보내지 못해 남은 CLOSE 등)가
-     * 제어 구간에 들어온다.
+     * 제어 구간에 들어온다. 확인 대기가 붙은 노드(HELLO·AUTH·PING)는 거두지 않는다. 대기는 {@link #drain}이 시작시키므로, 거두면 시작하지 못한 채 남는다.
+     *
+     * @throws IllegalStateException 노드에 확인 대기가 붙어 있을 때
      */
     void remove(Node node) {
+        if (node.waitId != LivenessTimers.NO_WAIT) {
+            throw new IllegalStateException("확인 대기가 붙은 노드는 거둘 수 없다: " + node.waitId);
+        }
         Node before = node.prev;
         Node after = node.next;
         if (before == null) {
