@@ -18,9 +18,10 @@ import org.jspecify.annotations.Nullable;
  * Endpoint.RequestState#WRITING_STARTED})는 기록의 값이다. 스트림→요청 색인, 번호표→요청 색인, 기한 색인, 쓰기 전 요청의 연결 리스트는
  * {@link #register}와 {@link #unregister}에서만 함께 고치므로 어긋날 수 없다. 끝난 요청은 어떤 색인에도 남지 않는다.
  *
- * <p>결과 확정성 판정(규격 3.5절, 4.4절, 4.4.1절)은 이 클래스의 {@link #unfinishedCertainty}, {@link #onResponse}, {@link
- * #onReset}, {@link #endAfter}에만 있다. 쓰기 전이면 처리 안 됨, 쓰기를 시작한 뒤면 결과 모름, 거절(REFUSED)은 쓰기를 시작했어도 처리
- * 안 됨이다.
+ * <p>결과 확정성 판정(규격 3.5절, 4.4절, 4.4.1절)은 이 클래스에만 있다. 응답이나 RESET 없이 끝나는 경우(취소, 기한, 전송 계층 닫힘)는
+ * {@link #unfinishedCertainty} 한 자리가 정한다: 쓰기 전이면 처리 안 됨, 쓰기를 시작한 뒤면 결과 모름이다. 나머지 사건은 사건 자체가 확정성을
+ * 정한다: 응답은 {@link Certainty#RESPONSE}({@link #onResponse}), 거절(REFUSED) RESET은 쓰기를 시작했어도 처리 안 됨, 그 밖의 RESET은 결과 모름
+ * ({@link #onReset}), CLOSE {@code last_stream_id} 뒤의 요청은 처리 안 됨({@link #endAfter})이다.
  *
  * <p>번호표 조회와 기한 색인의 비용 특성은 #202를 따른다. 번호표 조회는 O(1)이고 {@link #expire}는 만료된 요청 수에 비례해서만 일한다.
  */
@@ -261,10 +262,7 @@ final class OwnRequestLedger {
     List<Outcome> onTransportClosed() {
         List<Outcome> outcomes = new ArrayList<>(byStream.size());
         for (Record record : byStream.values()) {
-            Certainty certainty =
-                    record.state == Endpoint.RequestState.WRITING_STARTED ? Certainty.UNKNOWN : Certainty.NOT_PROCESSED;
-            unwrite(record);
-            outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, certainty, false));
+            outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, unfinishedCertainty(record), false));
         }
         byStream.clear();
         byTicket.clear();
@@ -283,7 +281,7 @@ final class OwnRequestLedger {
     }
 
     /**
-     * 응답이나 RESET을 받지 못한 채 끝나는 요청의 확정성을 정하는 유일한 자리(규격 3.5절, 4.4절, 4.4.1절). 쓰기 전이면 프레임을 거두고 처리
+     * 응답이나 RESET을 받지 못한 채 끝나는 요청(취소, 기한, 전송 계층 닫힘)의 확정성을 정하는 유일한 자리(규격 3.5절, 4.4절, 4.4.1절). 쓰기 전이면 프레임을 거두고 처리
      * 안 됨, 쓰기를 시작했으면 프레임을 이미 끊을 수 없어 결과 모름이다.
      */
     private Certainty unfinishedCertainty(Record record) {
