@@ -32,9 +32,9 @@ final class ConnectionPhase {
         AUTH,
         /** AUTH 관문을 통과했다. 애플리케이션 프레임을 주고받는다. */
         OPEN,
-        /** CLOSE를 보냈거나 받았다(규격 3.5절). 오류 CLOSE이면 곧 닫고, {@code NO_ERROR}이면 대기 중인 스트림이 없어질 때까지 둔다. */
+        /** CLOSE 교환 쪽이다. CLOSE를 보냈거나 받았거나, 연결 오류로 CLOSE 교환으로 쳤다(규격 3.5절). 오류 CLOSE이면 곧 닫고, {@code NO_ERROR}이면 대기 중인 스트림이 없어질 때까지 둔다. */
         CLOSING,
-        /** 전송 계층이 닫혀 연결이 끝났다(규격 1.3절 연결이 끝남). 어떤 프레임도 받지 않는다. */
+        /** 전송 계층이 닫혀 연결이 끝났다(규격 1.3절 연결이 끝남). 어떤 프레임도 받지 않으므로 {@link #admit}을 부를 수 없다. */
         CLOSED
     }
 
@@ -43,9 +43,7 @@ final class ConnectionPhase {
         ALLOW,
         CONNECTION_ERROR,
         /** 예약 타입이다. 단계와 무관하게 무시한다(규격 2.2.2절). */
-        RESERVED,
-        /** 연결이 끝났다. 어떤 프레임도 받지 않는다. */
-        ENDED
+        RESERVED
     }
 
     /** {@link #applicationSend()}의 판단: 애플리케이션이 보내려는 요청이나 PING을 지금 어떻게 다루는가. */
@@ -58,18 +56,72 @@ final class ConnectionPhase {
         REFUSE
     }
 
+    /**
+     * 연결을 닫는 일이 어디까지 왔고 어떻게 끝나기로 했는가. 값 하나라서 정상과 오류가 겹치거나 기다릴 것이 없는데 오류가 아닌 식의 불가능한 조합이 없다.
+     * 정상 종료({@link #CLOSING}, {@link #DRAINED})는 오류({@link #FAILED}, {@link #DISCONNECTED})로 바뀔 수 있지만 오류가 정상으로 돌아가지는 않는다.
+     */
+    private enum Ending {
+        /** 닫는 일이 시작되지 않았다. */
+        NONE,
+        /** {@code NO_ERROR} CLOSE를 보냈거나 받았다. 대기 중인 스트림이 없어질 때까지 둔다. */
+        CLOSING,
+        /** {@code NO_ERROR}로 닫는 중에 더 기다릴 스트림이 없어졌다(0개가 됐거나 애플리케이션이 더 기다리지 않기로 했다). 곧 닫는다. */
+        DRAINED,
+        /** CLOSE 교환 쪽(CLOSE를 보냈거나 받았거나 연결 오류)에서 오류로 끝나기로 했다. 끊긴({@link #DISCONNECTED}) 뒤에 CLOSE가 겹쳐도 이 값이 된다. 곧 닫는다. 이후 NO_ERROR CLOSE가 겹쳐도 정상 종료로 되돌리지 않는다. */
+        FAILED,
+        /** CLOSE 없이 오류로 끝나기로 했다(전송 계층이 끊겼다). 곧 닫는다. */
+        DISCONNECTED;
+
+        /** CLOSE 교환 쪽으로 넘어갔는가. CLOSE를 보냈거나 받은 경우와, 연결 오류로 CLOSE 없이 CLOSE 교환으로 친 경우(규격 3.5절, {@link #connectionFailed})를 포함한다. */
+        boolean exchanged() {
+            return this != NONE && this != DISCONNECTED;
+        }
+
+        /** {@code NO_ERROR} CLOSE를 보내거나 받은 뒤의 값. 오류로 끝나기로 한 것은 정상으로 돌아가지 않는다. */
+        Ending afterNormalClose() {
+            if (this == NONE) {
+                return CLOSING;
+            }
+            return this == DISCONNECTED ? FAILED : this;
+        }
+
+        /** 전송 계층이 CLOSE 없이 끊긴 뒤의 값. */
+        Ending afterDisconnect() {
+            switch (this) {
+                case NONE:
+                    return DISCONNECTED;
+                case CLOSING:
+                case DRAINED:
+                    return FAILED;
+                default:
+                    return this;
+            }
+        }
+
+        /** 기다릴 스트림이 없어진 뒤의 값. 닫는 중인 정상 종료만 바뀌고, 오류로 끝나기로 한 것은 그대로다(이미 닫을 때다). */
+        Ending afterPendingStreamsZero() {
+            return this == CLOSING ? DRAINED : this;
+        }
+
+        /** 닫을 때가 됐는가. */
+        boolean due() {
+            return this == DRAINED || this == FAILED || this == DISCONNECTED;
+        }
+
+        /** {@code NO_ERROR}로 끝나는가. */
+        boolean normal() {
+            return this == CLOSING || this == DRAINED;
+        }
+    }
+
     private final boolean server;
     /** 수립 진행. {@link Phase#PREFACE}부터 {@link Phase#OPEN}까지의 값만 가진다. */
     private Phase established;
-    /** CLOSE를 보냈거나 받았다(규격 1.3절, 3.5절). */
-    private boolean closeExchanged;
+    /** 닫는 일의 진행과 끝나는 방식(규격 1.3절, 3.5절). */
+    private Ending ending = Ending.NONE;
     /** 상대의 CLOSE를 이미 받았다. 처음 받은 CLOSE의 {@code last_stream_id}만 쓴다(규격 3.5절). */
     private boolean closeReceived;
-    /** 오류나 끊김으로 끝나기로 했다. 이후 NO_ERROR CLOSE가 겹쳐도 정상 종료로 되돌리지 않는다. */
-    private boolean failed;
-    /** 닫는 중에 더 기다릴 스트림이 없어졌다(대기 중인 스트림이 0개가 됐거나 애플리케이션이 더 기다리지 않기로 했다). 오류로 끝나기로 한 경우는 {@link #failed}가 닫을 때를 정한다. */
-    private boolean drained;
-
+    /** 전송 계층이 닫혀 연결이 끝났다. 끝나도 {@link #ending}은 남아 어떻게 끝났는지 답한다. */
     private boolean closed;
     /** 연결을 닫게 한 로컬 원인. {@code CLOSED} 이벤트에 싣는다(규격 3.5절). */
     private @Nullable Throwable cause;
@@ -94,7 +146,7 @@ final class ConnectionPhase {
         if (closed) {
             return Phase.CLOSED;
         }
-        return closeExchanged ? Phase.CLOSING : established;
+        return ending.exchanged() ? Phase.CLOSING : established;
     }
 
     // 질의
@@ -112,9 +164,9 @@ final class ConnectionPhase {
         return closed;
     }
 
-    /** CLOSE를 보냈거나 받았는가(규격 3.5절). */
+    /** CLOSE 교환 쪽으로 넘어갔는가. CLOSE를 보냈거나 받은 경우와 연결 오류로 CLOSE 교환으로 친 경우를 포함한다(규격 3.5절). */
     boolean closeExchanged() {
-        return closeExchanged;
+        return ending.exchanged();
     }
 
     /**
@@ -122,17 +174,17 @@ final class ConnectionPhase {
      * 3.5절).
      */
     boolean isActive() {
-        return !closeExchanged && !closed;
+        return !ending.exchanged() && !closed;
     }
 
     /** 지금 전송 계층을 닫아야 하는가. 닫은 뒤에는 {@link #transportClosed()}를 알린다. */
     boolean shouldCloseTransport() {
-        return !closed && (failed || drained);
+        return !closed && ending.due();
     }
 
     /** 닫는 일이 {@code NO_ERROR}로 끝나는가. 이미 오류로 끝나기로 했으면 이후 NO_ERROR CLOSE가 겹쳐도 아니다. 참이면 WebSocket Close(1000)를 덧붙인다(규격 1.2절). */
     boolean endsNormally() {
-        return closeExchanged && !failed;
+        return ending.normal();
     }
 
     /** 연결을 닫게 한 로컬 원인. 없으면 null이다. */
@@ -144,13 +196,13 @@ final class ConnectionPhase {
     /**
      * 받은 프레임 타입을 지금 받아도 되는가(규격 3.3절). CLOSE는 항상 허용한다. 예약 타입은 단계와 무관하게 {@link Admission#RESERVED}다(규격 2.2.2절). 그 밖에는
      * 수립 진행이 정한다(닫는 중에도 같다): HELLO·HELLO(ACK)는 순서대로 한 번씩, AUTH는 AUTH 단계에서 서버는 AUTH만 클라이언트는
-     * AUTH(ACK)만, PING·RESET·애플리케이션 프레임은 열림 단계에서만 받는다. 어긋나면 연결 오류다. 연결이 끝났으면 아무것도 받지 않는다({@link Admission#ENDED}).
+     * AUTH(ACK)만, PING·RESET·애플리케이션 프레임은 열림 단계에서만 받는다. 어긋나면 연결 오류다. 연결이 끝난 뒤에 부르면 {@link IllegalStateException}이다(호출자는 끝난 연결의 입력을 받지 않는다).
      *
      * @param ack ACK 플래그가 켜져 있는가
      */
     Admission admit(int type, boolean ack) {
         if (closed) {
-            return Admission.ENDED;
+            throw new IllegalStateException("끝난 연결은 받은 프레임을 묻지 않는다");
         }
         if (type == FrameType.CLOSE) {
             return Admission.ALLOW;
@@ -248,8 +300,7 @@ final class ConnectionPhase {
         if (closed) {
             return;
         }
-        closeExchanged = true;
-        fail();
+        ending = Ending.FAILED; // 오류는 어디서든 오류 종료로 끝난다
     }
 
     /** 상대가 CLOSE 없이 전송 계층을 끊었다(TCP EOF·RST, WebSocket close). 곧 닫을 때가 되고 정상 종료가 아니다. */
@@ -257,21 +308,24 @@ final class ConnectionPhase {
         if (closed) {
             return;
         }
-        fail();
+        ending = ending.afterDisconnect();
     }
 
     /**
-     * 대기 중인 스트림이 0개다. 종료 중이면 닫을 때가 된다(규격 3.5절). 종료 중이 아니면 아무것도 하지 않는다. 애플리케이션이 종료 중인 연결을 더
+     * 대기 중인 스트림이 0개다. 정상 종료로 닫는 중이면 닫을 때가 된다(규격 3.5절). 닫는 중이 아니거나 이미 오류로 끝나기로 했으면 아무것도 바꾸지 않는다(오류 종료는 이미 닫을 때이며 정상 종료로 되돌리지 않는다). 애플리케이션이 종료 중인 연결을 더
      * 기다리지 않기로 했을 때도 같다. 그러면 {@code NO_ERROR}로 끝난 연결로 남는다(WebSocket Close(1000)를 덧붙인다).
      */
     void pendingStreamsReachedZero() {
-        if (closeExchanged && !closed) {
-            drained = true;
+        if (!closed) {
+            ending = ending.afterPendingStreamsZero();
         }
     }
 
     /** 연결을 닫게 한 로컬 원인을 기록한다. {@code CLOSED} 이벤트에 싣는다. */
     void causedBy(Throwable cause) {
+        if (closed) {
+            return;
+        }
         this.cause = cause;
     }
 
@@ -284,14 +338,11 @@ final class ConnectionPhase {
         if (closed) {
             return;
         }
-        closeExchanged = true;
         if (errorCode != ErrorCode.NO_ERROR) {
-            fail();
+            ending = Ending.FAILED; // 오류는 어디서든 오류 종료로 끝난다
+        } else {
+            ending = ending.afterNormalClose();
         }
-    }
-
-    private void fail() {
-        failed = true;
     }
 
     private void advance(Phase from, Phase to) {

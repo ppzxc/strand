@@ -388,7 +388,15 @@ class ConnectionPhaseTest {
         assertThat(ended(Phase.OPEN).isActive()).isFalse();
     }
 
-    /** 끝난 연결은 어떤 종료 쪽 사건에도 반응하지 않고, 아무것도 받지 않는다. */
+    /** 끝난 연결은 닫은 로컬 원인 기록을 포함해 어떤 종료 쪽 사건에도 반응하지 않는다. */
+    @Test
+    void endedConnectionKeepsItsCauseAgainstLateRecords() {
+        ConnectionPhase subject = ended(Phase.OPEN);
+        subject.causedBy(new IllegalStateException("late"));
+        assertThat(subject.closeCause()).isNull();
+    }
+
+    /** 끝난 연결은 어떤 종료 쪽 사건에도 반응하지 않는다. */
     @ParameterizedTest
     @EnumSource(CloseEvent.class)
     void endedConnectionIgnoresEveryEvent(CloseEvent event) {
@@ -402,14 +410,67 @@ class ConnectionPhaseTest {
 
     @ParameterizedTest
     @MethodSource("establishingPhases")
-    void endedConnectionAdmitsNothing(Phase established) {
+    void endedConnectionSendsNothing(Phase established) {
         ConnectionPhase subject = ended(established);
-        for (int type :
-                new int[] {FrameType.CLOSE, FrameType.HELLO, FrameType.AUTH, FrameType.PING, FrameType.RESET, APP}) {
-            assertThat(subject.admit(type, false)).isEqualTo(Admission.ENDED);
-        }
         assertThat(subject.mayIdlePing()).isFalse();
         assertThat(subject.applicationSend()).isEqualTo(ApplicationSend.REFUSE);
+        for (int type :
+                new int[] {FrameType.CLOSE, FrameType.HELLO, FrameType.AUTH, FrameType.PING, FrameType.RESET, APP}) {
+            assertThatThrownBy(() -> subject.admit(type, false)).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    /** 기다릴 스트림이 없어진 정상 종료도 끊기면 정상 종료가 아니다. */
+    @Test
+    void disconnectAfterDrainedIsNotANormalEnd() {
+        ConnectionPhase subject = closing(Phase.OPEN);
+        subject.pendingStreamsReachedZero();
+        subject.transportDisconnected();
+        assertThat(subject.endsNormally()).isFalse();
+        assertThat(subject.shouldCloseTransport()).isTrue();
+    }
+
+    /** 끊긴 뒤에 CLOSE나 연결 오류가 겹치면 이전처럼 CLOSE 교환으로 넘어가되 정상 종료가 아니다. */
+    @ParameterizedTest
+    @EnumSource(
+            value = CloseEvent.class,
+            names = {"CLOSE_SENT_NO_ERROR", "CLOSE_RECEIVED_NO_ERROR", "CLOSE_SENT_ERROR", "CONNECTION_FAILED"})
+    void closeExchangeAfterDisconnectMovesToClosingAsAnError(CloseEvent event) {
+        ConnectionPhase subject = server(Phase.OPEN);
+        subject.transportDisconnected();
+        event.action.accept(subject);
+        assertThat(subject.phase()).isEqualTo(Phase.CLOSING);
+        assertThat(subject.closeExchanged()).isTrue();
+        assertThat(subject.endsNormally()).isFalse();
+        assertThat(subject.shouldCloseTransport()).isTrue();
+    }
+
+    /** 끊김이 겹쳐도 끊긴 연결은 CLOSE를 교환한 것이 되지 않는다. 오류로 끝나기로 한 연결은 대기 스트림이 없어져도 그대로다. */
+    @Test
+    void repeatedDisconnectIsIdempotentAndFailedStaysFailed() {
+        ConnectionPhase subject = server(Phase.OPEN);
+        subject.transportDisconnected();
+        subject.transportDisconnected();
+        assertThat(subject.closeExchanged()).isFalse();
+        assertThat(subject.phase()).isEqualTo(Phase.OPEN);
+        ConnectionPhase failed = closing(Phase.OPEN);
+        failed.connectionFailed();
+        failed.pendingStreamsReachedZero();
+        failed.transportDisconnected();
+        assertThat(failed.endsNormally()).isFalse();
+        assertThat(failed.shouldCloseTransport()).isTrue();
+        assertThat(failed.phase()).isEqualTo(Phase.CLOSING);
+    }
+
+    /** 대기 중인 스트림 0개 도달은 끊긴 연결(CLOSE 교환 없음)을 정상 종료로 바꾸지 않는다. */
+    @Test
+    void pendingStreamsZeroDoesNotMakeADisconnectNormal() {
+        ConnectionPhase disconnected = server(Phase.OPEN);
+        disconnected.transportDisconnected();
+        disconnected.pendingStreamsReachedZero();
+        assertThat(disconnected.closeExchanged()).isFalse();
+        assertThat(disconnected.endsNormally()).isFalse();
+        assertThat(disconnected.shouldCloseTransport()).isTrue();
     }
 
     /** 닫은 로컬 원인은 단계가 보관하고 끝난 뒤에도 읽는다(규격 3.5절, #199). */

@@ -707,9 +707,6 @@ public final class Endpoint {
         }
         boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
         ConnectionPhase.Admission admission = phase.admit(type, ack);
-        if (admission == ConnectionPhase.Admission.ENDED) {
-            return;
-        }
         if (admission == ConnectionPhase.Admission.RESERVED) {
             // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 관문은 보지 않는다.
             if (extensionsLength != 0) {
