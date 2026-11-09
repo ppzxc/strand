@@ -322,7 +322,6 @@ class EndpointEndedConnectionTest {
 
         assertThat(client.openStreamCount()).isZero();
         assertThat(client.requestState(numbered)).isNull();
-        client.cancel(1);
         client.cancelRequest(numbered);
         assertSilent(client);
     }
@@ -334,12 +333,15 @@ class EndpointEndedConnectionTest {
         server.receive(Frames.request(257, 3, new byte[0]));
         server.drainEvents();
         server.receive(Frames.request(257, 5, new byte[0]));
+        // 끝나기 전에는 대기 스트림이 있어 응답이 나간다.
+        server.respond(1, 0, new byte[] {1});
+        assertThat(server.drainMessages()).hasSize(1);
         server.disconnect();
         assertThat(server.drainMessages()).isEmpty();
         server.drainEvents();
 
         // 대기 스트림 표는 private이라 respond의 무반응으로 비워졌음을 본다. 표를 비우지 않으면 응답 프레임이 나가 실패한다.
-        server.respond(1, 0, new byte[] {1});
+        // 3은 꺼낸 요청, 5는 꺼내지 않은 요청이다.
         server.respond(3, 0, new byte[0]);
         server.respond(5, 0, new byte[0]);
         assertSilent(server);

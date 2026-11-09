@@ -1218,7 +1218,7 @@ class EndpointTest {
 
     /** {@code last_stream_id}를 지정한 CLOSE(NO_ERROR)(규격 3.5절). */
     private static String closeNoErrorLast(long lastStreamId) {
-        return "0000001c00030000000000000000000000000000" + "00000000" + String.format("%016x", lastStreamId);
+        return closeWithLast(ErrorCode.NO_ERROR, lastStreamId);
     }
 
     private static String closeWithLast(int errorCode, long lastStreamId) {
