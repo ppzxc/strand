@@ -209,6 +209,7 @@ class ConnectionPhaseTest {
         CLOSE_SENT_ERROR(p -> p.closeSent(ERROR)),
         CLOSE_RECEIVED_NO_ERROR(p -> p.closeReceived(NO_ERROR)),
         CLOSE_RECEIVED_ERROR(p -> p.closeReceived(ERROR)),
+        MALFORMED_CLOSE_RECEIVED(ConnectionPhase::malformedCloseReceived),
         NEGOTIATION_FAILED(ConnectionPhase::negotiationFailed),
         CONNECTION_FAILED(ConnectionPhase::connectionFailed),
         DISCONNECTED(ConnectionPhase::transportDisconnected),
@@ -246,6 +247,7 @@ class ConnectionPhaseTest {
                 Arguments.of(CloseEvent.CLOSE_SENT_ERROR, closing, true, false),
                 Arguments.of(CloseEvent.CLOSE_RECEIVED_NO_ERROR, closing, false, true),
                 Arguments.of(CloseEvent.CLOSE_RECEIVED_ERROR, closing, true, false),
+                Arguments.of(CloseEvent.MALFORMED_CLOSE_RECEIVED, closing, true, false),
                 Arguments.of(CloseEvent.NEGOTIATION_FAILED, closing, true, false),
                 Arguments.of(CloseEvent.CONNECTION_FAILED, closing, true, false),
                 Arguments.of(CloseEvent.DISCONNECTED, Phase.OPEN, true, false),
@@ -323,6 +325,15 @@ class ConnectionPhaseTest {
                 Arguments.of(ERROR, ERROR));
     }
 
+    /** 형태가 잘못된 CLOSE는 처음 받은 CLOSE로 세지 않는다. 그 last_stream_id는 쓰지 않는다. */
+    @Test
+    void malformedCloseIsNotTheFirstClose() {
+        ConnectionPhase subject = server(Phase.OPEN);
+        subject.malformedCloseReceived();
+        assertThat(subject.closeExchanged()).isTrue();
+        assertThat(subject.closeReceived(NO_ERROR)).isTrue();
+    }
+
     /** 내가 보낸 CLOSE는 받은 CLOSE로 세지 않는다. 엇갈려 받은 CLOSE가 처음 받은 CLOSE다. */
     @Test
     void sentCloseDoesNotCountAsReceived() {
@@ -373,6 +384,9 @@ class ConnectionPhaseTest {
         assertThat(server(Phase.AUTH).mayOpenRequest()).isTrue();
         assertThat(closing(Phase.OPEN).mayOpenRequest()).isFalse();
         assertThat(ended(Phase.OPEN).mayOpenRequest()).isFalse();
+        ConnectionPhase disconnected = server(Phase.OPEN);
+        disconnected.transportDisconnected();
+        assertThat(disconnected.mayOpenRequest()).isFalse();
     }
 
     /** 끝난 연결은 어떤 종료 쪽 사건에도 반응하지 않고, 아무것도 받지 않는다. */

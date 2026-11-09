@@ -665,7 +665,7 @@ public final class Endpoint {
     /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */
     private void rejectBadLength(byte[] bytes, int off) {
         if (Frames.typeOf(bytes, off) == FrameType.CLOSE) {
-            phase.closeReceived(ErrorCode.PROTOCOL_ERROR);
+            phase.malformedCloseReceived();
             conclude();
         } else {
             connectionError();
@@ -1044,7 +1044,7 @@ public final class Endpoint {
                             || lastStreamId > ledger.highestWrittenStreamId());
         }
         if (malformed) {
-            phase.closeReceived(ErrorCode.PROTOCOL_ERROR);
+            phase.malformedCloseReceived();
             conclude();
             return;
         }

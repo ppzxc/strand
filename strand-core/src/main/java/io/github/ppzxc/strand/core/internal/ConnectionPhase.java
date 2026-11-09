@@ -106,7 +106,7 @@ final class ConnectionPhase {
 
     /** 새 요청에 스트림 번호를 줄 수 있는가. CLOSE를 보냈거나 받았거나 연결이 끝났으면 열지 않는다(규격 3.5절). */
     boolean mayOpenRequest() {
-        return !closeExchanged && !closed;
+        return !closeExchanged && !closeDue && !closed;
     }
 
     /** 지금 전송 계층을 닫아야 하는가. 닫은 뒤에는 {@link #transportClosed()}를 알린다. */
@@ -202,7 +202,7 @@ final class ConnectionPhase {
     }
 
     /**
-     * CLOSE를 받았다(형태가 잘못된 CLOSE는 오류 코드를 {@link ErrorCode#PROTOCOL_ERROR}로 알린다, 규격 3.5절).
+     * 형식이 올바른 CLOSE를 받았다.
      *
      * @return 처음 받은 CLOSE인가. 처음 받은 CLOSE의 {@code last_stream_id}만 쓴다(규격 3.5절)
      */
@@ -214,6 +214,14 @@ final class ConnectionPhase {
         closeReceived = true;
         exchange(errorCode);
         return first;
+    }
+
+    /**
+     * 형태가 잘못된 CLOSE를 받았다. 받은 CLOSE로 치고 오류 CLOSE처럼 다룬다(규격 3.5절). 이 CLOSE의 {@code last_stream_id}는 쓰지 않으므로
+     * {@link #closeReceived}의 처음 받은 CLOSE로 세지 않는다.
+     */
+    void malformedCloseReceived() {
+        connectionFailed();
     }
 
     /**
