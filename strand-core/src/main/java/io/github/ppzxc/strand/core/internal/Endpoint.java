@@ -493,7 +493,7 @@ public final class Endpoint {
         List<Long> expiredStreams = new ArrayList<>();
         while (!expirations.isEmpty() && now > expirations.first().deadlineAt) {
             Expiry expired = expirations.pollFirst();
-            (expired.deferred ? expiredTickets : expiredStreams).add(expired.id);
+            (expired.deferred ? expiredTickets : expiredStreams).add(expired.key);
         }
         Collections.sort(expiredTickets);
         Collections.sort(expiredStreams);
@@ -1257,9 +1257,9 @@ public final class Endpoint {
         deferredSends.add(deferred);
         if (deferred.isRequest()) {
             deferredByTicket.put(deferred.ticket, deferred);
-            Long deadlineAt = deferred.deadlineAt;
-            if (deadlineAt != null) {
-                expirations.add(Expiry.ofDeferred(deadlineAt, deferred.ticket));
+            Expiry expiry = deferred.expiry();
+            if (expiry != null) {
+                expirations.add(expiry);
             }
         }
     }
@@ -1274,9 +1274,9 @@ public final class Endpoint {
     private void forgetDeferred(DeferredSend deferred) {
         if (deferred.isRequest()) {
             deferredByTicket.remove(deferred.ticket);
-            Long deadlineAt = deferred.deadlineAt;
-            if (deadlineAt != null) {
-                expirations.remove(Expiry.ofDeferred(deadlineAt, deferred.ticket));
+            Expiry expiry = deferred.expiry();
+            if (expiry != null) {
+                expirations.remove(expiry);
             }
         }
     }
@@ -1284,8 +1284,9 @@ public final class Endpoint {
     /** {@link #ownPendingStreams}에서 이미 뺀 내 스트림의 색인만 지운다. */
     private void forgetOwn(long streamId, OwnStream stream) {
         streamIdByTicket.remove(stream.ticket);
-        if (stream.deadlineAt != null) {
-            expirations.remove(Expiry.ofOwn(stream.deadlineAt, streamId));
+        Expiry expiry = stream.expiry(streamId);
+        if (expiry != null) {
+            expirations.remove(expiry);
         }
     }
 
@@ -1357,6 +1358,12 @@ public final class Endpoint {
             this.ticket = ticket;
             this.deadlineAt = deadlineAt;
         }
+
+        /** 기한 색인 항목. 기한이 없으면 null. */
+        @Nullable
+        Expiry expiry(long streamId) {
+            return deadlineAt == null ? null : Expiry.ofOwn(deadlineAt, streamId);
+        }
     }
 
     /** 번호를 받은 내 요청의 상태. 번호 없는 대기열 요청은 번호가 없어 여기 오지 않는다({@link RequestState#QUEUED_WITHOUT_NUMBER}). */
@@ -1384,10 +1391,12 @@ public final class Endpoint {
             return RequestOutcome.OVERSIZE;
         }
         nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
-        ownPendingStreams.put(streamId, new OwnStream(type, ticket, deadlineAt));
+        OwnStream stream = new OwnStream(type, ticket, deadlineAt);
+        ownPendingStreams.put(streamId, stream);
         streamIdByTicket.put(ticket, streamId);
-        if (deadlineAt != null) {
-            expirations.add(Expiry.ofOwn(deadlineAt, streamId));
+        Expiry expiry = stream.expiry(streamId);
+        if (expiry != null) {
+            expirations.add(expiry);
         }
         undrainedRequests.put(streamId, outbox.addApplication(OutboundMessage.binary(frame)));
         return RequestOutcome.SENT;
@@ -1472,15 +1481,15 @@ public final class Endpoint {
     /** 기한이 있는 대기 요청 하나의 기한 색인 항목. 기한 순이고, 같은 기한이면 번호 없는 요청이 먼저다. */
     private static final class Expiry implements Comparable<Expiry> {
         final long deadlineAt;
-        /** true면 번호 없는 대기열 요청({@code id}는 번호표), false면 번호를 받은 요청({@code id}는 스트림 번호). */
+        /** true면 번호 없는 대기열 요청({@code key}는 번호표), false면 번호를 받은 요청({@code key}는 스트림 번호). */
         final boolean deferred;
 
-        final long id;
+        final long key;
 
-        private Expiry(long deadlineAt, boolean deferred, long id) {
+        private Expiry(long deadlineAt, boolean deferred, long key) {
             this.deadlineAt = deadlineAt;
             this.deferred = deferred;
-            this.id = id;
+            this.key = key;
         }
 
         static Expiry ofDeferred(long deadlineAt, long ticket) {
@@ -1500,17 +1509,7 @@ public final class Endpoint {
             if (deferred != other.deferred) {
                 return deferred ? -1 : 1;
             }
-            return Long.compare(id, other.id);
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            return other instanceof Expiry && compareTo((Expiry) other) == 0;
-        }
-
-        @Override
-        public int hashCode() {
-            return Long.hashCode(id) * 31 + Long.hashCode(deadlineAt);
+            return Long.compare(key, other.key);
         }
     }
 
@@ -1531,6 +1530,12 @@ public final class Endpoint {
 
         boolean isRequest() {
             return ticket >= 0;
+        }
+
+        /** 기한 색인 항목. 기한이 없으면 null. */
+        @Nullable
+        Expiry expiry() {
+            return deadlineAt == null ? null : Expiry.ofDeferred(deadlineAt, ticket);
         }
 
         void run() {
