@@ -932,9 +932,7 @@ public final class Endpoint {
             decision = config.authenticator().authenticate(mechanism, credentials);
         } catch (RuntimeException e) {
             // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다. 원인은 CLOSED 이벤트에 싣는다.
-            if (!phase.isEnded()) {
-                phase.causedBy(e);
-            }
+            phase.causedBy(e);
             decision = AuthDecision.TRANSIENT_FAILURE;
         }
         if (phase.isEnded()) {

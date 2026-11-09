@@ -330,7 +330,7 @@ class EndpointEndedConnectionTest {
     }
 
     @Test
-    void authenticatorThrowingAfterTheConnectionEndedKeepsTheReportedCause() {
+    void authenticatorThrowingAfterTheConnectionEndedQueuesNoFramesAndNoSecondClosed() {
         Endpoint server = serverEndedInsideAuthCallback(() -> {
             throw new IllegalStateException("late");
         });
