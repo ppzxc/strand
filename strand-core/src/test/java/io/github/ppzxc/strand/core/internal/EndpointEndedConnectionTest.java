@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
@@ -291,5 +292,27 @@ class EndpointEndedConnectionTest {
             endpoint.disconnect();
             assertSilent(endpoint);
         }
+    }
+
+    @Test
+    void connectionErrorOnAnEndedConnectionQueuesNoFrames() {
+        // 인증 콜백 안에서 끊김을 알린 뒤 거부를 돌려줘도, CLOSED 뒤에 CLOSE가 나가면 안 된다.
+        AtomicReference<Endpoint> self = new AtomicReference<>();
+        Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+            self.get().disconnect();
+            return AuthDecision.REJECT;
+        }));
+        self.set(server);
+        server.receive(bytes(PREFACE));
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+        server.drainEvents();
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(server.drainMessages()).isEmpty();
+        List<Event> events = server.drainEvents();
+        assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
     }
 }
