@@ -814,19 +814,19 @@ class EndpointTest {
         client.receive(bytes(HELLO_ACK));
 
         long first = client.request(257, new byte[0]);
-        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+        assertThat(client.requestState(first)).isEqualTo(OwnRequestLedger.RequestState.QUEUED_WITHOUT_NUMBER);
 
         client.receive(bytes(AUTH_ACK));
-        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+        assertThat(client.requestState(first)).isEqualTo(OwnRequestLedger.RequestState.NUMBERED_UNWRITTEN);
 
         client.drainMessages();
         long second = client.request(257, new byte[0]);
-        assertThat(client.requestState(first)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
-        assertThat(client.requestState(second)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+        assertThat(client.requestState(first)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
+        assertThat(client.requestState(second)).isEqualTo(OwnRequestLedger.RequestState.NUMBERED_UNWRITTEN);
 
         client.cancel(1);
         assertThat(client.requestState(first)).isNull();
-        assertThat(client.requestState(second)).isEqualTo(Endpoint.RequestState.NUMBERED_UNWRITTEN);
+        assertThat(client.requestState(second)).isEqualTo(OwnRequestLedger.RequestState.NUMBERED_UNWRITTEN);
     }
 
     /** CLOSE의 {@code last_stream_id} 컷으로 끝난 요청은 기록에서 사라진다(규격 3.5절). */
@@ -842,7 +842,7 @@ class EndpointTest {
                 bytes(CLOSE_NO_ERROR.substring(0, CLOSE_NO_ERROR.length() - NO_STREAM.length()) + "0000000000000001"));
 
         assertThat(client.requestState(cut)).isNull();
-        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+        assertThat(client.requestState(kept)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
         assertThat(client.openStreamCount()).isEqualTo(1);
     }
 
@@ -878,6 +878,20 @@ class EndpointTest {
     @Test
     void requestAfterCloseIsFailedLocallyWithoutAFrame() {
         Endpoint server = established();
+        server.close(ErrorCode.NO_ERROR);
+        server.drainMessages();
+        server.drainEvents();
+
+        server.request(257, new byte[0]);
+
+        assertFailedLocally(server);
+    }
+
+    /** CLOSE를 보내고도 대기 중인 스트림 때문에 연결이 열려 있는 동안에도 새 요청은 번호를 받지 못한다(장부의 닫는 중과 Endpoint의 CLOSE 교환이 같은 값). */
+    @Test
+    void requestAfterCloseWasSentWhileAStreamIsPendingIsFailedLocally() {
+        Endpoint server = established();
+        server.request(257, new byte[0]);
         server.close(ErrorCode.NO_ERROR);
         server.drainMessages();
         server.drainEvents();
@@ -952,6 +966,38 @@ class EndpointTest {
             assertThat(event.streamId()).isZero();
         }
         assertThat(sent(client))
+                .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + requestFrame(257, Long.MAX_VALUE, "") + CLOSE_NO_ERROR);
+    }
+
+    /** 미룬 PING은 미룬 때의 앞뒤 요청과의 상대 순서를 지킨다: 번호를 소진시키는 요청 앞의 PING은 나가고 뒤의 PING은 CLOSE 때문에 나가지 않는다. */
+    @Test
+    void deferredPingKeepsItsPlaceAmongDeferredRequestsWhenTheGateOpens() {
+        Endpoint before = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
+        before.drainMessages();
+        before.request(257, new byte[0]);
+        before.ping(bytes("0102030405060708"));
+        before.request(257, new byte[0]);
+        before.receive(bytes(HELLO));
+        before.receive(bytes(HELLO_ACK));
+        before.receive(bytes(AUTH_ACK));
+
+        Endpoint after = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
+        after.drainMessages();
+        after.request(257, new byte[0]);
+        after.request(257, new byte[0]);
+        after.ping(bytes("0102030405060708"));
+        after.receive(bytes(HELLO));
+        after.receive(bytes(HELLO_ACK));
+        after.receive(bytes(AUTH_ACK));
+
+        String pingFrame = "0000001800020000000000000000000000000000" + "0102030405060708";
+        assertThat(sent(before))
+                .isEqualTo(HELLO_ACK
+                        + AUTH_ANONYMOUS
+                        + pingFrame
+                        + requestFrame(257, Long.MAX_VALUE, "")
+                        + CLOSE_NO_ERROR);
+        assertThat(sent(after))
                 .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + requestFrame(257, Long.MAX_VALUE, "") + CLOSE_NO_ERROR);
     }
 
@@ -2226,7 +2272,7 @@ class EndpointTest {
         assertThat(client.requestState(ticket)).isNull();
         // 첫 요청의 프레임만 사라지고 나머지는 그대로 나간다. 쓴 적 없는 번호 1은 건너뛴다.
         assertThat(sent(client)).isEqualTo("0000001001010000000000000000000300000000");
-        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+        assertThat(client.requestState(kept)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
     }
 
     /** 규격 4.4.1절: 번호를 받지 못한 대기열 요청도 기한이 지나면 stream_id 없이 DEADLINE_EXCEEDED(처리 안 됨)로 끝난다. */
@@ -2237,7 +2283,7 @@ class EndpointTest {
         client.receive(bytes(HELLO_ACK));
         client.drainMessages();
         long ticket = client.request(257, new byte[0], 100);
-        assertThat(client.requestState(ticket)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+        assertThat(client.requestState(ticket)).isEqualTo(OwnRequestLedger.RequestState.QUEUED_WITHOUT_NUMBER);
 
         client.advance(101);
 
@@ -2362,7 +2408,7 @@ class EndpointTest {
         client.cancelRequest(cancelled);
         client.advance(101);
         assertThat(client.drainEvents()).hasSize(2);
-        assertThat(client.requestState(kept)).isEqualTo(Endpoint.RequestState.QUEUED_WITHOUT_NUMBER);
+        assertThat(client.requestState(kept)).isEqualTo(OwnRequestLedger.RequestState.QUEUED_WITHOUT_NUMBER);
         client.receive(bytes(AUTH_ACK));
 
         assertThat(sent(client)).contains(PING_PAYLOAD).contains("0000001001010000000000000000000100000000");
