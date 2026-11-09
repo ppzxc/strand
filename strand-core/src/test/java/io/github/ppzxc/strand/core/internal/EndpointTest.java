@@ -1228,7 +1228,7 @@ class EndpointTest {
     }
 
     private static String closeWith(int errorCode) {
-        return "0000001c00030000000000000000000000000000" + String.format("%08x", errorCode) + NO_STREAM;
+        return closeWithLast(errorCode, 0);
     }
 
     private static Endpoint serverAwaitingAuth(EndpointConfig config) {

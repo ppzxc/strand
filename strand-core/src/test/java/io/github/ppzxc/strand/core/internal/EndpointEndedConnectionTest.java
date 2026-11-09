@@ -338,7 +338,7 @@ class EndpointEndedConnectionTest {
         assertThat(server.drainMessages()).hasSize(1);
         server.disconnect();
         assertThat(server.drainMessages()).isEmpty();
-        server.drainEvents();
+        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
 
         // 대기 스트림 표는 private이라 respond의 무반응으로 비워졌음을 본다. 표를 비우지 않으면 응답 프레임이 나가 실패한다.
         // 3은 꺼낸 요청, 5는 꺼내지 않은 요청이다.
