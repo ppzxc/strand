@@ -282,7 +282,11 @@ final class ConnectionPhase {
         if (closed) {
             return;
         }
-        ending = ending == Ending.NONE ? Ending.DISCONNECTED : Ending.FAILED;
+        if (ending == Ending.NONE) {
+            ending = Ending.DISCONNECTED;
+        } else if (ending == Ending.CLOSING || ending == Ending.DRAINED) {
+            ending = Ending.FAILED;
+        }
     }
 
     /**

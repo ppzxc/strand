@@ -414,8 +414,27 @@ class ConnectionPhaseTest {
         ConnectionPhase subject = ended(established);
         assertThat(subject.mayIdlePing()).isFalse();
         assertThat(subject.applicationSend()).isEqualTo(ApplicationSend.REFUSE);
-        assertThatThrownBy(() -> subject.admit(FrameType.CLOSE, false)).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> subject.admit(APP, false)).isInstanceOf(IllegalStateException.class);
+        for (int type :
+                new int[] {FrameType.CLOSE, FrameType.HELLO, FrameType.AUTH, FrameType.PING, FrameType.RESET, APP}) {
+            assertThatThrownBy(() -> subject.admit(type, false)).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    /** 끊김이 겹쳐도 끊긴 연결은 CLOSE를 교환한 것이 되지 않는다. 오류로 끝나기로 한 연결은 대기 스트림이 없어져도 그대로다. */
+    @Test
+    void repeatedDisconnectIsIdempotentAndFailedStaysFailed() {
+        ConnectionPhase subject = server(Phase.OPEN);
+        subject.transportDisconnected();
+        subject.transportDisconnected();
+        assertThat(subject.closeExchanged()).isFalse();
+        assertThat(subject.phase()).isEqualTo(Phase.OPEN);
+        ConnectionPhase failed = closing(Phase.OPEN);
+        failed.connectionFailed();
+        failed.pendingStreamsReachedZero();
+        failed.transportDisconnected();
+        assertThat(failed.endsNormally()).isFalse();
+        assertThat(failed.shouldCloseTransport()).isTrue();
+        assertThat(failed.phase()).isEqualTo(Phase.CLOSING);
     }
 
     /** 대기 중인 스트림 0개 도달은 끊긴 연결(CLOSE 교환 없음)을 정상 종료로 바꾸지 않는다. */
