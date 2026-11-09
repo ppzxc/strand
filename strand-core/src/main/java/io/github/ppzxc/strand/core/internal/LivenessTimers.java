@@ -1,9 +1,9 @@
 package io.github.ppzxc.strand.core.internal;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -38,14 +38,12 @@ final class LivenessTimers {
     private static final int PING_PAYLOAD_SIZE = 8;
 
     private static final class Wait {
-        final long id;
         final Kind kind;
         final byte @Nullable [] payload;
         boolean started;
         long deadline;
 
-        Wait(long id, Kind kind, byte @Nullable [] payload) {
-            this.id = id;
+        Wait(Kind kind, byte @Nullable [] payload) {
             this.kind = kind;
             this.payload = payload;
         }
@@ -55,8 +53,8 @@ final class LivenessTimers {
     private final long authTimeoutMs;
     /** 0 이하면 유휴 PING을 보내지 않는다. */
     private final long idleIntervalMs;
-    /** 보낸 순서대로다. 식별자는 등록할 때마다 커지고 지울 때도 순서가 유지되므로 식별자 오름차순이다({@link #started}가 이 순서에 기댄다). */
-    private final List<Wait> waits = new ArrayList<>();
+    /** 식별자로 찾는다. 순회는 등록한 순서대로다(가장 먼저 등록한 대기가 먼저 나온다). */
+    private final Map<Long, Wait> waits = new LinkedHashMap<>();
 
     private long lastId = NO_WAIT;
     /** 서버의 AUTH 대기가 끝나는 시각. 대기 중이 아니면 null이다. */
@@ -101,29 +99,16 @@ final class LivenessTimers {
      */
     long await(Kind kind, byte @Nullable [] payload) {
         long id = ++lastId;
-        waits.add(new Wait(id, kind, payload));
+        waits.put(id, new Wait(kind, payload));
         return id;
     }
 
     /** 대기에 매인 프레임을 전송 계층에 넘겼다. 이때부터 {@code now + ackTimeoutMs}가 기한이다. 이미 끝났거나 시작한 대기는 그대로다. */
     void started(long id, long now) {
-        // 대기는 등록 순서이고 식별자는 등록할 때마다 커지므로 식별자로 이분 탐색한다.
-        int low = 0;
-        int high = waits.size() - 1;
-        while (low <= high) {
-            int mid = (low + high) >>> 1;
-            Wait wait = waits.get(mid);
-            if (wait.id < id) {
-                low = mid + 1;
-            } else if (wait.id > id) {
-                high = mid - 1;
-            } else {
-                if (!wait.started) {
-                    wait.started = true;
-                    wait.deadline = now + ackTimeoutMs;
-                }
-                return;
-            }
+        Wait wait = waits.get(id);
+        if (wait != null && !wait.started) {
+            wait.started = true;
+            wait.deadline = now + ackTimeoutMs;
         }
     }
 
@@ -132,7 +117,7 @@ final class LivenessTimers {
      * 맞는 대기가 없으면 아무 일도 없다.
      */
     void ackReceived(Kind kind, byte @Nullable [] payload) {
-        for (Iterator<Wait> it = waits.iterator(); it.hasNext(); ) {
+        for (Iterator<Wait> it = waits.values().iterator(); it.hasNext(); ) {
             Wait wait = it.next();
             if (wait.kind == kind && Arrays.equals(wait.payload, payload)) {
                 it.remove();
@@ -143,7 +128,7 @@ final class LivenessTimers {
 
     /** ACK를 기다리는 PING이 있는가. */
     boolean hasPing() {
-        for (Wait wait : waits) {
+        for (Wait wait : waits.values()) {
             if (wait.kind == Kind.PING) {
                 return true;
             }
@@ -162,7 +147,7 @@ final class LivenessTimers {
         if (authDeadline != null && now > authDeadline) {
             return Expiry.UNAUTHENTICATED;
         }
-        for (Wait wait : waits) {
+        for (Wait wait : waits.values()) {
             if (wait.started && now > wait.deadline) {
                 return Expiry.UNRESPONSIVE;
             }

@@ -141,6 +141,34 @@ class LivenessTimersTest {
     }
 
     @Test
+    void hasPingStaysTrueUntilEveryAwaitedPingIsAcked() {
+        timers.await(Kind.PING, ping(1));
+        timers.await(Kind.PING, ping(2));
+        timers.await(Kind.PING, ping(1));
+
+        timers.ackReceived(Kind.PING, ping(1));
+        timers.ackReceived(Kind.PING, ping(2));
+        assertThat(timers.hasPing()).isTrue();
+
+        timers.ackReceived(Kind.PING, ping(2));
+        assertThat(timers.hasPing()).isTrue();
+
+        timers.ackReceived(Kind.PING, ping(1));
+        assertThat(timers.hasPing()).isFalse();
+    }
+
+    @Test
+    void startingAnUnknownWaitChangesNothing() {
+        long id = await(Kind.HELLO);
+        timers.ackReceived(Kind.HELLO, null);
+
+        timers.started(id, 0);
+        timers.started(id + 100, 0);
+
+        assertThat(timers.expiry(Long.MAX_VALUE)).isEqualTo(Expiry.NONE);
+    }
+
+    @Test
     void clearDropsEveryWait() {
         long id = await(Kind.PING);
         timers.started(id, 0);
