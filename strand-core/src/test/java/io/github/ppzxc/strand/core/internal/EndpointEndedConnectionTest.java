@@ -305,6 +305,7 @@ class EndpointEndedConnectionTest {
 
         assertThat(client.openStreamCount()).isZero();
         assertThat(client.requestState(written)).isNull();
+        // 클라이언트가 처음 연 스트림은 1번이다(규격 2.2.5절). 장부가 비워졌으므로 취소해도 아무것도 나가지 않는다.
         client.cancel(1);
         client.cancelRequest(written);
         assertSilent(client);
@@ -337,6 +338,7 @@ class EndpointEndedConnectionTest {
         assertThat(server.drainMessages()).isEmpty();
         server.drainEvents();
 
+        // 대기 스트림 표는 private이라 respond의 무반응으로 비워졌음을 본다. 표를 비우지 않으면 응답 프레임이 나가 실패한다.
         server.respond(1, 0, new byte[] {1});
         server.respond(3, 0, new byte[0]);
         server.respond(5, 0, new byte[0]);

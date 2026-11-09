@@ -1221,6 +1221,12 @@ class EndpointTest {
         return "0000001c00030000000000000000000000000000" + "00000000" + String.format("%016x", lastStreamId);
     }
 
+    private static String closeWithLast(int errorCode, long lastStreamId) {
+        return "0000001c00030000000000000000000000000000"
+                + String.format("%08x", errorCode)
+                + String.format("%016x", lastStreamId);
+    }
+
     private static String closeWith(int errorCode) {
         return "0000001c00030000000000000000000000000000" + String.format("%08x", errorCode) + NO_STREAM;
     }
@@ -3116,9 +3122,7 @@ class EndpointTest {
         assertThat(sent(server))
                 .isEqualTo(RESET_REFUSED_5
                         + RESET_REFUSED_7
-                        + "0000001c00030000000000000000000000000000"
-                        + "00000002"
-                        + "0000000000000007");
+                        + closeWithLast(ErrorCode.INTERNAL_ERROR, 7));
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 
