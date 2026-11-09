@@ -6,8 +6,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
@@ -51,8 +51,11 @@ public final class Endpoint {
     private final Outbox outbox = new Outbox();
     /** 애플리케이션에 낼 이벤트. 쌓기만 하고 고치지 않는다. 돌려보낸 요청의 거름은 꺼낼 때({@link #drainEvents()}) 한다. */
     private final List<Event> events = new ArrayList<>();
-    /** 이벤트로 쌓았지만 아직 꺼내지 않은 상대 요청의 번호(받은 순서). */
-    private final Set<Long> unhandedRequests = new LinkedHashSet<>();
+    /**
+     * 이벤트를 마지막으로 꺼낸 때의 {@link #highestPeerStreamId}. 상대 요청 번호는 늘어나기만 하므로, 이보다 큰 번호의 대기 중인 요청이 아직
+     * 애플리케이션이 이벤트로 받지 않은 요청이다.
+     */
+    private long drainedPeerStreamId;
     /** 돌려보내서 {@code REQUEST_RECEIVED}를 애플리케이션에 내지 않을 요청의 번호. */
     private final Set<Long> refusedRequests = new HashSet<>();
     /**
@@ -565,7 +568,7 @@ public final class Endpoint {
             }
         }
         events.clear();
-        unhandedRequests.clear();
+        drainedPeerStreamId = highestPeerStreamId;
         refusedRequests.clear();
         return drained;
     }
@@ -803,7 +806,6 @@ public final class Endpoint {
         } else {
             peerPendingStreams.put(streamId, type);
             events.add(Event.requestReceived(streamId, type));
-            unhandedRequests.add(streamId);
         }
     }
 
@@ -1081,13 +1083,15 @@ public final class Endpoint {
      * RESET(REFUSED)}로 돌려보내고 스트림을 끝낸다. 오류 CLOSE보다 먼저 호출한다.
      */
     private void refuseUnhandedRequests() {
-        for (Long streamId : unhandedRequests) {
-            if (peerPendingStreams.remove(streamId) != null) {
+        Iterator<Long> pending = peerPendingStreams.keySet().iterator();
+        while (pending.hasNext()) {
+            long streamId = pending.next();
+            if (streamId > drainedPeerStreamId) {
+                pending.remove();
                 send(Frames.reset(streamId, ErrorCode.REFUSED));
                 refusedRequests.add(streamId);
             }
         }
-        unhandedRequests.clear();
     }
 
     /** 형태가 잘못된 CLOSE를 받았다. 받은 CLOSE로 치고 CLOSE를 보내지 않은 채 닫는다(규격 3.5절). */
