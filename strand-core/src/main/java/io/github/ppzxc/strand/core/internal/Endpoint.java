@@ -1,19 +1,17 @@
 package io.github.ppzxc.strand.core.internal;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
-import java.util.TreeSet;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -58,20 +56,14 @@ public final class Endpoint {
      * 번호를 받은 내 요청(결과를 기다리는 내 스트림)의 장부. 프레임 하나가 메시지 하나이므로 {@link #drainMessages()}로 메시지를 꺼내면
      * 마지막 바이트가 넘어간 것으로 보고 장부에 쓰기 시작을 알린다(규격 3.5절 "연결이 끝날 때").
      */
-    private final OwnRequestLedger ledger = new OwnRequestLedger(outbox);
-    /** 다음 {@link #request}에 줄 번호표. */
-    private long nextTicket;
+    private final OwnRequestLedger ledger;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
     private final Map<Long, Integer> peerPendingStreams = new LinkedHashMap<>();
-    /** AUTH 관문을 통과하기 전이라 미뤄 둔 송신(규격 3.3절). */
-    private final Set<DeferredSend> deferredSends = new LinkedHashSet<>();
-    /** {@link #deferredSends} 가운데 요청을 번호표로 찾는 색인. {@link #deferredSends}와 함께만 고친다(#202). */
-    private final Map<Long, DeferredSend> deferredByTicket = new HashMap<>();
     /**
-     * 기한이 있는 번호 없는 대기열 요청의 기한 순 색인. 요청이 끝나면 함께 지운다. 번호를 받은 요청의 기한 색인은 {@link #ledger}가 가진다. 가장
-     * 이른 기한만 보므로 {@link #advance}는 만료된 요청 수에 비례해서만 일한다(#202).
+     * AUTH 관문을 통과하기 전이라 미뤄 둔 PING(규격 3.3절). 미룬 요청은 {@link #ledger}가 번호 없는 요청으로 가진다. PING은 미룬 때의 다음
+     * 번호표를 같이 적어 두어, 관문이 열릴 때 그 번호표 앞의 요청이 먼저 나가고 뒤의 요청이 나중에 나가게 한다.
      */
-    private final TreeSet<Expiry> expirations = new TreeSet<>();
+    private final Deque<DeferredPing> deferredPings = new ArrayDeque<>();
 
     /**
      * 받은 바이트 가운데 아직 한 단위(서문 또는 프레임)가 되지 못한 앞부분. 청크 경계에 걸친 단위 하나만 모으므로 비어 있는 때가 대부분이다.
@@ -93,8 +85,6 @@ public final class Endpoint {
     private boolean ownHelloAcked;
     /** 서버는 {@code AUTH(ACK)}를 보냈고 클라이언트는 {@code AUTH(ACK)}를 받았다(규격 3.3절 AUTH 관문). */
     private boolean authGatePassed;
-    /** 상대가 HELLO로 알린 {@code max_concurrent_streams}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
-    private long peerMaxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
     /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
     /** 연결을 닫게 한 로컬 원인. 닫을 때 {@code CLOSED} 이벤트에 싣는다. */
@@ -116,22 +106,19 @@ public final class Endpoint {
 
     private long idlePingCount;
 
-    private long nextStreamId;
-    /** 내 번호 공간의 홀짝: 클라이언트는 1, 서버는 0이다(규격 2.2.5절). */
-    private final int ownParity;
-
     private final boolean server;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
     private long highestPeerStreamId;
 
     private Endpoint(boolean server, EndpointConfig config) {
         this.config = config;
-        this.nextStreamId = config.firstStreamId(server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID);
-        this.ownParity = server ? 0 : 1;
-        if ((nextStreamId & 1) != ownParity) {
+        long firstStreamId = config.firstStreamId(server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID);
+        int ownParity = server ? 0 : 1;
+        if ((firstStreamId & 1) != ownParity) {
             throw new IllegalArgumentException(
-                    "nextStreamId " + nextStreamId + "는 " + (server ? "서버(짝수)" : "클라이언트(홀수)") + "의 번호 공간이 아니다");
+                    "nextStreamId " + firstStreamId + "는 " + (server ? "서버(짝수)" : "클라이언트(홀수)") + "의 번호 공간이 아니다");
         }
+        this.ledger = new OwnRequestLedger(outbox, firstStreamId, ownParity);
         this.server = server;
     }
 
@@ -379,25 +366,43 @@ public final class Endpoint {
     private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
         if (transportClosed) {
             failLocally();
-            return nextTicket++;
+            return ledger.issueTicket();
         }
         if (authGatePassed) {
             // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
-            long ticket = nextTicket;
-            if (sendRequest(ticket, type, payload, deadlineAt) == RequestOutcome.OVERSIZE) {
+            long ticket = ledger.nextTicket();
+            if (openRequest(type, payload, deadlineAt) == OwnRequestLedger.Admission.OVERSIZE) {
                 throw oversizeFrame("요청");
             }
-            nextTicket++;
             return ticket;
         }
-        long ticket = nextTicket++;
-        byte[] copy = payload.clone();
-        addDeferred(DeferredSend.request(ticket, deadlineAt, () -> {
-            if (sendRequest(ticket, type, copy, deadlineAt) == RequestOutcome.OVERSIZE) {
+        return ledger.queue(type, payload, deadlineAt);
+    }
+
+    /**
+     * 장부에 요청을 열게 하고, 번호를 받지 못했으면 로컬에서 실패시킨다. 번호 소진이면 연결도 닫는다(규격 2.2.5절). 프레임이 너무 크면 아무것도
+     * 하지 않고 돌려준다.
+     */
+    private OwnRequestLedger.Admission openRequest(int type, byte[] payload, @Nullable Long deadlineAt) {
+        return refuseLocally(ledger.open(type, payload, deadlineAt, peerMaxFrameSize));
+    }
+
+    /** 장부가 번호를 주지 않은 요청(프레임 크기 초과는 제외)을 로컬에서 실패시킨다. */
+    private OwnRequestLedger.Admission refuseLocally(OwnRequestLedger.Admission admission) {
+        switch (admission) {
+            case CLOSING:
+            case STREAM_LIMIT:
                 failLocally();
-            }
-        }));
-        return ticket;
+                break;
+            case EXHAUSTED:
+                // 프레임 없이 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
+                failLocally();
+                close(ErrorCode.NO_ERROR);
+                break;
+            default:
+                break;
+        }
+        return admission;
     }
 
     /**
@@ -427,12 +432,6 @@ public final class Endpoint {
      */
     public void cancelRequest(long ticket) {
         if (transportClosed) {
-            return;
-        }
-        DeferredSend deferred = deferredByTicket.get(ticket);
-        if (deferred != null) {
-            removeDeferred(deferred);
-            events.add(Event.result(0, Status.CANCELLED, Certainty.NOT_PROCESSED));
             return;
         }
         endOwnRequest(ledger.cancelTicket(ticket));
@@ -473,23 +472,8 @@ public final class Endpoint {
         }
     }
 
-    /**
-     * 기한이 지난 요청을 끝낸다(규격 4.4.1절). 번호 없는 대기열 요청은 stream_id 없는 결과로, 번호를 받은 요청은 장부가 끝낸다. 끝내는 순서는
-     * 기한 순이 아니라 번호 없는 요청이 먼저(낸 순서), 번호를 받은 요청이 뒤(스트림 번호 순)다.
-     */
+    /** 기한이 지난 요청을 끝낸다(규격 4.4.1절). 순서는 장부가 정한다. 번호를 받은 요청이 끝났으면 종료 중인 연결을 닫을 수 있는지 본다. */
     private void expireRequests() {
-        List<Long> expiredTickets = new ArrayList<>();
-        while (!expirations.isEmpty() && now > expirations.first().deadlineAt) {
-            expiredTickets.add(expirations.pollFirst().ticket);
-        }
-        Collections.sort(expiredTickets);
-        for (long ticket : expiredTickets) {
-            DeferredSend deferred = deferredByTicket.get(ticket);
-            if (deferred != null) {
-                removeDeferred(deferred);
-                events.add(Event.result(0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED));
-            }
-        }
         if (ledger.expire(now, this::applyOutcome)) {
             closeTransportIfNoPendingStreams();
         }
@@ -527,7 +511,11 @@ public final class Endpoint {
         }
         if (!transportClosed) {
             byte[] copy = payload.clone();
-            sendAfterAuthGate(DeferredSend.ping(() -> sendPing(copy)));
+            if (authGatePassed) {
+                sendPing(copy);
+            } else {
+                deferredPings.addLast(new DeferredPing(copy, ledger.nextTicket()));
+            }
         }
     }
 
@@ -779,7 +767,7 @@ public final class Endpoint {
     }
 
     private boolean isOwnSpace(long streamId) {
-        return (streamId & 1) == ownParity;
+        return ledger.isOwnSpace(streamId);
     }
 
     /**
@@ -900,7 +888,7 @@ public final class Endpoint {
             return;
         }
         peerHelloAcked = true;
-        peerMaxConcurrentStreams = peer.maxConcurrentStreams;
+        ledger.setPeerMaxConcurrentStreams(peer.maxConcurrentStreams);
         peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
         if (server) {
@@ -990,15 +978,28 @@ public final class Endpoint {
         openAuthGate();
     }
 
-    /** AUTH 관문을 연다. 미뤄 둔 송신을 보낸다. */
+    /**
+     * AUTH 관문을 연다. 미뤄 둔 요청과 PING을 미룬 순서대로 보낸다. 요청에 번호를 주다가 닫히면 남은 번호 없는 요청이 끝나고(CLOSE 뒤 PING은 보내지
+     * 않는다), 전송 계층이 닫히면 모두 끝나므로, 한 단계마다 장부와 연결 상태를 다시 본다.
+     */
     private void openAuthGate() {
         authGatePassed = true;
-        // 보내다가 닫히면 closeTransport가 남은 요청을 closed 이벤트 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
-        while (!deferredSends.isEmpty()) {
-            DeferredSend deferred = deferredSends.iterator().next();
-            removeDeferred(deferred);
-            if (deferred.isRequest() || !closeExchanged) {
-                deferred.sending.run();
+        while (true) {
+            DeferredPing ping = deferredPings.peekFirst();
+            OwnRequestLedger.Admission admission =
+                    ledger.openQueued(ping == null ? Long.MAX_VALUE : ping.beforeTicket, peerMaxFrameSize);
+            if (admission != OwnRequestLedger.Admission.NONE) {
+                // 크기를 넘는 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고 로컬에서 실패시킨다.
+                if (refuseLocally(admission) == OwnRequestLedger.Admission.OVERSIZE) {
+                    failLocally();
+                }
+            } else if (ping == null) {
+                return;
+            } else {
+                deferredPings.removeFirst();
+                if (!closeExchanged) {
+                    sendPing(ping.payload);
+                }
             }
         }
     }
@@ -1075,17 +1076,12 @@ public final class Endpoint {
     }
 
     /**
-     * CLOSE를 보내거나 받은 즉시, 번호를 받지 못하고 기다리던 요청(AUTH 관문 전에 미룬 요청)을 로컬 UNAVAILABLE(처리 안 됨)로 끝낸다(규격
-     * 3.5절). 미룬 PING은 그대로 둔다.
+     * CLOSE를 보내거나 받은 즉시, 번호를 받지 못하고 기다리던 요청(AUTH 관문 전에 미룬 요청)을 장부가 로컬 UNAVAILABLE(처리 안 됨)로 끝낸다(규격
+     * 3.5절). 이후 새 요청은 번호를 받지 못한다. 미룬 PING은 그대로 둔다.
      */
     private void endQueuedRequests() {
-        for (Iterator<DeferredSend> it = deferredSends.iterator(); it.hasNext(); ) {
-            DeferredSend deferred = it.next();
-            if (deferred.isRequest()) {
-                it.remove();
-                forgetDeferred(deferred);
-                failLocally();
-            }
+        for (OwnRequestLedger.Outcome outcome : ledger.onClosing()) {
+            applyOutcome(outcome);
         }
     }
 
@@ -1166,14 +1162,7 @@ public final class Endpoint {
         for (OwnRequestLedger.Outcome outcome : ledger.onTransportClosed()) {
             applyOutcome(outcome);
         }
-        for (DeferredSend deferred : deferredSends) {
-            if (deferred.isRequest()) {
-                failLocally();
-            }
-        }
-        deferredSends.clear();
-        deferredByTicket.clear();
-        expirations.clear();
+        deferredPings.clear();
         peerPendingStreams.clear();
         events.add(Event.closed(closeCause));
     }
@@ -1196,116 +1185,17 @@ public final class Endpoint {
         }
     }
 
-    /** AUTH 관문을 통과한 뒤면 바로, 아니면 통과할 때까지 미뤄서 보낸다. */
-    private void sendAfterAuthGate(DeferredSend sending) {
-        if (authGatePassed) {
-            sending.run();
-        } else {
-            addDeferred(sending);
-        }
-    }
-
-    private void addDeferred(DeferredSend deferred) {
-        deferredSends.add(deferred);
-        if (deferred.isRequest()) {
-            deferredByTicket.put(deferred.ticket, deferred);
-            Expiry expiry = deferred.expiry();
-            if (expiry != null) {
-                expirations.add(expiry);
-            }
-        }
-    }
-
-    /** 미룬 송신을 대기열에서 빼고 색인도 함께 지운다. */
-    private void removeDeferred(DeferredSend deferred) {
-        deferredSends.remove(deferred);
-        forgetDeferred(deferred);
-    }
-
-    /** 대기열 밖에서 이미 뺀 미룬 송신의 색인만 지운다. */
-    private void forgetDeferred(DeferredSend deferred) {
-        if (deferred.isRequest()) {
-            deferredByTicket.remove(deferred.ticket);
-            Expiry expiry = deferred.expiry();
-            if (expiry != null) {
-                expirations.remove(expiry);
-            }
-        }
-    }
-
-    /**
-     * 요청이 쓰기 대기열 어디에 있는지(규격 1.3절, 4.4.1절). 입출력 없는(sans-IO) 모델에서는 {@link #drainMessages()}가 프레임을 돌려준 때를 쓰기를
-     * 시작한 때로 본다. 돌려준 프레임은 전송 계층이 이미 받았으므로 끊거나 거둘 수 없다.
-     */
-    enum RequestState {
-        /** 번호를 받지 못한 대기열 요청. {@code deferredSends}에 있고 프레임이 아직 없다. */
-        QUEUED_WITHOUT_NUMBER,
-        /** 번호를 받았지만 프레임이 아직 {@code drainMessages()}로 나가지 않았다({@link OwnRequestLedger}). 쓰기 전이다. */
-        NUMBERED_UNWRITTEN,
-        /** 프레임이 {@code drainMessages()}로 나갔다. 쓰기를 시작했고 끝까지 쓴다. */
-        WRITING_STARTED
-    }
-
     /**
      * 요청을 낸 순서(번호표, 0부터)로 요청의 상태를 본다. 번호 없는 대기열 요청도 번호표로 찾는다. 결과가 나와 끝났거나 스트림을 열기 전에
      * 로컬에서 실패한 요청, 낸 적 없는 번호표는 null이다. 쓰기 전(번호 유무 무관)과 쓰기 시작 뒤를 가르는 기준이다.
      */
-    @Nullable
-    RequestState requestState(long ticket) {
-        if (deferredByTicket.containsKey(ticket)) {
-            return RequestState.QUEUED_WITHOUT_NUMBER;
-        }
+    OwnRequestLedger.@Nullable RequestState requestState(long ticket) {
         return ledger.stateOfTicket(ticket);
     }
 
     /** 번호를 받아 아직 끝나지 않은 내 스트림의 수. 요청 기록이 끝난 요청 뒤에 남지 않는지 보는 기준이다. */
     int openStreamCount() {
         return ledger.openCount();
-    }
-
-    /** 요청을 보낸 결과. */
-    private enum RequestOutcome {
-        /** 요청 프레임을 보냈다. */
-        SENT,
-        /** 프레임을 열지 못해 로컬에서 실패시켰다(이미 이벤트를 냈다). */
-        FAILED_LOCALLY,
-        /** 프레임이 상대의 {@code max_frame_size}를 넘어 아무것도 하지 않았다. 규격 3.2.1절: 보내지 않고 번호도 쓰지 않는다. */
-        OVERSIZE
-    }
-
-    private RequestOutcome sendRequest(long ticket, int type, byte[] payload, @Nullable Long deadlineAt) {
-        if (failRequestIfRefused()) {
-            return RequestOutcome.FAILED_LOCALLY;
-        }
-        long streamId = nextStreamId;
-        byte[] frame = Frames.request(type, streamId, payload);
-        if (exceedsPeerFrameSize(frame)) {
-            return RequestOutcome.OVERSIZE;
-        }
-        nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
-        ledger.accept(streamId, ticket, type, frame, deadlineAt);
-        return RequestOutcome.SENT;
-    }
-
-    /** 프레임을 열지 못하는 요청이면 로컬에서 실패시키고 {@code true}를 돌려준다. 실패한 요청은 대기시키지 않고 번호도 쓰지 않는다. */
-    private boolean failRequestIfRefused() {
-        if (closeExchanged) {
-            // CLOSE를 보냈거나 받았다(규격 3.5절).
-            failLocally();
-            return true;
-        }
-        if (!Frames.isValidStreamId(nextStreamId)) {
-            // 번호가 소진됐다(2^63-1을 넘으면 long이 음수로 넘친다). 상대가 알린 한도보다 먼저 본다. 프레임 없이 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
-            failLocally();
-            close(ErrorCode.NO_ERROR);
-            return true;
-        }
-        if (ledger.openCount() >= peerMaxConcurrentStreams) {
-            // 상대가 알린 한도에 닿았다(규격 3.2.1절).
-            failLocally();
-            return true;
-        }
-        return false;
     }
 
     /** 프레임이 상대가 알린 {@code max_frame_size}를 넘는다(규격 3.2.1절). */
@@ -1351,58 +1241,15 @@ public final class Endpoint {
         ackWaits.add(wait);
     }
 
-    /** 기한이 있는 번호 없는 대기열 요청 하나의 기한 색인 항목. 기한 순이고 같은 기한이면 번호표 순이다. */
-    private static final class Expiry implements Comparable<Expiry> {
-        final long deadlineAt;
-        final long ticket;
+    /** AUTH 관문을 통과할 때까지 미룬 PING 하나. */
+    private static final class DeferredPing {
+        final byte[] payload;
+        /** 미룰 때의 다음 번호표. 이보다 작은 번호표의 미룬 요청이 이 PING보다 먼저 나간다. */
+        final long beforeTicket;
 
-        Expiry(long deadlineAt, long ticket) {
-            this.deadlineAt = deadlineAt;
-            this.ticket = ticket;
-        }
-
-        @Override
-        public int compareTo(Expiry other) {
-            int byDeadline = Long.compare(deadlineAt, other.deadlineAt);
-            return byDeadline != 0 ? byDeadline : Long.compare(ticket, other.ticket);
-        }
-    }
-
-    /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
-    private static final class DeferredSend {
-        /** 요청이면 요청 번호표, 아니면 -1. */
-        final long ticket;
-        /** 요청 기한(가상 시계의 절대 시각). 요청이 아니거나 기한이 없으면 null. */
-        final @Nullable Long deadlineAt;
-
-        final Runnable sending;
-
-        private DeferredSend(long ticket, @Nullable Long deadlineAt, Runnable sending) {
-            this.ticket = ticket;
-            this.deadlineAt = deadlineAt;
-            this.sending = sending;
-        }
-
-        boolean isRequest() {
-            return ticket >= 0;
-        }
-
-        /** 기한 색인 항목. 기한이 없으면 null. */
-        @Nullable
-        Expiry expiry() {
-            return deadlineAt == null ? null : new Expiry(deadlineAt, ticket);
-        }
-
-        void run() {
-            sending.run();
-        }
-
-        static DeferredSend request(long ticket, @Nullable Long deadlineAt, Runnable sending) {
-            return new DeferredSend(ticket, deadlineAt, sending);
-        }
-
-        static DeferredSend ping(Runnable sending) {
-            return new DeferredSend(-1, null, sending);
+        DeferredPing(byte[] payload, long beforeTicket) {
+            this.payload = payload;
+            this.beforeTicket = beforeTicket;
         }
     }
 

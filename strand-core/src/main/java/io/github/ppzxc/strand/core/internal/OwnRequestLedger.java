@@ -2,7 +2,9 @@ package io.github.ppzxc.strand.core.internal;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,23 +13,57 @@ import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 
 /**
- * 내 요청 장부. 번호를 받은 내 요청의 생애를 소유한다(번호 받음 → 쓰기 전 → 쓰기 시작 → 결과). {@link Endpoint}는 사건을 알리고, 장부가
- * 돌려주는 {@link Outcome}(확정성이 붙은 결과, 보낼 RESET)을 반영한다. 이벤트 객체를 만들거나 이벤트 목록을 만지지 않는다.
+ * 내 요청 장부. 내 요청 하나의 생애 전부를 소유한다(번호표 발급 → 번호 없음 → 번호 받음 → 쓰기 전 → 쓰기 시작 → 결과). {@link Endpoint}는
+ * 사건을 알리고, 장부가 돌려주는 {@link Outcome}(확정성이 붙은 결과, 보낼 RESET)과 {@link Admission}(번호를 줄 수 있는지)을 반영한다. 이벤트
+ * 객체를 만들거나 이벤트 목록을 만지지 않는다.
  *
- * <p>요청 하나는 {@link Record} 하나이고 상태({@link Endpoint.RequestState#NUMBERED_UNWRITTEN}, {@link
- * Endpoint.RequestState#WRITING_STARTED})는 기록의 값이다. 스트림→요청 색인, 번호표→요청 색인, 기한 색인, 쓰기 전 요청의 연결 리스트는
- * {@link #register}와 {@link #unregister}에서만 함께 고치므로 어긋날 수 없다. 끝난 요청은 어떤 색인에도 남지 않는다.
+ * <p>요청 하나는 {@link Record} 하나이고 상태({@link RequestState})는 기록의 값이다. 스트림→요청 색인, 번호표→요청 색인, 번호 없는 요청의
+ * 대기열, 기한 색인, 쓰기 전 요청의 연결 리스트는 {@link #register}, {@link #queue}, {@link #unregister}에서만 함께 고치므로 어긋날 수
+ * 없다. 끝난 요청은 어떤 색인에도 남지 않는다. 기한 색인은 하나이고 번호를 받아도 항목이 그대로라 다시 넣지 않는다.
+ *
+ * <p>스트림 번호와 번호표의 발급, 내 번호 공간의 홀짝, 번호를 줄 수 없는 경우(CLOSE 뒤, 번호 소진, 상대 {@code max_concurrent_streams} 도달,
+ * 규격 2.2.5절, 3.2.1절, 3.5절)의 판정도 여기에 있다.
  *
  * <p>결과 확정성 판정(규격 3.5절, 4.4절, 4.4.1절)은 이 클래스에만 있다. 응답이나 RESET 없이 끝나는 경우(취소, 기한, 전송 계층 닫힘)는
- * {@link #unfinishedCertainty} 한 자리가 정한다: 쓰기 전이면 처리 안 됨, 쓰기를 시작한 뒤면 결과 모름이다. 나머지 사건은 사건 자체가 확정성을
- * 정한다: 응답은 {@link Certainty#RESPONSE}({@link #onResponse}), 거절(REFUSED) RESET은 쓰기를 시작했어도 처리 안 됨, 그 밖의 RESET은 결과 모름
- * ({@link #onReset}), CLOSE {@code last_stream_id} 뒤의 요청은 처리 안 됨({@link #endAfter})이다.
+ * {@link #unfinishedCertainty} 한 자리가 정한다: 쓰기를 시작했으면 결과 모름, 아니면(번호 없음, 쓰기 전) 처리 안 됨이다. 나머지 사건은 사건
+ * 자체가 확정성을 정한다: 응답은 {@link Certainty#RESPONSE}({@link #onResponse}), 거절(REFUSED) RESET은 쓰기를 시작했어도 처리 안 됨, 그 밖의
+ * RESET은 결과 모름({@link #onReset}), CLOSE를 보내거나 받아 끝나는 번호 없는 요청과 CLOSE {@code last_stream_id} 뒤의 요청은 처리 안 됨({@link
+ * #onClosing}, {@link #endAfter})이다.
  *
  * <p>번호표 조회와 기한 색인의 비용 특성은 #202를 따른다. 번호표 조회는 O(1)이고 {@link #expire}는 만료된 요청 수에 비례해서만 일한다.
  */
 final class OwnRequestLedger {
 
-    /** 요청 하나가 끝나며 장부가 {@link Endpoint}에 돌려주는 결과. */
+    /**
+     * 요청이 쓰기 대기열 어디에 있는지(규격 1.3절, 4.4.1절). 입출력 없는(sans-IO) 모델에서는 {@link Endpoint#drainMessages()}가 프레임을 돌려준
+     * 때를 쓰기를 시작한 때로 본다. 돌려준 프레임은 전송 계층이 이미 받았으므로 끊거나 거둘 수 없다.
+     */
+    enum RequestState {
+        /** 번호를 받지 못한 요청. 프레임이 아직 없다. */
+        QUEUED_WITHOUT_NUMBER,
+        /** 번호를 받았지만 프레임이 아직 {@code drainMessages()}로 나가지 않았다. 쓰기 전이다. */
+        NUMBERED_UNWRITTEN,
+        /** 프레임이 {@code drainMessages()}로 나갔다. 쓰기를 시작했고 끝까지 쓴다. */
+        WRITING_STARTED
+    }
+
+    /** 번호를 줄 수 있는지에 대한 장부의 답. */
+    enum Admission {
+        /** 번호를 받아 쓰기 대기열에 들어갔다. */
+        ADMITTED,
+        /** 번호를 받으려는 번호 없는 요청이 더 없다({@link #openQueued}). */
+        NONE,
+        /** CLOSE를 보냈거나 받았다(규격 3.5절). 번호표만 쓴다. */
+        CLOSING,
+        /** 스트림 번호가 소진됐다(규격 2.2.5절). 번호표만 쓴다. 호출자가 연결을 닫는다. */
+        EXHAUSTED,
+        /** 상대가 알린 {@code max_concurrent_streams}에 닿았다(규격 3.2.1절). 번호표만 쓴다. */
+        STREAM_LIMIT,
+        /** 프레임이 상대의 {@code max_frame_size}를 넘는다(규격 3.2.1절). 번호표도 스트림 번호도 쓰지 않는다. */
+        OVERSIZE
+    }
+
+    /** 요청 하나가 끝나며 장부가 {@link Endpoint}에 돌려주는 결과. 번호를 받지 못한 요청이면 {@code streamId}는 0이다. */
     static final class Outcome {
         final long streamId;
         final int status;
@@ -43,15 +79,19 @@ final class OwnRequestLedger {
         }
     }
 
-    /** 번호를 받은 내 요청 하나의 기록. */
+    /** 내 요청 하나의 기록. */
     private static final class Record {
-        final long streamId;
         final long ticket;
         final int type;
-        /** 요청 기한(가상 시계의 절대 시각). 기한이 없으면 null. */
-        final @Nullable Long deadlineAt;
+        /** 번호를 받기 전의 본문. 번호를 받으면 프레임이 되므로 비운다. */
+        byte @Nullable [] payload;
+        /** 기한 색인 항목. 기한이 없으면 null. */
+        final @Nullable Expiry expiry;
 
-        Endpoint.RequestState state = Endpoint.RequestState.NUMBERED_UNWRITTEN;
+        /** 번호를 받기 전에는 0이다. */
+        long streamId;
+
+        RequestState state = RequestState.QUEUED_WITHOUT_NUMBER;
         /** 쓰기 대기열의 노드. 쓰기 전일 때만 있다. */
         Outbox.@Nullable Node node;
         /** 쓰기 전 요청의 연결 리스트(넣은 순서). 쓰기 전일 때만 이어져 있다. */
@@ -61,58 +101,181 @@ final class OwnRequestLedger {
         @Nullable
         Record nextUnwritten;
 
-        Record(long streamId, long ticket, int type, @Nullable Long deadlineAt) {
-            this.streamId = streamId;
+        Record(long ticket, int type, byte @Nullable [] payload, @Nullable Long deadlineAt) {
             this.ticket = ticket;
             this.type = type;
-            this.deadlineAt = deadlineAt;
+            this.payload = payload;
+            this.expiry = deadlineAt == null ? null : new Expiry(deadlineAt, ticket);
         }
     }
 
-    /** 기한 색인 항목. 기한 순이고 같은 기한이면 스트림 번호 순이다. */
+    /** 기한 색인 항목. 기한 순이고 같은 기한이면 번호표 순이다. 요청은 번호표로 찾는다. */
     private static final class Expiry implements Comparable<Expiry> {
         final long deadlineAt;
-        final long streamId;
+        final long ticket;
 
-        Expiry(long deadlineAt, long streamId) {
+        Expiry(long deadlineAt, long ticket) {
             this.deadlineAt = deadlineAt;
-            this.streamId = streamId;
+            this.ticket = ticket;
         }
 
         @Override
         public int compareTo(Expiry other) {
             int byDeadline = Long.compare(deadlineAt, other.deadlineAt);
-            return byDeadline != 0 ? byDeadline : Long.compare(streamId, other.streamId);
+            return byDeadline != 0 ? byDeadline : Long.compare(ticket, other.ticket);
         }
     }
 
+    /** 만료 순서: 번호 없는 요청이 먼저(번호표 순), 번호를 받은 요청이 뒤(스트림 번호 순). */
+    private static final Comparator<Record> EXPIRY_ORDER = (a, b) -> {
+        boolean aQueued = a.state == RequestState.QUEUED_WITHOUT_NUMBER;
+        if (aQueued != (b.state == RequestState.QUEUED_WITHOUT_NUMBER)) {
+            return aQueued ? -1 : 1;
+        }
+        return aQueued ? Long.compare(a.ticket, b.ticket) : Long.compare(a.streamId, b.streamId);
+    };
+
     private final Outbox outbox;
-    /** 스트림 번호 → 요청. 보낸 순서대로다(규격 1.3절). */
+    /** 번호를 받은 요청의 스트림 번호 → 요청. 보낸 순서대로다(규격 1.3절). */
     private final Map<Long, Record> byStream = new LinkedHashMap<>();
-    /** 번호표 → 요청. */
+    /** 번호표 → 요청. 번호 없는 요청도 있다. */
     private final Map<Long, Record> byTicket = new HashMap<>();
+    /** 번호를 받지 못한 요청. 낸 순서(번호표 순서)대로다. */
+    private final Map<Long, Record> queued = new LinkedHashMap<>();
     /** 기한이 있는 요청의 기한 순 색인. 가장 이른 기한만 보므로 {@link #expire}는 만료된 요청 수에 비례한다. */
     private final TreeSet<Expiry> expirations = new TreeSet<>();
+    /** 내 번호 공간의 홀짝: 클라이언트는 1, 서버는 0이다(규격 2.2.5절). */
+    private final int ownParity;
 
     private @Nullable Record firstUnwritten;
     private @Nullable Record lastUnwritten;
     /** 요청 프레임을 전송 계층에 넘긴 내 스트림 가운데 가장 큰 번호. 상대 CLOSE의 {@code last_stream_id} 검사 기준이다(규격 3.5절). */
     private long highestWrittenStreamId;
+    /** 다음 요청에 줄 번호표(낸 순서, 0부터). */
+    private long nextTicket;
+    /** 다음 요청에 줄 스트림 번호. 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다. */
+    private long nextStreamId;
 
-    OwnRequestLedger(Outbox outbox) {
+    private long peerMaxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
+    /** CLOSE를 보냈거나 받았다(규격 3.5절). 새 요청에 번호를 주지 않는다. */
+    private boolean closing;
+
+    /**
+     * @param firstStreamId 첫 스트림 번호. 호출자가 {@code ownParity}의 번호 공간인지 이미 확인했다
+     * @param ownParity 내 번호 공간의 홀짝(클라이언트 1, 서버 0)
+     */
+    OwnRequestLedger(Outbox outbox, long firstStreamId, int ownParity) {
         this.outbox = outbox;
+        this.nextStreamId = firstStreamId;
+        this.ownParity = ownParity;
+    }
+
+    /** 상대 HELLO가 알린 {@code max_concurrent_streams}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
+    void setPeerMaxConcurrentStreams(long peerMaxConcurrentStreams) {
+        this.peerMaxConcurrentStreams = peerMaxConcurrentStreams;
+    }
+
+    /** 스트림 번호가 내 번호 공간에 속하는지(규격 2.2.5절). */
+    boolean isOwnSpace(long streamId) {
+        return (streamId & 1) == ownParity;
+    }
+
+    /** 다음 요청에 줄 번호표. 받지 않는다. */
+    long nextTicket() {
+        return nextTicket;
+    }
+
+    /** 요청을 만들지 않고 번호표 하나를 쓴다. 전송 계층이 닫힌 뒤 로컬에서 실패시킨 요청의 번호표다. */
+    long issueTicket() {
+        return nextTicket++;
     }
 
     /**
-     * 요청 접수. 번호를 받은 요청 하나를 기록하고 요청 프레임을 쓰기 대기열에 넣는다. 호출자는 관문과 한도를 이미 통과시켰다.
+     * AUTH 관문이 열린 뒤의 요청. 번호를 줄 수 있으면 번호를 주고 요청 프레임을 쓰기 대기열에 넣는다. 번호표는 {@link Admission#OVERSIZE}가 아니면 쓴다.
+     * 판정 순서는 CLOSE 뒤, 번호 소진, 한도, 프레임 크기다. 번호표는 호출 전의 {@link #nextTicket()}이다.
      *
-     * @param frame 요청 프레임
      * @param deadlineAt 기한(가상 시계의 절대 시각). 없으면 null
+     * @param peerMaxFrameSize 상대가 알린 {@code max_frame_size}
      */
-    void accept(long streamId, long ticket, int type, byte[] frame, @Nullable Long deadlineAt) {
-        Record record = new Record(streamId, ticket, type, deadlineAt);
+    Admission open(int type, byte[] payload, @Nullable Long deadlineAt, long peerMaxFrameSize) {
+        Record record = new Record(nextTicket, type, null, deadlineAt);
+        Admission admission = number(record, payload, peerMaxFrameSize);
+        if (admission != Admission.OVERSIZE) {
+            nextTicket++;
+        }
+        return admission;
+    }
+
+    /**
+     * AUTH 관문이 열리기 전의 요청. 번호 없는 요청으로 대기열에 두고 번호표를 쓴다. 본문은 복사해 둔다.
+     *
+     * @param deadlineAt 기한(가상 시계의 절대 시각). 없으면 null
+     * @return 번호표
+     */
+    long queue(int type, byte[] payload, @Nullable Long deadlineAt) {
+        Record record = new Record(nextTicket++, type, payload.clone(), deadlineAt);
+        byTicket.put(record.ticket, record);
+        queued.put(record.ticket, record);
+        if (record.expiry != null) {
+            expirations.add(record.expiry);
+        }
+        return record.ticket;
+    }
+
+    /**
+     * 번호 없는 요청 가운데 가장 먼저 낸 것에 번호를 준다. 번호표가 {@code beforeTicket}보다 작은 것만 준다. 번호를 줄 수 없으면(
+     * {@link Admission#ADMITTED}가 아니면) 그 요청은 장부에서 지워진다. 호출자는 로컬 실패를 이벤트로 낸다. 한 번에 하나만 처리하는 것은
+     * 호출자가 단계마다 연결 상태를 다시 보기 위해서다(번호를 주다가 닫히면 남은 번호 없는 요청이 끝난다).
+     *
+     * @return 번호 없는 요청이 없거나 번호표 한도에 닿으면 {@link Admission#NONE}
+     */
+    Admission openQueued(long beforeTicket, long peerMaxFrameSize) {
+        Iterator<Record> it = queued.values().iterator();
+        if (!it.hasNext()) {
+            return Admission.NONE;
+        }
+        Record record = it.next();
+        if (record.ticket >= beforeTicket) {
+            return Admission.NONE;
+        }
+        byte[] payload = record.payload;
+        if (payload == null) {
+            throw new IllegalStateException("번호 없는 요청에 본문이 없다: 번호표 " + record.ticket);
+        }
+        it.remove();
+        Admission admission = number(record, payload, peerMaxFrameSize);
+        if (admission != Admission.ADMITTED) {
+            byTicket.remove(record.ticket);
+            if (record.expiry != null) {
+                expirations.remove(record.expiry);
+            }
+        }
+        return admission;
+    }
+
+    /** 번호를 줄 수 있는지 판정하고, 줄 수 있으면 번호를 주고 프레임을 쓰기 대기열에 넣는다. */
+    private Admission number(Record record, byte[] payload, long peerMaxFrameSize) {
+        if (closing) {
+            return Admission.CLOSING;
+        }
+        if (!Frames.isValidStreamId(nextStreamId)) {
+            return Admission.EXHAUSTED;
+        }
+        if (byStream.size() >= peerMaxConcurrentStreams) {
+            return Admission.STREAM_LIMIT;
+        }
+        long streamId = nextStreamId;
+        byte[] frame = Frames.request(record.type, streamId, payload);
+        if (frame.length > peerMaxFrameSize) {
+            return Admission.OVERSIZE;
+        }
+        nextStreamId += 2;
+        record.streamId = streamId;
+        record.state = RequestState.NUMBERED_UNWRITTEN;
+        record.payload = null;
         record.node = outbox.addApplication(OutboundMessage.binary(frame));
         register(record);
+        return Admission.ADMITTED;
     }
 
     /**
@@ -123,7 +286,7 @@ final class OwnRequestLedger {
         for (Record record = firstUnwritten; record != null; ) {
             Record next = record.nextUnwritten;
             highestWrittenStreamId = Math.max(highestWrittenStreamId, record.streamId);
-            record.state = Endpoint.RequestState.WRITING_STARTED;
+            record.state = RequestState.WRITING_STARTED;
             record.node = null;
             record.prevUnwritten = null;
             record.nextUnwritten = null;
@@ -133,13 +296,15 @@ final class OwnRequestLedger {
         lastUnwritten = null;
     }
 
-    /** 번호표로 요청의 상태를 본다. 끝났거나 번호를 받지 못했거나 낸 적 없으면 null이다. */
-    Endpoint.@Nullable RequestState stateOfTicket(long ticket) {
+    /** 번호표로 요청의 상태를 본다. 번호 없는 요청도 찾는다. 끝났거나 번호표를 받고도 요청이 되지 못했거나 낸 적 없으면 null이다. */
+    @Nullable
+    RequestState stateOfTicket(long ticket) {
         Record record = byTicket.get(ticket);
         return record == null ? null : record.state;
     }
 
-    Endpoint.@Nullable RequestState stateOfStream(long streamId) {
+    @Nullable
+    RequestState stateOfStream(long streamId) {
         Record record = byStream.get(streamId);
         return record == null ? null : record.state;
     }
@@ -148,7 +313,7 @@ final class OwnRequestLedger {
     @Nullable
     Long streamIdOf(long ticket) {
         Record record = byTicket.get(ticket);
-        return record == null ? null : record.streamId;
+        return record == null || record.state == RequestState.QUEUED_WITHOUT_NUMBER ? null : record.streamId;
     }
 
     /** 번호를 받아 아직 끝나지 않은 내 요청의 수. */
@@ -172,7 +337,7 @@ final class OwnRequestLedger {
         return record == null ? null : abort(record, status);
     }
 
-    /** 번호표로 취소한다(규격 4.4절). 번호를 받은 대기 중 요청이 아니면 null이다. */
+    /** 번호표로 취소한다(규격 4.4절). 번호 없는 요청도 취소한다. 대기 중이 아니면 null이다. */
     @Nullable
     Outcome cancelTicket(long ticket) {
         Record record = byTicket.get(ticket);
@@ -180,28 +345,27 @@ final class OwnRequestLedger {
     }
 
     /**
-     * 시계 진행 사건. 기한이 지난 요청을 끝낸다(규격 4.4.1절). 끝내는 순서는 기한 순이 아니라 스트림 번호 순이다. 결과는 요청 하나를 끝낼
-     * 때마다 곧바로 {@code sink}에 넘긴다. 쓰기를 시작한 요청의 {@code RESET}을 보내는 일과 쓰기 전 요청의 프레임을 거두는 일이 요청 순서대로
-     * 엇갈려야 쓰기 대기열의 송신 순서가 바뀌지 않기 때문이다.
+     * 시계 진행 사건. 기한이 지난 요청을 끝낸다(규격 4.4.1절). 끝내는 순서는 기한 순이 아니라 번호 없는 요청이 먼저(낸 순서), 번호를 받은
+     * 요청이 뒤(스트림 번호 순)다. 결과는 요청 하나를 끝낼 때마다 곧바로 {@code sink}에 넘긴다. 쓰기를 시작한 요청의 {@code RESET}을 보내는
+     * 일과 쓰기 전 요청의 프레임을 거두는 일이 요청 순서대로 엇갈려야 쓰기 대기열의 송신 순서가 바뀌지 않기 때문이다.
      *
-     * @return 끝낸 요청이 있으면 true
+     * @return 번호를 받은 요청을 끝냈으면 true
      */
     boolean expire(long now, Consumer<Outcome> sink) {
         if (expirations.isEmpty() || now <= expirations.first().deadlineAt) {
             return false;
         }
-        List<Long> expired = new ArrayList<>();
+        List<Record> expired = new ArrayList<>();
         while (!expirations.isEmpty() && now > expirations.first().deadlineAt) {
-            expired.add(expirations.pollFirst().streamId);
+            expired.add(byTicket.get(expirations.pollFirst().ticket));
         }
-        Collections.sort(expired);
-        for (long streamId : expired) {
-            Record record = byStream.get(streamId);
-            if (record != null) {
-                sink.accept(abort(record, Status.DEADLINE_EXCEEDED));
-            }
+        Collections.sort(expired, EXPIRY_ORDER);
+        boolean endedNumbered = false;
+        for (Record record : expired) {
+            endedNumbered |= record.state != RequestState.QUEUED_WITHOUT_NUMBER;
+            sink.accept(abort(record, Status.DEADLINE_EXCEEDED));
         }
-        return true;
+        return endedNumbered;
     }
 
     /**
@@ -256,16 +420,38 @@ final class OwnRequestLedger {
     }
 
     /**
-     * 전송 계층 닫힘 사건. 대기 중인 요청을 모두 끝내고 장부를 비운다. 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절).
-     * 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
+     * CLOSE를 보내거나 받는 사건. 이후 새 요청에 번호를 주지 않고, 번호를 받지 못하고 기다리던 요청은 모두 처리 안 됨으로 끝낸다(규격
+     * 3.5절). 번호를 받은 요청은 건드리지 않는다. 낸 순서대로 돌려준다.
+     */
+    List<Outcome> onClosing() {
+        closing = true;
+        List<Outcome> outcomes = new ArrayList<>(queued.size());
+        for (Record record : queued.values()) {
+            outcomes.add(new Outcome(0, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false));
+            byTicket.remove(record.ticket);
+            if (record.expiry != null) {
+                expirations.remove(record.expiry);
+            }
+        }
+        queued.clear();
+        return outcomes;
+    }
+
+    /**
+     * 전송 계층 닫힘 사건. 대기 중인 요청을 모두 끝내고 장부를 비운다. 번호를 받은 요청(스트림 번호 순)이 먼저고 번호 없는 요청(낸 순서)이 뒤다.
+     * 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절). 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
      */
     List<Outcome> onTransportClosed() {
-        List<Outcome> outcomes = new ArrayList<>(byStream.size());
+        List<Outcome> outcomes = new ArrayList<>(byTicket.size());
         for (Record record : byStream.values()) {
             outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, unfinishedCertainty(record), false));
         }
+        for (Record record : queued.values()) {
+            outcomes.add(new Outcome(0, Status.UNAVAILABLE, unfinishedCertainty(record), false));
+        }
         byStream.clear();
         byTicket.clear();
+        queued.clear();
         expirations.clear();
         return outcomes;
     }
@@ -281,19 +467,20 @@ final class OwnRequestLedger {
     }
 
     /**
-     * 응답이나 RESET을 받지 못한 채 끝나는 요청(취소, 기한, 전송 계층 닫힘)의 확정성을 정하는 유일한 자리(규격 3.5절, 4.4절, 4.4.1절). 쓰기 전이면 프레임을 거두고 처리
-     * 안 됨, 쓰기를 시작했으면 프레임을 이미 끊을 수 없어 결과 모름이다.
+     * 응답이나 RESET을 받지 못한 채 끝나는 요청(취소, 기한, 전송 계층 닫힘)의 확정성을 정하는 유일한 자리(규격 3.5절, 4.4절, 4.4.1절). 쓰기를
+     * 시작했으면 프레임을 이미 끊을 수 없어 결과 모름이다. 번호가 없거나 쓰기 전이면 프레임을 거두고(번호가 없으면 프레임이 없다) 처리 안 됨이다.
      */
     private Certainty unfinishedCertainty(Record record) {
-        return unwrite(record) ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
+        unwrite(record);
+        return record.state == RequestState.WRITING_STARTED ? Certainty.UNKNOWN : Certainty.NOT_PROCESSED;
     }
 
-    /** 요청을 모든 색인에 함께 넣는다. 쓰기 전 요청의 연결 리스트 끝에도 잇는다. */
+    /** 번호를 받은 요청을 색인에 함께 넣는다. 쓰기 전 요청의 연결 리스트 끝에도 잇는다. 번호표와 기한 색인에는 이미 있을 수 있다(번호 없는 요청). */
     private void register(Record record) {
         byStream.put(record.streamId, record);
         byTicket.put(record.ticket, record);
-        if (record.deadlineAt != null) {
-            expirations.add(new Expiry(record.deadlineAt, record.streamId));
+        if (record.expiry != null) {
+            expirations.add(record.expiry);
         }
         record.prevUnwritten = lastUnwritten;
         if (lastUnwritten == null) {
@@ -304,12 +491,16 @@ final class OwnRequestLedger {
         lastUnwritten = record;
     }
 
-    /** 요청을 스트림·번호표·기한 색인에서 함께 뺀다. 쓰기 전 연결 리스트와 대기열 노드는 {@link #unwrite}가 맡는다. */
+    /** 요청을 스트림·번호 없는 요청 대기열·번호표·기한 색인에서 함께 뺀다. 쓰기 전 연결 리스트와 대기열 노드는 {@link #unwrite}가 맡는다. */
     private void unregister(Record record) {
-        byStream.remove(record.streamId);
+        if (record.state == RequestState.QUEUED_WITHOUT_NUMBER) {
+            queued.remove(record.ticket);
+        } else {
+            byStream.remove(record.streamId);
+        }
         byTicket.remove(record.ticket);
-        if (record.deadlineAt != null) {
-            expirations.remove(new Expiry(record.deadlineAt, record.streamId));
+        if (record.expiry != null) {
+            expirations.remove(record.expiry);
         }
     }
 
@@ -319,7 +510,7 @@ final class OwnRequestLedger {
      * @return 쓰기 전이어서 거뒀으면 true, 이미 쓰기를 시작했으면 false
      */
     private boolean unwrite(Record record) {
-        if (record.state != Endpoint.RequestState.NUMBERED_UNWRITTEN) {
+        if (record.state != RequestState.NUMBERED_UNWRITTEN) {
             return false;
         }
         Outbox.Node node = record.node;

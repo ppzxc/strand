@@ -92,15 +92,15 @@ public class TicketLookupBenchmark {
     }
 
     private void verifyState(long ticket) {
-        Endpoint.RequestState expected;
+        OwnRequestLedger.RequestState expected;
         if (kind == Kind.UNNUMBERED) {
-            expected = Endpoint.RequestState.QUEUED_WITHOUT_NUMBER;
+            expected = OwnRequestLedger.RequestState.QUEUED_WITHOUT_NUMBER;
         } else if (kind == Kind.UNWRITTEN) {
-            expected = Endpoint.RequestState.NUMBERED_UNWRITTEN;
+            expected = OwnRequestLedger.RequestState.NUMBERED_UNWRITTEN;
         } else {
-            expected = Endpoint.RequestState.WRITING_STARTED;
+            expected = OwnRequestLedger.RequestState.WRITING_STARTED;
         }
-        Endpoint.RequestState actual = endpoint.requestState(ticket);
+        OwnRequestLedger.RequestState actual = endpoint.requestState(ticket);
         if (actual != expected) {
             throw new IllegalStateException("준비한 요청의 상태가 " + expected + "가 아니라 " + actual + "이다");
         }
