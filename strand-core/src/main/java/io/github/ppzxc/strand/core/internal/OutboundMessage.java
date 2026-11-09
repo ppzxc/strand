@@ -31,7 +31,7 @@ public final class OutboundMessage {
 
     /** 애플리케이션 프레임(요청·응답)이다. 8바이트 연결 서문은 프레임이 아니라 제어 쪽이다. 제어 프레임이 앞지를 수 있는 쪽이다(규격 3.6절). */
     boolean isApplication() {
-        return bytes.length >= Frames.HEADER_SIZE && Frames.typeOf(bytes) >= FrameType.FIRST_APPLICATION;
+        return bytes.length >= Frames.HEADER_SIZE && Frames.typeOf(bytes, 0) >= FrameType.FIRST_APPLICATION;
     }
 
     /** {@code NO_ERROR} 종료의 WebSocket Close. 상태 코드는 {@code 1000 Normal Closure}다(규격 1.2절). */

@@ -2,7 +2,6 @@ package io.github.ppzxc.strand.core.internal;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 
 /** 프레임 바이트 인코딩(규격 2.1절). */
 final class Frames {
@@ -130,38 +129,32 @@ final class Frames {
         return (readUnsignedInt(bytes, at) << 32) | readUnsignedInt(bytes, at + 4);
     }
 
-    static byte[] concat(byte[] a, byte[] b) {
-        byte[] out = Arrays.copyOf(a, a.length + b.length);
-        System.arraycopy(b, 0, out, a.length, b.length);
-        return out;
-    }
-
     static int readUnsignedShort(byte[] bytes, int at) {
         return ((bytes[at] & 0xFF) << 8) | (bytes[at + 1] & 0xFF);
     }
 
-    /** 프레임의 {@code type}(바이트 4~5, 규격 2.1절). */
-    static int typeOf(byte[] frame) {
-        return readUnsignedShort(frame, 4);
+    /** {@code off}에서 시작하는 프레임의 {@code type}(바이트 4~5, 규격 2.1절). */
+    static int typeOf(byte[] bytes, int off) {
+        return readUnsignedShort(bytes, off + 4);
     }
 
-    /** 프레임의 {@code flags}(바이트 6). */
-    static int flagsOf(byte[] frame) {
-        return frame[6] & 0xFF;
+    /** {@code off}에서 시작하는 프레임의 {@code flags}(바이트 6). */
+    static int flagsOf(byte[] bytes, int off) {
+        return bytes[off + 6] & 0xFF;
     }
 
-    /** 응답 프레임의 {@code status}(바이트 7). */
-    static int statusOf(byte[] frame) {
-        return frame[7] & 0xFF;
+    /** {@code off}에서 시작하는 응답 프레임의 {@code status}(바이트 7). */
+    static int statusOf(byte[] bytes, int off) {
+        return bytes[off + 7] & 0xFF;
     }
 
-    /** 프레임의 {@code stream_id}(바이트 8~15). 최상위 비트가 1이면 음수다. */
-    static long streamIdOf(byte[] frame) {
-        return readLong(frame, 8);
+    /** {@code off}에서 시작하는 프레임의 {@code stream_id}(바이트 8~15). 최상위 비트가 1이면 음수다. */
+    static long streamIdOf(byte[] bytes, int off) {
+        return readLong(bytes, off + 8);
     }
 
-    /** 프레임의 {@code extensions_length}(바이트 16~17). */
-    static int extensionsLengthOf(byte[] frame) {
-        return readUnsignedShort(frame, 16);
+    /** {@code off}에서 시작하는 프레임의 {@code extensions_length}(바이트 16~17). */
+    static int extensionsLengthOf(byte[] bytes, int off) {
+        return readUnsignedShort(bytes, off + 16);
     }
 }

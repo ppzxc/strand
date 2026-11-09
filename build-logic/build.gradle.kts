@@ -16,6 +16,7 @@ dependencies {
   implementation(libs.plugins.maven.publish.asDependency())
   implementation(libs.plugins.cyclonedx.asDependency())
   implementation(libs.plugins.japicmp.asDependency())
+  implementation(libs.plugins.jmh.asDependency())
   // 플러그인 0.4.6이 끌어오는 japicmp 코어(0.23.1) 대신 카탈로그에 고정한 코어를 쓴다. 플러그인은 코어를 자기 클래스패스에서 읽는다.
   implementation(libs.japicmp)
 
