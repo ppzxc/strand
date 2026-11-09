@@ -7,6 +7,7 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
@@ -48,7 +49,12 @@ public final class Endpoint {
 
     private final EndpointConfig config;
     private final Outbox outbox = new Outbox();
+    /** 애플리케이션에 낼 이벤트. 쓰기만 한다. 꺼낼 때({@link #drainEvents()}) 비운다. */
     private final List<Event> events = new ArrayList<>();
+    /** 이벤트로 쌓았지만 아직 꺼내지 않은 상대 요청의 번호(받은 순서). */
+    private final Set<Long> unhandedRequests = new LinkedHashSet<>();
+    /** 돌려보내서 {@code REQUEST_RECEIVED}를 애플리케이션에 내지 않을 요청의 번호. */
+    private final Set<Long> refusedRequests = new HashSet<>();
     /**
      * 내 요청(번호표를 받은 뒤 결과가 나올 때까지)의 장부. 번호를 받기 전(AUTH 관문 전에 미룬 요청)과 번호를 받은 뒤(쓰기 전, 쓰기 시작)를
      * 모두 가진다. 프레임 하나가 메시지 하나이므로 {@link #drainMessages()}로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 보고 장부에 쓰기
@@ -550,8 +556,15 @@ public final class Endpoint {
      * @return 이벤트 목록. 없으면 빈 목록
      */
     public List<Event> drainEvents() {
-        List<Event> drained = new ArrayList<>(events);
+        List<Event> drained = new ArrayList<>(events.size());
+        for (Event event : events) {
+            if (event.kind() != Event.Kind.REQUEST_RECEIVED || !refusedRequests.contains(event.streamId())) {
+                drained.add(event);
+            }
+        }
         events.clear();
+        unhandedRequests.clear();
+        refusedRequests.clear();
         return drained;
     }
 
@@ -788,6 +801,7 @@ public final class Endpoint {
         } else {
             peerPendingStreams.put(streamId, type);
             events.add(Event.requestReceived(streamId, type));
+            unhandedRequests.add(streamId);
         }
     }
 
@@ -1065,13 +1079,13 @@ public final class Endpoint {
      * RESET(REFUSED)}로 돌려보내고 스트림을 끝낸다. 오류 CLOSE보다 먼저 호출한다.
      */
     private void refuseUnhandedRequests() {
-        events.removeIf(event -> {
-            if (event.kind() != Event.Kind.REQUEST_RECEIVED || peerPendingStreams.remove(event.streamId()) == null) {
-                return false;
+        for (Long streamId : unhandedRequests) {
+            if (peerPendingStreams.remove(streamId) != null) {
+                send(Frames.reset(streamId, ErrorCode.REFUSED));
+                refusedRequests.add(streamId);
             }
-            send(Frames.reset(event.streamId(), ErrorCode.REFUSED));
-            return true;
-        });
+        }
+        unhandedRequests.clear();
     }
 
     /** 형태가 잘못된 CLOSE를 받았다. 받은 CLOSE로 치고 CLOSE를 보내지 않은 채 닫는다(규격 3.5절). */
