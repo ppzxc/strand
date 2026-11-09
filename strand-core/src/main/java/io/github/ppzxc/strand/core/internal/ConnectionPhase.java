@@ -67,7 +67,7 @@ final class ConnectionPhase {
         CLOSING,
         /** {@code NO_ERROR}로 닫는 중에 더 기다릴 스트림이 없어졌다(0개가 됐거나 애플리케이션이 더 기다리지 않기로 했다). 곧 닫는다. */
         DRAINED,
-        /** CLOSE 교환 쪽(CLOSE를 보냈거나 받았거나 연결 오류)에서 오류로 끝나기로 했다. 곧 닫는다. 이후 NO_ERROR CLOSE가 겹쳐도 정상 종료로 되돌리지 않는다. */
+        /** CLOSE 교환 쪽(CLOSE를 보냈거나 받았거나 연결 오류)에서 오류로 끝나기로 했다. 끊긴({@link #DISCONNECTED}) 뒤에 CLOSE가 겹쳐도 이 값이 된다. 곧 닫는다. 이후 NO_ERROR CLOSE가 겹쳐도 정상 종료로 되돌리지 않는다. */
         FAILED,
         /** CLOSE 없이 오류로 끝나기로 했다(전송 계층이 끊겼다). 곧 닫는다. */
         DISCONNECTED;
