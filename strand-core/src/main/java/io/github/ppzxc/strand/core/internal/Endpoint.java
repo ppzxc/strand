@@ -157,22 +157,30 @@ public final class Endpoint {
         if (config.isWebSocket()) {
             throw new IllegalStateException("WebSocket 엔드포인트는 receiveMessage로 입력한다");
         }
-        enterReceive();
+        if (!enterReceive()) {
+            return;
+        }
         try {
-            if (!phase.isEnded()) {
-                receiveBytes(bytes);
-            }
+            receiveBytes(bytes);
         } finally {
             receiving = false;
         }
     }
 
-    /** 입력 처리에 들어간다. 이미 처리 중이면(애플리케이션 콜백이 다시 입력함) 상태를 건드리지 않고 던진다. */
-    private void enterReceive() {
+    /**
+     * 입력 처리에 들어간다. 이미 처리 중이면(애플리케이션 콜백이 다시 입력함) 상태를 건드리지 않고 던진다. 연결이 끝났으면 입력을 받지 않는다.
+     *
+     * @return 입력을 처리해도 되는가
+     */
+    private boolean enterReceive() {
         if (receiving) {
             throw new IllegalStateException("입력을 처리하는 중에 같은 엔드포인트에 다시 입력할 수 없다");
         }
+        if (phase.isEnded()) {
+            return false;
+        }
         receiving = true;
+        return true;
     }
 
     /**
@@ -248,7 +256,9 @@ public final class Endpoint {
         if (!config.isWebSocket()) {
             throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
         }
-        enterReceive();
+        if (!enterReceive()) {
+            return;
+        }
         try {
             receiveWebSocketMessage(kind, message);
         } finally {
@@ -257,9 +267,6 @@ public final class Endpoint {
     }
 
     private void receiveWebSocketMessage(WebSocketMessageKind kind, byte[] message) {
-        if (phase.isEnded()) {
-            return;
-        }
         if (phase.awaitingPreface()) {
             if (kind == WebSocketMessageKind.BINARY
                     && message.length == Frames.preface().length
@@ -295,9 +302,6 @@ public final class Endpoint {
      * @param ms 밀리초
      */
     public void advance(long ms) {
-        if (phase.isEnded()) {
-            return;
-        }
         now += ms;
         LivenessTimers.Expiry expiry = timers.expiry(now);
         if (expiry == LivenessTimers.Expiry.UNAUTHENTICATED) {
@@ -334,12 +338,9 @@ public final class Endpoint {
     }
 
     private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
-        if (phase.isEnded()) {
-            failLocally();
-            return ledger.issueTicket();
-        }
-        if (!phase.defersApplicationSends()) {
-            if (!phase.mayOpenRequest()) {
+        ConnectionPhase.ApplicationSend send = phase.applicationSend();
+        if (send != ConnectionPhase.ApplicationSend.DEFER) {
+            if (send == ConnectionPhase.ApplicationSend.REFUSE || !phase.mayOpenRequest()) {
                 failLocally();
                 return ledger.issueTicket();
             }
@@ -401,9 +402,6 @@ public final class Endpoint {
      * @param ticket {@link #request}가 돌려준 번호표
      */
     public void cancelRequest(long ticket) {
-        if (phase.isEnded()) {
-            return;
-        }
         endOwnRequest(ledger.cancelTicket(ticket));
     }
 
@@ -417,7 +415,7 @@ public final class Endpoint {
      *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
     public void respond(long streamId, int status, byte[] payload) {
-        Integer type = phase.isEnded() ? null : peerPendingStreams.get(streamId);
+        Integer type = peerPendingStreams.get(streamId);
         if (type == null) {
             return;
         }
@@ -437,9 +435,7 @@ public final class Endpoint {
      * @param streamId 내가 연 스트림 번호
      */
     public void cancel(long streamId) {
-        if (!phase.isEnded()) {
-            endOwnRequest(ledger.cancelStream(streamId, Status.CANCELLED));
-        }
+        endOwnRequest(ledger.cancelStream(streamId, Status.CANCELLED));
     }
 
     /** 기한이 지난 요청을 끝낸다(규격 4.4.1절). 순서는 장부가 정한다. 번호를 받은 요청이 끝났으면 종료 중인 연결을 닫을 수 있는지 본다. */
@@ -482,13 +478,15 @@ public final class Endpoint {
         if (payload.length != PING_PAYLOAD_SIZE) {
             throw new IllegalArgumentException("PING payload는 정확히 8바이트여야 한다: " + payload.length);
         }
-        if (!phase.isEnded()) {
-            byte[] copy = payload.clone();
-            if (!phase.defersApplicationSends()) {
-                sendPing(copy);
-            } else {
-                deferredPings.addLast(new DeferredPing(copy, ledger.nextTicket()));
-            }
+        switch (phase.applicationSend()) {
+            case NOW:
+                sendPing(payload.clone());
+                break;
+            case DEFER:
+                deferredPings.addLast(new DeferredPing(payload.clone(), ledger.nextTicket()));
+                break;
+            default:
+                break;
         }
     }
 
@@ -498,7 +496,7 @@ public final class Endpoint {
      * @param errorCode 규격 2.5.2절의 error_code 값
      */
     public void close(int errorCode) {
-        if (phase.isEnded() || phase.closeExchanged()) {
+        if (!phase.mayClose()) {
             return;
         }
         if (errorCode != ErrorCode.NO_ERROR) {
@@ -525,7 +523,7 @@ public final class Endpoint {
      * 아무것도 하지 않는다.
      */
     public void abortClosing() {
-        if (phase.isEnded() || !phase.closeExchanged()) {
+        if (phase.phase() != ConnectionPhase.Phase.CLOSING) {
             return;
         }
         refuseUnhandedRequests();

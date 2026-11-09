@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ppzxc.strand.core.internal.ConnectionPhase.Admission;
+import io.github.ppzxc.strand.core.internal.ConnectionPhase.ApplicationSend;
 import io.github.ppzxc.strand.core.internal.ConnectionPhase.Phase;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -190,9 +191,10 @@ class ConnectionPhaseTest {
     void sendsAreDeferredAndIdlePingSuppressedUntilTheGateOpens() {
         for (Phase phase : establishing()) {
             boolean open = phase == Phase.OPEN;
-            assertThat(server(phase).defersApplicationSends()).isEqualTo(!open);
+            ApplicationSend expected = open ? ApplicationSend.NOW : ApplicationSend.DEFER;
+            assertThat(server(phase).applicationSend()).isEqualTo(expected);
             if (phase != Phase.PREFACE) {
-                assertThat(client(phase).defersApplicationSends()).isEqualTo(!open);
+                assertThat(client(phase).applicationSend()).isEqualTo(expected);
             }
             assertThat(server(phase).mayIdlePing()).isEqualTo(open);
         }
@@ -292,7 +294,7 @@ class ConnectionPhaseTest {
                 assertThat(closing.admit(type, ack)).isEqualTo(open.admit(type, ack));
             }
         }
-        assertThat(closing.defersApplicationSends()).isEqualTo(open.defersApplicationSends());
+        assertThat(closing.applicationSend()).isEqualTo(open.applicationSend());
         assertThat(closing.mayIdlePing()).isEqualTo(open.mayIdlePing());
         assertThat(closing.admit(FrameType.CLOSE, false)).isEqualTo(Admission.ALLOW);
         assertThat(closing.admit(RESERVED, false)).isEqualTo(Admission.IGNORE);
@@ -416,6 +418,15 @@ class ConnectionPhaseTest {
             assertThat(subject.admit(type, false)).isEqualTo(Admission.IGNORE);
         }
         assertThat(subject.mayIdlePing()).isFalse();
+        assertThat(subject.applicationSend()).isEqualTo(ApplicationSend.REFUSE);
+    }
+
+    @Test
+    void mayCloseOnlyWhileNoCloseExchanged() {
+        assertThat(server(Phase.AUTH).mayClose()).isTrue();
+        assertThat(server(Phase.OPEN).mayClose()).isTrue();
+        assertThat(closing(Phase.OPEN).mayClose()).isFalse();
+        assertThat(ended(Phase.OPEN).mayClose()).isFalse();
     }
 
     /** 닫은 로컬 원인은 단계가 보관하고 끝난 뒤에도 읽는다(규격 3.5절, #199). */
