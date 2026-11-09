@@ -65,7 +65,7 @@ public final class Endpoint {
      *
      * <p>장부의 닫는 중({@code onClosing})과 연결 단계의 CLOSE 교환은 같은 사건이다. 연결이 계속 열려 있을 수 있는 두 곳({@link #close},
      * {@link #handleClose})은 {@link #endQueuedRequests}로 장부에 알린다. 나머지(형태가 잘못된 CLOSE, 연결 오류, 너무 큰 AUTH)는 곧바로
-     * 전송 계층을 닫아 {@link ConnectionPhase#mayOpenRequest()}가 새 요청을 먼저 막으므로 장부의 닫는 중이 필요 없다.
+     * 전송 계층을 닫아 {@link ConnectionPhase#isActive()}가 새 요청을 먼저 막으므로 장부의 닫는 중이 필요 없다.
      */
     private final OwnRequestLedger ledger;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
@@ -302,6 +302,9 @@ public final class Endpoint {
      * @param ms 밀리초
      */
     public void advance(long ms) {
+        if (phase.isEnded()) {
+            return;
+        }
         now += ms;
         LivenessTimers.Expiry expiry = timers.expiry(now);
         if (expiry == LivenessTimers.Expiry.UNAUTHENTICATED) {
@@ -342,7 +345,7 @@ public final class Endpoint {
         if (send == ConnectionPhase.ApplicationSend.DEFER) {
             return ledger.queue(type, payload, deadlineAt);
         }
-        if (send == ConnectionPhase.ApplicationSend.REFUSE || !phase.mayOpenRequest()) {
+        if (!phase.isActive()) {
             failLocally();
             return ledger.issueTicket();
         }
@@ -496,7 +499,7 @@ public final class Endpoint {
      * @param errorCode 규격 2.5.2절의 error_code 값
      */
     public void close(int errorCode) {
-        if (!phase.mayClose()) {
+        if (!phase.isActive()) {
             return;
         }
         if (errorCode != ErrorCode.NO_ERROR) {
@@ -527,7 +530,8 @@ public final class Endpoint {
             return;
         }
         refuseUnhandedRequests();
-        phase.closingAborted();
+        // 더 기다리지 않으므로 대기 중인 스트림이 없어진 것으로 본다.
+        phase.pendingStreamsReachedZero();
         conclude();
     }
 
@@ -551,12 +555,15 @@ public final class Endpoint {
      * @return 이벤트 목록. 없으면 빈 목록
      */
     public List<Event> drainEvents() {
-        List<Event> drained = new ArrayList<>(events.size());
-        for (Event event : events) {
-            if (refusedRequests.isEmpty()
-                    || event.kind() != Event.Kind.REQUEST_RECEIVED
-                    || !refusedRequests.contains(event.streamId())) {
-                drained.add(event);
+        List<Event> drained;
+        if (refusedRequests.isEmpty()) {
+            drained = new ArrayList<>(events);
+        } else {
+            drained = new ArrayList<>(events.size());
+            for (Event event : events) {
+                if (event.kind() != Event.Kind.REQUEST_RECEIVED || !refusedRequests.contains(event.streamId())) {
+                    drained.add(event);
+                }
             }
         }
         events.clear();
@@ -663,7 +670,7 @@ public final class Endpoint {
     /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */
     private void rejectBadLength(byte[] bytes, int off) {
         if (Frames.typeOf(bytes, off) == FrameType.CLOSE) {
-            phase.malformedCloseReceived();
+            phase.connectionFailed();
             conclude();
         } else {
             connectionError();
@@ -676,7 +683,8 @@ public final class Endpoint {
      */
     private void handle(byte[] bytes, int off, int size) {
         dispatch(bytes, off, size);
-        // 응답·취소·RESET·기한 만료로 대기 중인 스트림이 0개가 됐는지는 프레임 하나를 처리한 뒤에 한 번 본다.
+        // 프레임 하나를 처리한 뒤 종료 경로를 한 번 지난다. 응답·RESET·CLOSE·오류로 대기 중인 스트림이 0개가 됐는지, 닫을 때가 됐는지는
+        // 여기서 본다. dispatch가 부르는 핸들러는 따로 conclude하지 않는다.
         conclude();
     }
 
@@ -699,7 +707,10 @@ public final class Endpoint {
         }
         boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
         ConnectionPhase.Admission admission = phase.admit(type, ack);
-        if (admission == ConnectionPhase.Admission.IGNORE) {
+        if (admission == ConnectionPhase.Admission.ENDED) {
+            return;
+        }
+        if (admission == ConnectionPhase.Admission.RESERVED) {
             // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 관문은 보지 않는다.
             if (extensionsLength != 0) {
                 connectionError();
@@ -879,8 +890,7 @@ public final class Endpoint {
             // 3.2.1절은 상대 max_frame_size를 넘는 프레임을 금지(MUST NOT)하며 AUTH도 예외가 아니다. 상대 HELLO는 유효하므로 ACK는 3.2.3절이
             // 요구한 대로 보냈다. 그다음 닫는 처리만 규격에 정의가 없다(#196): AUTH도 CLOSE도 보내지 않고 전송 계층만 닫는다. 아무것도 보내지
             // 않았으므로 대기 요청은 연결이 끝날 때 처리 안 됨으로 끝난다.
-            phase.negotiationFailed();
-            conclude();
+            phase.connectionFailed();
             return;
         }
         // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
@@ -1042,8 +1052,7 @@ public final class Endpoint {
                             || lastStreamId > ledger.highestWrittenStreamId());
         }
         if (malformed) {
-            phase.malformedCloseReceived();
-            conclude();
+            phase.connectionFailed();
             return;
         }
         if (phase.closeReceived(Frames.readUnsignedInt(bytes, off + Frames.HEADER_SIZE))) {
@@ -1052,7 +1061,6 @@ public final class Endpoint {
             }
         }
         endQueuedRequests();
-        conclude();
     }
 
     /**
@@ -1068,6 +1076,10 @@ public final class Endpoint {
     /**
      * 끊기 전에 돌려보낸다(규격 3.5.1절, SHOULD). 받아들였지만 아직 애플리케이션이 이벤트로 받지 않은 상대의 요청을 {@code
      * RESET(REFUSED)}로 돌려보내고 스트림을 끝낸다. 오류 CLOSE보다 먼저 호출한다.
+     *
+     * <p>암묵 불변식: {@code drainedPeerStreamId}보다 큰 번호의 대기 스트림은 항상 아직 꺼내지 않은 REQUEST_RECEIVED 이벤트와 짝이다
+     * ({@link #handleRequest}가 둘을 함께 만들고, 이벤트는 {@link #drainEvents}가 {@code drainedPeerStreamId}를 올릴 때만 사라진다).
+     * 그래서 여기서 돌려보낸 요청의 이벤트를 {@link #drainEvents}가 가려낼 수 있다.
      */
     private void refuseUnhandedRequests() {
         Iterator<Long> pending = peerPendingStreams.keySet().iterator();

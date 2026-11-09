@@ -120,8 +120,8 @@ class ConnectionPhaseTest {
     @MethodSource("establishingPhases")
     void closeAndReservedTypesAreNeverGated(Phase phase) {
         assertThat(server(phase).admit(FrameType.CLOSE, false)).isEqualTo(Admission.ALLOW);
-        assertThat(server(phase).admit(RESERVED, false)).isEqualTo(Admission.IGNORE);
-        assertThat(server(phase).admit(0, false)).isEqualTo(Admission.IGNORE);
+        assertThat(server(phase).admit(RESERVED, false)).isEqualTo(Admission.RESERVED);
+        assertThat(server(phase).admit(0, false)).isEqualTo(Admission.RESERVED);
     }
 
     static Stream<Phase> establishingPhases() {
@@ -211,12 +211,9 @@ class ConnectionPhaseTest {
         CLOSE_SENT_ERROR(p -> p.closeSent(ERROR)),
         CLOSE_RECEIVED_NO_ERROR(p -> p.closeReceived(NO_ERROR)),
         CLOSE_RECEIVED_ERROR(p -> p.closeReceived(ERROR)),
-        MALFORMED_CLOSE_RECEIVED(ConnectionPhase::malformedCloseReceived),
-        NEGOTIATION_FAILED(ConnectionPhase::negotiationFailed),
         CONNECTION_FAILED(ConnectionPhase::connectionFailed),
         DISCONNECTED(ConnectionPhase::transportDisconnected),
         PENDING_STREAMS_ZERO(ConnectionPhase::pendingStreamsReachedZero),
-        CLOSING_ABORTED(ConnectionPhase::closingAborted),
         TRANSPORT_CLOSED(ConnectionPhase::transportClosed);
 
         private final Consumer<ConnectionPhase> action;
@@ -249,13 +246,10 @@ class ConnectionPhaseTest {
                 Arguments.of(CloseEvent.CLOSE_SENT_ERROR, closing, true, false),
                 Arguments.of(CloseEvent.CLOSE_RECEIVED_NO_ERROR, closing, false, true),
                 Arguments.of(CloseEvent.CLOSE_RECEIVED_ERROR, closing, true, false),
-                Arguments.of(CloseEvent.MALFORMED_CLOSE_RECEIVED, closing, true, false),
-                Arguments.of(CloseEvent.NEGOTIATION_FAILED, closing, true, false),
                 Arguments.of(CloseEvent.CONNECTION_FAILED, closing, true, false),
                 Arguments.of(CloseEvent.DISCONNECTED, Phase.OPEN, true, false),
                 // 종료 중이 아닌 연결에서는 대기 중인 스트림 0개 도달도 닫는 일의 근거가 아니다.
                 Arguments.of(CloseEvent.PENDING_STREAMS_ZERO, Phase.OPEN, false, false),
-                Arguments.of(CloseEvent.CLOSING_ABORTED, Phase.OPEN, false, false),
                 Arguments.of(CloseEvent.TRANSPORT_CLOSED, closed, false, false));
     }
 
@@ -297,7 +291,7 @@ class ConnectionPhaseTest {
         assertThat(closing.applicationSend()).isEqualTo(open.applicationSend());
         assertThat(closing.mayIdlePing()).isEqualTo(open.mayIdlePing());
         assertThat(closing.admit(FrameType.CLOSE, false)).isEqualTo(Admission.ALLOW);
-        assertThat(closing.admit(RESERVED, false)).isEqualTo(Admission.IGNORE);
+        assertThat(closing.admit(RESERVED, false)).isEqualTo(Admission.RESERVED);
     }
 
     @Test
@@ -331,7 +325,7 @@ class ConnectionPhaseTest {
     @Test
     void malformedCloseIsNotTheFirstClose() {
         ConnectionPhase subject = server(Phase.OPEN);
-        subject.malformedCloseReceived();
+        subject.connectionFailed();
         assertThat(subject.closeExchanged()).isTrue();
         assertThat(subject.closeReceived(NO_ERROR)).isTrue();
     }
@@ -355,13 +349,10 @@ class ConnectionPhaseTest {
     }
 
     /** 대기 중인 스트림 0개 도달과 중단은 종료 중일 때만 닫을 때로 만들고, 정상 종료로 남는다. */
-    @ParameterizedTest
-    @EnumSource(
-            value = CloseEvent.class,
-            names = {"PENDING_STREAMS_ZERO", "CLOSING_ABORTED"})
-    void closingEndsNormallyWhenNoStreamsRemainOrIsAborted(CloseEvent event) {
+    @Test
+    void closingEndsNormallyWhenNoStreamsRemainOrIsAborted() {
         ConnectionPhase subject = closing(Phase.OPEN);
-        event.action.accept(subject);
+        subject.pendingStreamsReachedZero();
         assertThat(subject.phase()).isEqualTo(Phase.CLOSING);
         assertThat(subject.shouldCloseTransport()).isTrue();
         assertThat(subject.endsNormally()).isTrue();
@@ -390,11 +381,11 @@ class ConnectionPhaseTest {
     }
 
     @Test
-    void mayOpenRequestOnlyWhileNoCloseExchanged() {
-        assertThat(server(Phase.OPEN).mayOpenRequest()).isTrue();
-        assertThat(server(Phase.AUTH).mayOpenRequest()).isTrue();
-        assertThat(closing(Phase.OPEN).mayOpenRequest()).isFalse();
-        assertThat(ended(Phase.OPEN).mayOpenRequest()).isFalse();
+    void isActiveOnlyWhileNoCloseExchanged() {
+        assertThat(server(Phase.OPEN).isActive()).isTrue();
+        assertThat(server(Phase.AUTH).isActive()).isTrue();
+        assertThat(closing(Phase.OPEN).isActive()).isFalse();
+        assertThat(ended(Phase.OPEN).isActive()).isFalse();
     }
 
     /** 끝난 연결은 어떤 종료 쪽 사건에도 반응하지 않고, 아무것도 받지 않는다. */
@@ -415,18 +406,10 @@ class ConnectionPhaseTest {
         ConnectionPhase subject = ended(established);
         for (int type :
                 new int[] {FrameType.CLOSE, FrameType.HELLO, FrameType.AUTH, FrameType.PING, FrameType.RESET, APP}) {
-            assertThat(subject.admit(type, false)).isEqualTo(Admission.IGNORE);
+            assertThat(subject.admit(type, false)).isEqualTo(Admission.ENDED);
         }
         assertThat(subject.mayIdlePing()).isFalse();
         assertThat(subject.applicationSend()).isEqualTo(ApplicationSend.REFUSE);
-    }
-
-    @Test
-    void mayCloseOnlyWhileNoCloseExchanged() {
-        assertThat(server(Phase.AUTH).mayClose()).isTrue();
-        assertThat(server(Phase.OPEN).mayClose()).isTrue();
-        assertThat(closing(Phase.OPEN).mayClose()).isFalse();
-        assertThat(ended(Phase.OPEN).mayClose()).isFalse();
     }
 
     /** 닫은 로컬 원인은 단계가 보관하고 끝난 뒤에도 읽는다(규격 3.5절, #199). */
