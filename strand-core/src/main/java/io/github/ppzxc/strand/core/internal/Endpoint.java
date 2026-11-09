@@ -321,24 +321,27 @@ public final class Endpoint {
             return;
         }
         expireRequests();
-        sendIdlePingIfDue();
+        byte[] idlePing = nextIdlePing();
+        if (idlePing != null) {
+            sendPing(idlePing);
+        }
     }
 
     /**
-     * 유휴 간격 동안 받은 프레임이 없고 ACK를 기다리는 PING이 없으면 PING을 보낸다(규격 3.4.1절). 간격이 설정돼 있지 않으면 보내지 않는다.
+     * 유휴 간격 동안 받은 프레임이 없고 ACK를 기다리는 PING이 없으면 보낼 PING의 payload를 돌려준다(규격 3.4.1절). 간격이 설정돼 있지 않으면 보내지 않는다.
      * 보내는 때는 규격 3.3절의 송신 규칙을 따라 AUTH 관문을 통과한 뒤에만 보낸다. 종료 중에도 보낸다.
      */
-    private void sendIdlePingIfDue() {
+    private byte @Nullable [] nextIdlePing() {
         long idle = config.idleIntervalMs();
         if (idle <= 0 || !authGatePassed || now - lastReceivedAt < idle || timers.hasPing()) {
-            return;
+            return null;
         }
         byte[] payload = new byte[PING_PAYLOAD_SIZE];
         for (int i = PING_PAYLOAD_SIZE - 1; i >= 0; i--) {
             payload[i] = (byte) (idlePingCount >>> (8 * (PING_PAYLOAD_SIZE - 1 - i)));
         }
         idlePingCount++;
-        sendPing(payload);
+        return payload;
     }
 
     /**
