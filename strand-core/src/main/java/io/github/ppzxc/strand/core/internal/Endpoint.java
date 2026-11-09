@@ -684,7 +684,7 @@ public final class Endpoint {
     private void handle(byte[] bytes, int off, int size) {
         dispatch(bytes, off, size);
         // 프레임 하나를 처리한 뒤 종료 경로를 한 번 지난다. 응답·RESET·CLOSE·오류로 대기 중인 스트림이 0개가 됐는지, 닫을 때가 됐는지는
-        // 여기서 본다. dispatch가 부르는 핸들러는 따로 conclude하지 않는다.
+        // 여기서 본다. 연결 오류를 내는 핸들러는 스스로 conclude하며, conclude는 멱등이라 여기서 한 번 더 불러도 안전하다.
         conclude();
     }
 
