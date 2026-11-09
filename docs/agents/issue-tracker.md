@@ -54,6 +54,7 @@ Every issue title carries a fixed prefix. `NN` is the parent's issue number.
 | Map | `[MAP] <title>` |
 | Map decision ticket (grilling) | `[MAP #NN / GRILLING] <title>` |
 | Map spec | `[MAP #NN / SPEC] <title>` |
+| Standalone spec (no map) | `[SPEC] <title>` |
 | Spec ticket | `[SPEC #NN / TICKET-N] <title>` |
 | Map research ticket | `[MAP #NN / RESEARCH] <title>` |
 
