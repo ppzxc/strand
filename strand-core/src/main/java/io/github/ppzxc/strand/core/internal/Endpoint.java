@@ -339,20 +339,20 @@ public final class Endpoint {
 
     private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
         ConnectionPhase.ApplicationSend send = phase.applicationSend();
-        if (send != ConnectionPhase.ApplicationSend.DEFER) {
-            if (!phase.mayOpenRequest()) {
-                failLocally();
-                return ledger.issueTicket();
-            }
-            // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
-            long ticket = ledger.nextTicket();
-            if (refuseLocally(ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
-                    == OwnRequestLedger.Admission.OVERSIZE) {
-                throw oversizeFrame("요청");
-            }
-            return ticket;
+        if (send == ConnectionPhase.ApplicationSend.DEFER) {
+            return ledger.queue(type, payload, deadlineAt);
         }
-        return ledger.queue(type, payload, deadlineAt);
+        if (send == ConnectionPhase.ApplicationSend.REFUSE || !phase.mayOpenRequest()) {
+            failLocally();
+            return ledger.issueTicket();
+        }
+        // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
+        long ticket = ledger.nextTicket();
+        if (refuseLocally(ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
+                == OwnRequestLedger.Admission.OVERSIZE) {
+            throw oversizeFrame("요청");
+        }
+        return ticket;
     }
 
     /**
@@ -478,17 +478,15 @@ public final class Endpoint {
         if (payload.length != PING_PAYLOAD_SIZE) {
             throw new IllegalArgumentException("PING payload는 정확히 8바이트여야 한다: " + payload.length);
         }
-        switch (phase.applicationSend()) {
-            case NOW:
-                sendPing(payload.clone());
-                break;
-            case REFUSE:
-                break;
-            case DEFER:
-                deferredPings.addLast(new DeferredPing(payload.clone(), ledger.nextTicket()));
-                break;
-            default:
-                throw new IllegalStateException("처리하지 않은 송신 판단");
+        ConnectionPhase.ApplicationSend send = phase.applicationSend();
+        if (send == ConnectionPhase.ApplicationSend.REFUSE) {
+            return;
+        }
+        byte[] copy = payload.clone();
+        if (send == ConnectionPhase.ApplicationSend.DEFER) {
+            deferredPings.addLast(new DeferredPing(copy, ledger.nextTicket()));
+        } else {
+            sendPing(copy);
         }
     }
 
