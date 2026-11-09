@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,22 +100,31 @@ final class OwnRequestLedger {
         @Nullable
         Record nextUnwritten;
 
+        /** 번호 없는 요청의 연결 리스트(낸 순서). 번호가 없을 때만 이어져 있다. */
+        @Nullable
+        Record prevQueued;
+
+        @Nullable
+        Record nextQueued;
+
         Record(long ticket, int type, byte @Nullable [] payload, @Nullable Long deadlineAt) {
             this.ticket = ticket;
             this.type = type;
             this.payload = payload;
-            this.expiry = deadlineAt == null ? null : new Expiry(deadlineAt, ticket);
+            this.expiry = deadlineAt == null ? null : new Expiry(deadlineAt, ticket, this);
         }
     }
 
-    /** 기한 색인 항목. 기한 순이고 같은 기한이면 번호표 순이다. 요청은 번호표로 찾는다. */
+    /** 기한 색인 항목. 기한 순이고 같은 기한이면 번호표 순이다. */
     private static final class Expiry implements Comparable<Expiry> {
         final long deadlineAt;
         final long ticket;
+        final Record record;
 
-        Expiry(long deadlineAt, long ticket) {
+        Expiry(long deadlineAt, long ticket, Record record) {
             this.deadlineAt = deadlineAt;
             this.ticket = ticket;
+            this.record = record;
         }
 
         @Override
@@ -138,15 +146,17 @@ final class OwnRequestLedger {
     private final Outbox outbox;
     /** 번호를 받은 요청의 스트림 번호 → 요청. 보낸 순서대로다(규격 1.3절). */
     private final Map<Long, Record> byStream = new LinkedHashMap<>();
-    /** 번호표 → 요청. 번호 없는 요청도 있다. */
+    /** 번호표 → 번호를 받은 요청. 번호 없는 요청은 {@link #queued}에만 있다. 요청 하나는 둘 가운데 하나에만 있다. */
     private final Map<Long, Record> byTicket = new HashMap<>();
     /** 번호를 받지 못한 요청. 낸 순서(번호표 순서)대로다. */
-    private final Map<Long, Record> queued = new LinkedHashMap<>();
+    private final Map<Long, Record> queued = new HashMap<>();
     /** 기한이 있는 요청의 기한 순 색인. 가장 이른 기한만 보므로 {@link #expire}는 만료된 요청 수에 비례한다. */
     private final TreeSet<Expiry> expirations = new TreeSet<>();
     /** 내 번호 공간의 홀짝: 클라이언트는 1, 서버는 0이다(규격 2.2.5절). */
     private final int ownParity;
 
+    private @Nullable Record firstQueued;
+    private @Nullable Record lastQueued;
     private @Nullable Record firstUnwritten;
     private @Nullable Record lastUnwritten;
     /** 요청 프레임을 전송 계층에 넘긴 내 스트림 가운데 가장 큰 번호. 상대 CLOSE의 {@code last_stream_id} 검사 기준이다(규격 3.5절). */
@@ -214,8 +224,14 @@ final class OwnRequestLedger {
      */
     long queue(int type, byte[] payload, @Nullable Long deadlineAt) {
         Record record = new Record(nextTicket++, type, payload.clone(), deadlineAt);
-        byTicket.put(record.ticket, record);
         queued.put(record.ticket, record);
+        record.prevQueued = lastQueued;
+        if (lastQueued == null) {
+            firstQueued = record;
+        } else {
+            lastQueued.nextQueued = record;
+        }
+        lastQueued = record;
         if (record.expiry != null) {
             expirations.add(record.expiry);
         }
@@ -230,22 +246,17 @@ final class OwnRequestLedger {
      * @return 번호 없는 요청이 없거나 번호표 한도에 닿으면 {@link Admission#NONE}
      */
     Admission openQueued(long beforeTicket, long peerMaxFrameSize) {
-        Iterator<Record> it = queued.values().iterator();
-        if (!it.hasNext()) {
-            return Admission.NONE;
-        }
-        Record record = it.next();
-        if (record.ticket >= beforeTicket) {
+        Record record = firstQueued;
+        if (record == null || record.ticket >= beforeTicket) {
             return Admission.NONE;
         }
         byte[] payload = record.payload;
         if (payload == null) {
             throw new IllegalStateException("번호 없는 요청에 본문이 없다: 번호표 " + record.ticket);
         }
-        it.remove();
+        unqueue(record);
         Admission admission = number(record, payload, peerMaxFrameSize);
         if (admission != Admission.ADMITTED) {
-            byTicket.remove(record.ticket);
             if (record.expiry != null) {
                 expirations.remove(record.expiry);
             }
@@ -299,6 +310,10 @@ final class OwnRequestLedger {
     /** 번호표로 요청의 상태를 본다. 번호 없는 요청도 찾는다. 끝났거나 번호표를 받고도 요청이 되지 못했거나 낸 적 없으면 null이다. */
     @Nullable
     RequestState stateOfTicket(long ticket) {
+        // 번호 없는 요청은 값 객체를 읽지 않고 색인에 있는지만 본다(큰 대기열에서 조회마다 객체를 따라가는 비용을 피한다).
+        if (queued.containsKey(ticket)) {
+            return RequestState.QUEUED_WITHOUT_NUMBER;
+        }
         Record record = byTicket.get(ticket);
         return record == null ? null : record.state;
     }
@@ -313,7 +328,7 @@ final class OwnRequestLedger {
     @Nullable
     Long streamIdOf(long ticket) {
         Record record = byTicket.get(ticket);
-        return record == null || record.state == RequestState.QUEUED_WITHOUT_NUMBER ? null : record.streamId;
+        return record == null ? null : record.streamId;
     }
 
     /** 번호를 받아 아직 끝나지 않은 내 요청의 수. */
@@ -340,7 +355,10 @@ final class OwnRequestLedger {
     /** 번호표로 취소한다(규격 4.4절). 번호 없는 요청도 취소한다. 대기 중이 아니면 null이다. */
     @Nullable
     Outcome cancelTicket(long ticket) {
-        Record record = byTicket.get(ticket);
+        Record record = queued.get(ticket);
+        if (record == null) {
+            record = byTicket.get(ticket);
+        }
         return record == null ? null : abort(record, Status.CANCELLED);
     }
 
@@ -357,7 +375,7 @@ final class OwnRequestLedger {
         }
         List<Record> expired = new ArrayList<>();
         while (!expirations.isEmpty() && now > expirations.first().deadlineAt) {
-            expired.add(byTicket.get(expirations.pollFirst().ticket));
+            expired.add(expirations.pollFirst().record);
         }
         Collections.sort(expired, EXPIRY_ORDER);
         boolean endedNumbered = false;
@@ -426,14 +444,13 @@ final class OwnRequestLedger {
     List<Outcome> onClosing() {
         closing = true;
         List<Outcome> outcomes = new ArrayList<>(queued.size());
-        for (Record record : queued.values()) {
+        for (Record record = firstQueued; record != null; record = record.nextQueued) {
             outcomes.add(new Outcome(0, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false));
-            byTicket.remove(record.ticket);
             if (record.expiry != null) {
                 expirations.remove(record.expiry);
             }
         }
-        queued.clear();
+        clearQueued();
         return outcomes;
     }
 
@@ -442,16 +459,16 @@ final class OwnRequestLedger {
      * 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절). 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
      */
     List<Outcome> onTransportClosed() {
-        List<Outcome> outcomes = new ArrayList<>(byTicket.size());
+        List<Outcome> outcomes = new ArrayList<>(byStream.size() + queued.size());
         for (Record record : byStream.values()) {
             outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, unfinishedCertainty(record), false));
         }
-        for (Record record : queued.values()) {
+        for (Record record = firstQueued; record != null; record = record.nextQueued) {
             outcomes.add(new Outcome(0, Status.UNAVAILABLE, unfinishedCertainty(record), false));
         }
         byStream.clear();
         byTicket.clear();
-        queued.clear();
+        clearQueued();
         expirations.clear();
         return outcomes;
     }
@@ -475,7 +492,7 @@ final class OwnRequestLedger {
         return record.state == RequestState.WRITING_STARTED ? Certainty.UNKNOWN : Certainty.NOT_PROCESSED;
     }
 
-    /** 번호를 받은 요청을 색인에 함께 넣는다. 쓰기 전 요청의 연결 리스트 끝에도 잇는다. 번호표와 기한 색인에는 이미 있을 수 있다(번호 없는 요청). */
+    /** 번호를 받은 요청을 색인에 함께 넣는다. 쓰기 전 요청의 연결 리스트 끝에도 잇는다. 기한 색인에는 이미 있을 수 있다(번호 없는 요청). */
     private void register(Record record) {
         byStream.put(record.streamId, record);
         byTicket.put(record.ticket, record);
@@ -491,14 +508,39 @@ final class OwnRequestLedger {
         lastUnwritten = record;
     }
 
+    /** 번호 없는 요청을 대기열(색인과 연결 리스트)에서 뺀다. */
+    private void unqueue(Record record) {
+        queued.remove(record.ticket);
+        Record prev = record.prevQueued;
+        Record next = record.nextQueued;
+        if (prev == null) {
+            firstQueued = next;
+        } else {
+            prev.nextQueued = next;
+        }
+        if (next == null) {
+            lastQueued = prev;
+        } else {
+            next.prevQueued = prev;
+        }
+        record.prevQueued = null;
+        record.nextQueued = null;
+    }
+
+    private void clearQueued() {
+        queued.clear();
+        firstQueued = null;
+        lastQueued = null;
+    }
+
     /** 요청을 스트림·번호 없는 요청 대기열·번호표·기한 색인에서 함께 뺀다. 쓰기 전 연결 리스트와 대기열 노드는 {@link #unwrite}가 맡는다. */
     private void unregister(Record record) {
         if (record.state == RequestState.QUEUED_WITHOUT_NUMBER) {
-            queued.remove(record.ticket);
+            unqueue(record);
         } else {
             byStream.remove(record.streamId);
+            byTicket.remove(record.ticket);
         }
-        byTicket.remove(record.ticket);
         if (record.expiry != null) {
             expirations.remove(record.expiry);
         }
