@@ -14,6 +14,8 @@ japicmp = "0.26.5"
 japicmp-plugin = "0.4.6"
 vanniktech-maven-publish = "0.37.0"
 cyclonedx-plugin = "3.5.1"
+jmh-plugin = "0.7.4"
+jmh = "1.37"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -33,3 +35,4 @@ spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 japicmp = { id = "me.champeau.gradle.japicmp", version.ref = "japicmp-plugin" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "vanniktech-maven-publish" }
 cyclonedx = { id = "org.cyclonedx.bom", version.ref = "cyclonedx-plugin" }
+jmh = { id = "me.champeau.jmh", version.ref = "jmh-plugin" }
