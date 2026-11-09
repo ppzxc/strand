@@ -377,7 +377,8 @@ public final class Endpoint {
         if (authGatePassed) {
             // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
             long ticket = ledger.nextTicket();
-            if (openRequest(type, payload, deadlineAt) == OwnRequestLedger.Admission.OVERSIZE) {
+            if (refuseLocally(ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
+                    == OwnRequestLedger.Admission.OVERSIZE) {
                 throw oversizeFrame("요청");
             }
             return ticket;
@@ -386,14 +387,9 @@ public final class Endpoint {
     }
 
     /**
-     * 장부에 요청을 열게 하고, 번호를 받지 못했으면 로컬에서 실패시킨다. 번호 소진이면 연결도 닫는다(규격 2.2.5절). 프레임이 너무 크면 아무것도
-     * 하지 않고 돌려준다.
+     * 장부가 번호를 주지 않은 요청(프레임 크기 초과는 제외)을 로컬에서 실패시킨다. 번호 소진이면 연결도 닫는다(규격 2.2.5절). 프레임이 너무 크면
+     * 아무것도 하지 않고 돌려준다.
      */
-    private OwnRequestLedger.Admission openRequest(int type, byte[] payload, @Nullable Long deadlineAt) {
-        return refuseLocally(ledger.open(type, payload, deadlineAt, peerMaxFrameSize));
-    }
-
-    /** 장부가 번호를 주지 않은 요청(프레임 크기 초과는 제외)을 로컬에서 실패시킨다. */
     private OwnRequestLedger.Admission refuseLocally(OwnRequestLedger.Admission admission) {
         switch (admission) {
             case CLOSING:

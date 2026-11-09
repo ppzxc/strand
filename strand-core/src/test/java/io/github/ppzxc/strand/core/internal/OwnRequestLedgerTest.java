@@ -718,6 +718,32 @@ class OwnRequestLedgerTest {
         assertThat(ledger.highestWrittenStreamId()).isEqualTo(3);
     }
 
+    /**
+     * 쓰기 전 요청의 프레임을 거두는 일을 두 번 해도 연결 리스트와 쓰기 대기열이 어긋나지 않는다. 장부의 사건은 요청 하나에 한 번만 거두므로
+     * interface로는 두 번 부를 수 없다. 방어 장치를 확인하려고 private 메서드를 직접 부른다.
+     */
+    @Test
+    void unwritingTwiceLeavesTheUnwrittenListIntact() throws Exception {
+        accept(1, 0);
+        accept(3, 1);
+        accept(5, 2);
+        java.lang.reflect.Field byTicket = OwnRequestLedger.class.getDeclaredField("byTicket");
+        byTicket.setAccessible(true);
+        Object middle = ((java.util.Map<?, ?>) byTicket.get(ledger)).get(1L);
+        java.lang.reflect.Method unwrite = OwnRequestLedger.class.getDeclaredMethod("unwrite", middle.getClass());
+        unwrite.setAccessible(true);
+        unwrite.invoke(ledger, middle);
+        unwrite.invoke(ledger, middle);
+
+        // 가운데 요청의 프레임만 거뒀고, 쓰기 전 마지막 노드는 그대로이며, 나머지 둘은 계속 쓰기 전으로 이어져 있다.
+        assertThat(ledger.lastUnwrittenNode()).isNotNull();
+        assertThat(drain()).hasSize(2);
+        ledger.onWriteStarted();
+        assertThat(ledger.stateOfStream(1)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
+        assertThat(ledger.stateOfStream(5)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
+        assertThat(ledger.lastUnwrittenNode()).isNull();
+    }
+
     /** Endpoint가 메시지를 꺼낸 뒤 쓰기 시작 사건을 알리는 순서를 따른다. */
     private void startWrite() {
         outbox.drain(0);
