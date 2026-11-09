@@ -363,4 +363,61 @@ class EndpointEndedConnectionTest {
             assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
         }
     }
+
+    @Test
+    void endingClearsAWrittenRequestFromTheLedger() {
+        Endpoint client = settle(openClient());
+        long written = client.request(257, new byte[0]);
+        client.drainMessages();
+        assertThat(client.openStreamCount()).isEqualTo(1);
+        assertThat(client.requestState(written)).isNotNull();
+        client.disconnect();
+        settle(client);
+
+        assertThat(client.openStreamCount()).isZero();
+        assertThat(client.requestState(written)).isNull();
+        // 클라이언트가 처음 연 스트림은 1번이다(규격 2.2.5절). 장부가 비워졌으므로 취소해도 아무것도 나가지 않는다.
+        client.cancel(1);
+        client.cancelRequest(written);
+        assertSilent(client);
+    }
+
+    @Test
+    void endingClearsAnUnwrittenRequestFromTheLedger() {
+        Endpoint client = settle(openClient());
+        long numbered = client.request(257, new byte[0]);
+        assertThat(client.openStreamCount()).isEqualTo(1);
+        assertThat(client.requestState(numbered)).isNotNull();
+        client.disconnect();
+        settle(client);
+
+        assertThat(client.openStreamCount()).isZero();
+        assertThat(client.requestState(numbered)).isNull();
+        client.cancelRequest(numbered);
+        assertSilent(client);
+    }
+
+    @Test
+    void endingClearsThePeerPendingStreamsWithoutRefusingThem() {
+        Endpoint server = settle(openServer());
+        server.receive(Frames.request(257, 1, new byte[0]));
+        server.receive(Frames.request(257, 3, new byte[0]));
+        server.drainEvents();
+        server.receive(Frames.request(257, 5, new byte[0]));
+        // 끝나기 전에는 대기 스트림이 있어 응답이 나간다.
+        server.respond(1, 0, new byte[] {1});
+        assertThat(server.drainMessages()).hasSize(1);
+        server.disconnect();
+        assertThat(server.drainMessages()).isEmpty();
+        // 끊김은 돌려보내지 않으므로 꺼내지 않은 요청 5의 이벤트가 그대로 남고, 뒤에 CLOSED가 온다.
+        assertThat(server.drainEvents())
+                .extracting(Event::kind)
+                .containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.CLOSED);
+
+        // 대기 스트림 표는 private이라 respond의 무반응으로 비워졌음을 본다. 표를 비우지 않으면 응답 프레임이 나가 실패한다.
+        // 3은 꺼낸 요청, 5는 꺼내지 않은 요청이다.
+        server.respond(3, 0, new byte[0]);
+        server.respond(5, 0, new byte[0]);
+        assertSilent(server);
+    }
 }

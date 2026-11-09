@@ -1218,11 +1218,17 @@ class EndpointTest {
 
     /** {@code last_stream_id}를 지정한 CLOSE(NO_ERROR)(규격 3.5절). */
     private static String closeNoErrorLast(long lastStreamId) {
-        return "0000001c00030000000000000000000000000000" + "00000000" + String.format("%016x", lastStreamId);
+        return closeWithLast(ErrorCode.NO_ERROR, lastStreamId);
+    }
+
+    private static String closeWithLast(int errorCode, long lastStreamId) {
+        return "0000001c00030000000000000000000000000000"
+                + String.format("%08x", errorCode)
+                + String.format("%016x", lastStreamId);
     }
 
     private static String closeWith(int errorCode) {
-        return "0000001c00030000000000000000000000000000" + String.format("%08x", errorCode) + NO_STREAM;
+        return closeWithLast(errorCode, 0);
     }
 
     private static Endpoint serverAwaitingAuth(EndpointConfig config) {
@@ -1849,6 +1855,7 @@ class EndpointTest {
     private static final String RESET_REFUSED_1 = "00000014000400000000000000000001" + "0000" + "0000" + "00000003";
     private static final String RESET_REFUSED_3 = "00000014000400000000000000000003" + "0000" + "0000" + "00000003";
     private static final String RESET_REFUSED_5 = "00000014000400000000000000000005" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_7 = "00000014000400000000000000000007" + "0000" + "0000" + "00000003";
 
     private static String keyBytes(int count) {
         StringBuilder hex = new StringBuilder();
@@ -3098,6 +3105,23 @@ class EndpointTest {
         server.receive(bytes(requestFrame(257, 1, "")));
 
         assertClosedWithProtocolError(server, 1);
+    }
+
+    @Test
+    void onlyUnhandedRequestsAreRefusedAndTheirRequestReceivedEventsAreWithheld() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.receive(bytes(requestFrame(257, 3, "")));
+        List<Event> handed = server.drainEvents();
+        assertThat(handed).hasSize(2);
+        server.receive(bytes(requestFrame(257, 5, "")));
+        server.receive(bytes(requestFrame(257, 7, "")));
+
+        server.close(ErrorCode.INTERNAL_ERROR);
+
+        assertThat(sent(server))
+                .isEqualTo(RESET_REFUSED_5 + RESET_REFUSED_7 + closeWithLast(ErrorCode.INTERNAL_ERROR, 7));
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 
     @Test
