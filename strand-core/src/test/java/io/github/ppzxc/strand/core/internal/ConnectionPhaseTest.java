@@ -420,6 +420,21 @@ class ConnectionPhaseTest {
         }
     }
 
+    /** 끊긴 뒤에 CLOSE나 연결 오류가 겹치면 이전처럼 CLOSE 교환으로 넘어가되 정상 종료가 아니다. */
+    @ParameterizedTest
+    @EnumSource(
+            value = CloseEvent.class,
+            names = {"CLOSE_SENT_NO_ERROR", "CLOSE_RECEIVED_NO_ERROR", "CLOSE_SENT_ERROR", "CONNECTION_FAILED"})
+    void closeExchangeAfterDisconnectMovesToClosingAsAnError(CloseEvent event) {
+        ConnectionPhase subject = server(Phase.OPEN);
+        subject.transportDisconnected();
+        event.action.accept(subject);
+        assertThat(subject.phase()).isEqualTo(Phase.CLOSING);
+        assertThat(subject.closeExchanged()).isTrue();
+        assertThat(subject.endsNormally()).isFalse();
+        assertThat(subject.shouldCloseTransport()).isTrue();
+    }
+
     /** 끊김이 겹쳐도 끊긴 연결은 CLOSE를 교환한 것이 되지 않는다. 오류로 끝나기로 한 연결은 대기 스트림이 없어져도 그대로다. */
     @Test
     void repeatedDisconnectIsIdempotentAndFailedStaysFailed() {
