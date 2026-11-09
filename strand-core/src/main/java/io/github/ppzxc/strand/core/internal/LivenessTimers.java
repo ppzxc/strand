@@ -161,13 +161,11 @@ final class LivenessTimers {
 
     /**
      * 지금 보낼 유휴 PING의 payload(횟수 카운터, 빅엔디언 8바이트). 보낼 때가 아니면 null이다. 간격이 설정되지 않았거나, AUTH 관문 통과 전이거나,
-     * 마지막 수신 뒤 간격이 차지 않았거나, 기다리는 PING이 있으면 보내지 않는다. payload를 돌려주면 보내는 것으로 세고 횟수가 오른다.
-     *
-     * <p>연결이 끝났는지는 보지 않는다. {@code Endpoint.advance}는 요청 기한 만료로 연결이 끝난 같은 호출에서도 유휴 PING을 보내 왔고 outbox
-     * 순서 golden이 이를 고정하므로, 끝난 뒤의 호출 여부는 호출자가 정한다.
+     * 마지막 수신 뒤 간격이 차지 않았거나, 기다리는 PING이 있거나, 연결이 끝났으면 보내지 않는다. payload를 돌려주면 보내는 것으로 세고 횟수가
+     * 오른다.
      */
     byte @Nullable [] idlePing(long now) {
-        if (idleIntervalMs <= 0 || !authGatePassed || now - lastReceivedAt < idleIntervalMs || hasPing()) {
+        if (ended || idleIntervalMs <= 0 || !authGatePassed || now - lastReceivedAt < idleIntervalMs || hasPing()) {
             return null;
         }
         byte[] payload = new byte[PING_PAYLOAD_SIZE];

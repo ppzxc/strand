@@ -295,4 +295,13 @@ class LivenessTimersTest {
         assertThat(timers.expiry(Long.MAX_VALUE)).isEqualTo(Expiry.NONE);
         assertThat(timers.hasPing()).isFalse();
     }
+
+    @Test
+    void noIdlePingIsJudgedAfterTheConnectionEnded() {
+        timers.authGatePassed();
+
+        timers.clear();
+
+        assertThat(timers.idlePing(Long.MAX_VALUE)).isNull();
+    }
 }
