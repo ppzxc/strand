@@ -65,7 +65,7 @@ public final class Endpoint {
      *
      * <p>장부의 닫는 중({@code onClosing})과 연결 단계의 CLOSE 교환은 같은 사건이다. 연결이 계속 열려 있을 수 있는 두 곳({@link #close},
      * {@link #handleClose})은 {@link #endQueuedRequests}로 장부에 알린다. 나머지(형태가 잘못된 CLOSE, 연결 오류, 너무 큰 AUTH)는 곧바로
-     * 전송 계층을 닫아 {@link ConnectionPhase#isEnded()}가 새 요청을 먼저 막으므로 장부의 닫는 중이 필요 없다.
+     * 전송 계층을 닫아 {@link ConnectionPhase#mayOpenRequest()}가 새 요청을 먼저 막으므로 장부의 닫는 중이 필요 없다.
      */
     private final OwnRequestLedger ledger;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
@@ -340,7 +340,7 @@ public final class Endpoint {
     private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
         ConnectionPhase.ApplicationSend send = phase.applicationSend();
         if (send != ConnectionPhase.ApplicationSend.DEFER) {
-            if (send == ConnectionPhase.ApplicationSend.REFUSE || !phase.mayOpenRequest()) {
+            if (!phase.mayOpenRequest()) {
                 failLocally();
                 return ledger.issueTicket();
             }
@@ -482,11 +482,13 @@ public final class Endpoint {
             case NOW:
                 sendPing(payload.clone());
                 break;
+            case REFUSE:
+                break;
             case DEFER:
                 deferredPings.addLast(new DeferredPing(payload.clone(), ledger.nextTicket()));
                 break;
             default:
-                break;
+                throw new IllegalStateException("처리하지 않은 송신 판단");
         }
     }
 

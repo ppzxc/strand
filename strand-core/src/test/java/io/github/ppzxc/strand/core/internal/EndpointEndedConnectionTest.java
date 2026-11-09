@@ -34,13 +34,22 @@ class EndpointEndedConnectionTest {
         return client;
     }
 
-    private static Endpoint openServer() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+    private static Endpoint serverAwaitingAuth(EndpointConfig config) {
+        Endpoint server = Endpoint.server(config);
         server.receive(bytes(PREFACE));
         server.receive(bytes(HELLO));
         server.receive(bytes(HELLO_ACK));
+        return server;
+    }
+
+    private static Endpoint openServer(EndpointConfig config) {
+        Endpoint server = serverAwaitingAuth(config);
         server.receive(bytes(AUTH_ANONYMOUS));
         return server;
+    }
+
+    private static Endpoint openServer() {
+        return openServer(EndpointConfig.defaults());
     }
 
     private static Endpoint openWebSocketClient() {
@@ -80,12 +89,44 @@ class EndpointEndedConnectionTest {
         Endpoint badFrame = openClient();
         badFrame.receive(bytes("0000000f0004" + "00000000000000000000000000"));
         ended.put("연결 오류로 닫음", badFrame);
+        return ended;
+    }
+
+    /** 끝난 서버 연결들. AUTH 기한과 확인 대기가 걸려 있던 연결도 있다. */
+    private static Map<String, Endpoint> endedServers() {
+        Map<String, Endpoint> ended = new LinkedHashMap<>();
+        EndpointConfig timed = EndpointConfig.defaults().ackTimeoutMs(1000).authTimeoutMs(1000);
+        Endpoint awaitingAuth = serverAwaitingAuth(timed);
+        awaitingAuth.disconnect();
+        ended.put("서버 AUTH 대기 중 끊김", awaitingAuth);
+        Endpoint authExpiryPending = serverAwaitingAuth(timed);
+        authExpiryPending.close(ErrorCode.PROTOCOL_ERROR);
+        ended.put("서버 AUTH 대기 중 오류 CLOSE로 닫음", authExpiryPending);
+        EndpointConfig idle = EndpointConfig.defaults().ackTimeoutMs(1000).idleIntervalMs(500);
+        Endpoint pingOutstanding = openServer(idle);
+        pingOutstanding.advance(600);
+        pingOutstanding.disconnect();
+        ended.put("서버 PING 확인 대기 중 끊김", pingOutstanding);
+        Endpoint pingOutstandingClosed = openServer(idle);
+        pingOutstandingClosed.advance(600);
+        pingOutstandingClosed.close(ErrorCode.NO_ERROR);
+        ended.put("서버 PING 확인 대기 중 NO_ERROR CLOSE로 닫음", pingOutstandingClosed);
+        Endpoint pendingResponse = openServer();
+        pendingResponse.receive(Frames.request(257, 1, new byte[0]));
+        pendingResponse.disconnect();
+        ended.put("서버 응답 대기 중 끊김", pendingResponse);
+        return ended;
+    }
+
+    private static Map<String, Endpoint> endedEndpoints() {
+        Map<String, Endpoint> ended = new LinkedHashMap<>(endedClients());
+        ended.putAll(endedServers());
         ended.values().forEach(EndpointEndedConnectionTest::settle);
         return ended;
     }
 
-    private static void forEachEndedClient(Consumer<Endpoint> check) {
-        endedClients().forEach((name, endpoint) -> {
+    private static void forEachEnded(Consumer<Endpoint> check) {
+        endedEndpoints().forEach((name, endpoint) -> {
             try {
                 check.accept(endpoint);
             } catch (AssertionError e) {
@@ -101,7 +142,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void receivedBytesAreIgnored() {
-        forEachEndedClient(endpoint -> {
+        forEachEnded(endpoint -> {
             endpoint.receive(bytes(PREFACE));
             endpoint.receive(bytes("0000000f0004"));
             endpoint.receive(bytes("ffffffff"));
@@ -125,7 +166,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void clockAdvanceIsIgnored() {
-        forEachEndedClient(endpoint -> {
+        forEachEnded(endpoint -> {
             endpoint.advance(1_000_000);
             endpoint.advance(1_000_000);
             assertSilent(endpoint);
@@ -134,7 +175,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void requestFailsLocallyWithAnUnavailableResultAndUsesATicket() {
-        forEachEndedClient(endpoint -> {
+        forEachEnded(endpoint -> {
             long first = endpoint.request(257, new byte[] {1});
             long second = endpoint.request(257, new byte[0], 100);
 
@@ -167,7 +208,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void cancellationsAreIgnored() {
-        forEachEndedClient(endpoint -> {
+        forEachEnded(endpoint -> {
             endpoint.cancelRequest(0);
             endpoint.cancelRequest(5);
             endpoint.cancel(1);
@@ -207,7 +248,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void pingIsIgnored() {
-        forEachEndedClient(endpoint -> {
+        forEachEnded(endpoint -> {
             endpoint.ping(PING_PAYLOAD);
             endpoint.advance(1_000_000);
             assertSilent(endpoint);
@@ -216,7 +257,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void closeIsIgnored() {
-        forEachEndedClient(endpoint -> {
+        forEachEnded(endpoint -> {
             endpoint.close(ErrorCode.NO_ERROR);
             endpoint.close(ErrorCode.PROTOCOL_ERROR);
             assertSilent(endpoint);
@@ -225,7 +266,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void disconnectIsIgnored() {
-        forEachEndedClient(endpoint -> {
+        forEachEnded(endpoint -> {
             endpoint.disconnect();
             assertSilent(endpoint);
         });
@@ -233,7 +274,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void abortClosingIsIgnored() {
-        forEachEndedClient(endpoint -> {
+        forEachEnded(endpoint -> {
             endpoint.abortClosing();
             assertSilent(endpoint);
         });
@@ -241,7 +282,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void anEndedConnectionStaysEndedAfterEveryCallTogether() {
-        List<Endpoint> ended = new ArrayList<>(endedClients().values());
+        List<Endpoint> ended = new ArrayList<>(endedEndpoints().values());
         for (Endpoint endpoint : ended) {
             endpoint.request(257, new byte[0]);
             endpoint.drainEvents();

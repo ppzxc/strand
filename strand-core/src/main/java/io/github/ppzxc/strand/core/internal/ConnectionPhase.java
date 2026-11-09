@@ -118,7 +118,7 @@ final class ConnectionPhase {
 
     /** 새 요청에 스트림 번호를 줄 수 있는가. CLOSE를 보냈거나 받았거나 연결이 끝났으면 열지 않는다(규격 3.5절). */
     boolean mayOpenRequest() {
-        return mayClose();
+        return !closeExchanged && !closed;
     }
 
     /** 지금 전송 계층을 닫아야 하는가. 닫은 뒤에는 {@link #transportClosed()}를 알린다. */
