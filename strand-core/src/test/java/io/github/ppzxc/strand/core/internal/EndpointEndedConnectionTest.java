@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
@@ -291,5 +292,132 @@ class EndpointEndedConnectionTest {
             endpoint.disconnect();
             assertSilent(endpoint);
         }
+    }
+
+    /** 인증 콜백 안에서 {@code onCallback}이 연결을 끝내도록 한 서버로 AUTH를 받게 하고, 그 서버를 돌려준다. */
+    private static Endpoint serverEndedInsideAuthCallback(AuthAction onCallback) {
+        AtomicReference<Endpoint> self = new AtomicReference<>();
+        Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+            self.get().disconnect();
+            return onCallback.decide();
+        }));
+        self.set(server);
+        server.receive(bytes(PREFACE));
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+        server.drainEvents();
+        server.receive(bytes(AUTH_ANONYMOUS));
+        return server;
+    }
+
+    @FunctionalInterface
+    private interface AuthAction {
+        AuthDecision decide();
+    }
+
+    @Test
+    void authDecisionAfterTheConnectionEndedInsideTheCallbackQueuesNoFrames() {
+        for (AuthDecision decision : AuthDecision.values()) {
+            Endpoint server = serverEndedInsideAuthCallback(() -> decision);
+
+            assertThat(server.drainMessages()).as(decision.name()).isEmpty();
+            assertThat(server.drainEvents())
+                    .as(decision.name())
+                    .extracting(Event::kind)
+                    .containsExactly(Event.Kind.CLOSED);
+        }
+    }
+
+    @Test
+    void authenticatorThrowingAfterTheConnectionEndedQueuesNoFramesAndNoSecondClosed() {
+        Endpoint server = serverEndedInsideAuthCallback(() -> {
+            throw new IllegalStateException("late");
+        });
+
+        assertThat(server.drainMessages()).isEmpty();
+        List<Event> events = server.drainEvents();
+        assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        assertThat(events.get(0).cause()).isEmpty();
+    }
+
+    @Test
+    void closingInsideTheAuthCallbackEndsTheConnectionSoNoAuthAckFollowsTheClose() {
+        // AUTH 단계에는 대기 중인 스트림이 없어, 콜백 안의 CLOSE는 곧바로 연결을 끝낸다. "닫는 중이지만 안 끝난" 상태는 생기지 않는다.
+        for (int code : new int[] {ErrorCode.NO_ERROR, ErrorCode.PROTOCOL_ERROR}) {
+            AtomicReference<Endpoint> self = new AtomicReference<>();
+            Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+                self.get().close(code);
+                return AuthDecision.PASS;
+            }));
+            self.set(server);
+            server.receive(bytes(PREFACE));
+            server.receive(bytes(HELLO));
+            server.receive(bytes(HELLO_ACK));
+            server.drainMessages();
+            server.drainEvents();
+
+            server.receive(bytes(AUTH_ANONYMOUS));
+
+            assertThat(server.drainMessages()).as("code " + code).hasSize(1); // CLOSE 하나뿐, AUTH ACK 없음
+            assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        }
+    }
+
+    @Test
+    void endingClearsAWrittenRequestFromTheLedger() {
+        Endpoint client = settle(openClient());
+        long written = client.request(257, new byte[0]);
+        client.drainMessages();
+        assertThat(client.openStreamCount()).isEqualTo(1);
+        assertThat(client.requestState(written)).isNotNull();
+        client.disconnect();
+        settle(client);
+
+        assertThat(client.openStreamCount()).isZero();
+        assertThat(client.requestState(written)).isNull();
+        // 클라이언트가 처음 연 스트림은 1번이다(규격 2.2.5절). 장부가 비워졌으므로 취소해도 아무것도 나가지 않는다.
+        client.cancel(1);
+        client.cancelRequest(written);
+        assertSilent(client);
+    }
+
+    @Test
+    void endingClearsAnUnwrittenRequestFromTheLedger() {
+        Endpoint client = settle(openClient());
+        long numbered = client.request(257, new byte[0]);
+        assertThat(client.openStreamCount()).isEqualTo(1);
+        assertThat(client.requestState(numbered)).isNotNull();
+        client.disconnect();
+        settle(client);
+
+        assertThat(client.openStreamCount()).isZero();
+        assertThat(client.requestState(numbered)).isNull();
+        client.cancelRequest(numbered);
+        assertSilent(client);
+    }
+
+    @Test
+    void endingClearsThePeerPendingStreamsWithoutRefusingThem() {
+        Endpoint server = settle(openServer());
+        server.receive(Frames.request(257, 1, new byte[0]));
+        server.receive(Frames.request(257, 3, new byte[0]));
+        server.drainEvents();
+        server.receive(Frames.request(257, 5, new byte[0]));
+        // 끝나기 전에는 대기 스트림이 있어 응답이 나간다.
+        server.respond(1, 0, new byte[] {1});
+        assertThat(server.drainMessages()).hasSize(1);
+        server.disconnect();
+        assertThat(server.drainMessages()).isEmpty();
+        // 끊김은 돌려보내지 않으므로 꺼내지 않은 요청 5의 이벤트가 그대로 남고, 뒤에 CLOSED가 온다.
+        assertThat(server.drainEvents())
+                .extracting(Event::kind)
+                .containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.CLOSED);
+
+        // 대기 스트림 표는 private이라 respond의 무반응으로 비워졌음을 본다. 표를 비우지 않으면 응답 프레임이 나가 실패한다.
+        // 3은 꺼낸 요청, 5는 꺼내지 않은 요청이다.
+        server.respond(3, 0, new byte[0]);
+        server.respond(5, 0, new byte[0]);
+        assertSilent(server);
     }
 }

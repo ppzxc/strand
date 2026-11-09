@@ -689,6 +689,8 @@ public final class Endpoint {
     }
 
     private void dispatch(byte[] bytes, int off, int size) {
+        // 불변식: 끝난 연결에서는 불리지 않는다. 입력은 enterReceive가 끝난 연결에서 막고, 프레임 하나를 처리하는 동안 연결을 끝낼 수 있는 것은
+        // 애플리케이션 콜백(연결 인증)뿐인데 그 뒤로는 이 프레임에서 admit을 다시 부르지 않는다. 그래서 phase.admit은 던지지 않는다.
         timers.frameReceived(now);
         int type = Frames.typeOf(bytes, off);
         int extensionsLength = Frames.extensionsLengthOf(bytes, off);
@@ -707,9 +709,6 @@ public final class Endpoint {
         }
         boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
         ConnectionPhase.Admission admission = phase.admit(type, ack);
-        if (admission == ConnectionPhase.Admission.ENDED) {
-            return;
-        }
         if (admission == ConnectionPhase.Admission.RESERVED) {
             // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 관문은 보지 않는다.
             if (extensionsLength != 0) {
@@ -774,6 +773,7 @@ public final class Endpoint {
      */
     private void handleApplication(byte[] bytes, int off, int type, int extensionsLength, long streamId) {
         // 연결 오류 집합은 검사 순서가 없다(규격 5.1절 3번). 확장 영역 형식, 상대 ACK 전의 프레임(3.3절), 잘못된 stream_id.
+        // 불변식: dispatch와 같이 끝난 연결에서는 불리지 않으므로 phase.admit은 던지지 않는다.
         Extensions extensionsResult = extensionsLength > MAX_EXTENSIONS_LENGTH
                 ? Extensions.MALFORMED
                 : scanExtensions(bytes, off, extensionsLength);
@@ -934,6 +934,12 @@ public final class Endpoint {
             // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다. 원인은 CLOSED 이벤트에 싣는다.
             phase.causedBy(e);
             decision = AuthDecision.TRANSIENT_FAILURE;
+        }
+        if (!phase.isActive()) {
+            // 콜백 안에서 CLOSE를 보냈거나 연결 오류로 CLOSE 교환으로 쳤거나 연결이 끝났다(isActive는 이 셋을 모두 거짓으로 답한다). 판정과 무관하게
+            // CLOSE·CLOSED 뒤 프레임을 쌓지 않는다(규격 3.5절). AUTH 단계에는 대기 중인 스트림이 없어 콜백 안의 close()가 conclude()로 곧바로
+            // 연결을 끝내므로 "닫는 중이지만 안 끝난" 상태는 여기서 도달할 수 없다(EndpointEndedConnectionTest가 고정한다).
+            return;
         }
         if (decision != AuthDecision.PASS) {
             // 거부와 모르는 메커니즘은 UNAUTHENTICATED, 일시 실패는 INTERNAL_ERROR. 이유는 비운다(규격 3.3.1절).
