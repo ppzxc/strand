@@ -4,11 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
-import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,7 +50,7 @@ public final class Endpoint {
     private static final int MAX_EXTENSIONS_LENGTH = 8192;
 
     private final EndpointConfig config;
-    private final List<OutboundMessage> outbox = new ArrayList<>();
+    private final Outbox outbox = new Outbox();
     private final List<Event> events = new ArrayList<>();
     /** 대기 중인 스트림 가운데 내가 연 것(결과를 기다리는 내 요청)의 번호와 요청 type·번호표. 보낸 순서대로다(규격 1.3절). */
     private final Map<Long, OwnStream> ownPendingStreams = new LinkedHashMap<>();
@@ -61,7 +58,7 @@ public final class Endpoint {
      * 요청 프레임이 아직 {@link #drainMessages()}로 전송 계층에 넘어가지 않은 내 스트림(규격 3.5절 "연결이 끝날 때"). 프레임 하나가 메시지
      * 하나이므로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 본다.
      */
-    private final Map<Long, OutboundMessage> undrainedRequests = new LinkedHashMap<>();
+    private final Map<Long, Outbox.Node> undrainedRequests = new LinkedHashMap<>();
     /** 다음 {@link #request}에 줄 번호표. */
     private long nextTicket;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
@@ -503,9 +500,9 @@ public final class Endpoint {
         if (endOwnStream(streamId) == null) {
             return;
         }
-        OutboundMessage unwritten = undrainedRequests.remove(streamId);
+        Outbox.Node unwritten = undrainedRequests.remove(streamId);
         if (unwritten != null) {
-            outbox.removeIf(message -> message == unwritten);
+            outbox.remove(unwritten);
             events.add(Event.result(streamId, status, Certainty.NOT_PROCESSED));
         } else {
             send(Frames.reset(streamId, ErrorCode.CANCEL));
@@ -576,17 +573,8 @@ public final class Endpoint {
      * @return 보낼 메시지. 없으면 빈 목록
      */
     public List<OutboundMessage> drainMessages() {
-        List<OutboundMessage> drained = new ArrayList<>(outbox);
-        outbox.clear();
         // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
-        if (!drained.isEmpty()) {
-            Set<OutboundMessage> drainedSet = identitySet(drained);
-            for (AckWait wait : ackWaits) {
-                if (!wait.started && drainedSet.contains(wait.message)) {
-                    wait.start(now + config.ackTimeoutMs());
-                }
-            }
-        }
+        List<OutboundMessage> drained = outbox.drain(now + config.ackTimeoutMs());
         for (long streamId : undrainedRequests.keySet()) {
             highestSentOwnStreamId = Math.max(highestSentOwnStreamId, streamId);
         }
@@ -1094,20 +1082,18 @@ public final class Endpoint {
      * 상대가 처리하지 않은 요청이므로 아직 넘기지 못한 프레임도 보내지 않는다.
      */
     private void endRequestsAfter(long lastStreamId) {
-        Set<OutboundMessage> unsentMessages = newIdentitySet();
         Iterator<Long> pending = ownPendingStreams.keySet().iterator();
         while (pending.hasNext()) {
             long streamId = pending.next();
             if (streamId > lastStreamId) {
                 pending.remove();
-                OutboundMessage unsent = undrainedRequests.remove(streamId);
+                Outbox.Node unsent = undrainedRequests.remove(streamId);
                 if (unsent != null) {
-                    unsentMessages.add(unsent);
+                    outbox.remove(unsent);
                 }
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
             }
         }
-        removeFromOutbox(unsentMessages);
     }
 
     /**
@@ -1159,7 +1145,7 @@ public final class Endpoint {
      */
     private void closeTransportAfterNoError() {
         if (!transportClosed && config.isWebSocket()) {
-            outbox.add(OutboundMessage.normalWebSocketClose());
+            outbox.addLast(OutboundMessage.normalWebSocketClose());
         }
         closeTransport();
     }
@@ -1197,20 +1183,19 @@ public final class Endpoint {
         pending = NO_BYTES;
         pendingLength = 0;
         ackWaits.clear();
-        Set<OutboundMessage> unsentMessages = newIdentitySet();
         for (long streamId : ownPendingStreams.keySet()) {
             // 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절). 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
             if (stateOf(streamId) == RequestState.WRITING_STARTED) {
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.UNKNOWN));
             } else {
-                OutboundMessage unsent = undrainedRequests.get(streamId);
+                // 요청의 마지막 바이트를 넘기지 못한 프레임은 이후에도 넘기지 않도록 거둔다.
+                Outbox.Node unsent = undrainedRequests.get(streamId);
                 if (unsent != null) {
-                    unsentMessages.add(unsent);
+                    outbox.remove(unsent);
                 }
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
             }
         }
-        removeFromOutbox(unsentMessages);
         undrainedRequests.clear();
         for (DeferredSend deferred : deferredSends) {
             if (deferred.isRequest()) {
@@ -1289,9 +1274,9 @@ public final class Endpoint {
 
     /** 상대가 아직 쓰지 않은 내 요청에 답한 경우(상대의 규격 위반), 쓰기 대기열에 남은 요청 기록을 함께 치운다. */
     private void dropUnwrittenRequest(long streamId) {
-        OutboundMessage unwritten = undrainedRequests.remove(streamId);
+        Outbox.Node unwritten = undrainedRequests.remove(streamId);
         if (unwritten != null) {
-            outbox.removeIf(message -> message == unwritten);
+            outbox.remove(unwritten);
         }
     }
 
@@ -1341,9 +1326,7 @@ public final class Endpoint {
         }
         nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
         ownPendingStreams.put(streamId, new OwnStream(type, ticket, deadlineAt));
-        OutboundMessage message = OutboundMessage.binary(frame);
-        outbox.add(message);
-        undrainedRequests.put(streamId, message);
+        undrainedRequests.put(streamId, outbox.addApplication(OutboundMessage.binary(frame)));
         return RequestOutcome.SENT;
     }
 
@@ -1383,68 +1366,44 @@ public final class Endpoint {
     }
 
     /**
-     * 프레임을 쓰기 대기열에 넣는다. 제어 프레임은 아직 쓰기를 시작한 적 없는 애플리케이션 프레임 앞에 둔다(규격 3.6절). 대기열에 남은 메시지는
-     * 모두 쓰기 전이다(꺼낸 메시지가 쓰기를 시작한 것이다). 애플리케이션 프레임끼리는 넣은 순서 그대로다. 제어 프레임은 대부분 넣은 순서 그대로지만,
-     * CLOSE는 쓰기 전 요청 뒤에 두므로 그 뒤에 넣은 다른 제어 프레임(PING, RESET 등)이 그 요청 앞에 있는 CLOSE 앞에 올 수 있다. 제어 프레임끼리의
-     * 순서는 3.6절이 정하지 않고, 3.2.2절과 3.5.1절이 정한 순서(HELLO 먼저, 돌려보내는 RESET이 오류 CLOSE보다 먼저)는 CLOSE를 보내는 때에 이미
-     * 대기열에 들어 있는 RESET과 HELLO가 CLOSE 앞에 남으므로 지켜진다. CLOSE를 쓰기 전 요청 뒤에 두는 까닭은 앞서 보내면 그 요청이 CLOSE 뒤에 온 새
-     * 요청이 되어 상대가 버리기 때문이다(규격 3.5절).
+     * 프레임을 쓰기 대기열에 넣는다. 순서 규칙은 {@link Outbox}가 정한다. 제어 프레임은 아직 쓰기를 시작한 적 없는 애플리케이션 프레임 앞에 두고
+     * (규격 3.6절), 애플리케이션 프레임끼리는 넣은 순서 그대로다. CLOSE는 쓰기 전 요청 가운데 마지막 것 바로 뒤에 둔다. 앞서 보내면 그 요청이 CLOSE
+     * 뒤에 온 새 요청이 되어 상대가 버리기 때문이다(규격 3.5절). 그래서 그 뒤에 넣은 다른 제어 프레임(PING, RESET 등)이 그 요청 앞에 있는 CLOSE
+     * 앞에 올 수 있다. 제어 프레임끼리의 순서는 3.6절이 정하지 않고, 3.2.2절과 3.5.1절이 정한 순서(HELLO 먼저, 돌려보내는 RESET이 오류 CLOSE보다
+     * 먼저)는 CLOSE를 보내는 때에 이미 대기열에 들어 있는 RESET과 HELLO가 CLOSE 앞에 남으므로 지켜진다.
      */
-    private OutboundMessage send(byte[] frame) {
+    private Outbox.Node send(byte[] frame) {
         OutboundMessage message = OutboundMessage.binary(frame);
         if (message.isApplication()) {
-            outbox.add(message);
-            return message;
+            return outbox.addApplication(message);
         }
-        int at = firstApplicationIndex();
-        if (Frames.typeOf(frame, 0) == FrameType.CLOSE) {
-            at = Math.max(at, afterLastUnwrittenRequest());
+        if (Frames.typeOf(frame, 0) == FrameType.CLOSE && !undrainedRequests.isEmpty()) {
+            return outbox.addAfter(lastUndrainedRequest(), message);
         }
-        outbox.add(at, message);
-        return message;
+        return outbox.addControl(message);
     }
 
-    private int firstApplicationIndex() {
-        int i = 0;
-        while (i < outbox.size() && !outbox.get(i).isApplication()) {
-            i++;
+    /**
+     * 쓰기 전 요청 가운데 마지막 것. 요청은 넣은 순서대로 대기열에 있고 {@code undrainedRequests}도 그 순서라 마지막 값이 마지막 요청이다. CLOSE는
+     * 연결당 한 번만 보내므로 끝까지 도는 비용은 한 번이다.
+     */
+    private Outbox.Node lastUndrainedRequest() {
+        Outbox.Node last = null;
+        for (Outbox.Node request : undrainedRequests.values()) {
+            last = request;
         }
-        return i;
-    }
-
-    private int afterLastUnwrittenRequest() {
-        if (undrainedRequests.isEmpty()) {
-            return 0;
+        if (last == null) {
+            throw new IllegalStateException("쓰기 전 요청이 없다");
         }
-        Set<OutboundMessage> requests = identitySet(undrainedRequests.values());
-        for (int i = outbox.size() - 1; i >= 0; i--) {
-            if (requests.contains(outbox.get(i))) {
-                return i + 1;
-            }
-        }
-        return 0;
-    }
-
-    private static Set<OutboundMessage> newIdentitySet() {
-        return Collections.newSetFromMap(new IdentityHashMap<>());
-    }
-
-    private static Set<OutboundMessage> identitySet(Collection<OutboundMessage> messages) {
-        Set<OutboundMessage> set = newIdentitySet();
-        set.addAll(messages);
-        return set;
-    }
-
-    /** 쓰기 대기열에서 주어진 메시지(같은 객체)를 한 번에 거둔다. */
-    private void removeFromOutbox(Set<OutboundMessage> unsent) {
-        if (!unsent.isEmpty()) {
-            outbox.removeIf(unsent::contains);
-        }
+        return last;
     }
 
     /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
     private void sendAwaitingAck(byte[] frame, byte @Nullable [] payload) {
-        ackWaits.add(new AckWait(payload, send(frame)));
+        Outbox.Node node = send(frame);
+        AckWait wait = new AckWait(payload);
+        node.wait = wait;
+        ackWaits.add(wait);
     }
 
     /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
@@ -1491,24 +1450,6 @@ public final class Endpoint {
         PeerLimits(long maxConcurrentStreams, long maxFrameSize) {
             this.maxConcurrentStreams = maxConcurrentStreams;
             this.maxFrameSize = maxFrameSize;
-        }
-    }
-
-    /** 확인 대기 하나. {@code payload}는 PING이면 보낸 8바이트, HELLO이면 null이다. 기한은 {@code message}를 넘긴 때부터 센다. */
-    private static final class AckWait {
-        final byte @Nullable [] payload;
-        final OutboundMessage message;
-        boolean started;
-        long deadline;
-
-        AckWait(byte @Nullable [] payload, OutboundMessage message) {
-            this.payload = payload;
-            this.message = message;
-        }
-
-        void start(long deadline) {
-            this.started = true;
-            this.deadline = deadline;
         }
     }
 }

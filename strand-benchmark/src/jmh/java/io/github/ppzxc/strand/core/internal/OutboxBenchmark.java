@@ -17,7 +17,9 @@ import org.openjdk.jmh.infra.Blackhole;
  *
  * <ul>
  *   <li>{@link #closeWithQueuedRequests}: 오류로 닫는다. 받아 둔 요청마다 RESET을 돌려보낸다(#200).
- *   <li>{@link #cancelAllByTicket}: 쓰기 전 요청 n개를 번호표로 모두 취소한다(#200의 outbox 제거와 #202의 번호표 탐색).
+ *   <li>{@link #cancelAllByTicket}: 쓰기 전 요청 n개를 낸 순서대로 번호표로 모두 취소한다(#200의 outbox 제거). 번호표 탐색은 매번 맨 앞에서
+ *       맞아 최선의 경우다.
+ *   <li>{@link #cancelAllByTicketNewestFirst}: 최근 번호표부터 모두 취소한다. 번호표 탐색이 최악이다(#202).
  *   <li>{@link #requestStateOfEveryTicket}: 쓰기 전 요청 n개의 상태를 번호표마다 묻는다. 한 번이 O(n)이면 전체가 이차다(#202).
  *   <li>{@link #advanceOncePerPendingRequest}: 시계를 n번 민다. 한 번이 대기 요청 전체를 훑으면 전체가 이차다(#202).
  * </ul>
@@ -59,6 +61,13 @@ public class OutboxBenchmark {
     @Benchmark
     public void cancelAllByTicket() {
         for (int i = 0; i < requests; i++) {
+            server.cancelRequest(tickets[i]);
+        }
+    }
+
+    @Benchmark
+    public void cancelAllByTicketNewestFirst() {
+        for (int i = requests - 1; i >= 0; i--) {
             server.cancelRequest(tickets[i]);
         }
     }
