@@ -24,7 +24,11 @@ class EndpointTicketOrderTest {
 
     private static void states(StringBuilder trace, Endpoint endpoint, List<Long> tickets) {
         for (long ticket : tickets) {
-            trace.append("state ").append(ticket).append(' ').append(endpoint.requestState(ticket)).append('\n');
+            trace.append("state ")
+                    .append(ticket)
+                    .append(' ')
+                    .append(endpoint.requestState(ticket))
+                    .append('\n');
         }
         trace.append("open ").append(endpoint.openStreamCount()).append('\n');
     }
