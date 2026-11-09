@@ -315,4 +315,46 @@ class EndpointEndedConnectionTest {
         List<Event> events = server.drainEvents();
         assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
     }
+
+    @Test
+    void authDecisionAfterTheConnectionEndedInsideTheCallbackQueuesNoFrames() {
+        for (AuthDecision decision : AuthDecision.values()) {
+            AtomicReference<Endpoint> self = new AtomicReference<>();
+            Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+                self.get().disconnect();
+                return decision;
+            }));
+            self.set(server);
+            server.receive(bytes(PREFACE));
+            server.receive(bytes(HELLO));
+            server.receive(bytes(HELLO_ACK));
+            server.drainMessages();
+            server.drainEvents();
+
+            server.receive(bytes(AUTH_ANONYMOUS));
+
+            assertThat(server.drainMessages()).as(decision.name()).isEmpty();
+            assertThat(server.drainEvents()).as(decision.name()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        }
+    }
+
+    @Test
+    void authenticatorThrowingAfterTheConnectionEndedKeepsTheReportedCause() {
+        AtomicReference<Endpoint> self = new AtomicReference<>();
+        Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+            self.get().disconnect();
+            throw new IllegalStateException("late");
+        }));
+        self.set(server);
+        server.receive(bytes(PREFACE));
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+        server.drainEvents();
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(server.drainMessages()).isEmpty();
+        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+    }
 }

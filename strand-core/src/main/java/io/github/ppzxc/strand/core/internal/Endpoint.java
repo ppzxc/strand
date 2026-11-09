@@ -932,8 +932,14 @@ public final class Endpoint {
             decision = config.authenticator().authenticate(mechanism, credentials);
         } catch (RuntimeException e) {
             // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다. 원인은 CLOSED 이벤트에 싣는다.
-            phase.causedBy(e);
+            if (!phase.isEnded()) {
+                phase.causedBy(e);
+            }
             decision = AuthDecision.TRANSIENT_FAILURE;
+        }
+        if (phase.isEnded()) {
+            // 콜백 안에서 연결이 이미 끝났다. 판정과 무관하게 CLOSED 뒤 프레임을 쌓지 않는다(규격 3.5절).
+            return;
         }
         if (decision != AuthDecision.PASS) {
             // 거부와 모르는 메커니즘은 UNAUTHENTICATED, 일시 실패는 INTERNAL_ERROR. 이유는 비운다(규격 3.3.1절).
