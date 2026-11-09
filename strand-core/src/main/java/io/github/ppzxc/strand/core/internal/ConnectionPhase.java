@@ -32,7 +32,7 @@ final class ConnectionPhase {
         AUTH,
         /** AUTH 관문을 통과했다. 애플리케이션 프레임을 주고받는다. */
         OPEN,
-        /** CLOSE를 보냈거나 받았다(규격 3.5절). 오류 CLOSE이면 곧 닫고, {@code NO_ERROR}이면 대기 중인 스트림이 없어질 때까지 둔다. */
+        /** CLOSE 교환 쪽이다. CLOSE를 보냈거나 받았거나, 연결 오류로 CLOSE 교환으로 쳤다(규격 3.5절). 오류 CLOSE이면 곧 닫고, {@code NO_ERROR}이면 대기 중인 스트림이 없어질 때까지 둔다. */
         CLOSING,
         /** 전송 계층이 닫혀 연결이 끝났다(규격 1.3절 연결이 끝남). 어떤 프레임도 받지 않으므로 {@link #admit}을 부를 수 없다. */
         CLOSED
