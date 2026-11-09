@@ -56,6 +56,9 @@ final class LivenessTimers {
     /** 식별자로 찾는다. 순회는 등록한 순서대로다(가장 먼저 등록한 대기가 먼저 나온다). */
     private final Map<Long, Wait> waits = new LinkedHashMap<>();
 
+    /** 등록된 PING 대기 수. {@link #hasPing}을 상수 시간에 답하려고 센다. */
+    private int pingCount;
+
     private long lastId = NO_WAIT;
     /** 서버의 AUTH 대기가 끝나는 시각. 대기 중이 아니면 null이다. */
     private @Nullable Long authDeadline;
@@ -100,6 +103,9 @@ final class LivenessTimers {
     long await(Kind kind, byte @Nullable [] payload) {
         long id = ++lastId;
         waits.put(id, new Wait(kind, payload));
+        if (kind == Kind.PING) {
+            pingCount++;
+        }
         return id;
     }
 
@@ -121,6 +127,9 @@ final class LivenessTimers {
             Wait wait = it.next();
             if (wait.kind == kind && Arrays.equals(wait.payload, payload)) {
                 it.remove();
+                if (kind == Kind.PING) {
+                    pingCount--;
+                }
                 return;
             }
         }
@@ -128,12 +137,7 @@ final class LivenessTimers {
 
     /** ACK를 기다리는 PING이 있는가. */
     boolean hasPing() {
-        for (Wait wait : waits.values()) {
-            if (wait.kind == Kind.PING) {
-                return true;
-            }
-        }
-        return false;
+        return pingCount > 0;
     }
 
     /**
@@ -179,5 +183,6 @@ final class LivenessTimers {
         ended = true;
         authDeadline = null;
         waits.clear();
+        pingCount = 0;
     }
 }
