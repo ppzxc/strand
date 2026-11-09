@@ -1848,6 +1848,7 @@ class EndpointTest {
 
     private static final String RESET_REFUSED_1 = "00000014000400000000000000000001" + "0000" + "0000" + "00000003";
     private static final String RESET_REFUSED_3 = "00000014000400000000000000000003" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_7 = "00000014000400000000000000000007" + "0000" + "0000" + "00000003";
     private static final String RESET_REFUSED_5 = "00000014000400000000000000000005" + "0000" + "0000" + "00000003";
 
     private static String keyBytes(int count) {
@@ -3098,6 +3099,24 @@ class EndpointTest {
         server.receive(bytes(requestFrame(257, 1, "")));
 
         assertClosedWithProtocolError(server, 1);
+    }
+
+    @Test
+    void onlyUnhandedRequestsAreRefusedAndTheirRequestReceivedEventsAreWithheld() {
+        Endpoint server = established();
+        server.receive(bytes(requestFrame(257, 1, "")));
+        server.receive(bytes(requestFrame(257, 3, "")));
+        List<Event> handed = server.drainEvents();
+        assertThat(handed).hasSize(2);
+        server.receive(bytes(requestFrame(257, 5, "")));
+        server.receive(bytes(requestFrame(257, 7, "")));
+
+        server.close(ErrorCode.INTERNAL_ERROR);
+
+        String sent = sent(server);
+        assertThat(sent).startsWith(RESET_REFUSED_5 + RESET_REFUSED_7);
+        assertThat(sent).doesNotContain(RESET_REFUSED_1).doesNotContain(RESET_REFUSED_3);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 
     @Test
