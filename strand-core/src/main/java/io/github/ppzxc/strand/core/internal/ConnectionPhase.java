@@ -98,11 +98,6 @@ final class ConnectionPhase {
             }
         }
 
-        /** 오류 CLOSE를 보내거나 받았거나 연결 오류가 난 뒤의 값. 어디서든 오류로 끝난다. */
-        Ending afterError() {
-            return FAILED;
-        }
-
         /** 기다릴 스트림이 없어진 뒤의 값. 닫는 중인 정상 종료만 바뀌고, 오류로 끝나기로 한 것은 그대로다(이미 닫을 때다). */
         Ending afterPendingStreamsZero() {
             return this == CLOSING ? DRAINED : this;
@@ -305,7 +300,7 @@ final class ConnectionPhase {
         if (closed) {
             return;
         }
-        ending = ending.afterError();
+        ending = Ending.FAILED; // 오류는 어디서든 오류 종료로 끝난다
     }
 
     /** 상대가 CLOSE 없이 전송 계층을 끊었다(TCP EOF·RST, WebSocket close). 곧 닫을 때가 되고 정상 종료가 아니다. */
@@ -344,7 +339,7 @@ final class ConnectionPhase {
             return;
         }
         if (errorCode != ErrorCode.NO_ERROR) {
-            ending = ending.afterError();
+            ending = Ending.FAILED; // 오류는 어디서든 오류 종료로 끝난다
         } else {
             ending = ending.afterNormalClose();
         }
