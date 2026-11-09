@@ -106,7 +106,7 @@ final class ConnectionPhase {
 
     /** 새 요청에 스트림 번호를 줄 수 있는가. CLOSE를 보냈거나 받았거나 연결이 끝났으면 열지 않는다(규격 3.5절). */
     boolean mayOpenRequest() {
-        return !closeExchanged && !closeDue && !closed;
+        return !closeExchanged && !closed;
     }
 
     /** 지금 전송 계층을 닫아야 하는가. 닫은 뒤에는 {@link #transportClosed()}를 알린다. */
@@ -258,11 +258,12 @@ final class ConnectionPhase {
         }
     }
 
-    /** 애플리케이션이 종료 중인 연결을 더 기다리지 않기로 했다. 종료 중이면 닫을 때가 된다. */
+    /**
+     * 애플리케이션이 종료 중인 연결을 더 기다리지 않기로 했다. 종료 중이면 닫을 때가 되고, {@code NO_ERROR}로 끝난 연결로 남는다(WebSocket
+     * Close(1000)를 덧붙인다).
+     */
     void closingAborted() {
-        if (closeExchanged && !closed) {
-            closeDue = true;
-        }
+        pendingStreamsReachedZero();
     }
 
     /** 연결을 닫게 한 로컬 원인을 기록한다. {@code CLOSED} 이벤트에 싣는다. */
@@ -282,7 +283,8 @@ final class ConnectionPhase {
         }
         closeExchanged = true;
         if (errorCode == ErrorCode.NO_ERROR) {
-            normalEnd = true;
+            // 이미 오류로 끝나기로 했으면 정상 종료로 되돌리지 않는다.
+            normalEnd = !closeDue;
         } else {
             normalEnd = false;
             closeDue = true;

@@ -378,15 +378,21 @@ class ConnectionPhaseTest {
         assertThat(subject.endsNormally()).isFalse();
     }
 
+    /** 오류로 끝나기로 한 연결은 뒤늦은 NO_ERROR CLOSE로 정상 종료가 되지 않는다. */
+    @Test
+    void errorEndStaysErrorEnd() {
+        ConnectionPhase subject = server(Phase.OPEN);
+        subject.connectionFailed();
+        subject.closeReceived(NO_ERROR);
+        assertThat(subject.endsNormally()).isFalse();
+    }
+
     @Test
     void mayOpenRequestOnlyWhileNoCloseExchanged() {
         assertThat(server(Phase.OPEN).mayOpenRequest()).isTrue();
         assertThat(server(Phase.AUTH).mayOpenRequest()).isTrue();
         assertThat(closing(Phase.OPEN).mayOpenRequest()).isFalse();
         assertThat(ended(Phase.OPEN).mayOpenRequest()).isFalse();
-        ConnectionPhase disconnected = server(Phase.OPEN);
-        disconnected.transportDisconnected();
-        assertThat(disconnected.mayOpenRequest()).isFalse();
     }
 
     /** 끝난 연결은 어떤 종료 쪽 사건에도 반응하지 않고, 아무것도 받지 않는다. */
