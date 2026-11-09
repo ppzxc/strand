@@ -85,6 +85,11 @@ final class ConnectionPhase {
             return this == DISCONNECTED ? FAILED : this;
         }
 
+        /** 오류(오류 CLOSE, 연결 오류, 서문·첫 프레임 검사 실패)가 난 뒤의 값. 어느 값에서든 오류 종료로 끝난다. */
+        Ending afterError() {
+            return FAILED;
+        }
+
         /** 전송 계층이 CLOSE 없이 끊긴 뒤의 값. */
         Ending afterDisconnect() {
             switch (this) {
@@ -164,14 +169,19 @@ final class ConnectionPhase {
         return closed;
     }
 
-    /** CLOSE 교환 쪽으로 넘어갔는가. CLOSE를 보냈거나 받은 경우와 연결 오류로 CLOSE 교환으로 친 경우를 포함한다(규격 3.5절). */
+    /**
+     * CLOSE 교환 쪽으로 넘어갔는가. CLOSE를 보냈거나 받은 경우와 연결 오류로 CLOSE 없이 CLOSE 교환으로 친 경우(규격 3.5절)를 포함한다. 전송 계층이
+     * CLOSE 없이 끊긴({@link #transportDisconnected}) 경우는 포함하지 않는다. 연결이 끝난 뒤에도 끝나기 전의 값을 그대로 답한다.
+     */
     boolean closeExchanged() {
         return ending.exchanged();
     }
 
     /**
-     * 새 요청에 스트림 번호를 주거나 애플리케이션이 연결을 닫을 수 있는가. CLOSE를 보냈거나 받았거나 연결이 끝났으면 둘 다 하지 않는다(규격
-     * 3.5절).
+     * 새 요청에 스트림 번호를 주거나 애플리케이션이 연결을 닫을 수 있는가. 닫는 일이 시작되지 않았고 연결이 끝나지 않았을 때만 참이다. 따라서
+     * CLOSE를 보냈거나 받았거나, 연결 오류로 CLOSE 교환으로 쳤거나, 연결이 끝났으면 거짓이다(규격 3.5절). 전송 계층이 끊겨 곧 닫을 때가 된
+     * 상태({@link Ending#DISCONNECTED})는 CLOSE 교환이 아니므로 아직 닫히지 않았다면 참이다. 호출자는 끊김을 알린 뒤 곧바로 연결을 끝내므로 이 값이
+     * 관찰되는 일은 없다.
      */
     boolean isActive() {
         return !ending.exchanged() && !closed;
@@ -196,7 +206,8 @@ final class ConnectionPhase {
     /**
      * 받은 프레임 타입을 지금 받아도 되는가(규격 3.3절). CLOSE는 항상 허용한다. 예약 타입은 단계와 무관하게 {@link Admission#RESERVED}다(규격 2.2.2절). 그 밖에는
      * 수립 진행이 정한다(닫는 중에도 같다): HELLO·HELLO(ACK)는 순서대로 한 번씩, AUTH는 AUTH 단계에서 서버는 AUTH만 클라이언트는
-     * AUTH(ACK)만, PING·RESET·애플리케이션 프레임은 열림 단계에서만 받는다. 어긋나면 연결 오류다. 연결이 끝난 뒤에 부르면 {@link IllegalStateException}이다(호출자는 끝난 연결의 입력을 받지 않는다).
+     * AUTH(ACK)만, PING·RESET·애플리케이션 프레임은 열림 단계에서만 받는다. 어긋나면 연결 오류다. 연결이 끝난 뒤에 부르면 {@link IllegalStateException}이다. 호출자({@code Endpoint})는 끝난 연결의 입력을 받지 않으며, 한 프레임을 처리하는 동안
+     * 애플리케이션 콜백(연결 인증)이 연결을 끝내도 그 프레임에서 다시 묻지 않는다.
      *
      * @param ack ACK 플래그가 켜져 있는가
      */
@@ -300,7 +311,7 @@ final class ConnectionPhase {
         if (closed) {
             return;
         }
-        ending = Ending.FAILED; // 오류는 어디서든 오류 종료로 끝난다
+        ending = ending.afterError();
     }
 
     /** 상대가 CLOSE 없이 전송 계층을 끊었다(TCP EOF·RST, WebSocket close). 곧 닫을 때가 되고 정상 종료가 아니다. */
@@ -321,7 +332,10 @@ final class ConnectionPhase {
         }
     }
 
-    /** 연결을 닫게 한 로컬 원인을 기록한다. {@code CLOSED} 이벤트에 싣는다. */
+    /**
+     * 연결을 닫게 한 로컬 원인을 기록한다. {@code CLOSED} 이벤트에 싣는다. 종료 쪽 사건은 끝난 뒤에는 모두 무시한다는 규칙에 따라, 연결이 끝난 뒤
+     * 들어온 원인은 의도적으로 버린다(이미 낸 {@code CLOSED} 이벤트를 바꿀 수 없고 두 번째 {@code CLOSED}도 내지 않는다).
+     */
     void causedBy(Throwable cause) {
         if (closed) {
             return;
@@ -339,7 +353,7 @@ final class ConnectionPhase {
             return;
         }
         if (errorCode != ErrorCode.NO_ERROR) {
-            ending = Ending.FAILED; // 오류는 어디서든 오류 종료로 끝난다
+            ending = ending.afterError();
         } else {
             ending = ending.afterNormalClose();
         }
