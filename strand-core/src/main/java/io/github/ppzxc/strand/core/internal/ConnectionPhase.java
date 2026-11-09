@@ -77,6 +77,19 @@ final class ConnectionPhase {
             return this != NONE && this != DISCONNECTED;
         }
 
+        /** {@code NO_ERROR} CLOSE를 보내거나 받은 뒤의 값. 오류로 끝나기로 한 것은 정상으로 돌아가지 않는다. */
+        Ending afterNormalClose() {
+            if (this == NONE) {
+                return CLOSING;
+            }
+            return this == DISCONNECTED ? FAILED : this;
+        }
+
+        /** 전송 계층이 CLOSE 없이 끊긴 뒤의 값. */
+        Ending afterDisconnect() {
+            return this == NONE ? DISCONNECTED : (this == CLOSING || this == DRAINED ? FAILED : this);
+        }
+
         /** 닫을 때가 됐는가. */
         boolean due() {
             return this == DRAINED || this == FAILED || this == DISCONNECTED;
@@ -282,11 +295,7 @@ final class ConnectionPhase {
         if (closed) {
             return;
         }
-        if (ending == Ending.NONE) {
-            ending = Ending.DISCONNECTED;
-        } else if (ending == Ending.CLOSING || ending == Ending.DRAINED) {
-            ending = Ending.FAILED;
-        }
+        ending = ending.afterDisconnect();
     }
 
     /**
@@ -318,10 +327,8 @@ final class ConnectionPhase {
         }
         if (errorCode != ErrorCode.NO_ERROR) {
             ending = Ending.FAILED;
-        } else if (ending == Ending.NONE) {
-            ending = Ending.CLOSING;
-        } else if (ending == Ending.DISCONNECTED) {
-            ending = Ending.FAILED;
+        } else {
+            ending = ending.afterNormalClose();
         }
     }
 
