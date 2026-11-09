@@ -58,7 +58,7 @@ final class ConnectionPhase {
 
     /**
      * 연결을 닫는 일이 어디까지 왔고 어떻게 끝나기로 했는가. 값 하나라서 정상과 오류가 겹치거나 기다릴 것이 없는데 오류가 아닌 식의 불가능한 조합이 없다.
-     * 위에서 아래로 나아가기만 하고 되돌아가지 않는다(정상 종료는 오류로 바뀔 수 있지만 오류가 정상으로 돌아가지 않는다).
+     * 정상 종료({@link #CLOSING}, {@link #DRAINED})는 오류({@link #FAILED}, {@link #DISCONNECTED})로 바뀔 수 있지만 오류가 정상으로 돌아가지는 않는다.
      */
     private enum Ending {
         /** 닫는 일이 시작되지 않았다. */
@@ -67,7 +67,7 @@ final class ConnectionPhase {
         CLOSING,
         /** {@code NO_ERROR}로 닫는 중에 더 기다릴 스트림이 없어졌다(0개가 됐거나 애플리케이션이 더 기다리지 않기로 했다). 곧 닫는다. */
         DRAINED,
-        /** CLOSE를 교환한 채 오류로 끝나기로 했다. 곧 닫는다. 이후 NO_ERROR CLOSE가 겹쳐도 정상 종료로 되돌리지 않는다. */
+        /** CLOSE 교환 쪽(CLOSE를 보냈거나 받았거나 연결 오류)에서 오류로 끝나기로 했다. 곧 닫는다. 이후 NO_ERROR CLOSE가 겹쳐도 정상 종료로 되돌리지 않는다. */
         FAILED,
         /** CLOSE 없이 오류로 끝나기로 했다(전송 계층이 끊겼다). 곧 닫는다. */
         DISCONNECTED;
@@ -170,11 +170,14 @@ final class ConnectionPhase {
     /**
      * 받은 프레임 타입을 지금 받아도 되는가(규격 3.3절). CLOSE는 항상 허용한다. 예약 타입은 단계와 무관하게 {@link Admission#RESERVED}다(규격 2.2.2절). 그 밖에는
      * 수립 진행이 정한다(닫는 중에도 같다): HELLO·HELLO(ACK)는 순서대로 한 번씩, AUTH는 AUTH 단계에서 서버는 AUTH만 클라이언트는
-     * AUTH(ACK)만, PING·RESET·애플리케이션 프레임은 열림 단계에서만 받는다. 어긋나면 연결 오류다. 연결이 끝난 뒤에는 묻지 않는다(호출자가 끝난 연결의 입력을 받지 않는다).
+     * AUTH(ACK)만, PING·RESET·애플리케이션 프레임은 열림 단계에서만 받는다. 어긋나면 연결 오류다. 연결이 끝난 뒤에 부르면 {@link IllegalStateException}이다(호출자는 끝난 연결의 입력을 받지 않는다).
      *
      * @param ack ACK 플래그가 켜져 있는가
      */
     Admission admit(int type, boolean ack) {
+        if (closed) {
+            throw new IllegalStateException("끝난 연결은 받은 프레임을 묻지 않는다");
+        }
         if (type == FrameType.CLOSE) {
             return Admission.ALLOW;
         }

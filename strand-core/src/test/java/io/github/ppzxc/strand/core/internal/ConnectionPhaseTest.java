@@ -414,6 +414,19 @@ class ConnectionPhaseTest {
         ConnectionPhase subject = ended(established);
         assertThat(subject.mayIdlePing()).isFalse();
         assertThat(subject.applicationSend()).isEqualTo(ApplicationSend.REFUSE);
+        assertThatThrownBy(() -> subject.admit(FrameType.CLOSE, false)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> subject.admit(APP, false)).isInstanceOf(IllegalStateException.class);
+    }
+
+    /** 대기 중인 스트림 0개 도달은 끊긴 연결(CLOSE 교환 없음)을 정상 종료로 바꾸지 않는다. */
+    @Test
+    void pendingStreamsZeroDoesNotMakeADisconnectNormal() {
+        ConnectionPhase disconnected = server(Phase.OPEN);
+        disconnected.transportDisconnected();
+        disconnected.pendingStreamsReachedZero();
+        assertThat(disconnected.closeExchanged()).isFalse();
+        assertThat(disconnected.endsNormally()).isFalse();
+        assertThat(disconnected.shouldCloseTransport()).isTrue();
     }
 
     /** 닫은 로컬 원인은 단계가 보관하고 끝난 뒤에도 읽는다(규격 3.5절, #199). */
