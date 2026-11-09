@@ -45,6 +45,16 @@ final class ConnectionPhase {
         IGNORE
     }
 
+    /** {@link #applicationSend()}의 판단: 애플리케이션이 보내려는 요청이나 PING을 지금 어떻게 다루는가. */
+    enum ApplicationSend {
+        /** 지금 보낼 수 있다. */
+        NOW,
+        /** AUTH 관문 뒤로 미룬다. */
+        DEFER,
+        /** 연결이 끝났다. 보내지 않는다. */
+        REFUSE
+    }
+
     private final boolean server;
     /** 수립 진행. {@link Phase#PREFACE}부터 {@link Phase#OPEN}까지의 값만 가진다. */
     private Phase established;
@@ -155,9 +165,20 @@ final class ConnectionPhase {
         return allowed ? Admission.ALLOW : Admission.CONNECTION_ERROR;
     }
 
-    /** 애플리케이션 송신(요청, PING)을 AUTH 관문 뒤로 미뤄야 하는가(규격 3.3절). */
-    boolean defersApplicationSends() {
-        return established != Phase.OPEN;
+    /**
+     * 애플리케이션 송신(요청, PING)을 지금 어떻게 다루는가. 연결이 끝났으면 보내지 않고, AUTH 관문을 통과하기 전이면 뒤로 미루며(규격
+     * 3.3절), 그 밖에는 지금 보낸다. 끝난 연결의 공개 메서드 동작은 이 판단과 각 메서드가 다루는 장부가 비어 있다는 사실로 정해진다.
+     */
+    ApplicationSend applicationSend() {
+        if (closed) {
+            return ApplicationSend.REFUSE;
+        }
+        return established == Phase.OPEN ? ApplicationSend.NOW : ApplicationSend.DEFER;
+    }
+
+    /** 애플리케이션이 연결을 닫을 수 있는가. 이미 CLOSE를 보냈거나 받았거나 연결이 끝났으면 닫지 않는다(규격 3.5절). */
+    boolean mayClose() {
+        return !closeExchanged && !closed;
     }
 
     /** 유휴 PING을 보낼 수 있는가. AUTH 관문을 통과한 뒤 연결이 끝나기 전까지, 종료 중에도 보낸다(규격 3.3절, 3.4.1절, 3.5절). */
