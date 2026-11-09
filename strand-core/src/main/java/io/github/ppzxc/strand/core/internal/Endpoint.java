@@ -956,6 +956,7 @@ public final class Endpoint {
      * 않는다), 전송 계층이 닫히면 모두 끝나므로, 한 단계마다 장부와 연결 상태를 다시 본다.
      */
     private void openAuthGate() {
+        // 두 값은 이 한 곳에서만 함께 바뀐다. 엔드포인트는 요청 송신과 프레임 검사에, 타이머는 유휴 PING 억제에 쓴다.
         authGatePassed = true;
         timers.authGatePassed();
         while (true) {
