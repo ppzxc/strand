@@ -56,7 +56,7 @@ public final class Endpoint {
      * 애플리케이션이 이벤트로 받지 않은 요청이다.
      */
     private long drainedPeerStreamId;
-    /** 돌려보내서 {@code REQUEST_RECEIVED}를 애플리케이션에 내지 않을 요청의 번호. */
+    /** 돌려보내서 {@code REQUEST_RECEIVED}를 애플리케이션에 내지 않을 요청의 번호. 상대가 먼저 RESET한 요청은 대기 중이 아니므로 여기에 오르지 않는다. */
     private final Set<Long> refusedRequests = new HashSet<>();
     /**
      * 내 요청(번호표를 받은 뒤 결과가 나올 때까지)의 장부. 번호를 받기 전(AUTH 관문 전에 미룬 요청)과 번호를 받은 뒤(쓰기 전, 쓰기 시작)를
@@ -804,6 +804,7 @@ public final class Endpoint {
         } else if (extensionsResult == Extensions.INVALID_VALUE) {
             send(Frames.response(type, streamId, Status.INVALID_ARGUMENT));
         } else {
+            // 대기 중인 요청은 항상 REQUEST_RECEIVED 이벤트와 함께 생긴다. refuseUnhandedRequests가 이 짝에 기댄다.
             peerPendingStreams.put(streamId, type);
             events.add(Event.requestReceived(streamId, type));
         }
