@@ -80,14 +80,8 @@ public final class Endpoint {
     /** 입력 처리 중이다. 애플리케이션 콜백이 같은 엔드포인트에 다시 입력하는 것을 막는다. */
     private boolean receiving;
 
-    private boolean prefaceChecked;
-    private boolean firstFrameChecked;
-    /** 상대의 파라미터 HELLO를 받아 내가 ACK를 보냈다(규격 3.3절). */
-    private boolean peerHelloAcked;
-    /** 내가 보낸 HELLO에 대해 상대가 보낸 ACK를 받았다(규격 3.3절 ACK 관문). */
-    private boolean ownHelloAcked;
-    /** 서버는 {@code AUTH(ACK)}를 보냈고 클라이언트는 {@code AUTH(ACK)}를 받았다(규격 3.3절 AUTH 관문). */
-    private boolean authGatePassed;
+    /** 연결의 수립 단계와 관문(규격 3.3절). 받아도 되는 프레임 타입과 송신을 미룰지는 여기에 묻는다. */
+    private final ConnectionPhase phase;
     /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
     /** 연결을 닫게 한 로컬 원인. 닫을 때 {@code CLOSED} 이벤트에 싣는다. */
@@ -118,6 +112,7 @@ public final class Endpoint {
         }
         this.ledger = new OwnRequestLedger(outbox, firstStreamId, ownParity);
         this.server = server;
+        this.phase = server ? ConnectionPhase.server() : ConnectionPhase.client();
     }
 
     /**
@@ -140,7 +135,6 @@ public final class Endpoint {
      */
     public static Endpoint client(EndpointConfig config) {
         Endpoint endpoint = new Endpoint(false, config);
-        endpoint.prefaceChecked = true;
         endpoint.send(Frames.preface());
         endpoint.sendHello();
         return endpoint;
@@ -263,18 +257,18 @@ public final class Endpoint {
         if (transportClosed) {
             return;
         }
-        if (!prefaceChecked) {
+        if (phase.awaitingPreface()) {
             if (kind == WebSocketMessageKind.BINARY
                     && message.length == Frames.preface().length
                     && matchesPrefacePrefix(message, 0, message.length)) {
-                prefaceChecked = true;
+                phase.prefaceVerified();
                 sendHello();
             } else {
                 closeTransport();
             }
             return;
         }
-        if (!firstFrameChecked && !checkFirstMessage(kind, message)) {
+        if (phase.awaitingFirstFrame() && !checkFirstMessage(kind, message)) {
             closeTransport();
             return;
         }
@@ -312,7 +306,7 @@ public final class Endpoint {
             return;
         }
         expireRequests();
-        byte[] idlePing = timers.idlePing(now);
+        byte[] idlePing = phase.mayIdlePing() ? timers.idlePing(now) : null;
         if (idlePing != null) {
             sendPing(idlePing);
         }
@@ -341,7 +335,7 @@ public final class Endpoint {
             failLocally();
             return ledger.issueTicket();
         }
-        if (authGatePassed) {
+        if (!phase.defersApplicationSends()) {
             // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
             long ticket = ledger.nextTicket();
             if (refuseLocally(ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
@@ -483,7 +477,7 @@ public final class Endpoint {
         }
         if (!transportClosed) {
             byte[] copy = payload.clone();
-            if (authGatePassed) {
+            if (!phase.defersApplicationSends()) {
                 sendPing(copy);
             } else {
                 deferredPings.addLast(new DeferredPing(copy, ledger.nextTicket()));
@@ -561,7 +555,7 @@ public final class Endpoint {
      * 따라 결과가 달라지면 안 되므로, 판정에 필요한 바이트가 모이기 전에는 아무것도 하지 않는다.
      */
     private int consumeUnit(byte[] bytes, int off, int available) {
-        if (!prefaceChecked) {
+        if (phase.awaitingPreface()) {
             return consumePreface(bytes, off, available);
         }
         if (available < Frames.LENGTH_FIELD_SIZE) {
@@ -569,7 +563,7 @@ public final class Endpoint {
             return 0;
         }
         long length = Frames.readUnsignedInt(bytes, off);
-        if (!firstFrameChecked) {
+        if (phase.awaitingFirstFrame()) {
             // 첫 프레임 검사(규격 3.2.4절): 헤더를 읽을 수 없거나 HELLO가 아니면 아무것도 보내지 않고 닫는다.
             if (length < Frames.MIN_LENGTH) {
                 closeTransport();
@@ -583,7 +577,7 @@ public final class Endpoint {
                 closeTransport();
                 return 0;
             }
-            firstFrameChecked = true;
+            phase.firstFrameVerified();
         }
         if (length < Frames.MIN_LENGTH || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE) {
             if (available < Frames.TYPE_END) {
@@ -614,7 +608,7 @@ public final class Endpoint {
             wantedLength = preface.length;
             return 0;
         }
-        prefaceChecked = true;
+        phase.prefaceVerified();
         sendHello();
         return preface.length;
     }
@@ -638,13 +632,15 @@ public final class Endpoint {
                 && Frames.flagsOf(bytes, off) == 0;
     }
 
-    /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 첫 프레임 검사를 마친 것으로 기록한다. */
+    /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 연결 단계에 알린다. */
     private boolean checkFirstMessage(WebSocketMessageKind kind, byte[] message) {
         boolean valid = kind == WebSocketMessageKind.BINARY
                 && message.length >= Frames.HEADER_SIZE
                 && Frames.readUnsignedInt(message, 0) >= Frames.MIN_LENGTH
                 && isFirstFrameHeader(message, 0);
-        firstFrameChecked = valid;
+        if (valid) {
+            phase.firstFrameVerified();
+        }
         return valid;
     }
 
@@ -678,8 +674,10 @@ public final class Endpoint {
             handleApplication(bytes, off, type, extensionsLength, streamId);
             return;
         }
-        if (FrameType.isReserved(type)) {
-            // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 ACK 관문은 보지 않는다.
+        boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
+        ConnectionPhase.Admission admission = phase.admit(type, ack);
+        if (admission == ConnectionPhase.Admission.IGNORE) {
+            // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 관문은 보지 않는다.
             if (extensionsLength != 0) {
                 connectionError();
             }
@@ -689,19 +687,13 @@ public final class Endpoint {
             connectionError();
             return;
         }
-        if (!ownHelloAcked && type != FrameType.HELLO) {
-            // ACK 관문(규격 3.3절): 내 HELLO의 ACK를 받기 전에는 HELLO와 CLOSE만 받는다. AUTH는 예약이 아니라서 여기에 걸린다.
-            connectionError();
-            return;
-        }
-        if (!authGatePassed && type != FrameType.HELLO && type != FrameType.AUTH) {
-            // AUTH 관문(규격 3.3절): 통과 전에는 HELLO·AUTH·CLOSE만 받는다. ACK 관문이 먼저 적용된다.
+        if (admission == ConnectionPhase.Admission.CONNECTION_ERROR) {
+            // 관문(규격 3.3절)이나 HELLO·AUTH의 횟수·방향을 어겼다.
             connectionError();
             return;
         }
         int payloadAt = off + Frames.HEADER_SIZE;
         int payloadSize = size - Frames.HEADER_SIZE;
-        boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
         if (type == FrameType.HELLO) {
             handleHello(ack, bytes, payloadAt, payloadSize);
         } else if (type == FrameType.PING) {
@@ -709,7 +701,7 @@ public final class Endpoint {
         } else if (type == FrameType.RESET) {
             handleReset(streamId, bytes, payloadAt, payloadSize);
         } else if (type == FrameType.AUTH) {
-            handleAuth(ack, bytes, payloadAt, payloadSize);
+            handleAuth(bytes, payloadAt, payloadSize);
         }
     }
 
@@ -753,8 +745,7 @@ public final class Endpoint {
                 ? Extensions.MALFORMED
                 : scanExtensions(bytes, off, extensionsLength);
         if (extensionsResult == Extensions.MALFORMED
-                || !ownHelloAcked
-                || !authGatePassed
+                || phase.admit(type, false) != ConnectionPhase.Admission.ALLOW
                 || isInvalidStreamId(streamId)) {
             connectionError();
         } else if (isOwnSpace(streamId)) {
@@ -847,20 +838,20 @@ public final class Endpoint {
     private void handleHello(boolean ack, byte[] bytes, int payloadAt, int payloadSize) {
         if (ack) {
             // 합친 프레임(ACK이면서 payload가 있음)과 두 번째 ACK는 연결 오류다(규격 3.2.5절).
-            if (payloadSize != 0 || ownHelloAcked) {
+            if (payloadSize != 0) {
                 connectionError();
                 return;
             }
-            ownHelloAcked = true;
+            phase.ownHelloAckReceived();
             timers.ackReceived(LivenessTimers.Kind.HELLO, null);
             return;
         }
-        PeerLimits peer = peerHelloAcked ? null : peerLimitsOf(bytes, payloadAt, payloadSize);
+        PeerLimits peer = peerLimitsOf(bytes, payloadAt, payloadSize);
         if (peer == null) {
             connectionError();
             return;
         }
-        peerHelloAcked = true;
+        phase.peerHelloAcked();
         ledger.setPeerMaxConcurrentStreams(peer.maxConcurrentStreams);
         peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
@@ -886,13 +877,12 @@ public final class Endpoint {
      * {@code AUTH(ACK)}에서 {@code credential_lifetime}을 알린다. 방향 위반, 두 번째 {@code AUTH}·{@code AUTH(ACK)},
      * 형태 위반은 연결 오류다.
      */
-    private void handleAuth(boolean ack, byte[] bytes, int payloadAt, int payloadSize) {
-        if (server && !ack && !authGatePassed) {
+    private void handleAuth(byte[] bytes, int payloadAt, int payloadSize) {
+        // 방향과 횟수는 연결 단계가 이미 걸렀다: 서버는 첫 AUTH만, 클라이언트는 첫 AUTH(ACK)만 여기에 온다.
+        if (server) {
             handleServerAuth(bytes, payloadAt, payloadSize);
-        } else if (!server && ack && peerHelloAcked && !authGatePassed) {
-            handleClientAuthAck(bytes, payloadAt, payloadSize);
         } else {
-            connectionError();
+            handleClientAuthAck(bytes, payloadAt, payloadSize);
         }
     }
 
@@ -956,8 +946,7 @@ public final class Endpoint {
      * 않는다), 전송 계층이 닫히면 모두 끝나므로, 한 단계마다 장부와 연결 상태를 다시 본다.
      */
     private void openAuthGate() {
-        // 두 값은 이 한 곳에서만 함께 바뀐다. 엔드포인트는 요청 송신과 프레임 검사에, 타이머는 유휴 PING 억제에 쓴다.
-        authGatePassed = true;
+        phase.authGatePassed();
         timers.authGatePassed();
         while (true) {
             DeferredPing ping = deferredPings.peekFirst();
