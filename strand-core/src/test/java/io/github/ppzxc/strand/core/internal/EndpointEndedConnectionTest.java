@@ -340,4 +340,27 @@ class EndpointEndedConnectionTest {
         assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
         assertThat(events.get(0).cause()).isEmpty();
     }
+
+    @Test
+    void closingInsideTheAuthCallbackEndsTheConnectionSoNoAuthAckFollowsTheClose() {
+        // AUTH 단계에는 대기 중인 스트림이 없어, 콜백 안의 CLOSE는 곧바로 연결을 끝낸다. "닫는 중이지만 안 끝난" 상태는 생기지 않는다.
+        for (int code : new int[] {ErrorCode.NO_ERROR, ErrorCode.PROTOCOL_ERROR}) {
+            AtomicReference<Endpoint> self = new AtomicReference<>();
+            Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+                self.get().close(code);
+                return AuthDecision.PASS;
+            }));
+            self.set(server);
+            server.receive(bytes(PREFACE));
+            server.receive(bytes(HELLO));
+            server.receive(bytes(HELLO_ACK));
+            server.drainMessages();
+            server.drainEvents();
+
+            server.receive(bytes(AUTH_ANONYMOUS));
+
+            assertThat(server.drainMessages()).as("code " + code).hasSize(1); // CLOSE 하나뿐, AUTH ACK 없음
+            assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        }
+    }
 }
