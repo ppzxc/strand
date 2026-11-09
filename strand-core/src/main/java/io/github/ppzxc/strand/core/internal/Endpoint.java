@@ -6,12 +6,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.function.LongConsumer;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -103,8 +103,10 @@ public final class Endpoint {
     private long now;
     /** 서버의 AUTH 대기가 끝나는 시각. 대기 중이 아니면 null이다(규격 3.3절 AUTH 대기). */
     private @Nullable Long authDeadline;
-    /** ACK를 기다리는 HELLO와 PING들. 보낸 순서대로다(규격 3.3절). */
-    private final List<AckWait> ackWaits = new ArrayList<>();
+    /** ACK를 기다리는 HELLO, AUTH, PING의 확인 대기(규격 3.3절). */
+    private final LivenessTimers timers;
+    /** 쓰기 대기열에서 꺼낸 확인 대기를 시작한다. 시작 시각은 꺼낸 때의 가상 시각이다. */
+    private final LongConsumer startWait;
     /** 마지막으로 프레임을 받은 가상 시각(규격 3.4.1절 유휴 판단). */
     private long lastReceivedAt;
 
@@ -116,6 +118,8 @@ public final class Endpoint {
 
     private Endpoint(boolean server, EndpointConfig config) {
         this.config = config;
+        this.timers = new LivenessTimers(config.ackTimeoutMs());
+        this.startWait = id -> timers.started(id, now);
         long firstStreamId = config.firstStreamId(server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID);
         int ownParity = server ? 0 : 1;
         if ((firstStreamId & 1) != ownParity) {
@@ -312,12 +316,9 @@ public final class Endpoint {
             closeWithError(ErrorCode.UNAUTHENTICATED);
             return;
         }
-        for (AckWait wait : ackWaits) {
-            if (wait.started && now > wait.deadline) {
-                // 닫으면 대기 목록이 비므로 반복을 이어 가지 않고 바로 끝낸다.
-                closeWithError(ErrorCode.UNRESPONSIVE);
-                return;
-            }
+        if (timers.ackExpired(now)) {
+            closeWithError(ErrorCode.UNRESPONSIVE);
+            return;
         }
         expireRequests();
         sendIdlePingIfDue();
@@ -329,7 +330,7 @@ public final class Endpoint {
      */
     private void sendIdlePingIfDue() {
         long idle = config.idleIntervalMs();
-        if (idle <= 0 || !authGatePassed || now - lastReceivedAt < idle || hasOutstandingPing()) {
+        if (idle <= 0 || !authGatePassed || now - lastReceivedAt < idle || timers.hasPing()) {
             return;
         }
         byte[] payload = new byte[PING_PAYLOAD_SIZE];
@@ -338,15 +339,6 @@ public final class Endpoint {
         }
         idlePingCount++;
         sendPing(payload);
-    }
-
-    private boolean hasOutstandingPing() {
-        for (AckWait wait : ackWaits) {
-            if (wait.kind == AckWait.Kind.PING) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -569,7 +561,7 @@ public final class Endpoint {
      */
     public List<OutboundMessage> drainMessages() {
         // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
-        List<OutboundMessage> drained = outbox.drain(now + config.ackTimeoutMs());
+        List<OutboundMessage> drained = outbox.drain(startWait);
         ledger.onWriteStarted();
         return drained;
     }
@@ -882,7 +874,7 @@ public final class Endpoint {
                 return;
             }
             ownHelloAcked = true;
-            endOldestWait(AckWait.Kind.HELLO, null);
+            timers.ackReceived(LivenessTimers.Kind.HELLO, null);
             return;
         }
         PeerLimits peer = peerHelloAcked ? null : peerLimitsOf(bytes, payloadAt, payloadSize);
@@ -908,7 +900,7 @@ public final class Endpoint {
             return;
         }
         // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
-        sendAwaitingAck(auth, AckWait.Kind.AUTH, null);
+        sendAwaitingAck(auth, LivenessTimers.Kind.AUTH, null);
     }
 
     /**
@@ -976,7 +968,7 @@ public final class Endpoint {
                 lifetime = OptionalLong.of(Frames.readUnsignedInt(bytes, at + 2));
             }
         }
-        endOldestWait(AckWait.Kind.AUTH, null);
+        timers.ackReceived(LivenessTimers.Kind.AUTH, null);
         events.add(Event.authenticated(lifetime));
         openAuthGate();
     }
@@ -1047,7 +1039,7 @@ public final class Endpoint {
         byte[] payload = Arrays.copyOfRange(bytes, payloadAt, payloadAt + PING_PAYLOAD_SIZE);
         if (ack) {
             // 보낸 PING과 맞춰 보는 일은 로컬 몫이고, 맞지 않는 ACK는 무시한다(규격 3.4절).
-            endOldestWait(AckWait.Kind.PING, payload);
+            timers.ackReceived(LivenessTimers.Kind.PING, payload);
         } else {
             send(Frames.control(FrameType.PING, Flags.ACK, payload));
         }
@@ -1161,7 +1153,7 @@ public final class Endpoint {
         transportClosed = true;
         pending = NO_BYTES;
         pendingLength = 0;
-        ackWaits.clear();
+        timers.clear();
         for (OwnRequestLedger.Outcome outcome : ledger.onTransportClosed()) {
             applyOutcome(outcome);
         }
@@ -1171,22 +1163,11 @@ public final class Endpoint {
     }
 
     private void sendHello() {
-        sendAwaitingAck(Frames.hello(config), AckWait.Kind.HELLO, null);
+        sendAwaitingAck(Frames.hello(config), LivenessTimers.Kind.HELLO, null);
     }
 
     private void sendPing(byte[] payload) {
-        sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), AckWait.Kind.PING, payload);
-    }
-
-    /** ACK 하나가 끝내는 대기는 종류와 payload가 같은 것 중 가장 먼저 등록한 하나다. 프레임을 넘기기 전에 도착한 ACK도 그 대기를 끝낸다. */
-    private void endOldestWait(AckWait.Kind kind, byte @Nullable [] payload) {
-        for (Iterator<AckWait> it = ackWaits.iterator(); it.hasNext(); ) {
-            AckWait wait = it.next();
-            if (wait.kind == kind && Arrays.equals(wait.payload, payload)) {
-                it.remove();
-                return;
-            }
-        }
+        sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), LivenessTimers.Kind.PING, payload);
     }
 
     /**
@@ -1238,11 +1219,9 @@ public final class Endpoint {
     }
 
     /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
-    private void sendAwaitingAck(byte[] frame, AckWait.Kind kind, byte @Nullable [] payload) {
+    private void sendAwaitingAck(byte[] frame, LivenessTimers.Kind kind, byte @Nullable [] payload) {
         Outbox.Node node = send(frame);
-        AckWait wait = new AckWait(kind, payload);
-        node.ackWait = wait;
-        ackWaits.add(wait);
+        node.waitId = timers.await(kind, payload);
     }
 
     /** AUTH 관문을 통과할 때까지 미룬 PING 하나. */
