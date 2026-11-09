@@ -171,7 +171,8 @@ final class ConnectionPhase {
 
     /**
      * CLOSE 교환 쪽으로 넘어갔는가. CLOSE를 보냈거나 받은 경우와 연결 오류로 CLOSE 없이 CLOSE 교환으로 친 경우(규격 3.5절)를 포함한다. 전송 계층이
-     * CLOSE 없이 끊긴({@link #transportDisconnected}) 경우는 포함하지 않는다. 연결이 끝난 뒤에도 끝나기 전의 값을 그대로 답한다.
+     * CLOSE 없이 끊긴({@link #transportDisconnected}) 상태 자체는 포함하지 않는다. 다만 끊긴 뒤 끝나기 전에 CLOSE나 연결 오류가 겹치면 오류
+     * 종료로 바뀌어 참이 된다. 연결이 끝난 뒤에도 끝나기 전의 값을 그대로 답한다.
      */
     boolean closeExchanged() {
         return ending.exchanged();
