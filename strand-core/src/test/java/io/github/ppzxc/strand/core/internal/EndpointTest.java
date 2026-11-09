@@ -1848,8 +1848,8 @@ class EndpointTest {
 
     private static final String RESET_REFUSED_1 = "00000014000400000000000000000001" + "0000" + "0000" + "00000003";
     private static final String RESET_REFUSED_3 = "00000014000400000000000000000003" + "0000" + "0000" + "00000003";
-    private static final String RESET_REFUSED_7 = "00000014000400000000000000000007" + "0000" + "0000" + "00000003";
     private static final String RESET_REFUSED_5 = "00000014000400000000000000000005" + "0000" + "0000" + "00000003";
+    private static final String RESET_REFUSED_7 = "00000014000400000000000000000007" + "0000" + "0000" + "00000003";
 
     private static String keyBytes(int count) {
         StringBuilder hex = new StringBuilder();
