@@ -9,7 +9,7 @@
 ## 실행
 
 ```sh
-./gradlew :strand-benchmark:jmh                              # 전체. 수정 전 코드에서는 한 시간 넘게 걸린다.
+./gradlew :strand-benchmark:jmh                              # 전체
 ./gradlew :strand-benchmark:jmh -PjmhIncludes=OutboxBenchmark   # 정규식으로 일부만
 ```
 

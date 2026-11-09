@@ -29,7 +29,7 @@ final class Outbox {
         final boolean application;
 
         @Nullable
-        AckWait wait;
+        AckWait ackWait;
 
         @Nullable
         Node prev;
@@ -127,9 +127,9 @@ final class Outbox {
         List<OutboundMessage> drained = new ArrayList<>(size);
         for (Node node = head; node != null; node = node.next) {
             drained.add(node.message);
-            AckWait wait = node.wait;
-            if (wait != null && !wait.started) {
-                wait.start(ackDeadline);
+            AckWait ackWait = node.ackWait;
+            if (ackWait != null && !ackWait.started) {
+                ackWait.start(ackDeadline);
             }
         }
         head = null;

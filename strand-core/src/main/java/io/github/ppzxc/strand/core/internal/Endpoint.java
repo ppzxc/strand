@@ -158,9 +158,14 @@ public final class Endpoint {
     }
 
     /**
-     * 상대에게서 받은 바이트를 넣는다. 프레임 경계와 무관하게 어느 위치에서 잘라도 된다.
+     * 상대에게서 받은 바이트를 넣는다. 프레임 경계와 무관하게 어느 위치에서 잘라도 된다. 이 호출 안에서 읽고 끝내며 {@code bytes}를 붙잡지
+     * 않으므로, 돌아온 뒤에는 호출자가 배열을 다시 써도 된다.
+     *
+     * <p>입력을 처리하는 동안 애플리케이션 콜백({@code Authenticator})에서 같은 엔드포인트에 다시 입력할 수 없다. 오동작하지 않도록 상태를 건드리지
+     * 않고 던진다. 콜백이 던진 예외는 엔드포인트가 받아 연결을 닫으므로 이 호출 밖으로 나오지 않는다.
      *
      * @param bytes 받은 바이트
+     * @throws IllegalStateException WebSocket 엔드포인트일 때, 또는 입력을 처리하는 중에 다시 불렀을 때
      */
     public void receive(byte[] bytes) {
         if (config.isWebSocket()) {
@@ -227,8 +232,9 @@ public final class Endpoint {
     private void appendPending(byte[] bytes, int at, int length) {
         int needed = pendingLength + length;
         if (needed > pending.length) {
-            // 받은 만큼에 맞춰 두 배씩 키운다. 처리 중인 단위(최대 max_frame_size)보다 두 배를 넘지 않는다.
-            pending = Arrays.copyOf(pending, Math.max(needed, Math.max(PENDING_MIN_CAPACITY, pending.length * 2)));
+            // 받은 만큼에 맞춰 두 배씩 키운다. 상한은 처리 중인 단위의 크기(wantedLength, 최대 max_frame_size)다.
+            int doubled = Math.max(PENDING_MIN_CAPACITY, pending.length * 2);
+            pending = Arrays.copyOf(pending, Math.max(needed, Math.min(doubled, wantedLength)));
         }
         System.arraycopy(bytes, at, pending, pendingLength, length);
         pendingLength = needed;
@@ -246,8 +252,11 @@ public final class Endpoint {
      * WebSocket 메시지 하나를 넣는다. 서문은 첫 바이너리 메시지, 그 뒤로는 메시지 하나가 프레임 하나다(규격 1.2절). 바이너리가 아닌
      * 메시지, 크기가 {@code 4 + length}가 아닌 메시지는 연결 오류다. type이 CLOSE이면 크기가 어긋나도 받은 CLOSE로 본다.
      *
+     * <p>입력을 처리하는 동안 애플리케이션 콜백에서 같은 엔드포인트에 다시 입력할 수 없다({@link #receive(byte[])}와 같다).
+     *
      * @param kind 메시지 종류
      * @param message 메시지 내용
+     * @throws IllegalStateException 바이트 스트림 엔드포인트일 때, 또는 입력을 처리하는 중에 다시 불렀을 때
      */
     public void receiveMessage(WebSocketMessageKind kind, byte[] message) {
         if (!config.isWebSocket()) {
@@ -500,9 +509,7 @@ public final class Endpoint {
         if (endOwnStream(streamId) == null) {
             return;
         }
-        Outbox.Node unwritten = undrainedRequests.remove(streamId);
-        if (unwritten != null) {
-            outbox.remove(unwritten);
+        if (unwrite(streamId)) {
             events.add(Event.result(streamId, status, Certainty.NOT_PROCESSED));
         } else {
             send(Frames.reset(streamId, ErrorCode.CANCEL));
@@ -763,7 +770,7 @@ public final class Endpoint {
         }
         if (isOwnSpace(streamId)) {
             if (endOwnStream(streamId) != null) {
-                dropUnwrittenRequest(streamId);
+                unwrite(streamId);
                 long errorCode = Frames.readUnsignedInt(bytes, payloadAt);
                 // 거절한 요청은 처리를 시작하지 않았다(규격 4.4절 결과 표).
                 Certainty certainty = errorCode == ErrorCode.REFUSED ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
@@ -877,7 +884,7 @@ public final class Endpoint {
         int status = Frames.typeOf(bytes, off) == requestType
                 ? Status.normalize(Frames.statusOf(bytes, off))
                 : Event.RESPONSE_TYPE_MISMATCH;
-        dropUnwrittenRequest(streamId);
+        unwrite(streamId);
         events.add(Event.result(streamId, status, Certainty.RESPONSE));
         closeTransportIfNoPendingStreams();
     }
@@ -1087,10 +1094,7 @@ public final class Endpoint {
             long streamId = pending.next();
             if (streamId > lastStreamId) {
                 pending.remove();
-                Outbox.Node unsent = undrainedRequests.remove(streamId);
-                if (unsent != null) {
-                    outbox.remove(unsent);
-                }
+                unwrite(streamId);
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
             }
         }
@@ -1188,11 +1192,7 @@ public final class Endpoint {
             if (stateOf(streamId) == RequestState.WRITING_STARTED) {
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.UNKNOWN));
             } else {
-                // 요청의 마지막 바이트를 넘기지 못한 프레임은 이후에도 넘기지 않도록 거둔다.
-                Outbox.Node unsent = undrainedRequests.get(streamId);
-                if (unsent != null) {
-                    outbox.remove(unsent);
-                }
+                unwrite(streamId);
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
             }
         }
@@ -1272,12 +1272,19 @@ public final class Endpoint {
         return ownPendingStreams.size();
     }
 
-    /** 상대가 아직 쓰지 않은 내 요청에 답한 경우(상대의 규격 위반), 쓰기 대기열에 남은 요청 기록을 함께 치운다. */
-    private void dropUnwrittenRequest(long streamId) {
+    /**
+     * 아직 쓰기 전인 내 요청의 프레임을 쓰기 대기열에서 거둔다. 쓰기 전 요청의 기록({@code undrainedRequests})과 대기열이 어긋나지 않도록 둘을 항상
+     * 함께 고치는 유일한 자리다. 취소와 기한, CLOSE로 끝낼 때뿐 아니라 상대가 아직 쓰지 않은 내 요청에 답한 경우(상대의 규격 위반)에도 쓴다.
+     *
+     * @return 쓰기 전이어서 거뒀으면 true, 이미 쓰기를 시작했거나 없는 스트림이면 false
+     */
+    private boolean unwrite(long streamId) {
         Outbox.Node unwritten = undrainedRequests.remove(streamId);
-        if (unwritten != null) {
-            outbox.remove(unwritten);
+        if (unwritten == null) {
+            return false;
         }
+        outbox.remove(unwritten);
+        return true;
     }
 
     /** 내 스트림을 끝낸다. 대기 중이던 요청의 type을 돌려주고, 대기 중이 아니면 null이다. */
@@ -1385,7 +1392,7 @@ public final class Endpoint {
 
     /**
      * 쓰기 전 요청 가운데 마지막 것. 요청은 넣은 순서대로 대기열에 있고 {@code undrainedRequests}도 그 순서라 마지막 값이 마지막 요청이다. CLOSE는
-     * 연결당 한 번만 보내므로 끝까지 도는 비용은 한 번이다.
+     * 연결당 한 번만 보내므로(규격 3.5절, {@code closeExchanged}가 막는다) 끝까지 도는 비용은 한 번이다.
      */
     private Outbox.Node lastUndrainedRequest() {
         Outbox.Node last = null;
@@ -1402,7 +1409,7 @@ public final class Endpoint {
     private void sendAwaitingAck(byte[] frame, byte @Nullable [] payload) {
         Outbox.Node node = send(frame);
         AckWait wait = new AckWait(payload);
-        node.wait = wait;
+        node.ackWait = wait;
         ackWaits.add(wait);
     }
 

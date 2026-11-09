@@ -9,7 +9,7 @@ import org.openjdk.jmh.annotations.State;
 
 /**
  * 큰 프레임 하나가 작은 조각으로 도착하는 입력의 {@code Endpoint.receive()} 비용 증가율(#200). 프레임이 8배가 되면 시간도 8배 안팎(선형)이어야
- * 한다. 수정 전에는 조각마다 쌓인 전체를 이어 붙여 이차다.
+ * 한다.
  */
 @State(Scope.Benchmark)
 public class ReceiveBigFrameBenchmark {

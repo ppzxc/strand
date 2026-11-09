@@ -25,16 +25,21 @@ class EndpointOutboxOrderTest {
     /** 시나리오가 도는 환경. 시드로 고른다. */
     private enum Variant {
         /** 바이트 스트림, 규격 기본값. */
-        STREAM(EndpointConfig.defaults()),
+        STREAM,
         /** 바이트 스트림, 짧은 확인 대기와 유휴 간격. drain이 시작한 확인 대기가 실제로 만료된다. */
-        SHORT_TIMERS(EndpointConfig.defaults().ackTimeoutMs(100).idleIntervalMs(40)),
+        SHORT_TIMERS,
         /** WebSocket. 닫을 때 WebSocket Close가 맨 끝에 붙는다. */
-        WEBSOCKET(EndpointConfig.defaults().webSocket());
+        WEBSOCKET;
 
-        private final EndpointConfig config;
-
-        Variant(EndpointConfig config) {
-            this.config = config;
+        EndpointConfig config() {
+            switch (this) {
+                case SHORT_TIMERS:
+                    return EndpointConfig.defaults().ackTimeoutMs(100).idleIntervalMs(40);
+                case WEBSOCKET:
+                    return EndpointConfig.defaults().webSocket();
+                default:
+                    return EndpointConfig.defaults();
+            }
         }
     }
 
@@ -49,7 +54,7 @@ class EndpointOutboxOrderTest {
 
     /** 서버 쪽에서 서문, HELLO 교환, AUTH 통과까지 마친 엔드포인트. 상대가 알린 동시 스트림 수는 규격 기본값이다. */
     private static Endpoint established(Variant variant) {
-        Endpoint server = Endpoint.server(variant.config);
+        Endpoint server = Endpoint.server(variant.config());
         feed(variant, server, Frames.preface());
         feed(variant, server, Frames.hello(EndpointConfig.defaults()));
         feed(variant, server, Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));

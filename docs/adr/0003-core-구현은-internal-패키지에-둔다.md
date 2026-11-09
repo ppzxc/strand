@@ -4,7 +4,7 @@ status: proposed
 
 # core 구현은 internal 패키지에 둔다
 
-`strand-core`의 상태 기계 구현(`Endpoint`, `EndpointConfig`, `Event`, `OutboundMessage`, `MessageKind`, `Frames`)은 `io.github.ppzxc.strand.core.internal`에 둔다. 공개 패키지 `io.github.ppzxc.strand.core`에는 `StrandVersion`만 있다. 패키지 이름이 코드 밖에서는 드러나지 않는 약속이라 결정을 남긴다.
+`strand-core`의 상태 기계 구현(`Endpoint`, `EndpointConfig`, `Event`, `OutboundMessage`, `MessageKind`, `Frames`, `Outbox`, `AckWait` 등)은 `io.github.ppzxc.strand.core.internal`에 둔다. 공개 패키지 `io.github.ppzxc.strand.core`에는 `StrandVersion`만 있다. 패키지 이름이 코드 밖에서는 드러나지 않는 약속이라 결정을 남긴다.
 
 ## 결정
 

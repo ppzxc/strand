@@ -8,7 +8,6 @@ import org.openjdk.jmh.annotations.State;
 
 /**
  * 청크 하나에 작은 프레임이 가득 찬 입력의 {@code Endpoint.receive()} 비용 증가율(#200). 입력이 8배가 되면 시간도 8배 안팎(선형)이어야 한다.
- * 수정 전에는 프레임마다 남은 바이트를 복사해 이차다.
  */
 @State(Scope.Benchmark)
 public class ReceiveManySmallFramesBenchmark {

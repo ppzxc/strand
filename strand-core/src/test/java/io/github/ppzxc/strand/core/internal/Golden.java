@@ -39,6 +39,10 @@ final class Golden {
     /** 골든 파일의 줄. 환경 변수로 갱신을 요청했으면 {@code actual}을 먼저 파일에 쓴다. */
     static List<String> lines(String resource, List<String> actual) {
         if ("1".equals(System.getenv("STRAND_GOLDEN_UPDATE"))) {
+            if (System.getenv("CI") != null) {
+                // CI에서 골든이 조용히 다시 만들어지면 비교가 무의미해진다.
+                throw new IllegalStateException("CI에서는 STRAND_GOLDEN_UPDATE를 쓸 수 없다");
+            }
             try {
                 Files.write(
                         RESOURCE_DIR.resolve(resource),
