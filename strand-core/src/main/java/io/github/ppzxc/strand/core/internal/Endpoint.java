@@ -35,8 +35,6 @@ public final class Endpoint {
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int AUTH_ACK_PARAM_SIZE = 6;
     private static final int CREDENTIAL_LIFETIME_ID = 0x0001;
-    /** AUTH 확인 대기를 PING(8바이트)·HELLO(null)의 대기와 구분하는 표지. */
-    private static final byte[] AUTH_WAIT = new byte[0];
 
     private static final int RESET_PAYLOAD_SIZE = 4;
     private static final int TLV_HEADER_SIZE = 4;
@@ -344,7 +342,7 @@ public final class Endpoint {
 
     private boolean hasOutstandingPing() {
         for (AckWait wait : ackWaits) {
-            if (wait.payload != null && wait.payload.length == PING_PAYLOAD_SIZE) {
+            if (wait.kind == AckWait.Kind.PING) {
                 return true;
             }
         }
@@ -884,7 +882,7 @@ public final class Endpoint {
                 return;
             }
             ownHelloAcked = true;
-            endOldestWait(null);
+            endOldestWait(AckWait.Kind.HELLO, null);
             return;
         }
         PeerLimits peer = peerHelloAcked ? null : peerLimitsOf(bytes, payloadAt, payloadSize);
@@ -910,7 +908,7 @@ public final class Endpoint {
             return;
         }
         // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
-        sendAwaitingAck(auth, AUTH_WAIT);
+        sendAwaitingAck(auth, AckWait.Kind.AUTH, null);
     }
 
     /**
@@ -978,7 +976,7 @@ public final class Endpoint {
                 lifetime = OptionalLong.of(Frames.readUnsignedInt(bytes, at + 2));
             }
         }
-        endOldestWait(AUTH_WAIT);
+        endOldestWait(AckWait.Kind.AUTH, null);
         events.add(Event.authenticated(lifetime));
         openAuthGate();
     }
@@ -1049,7 +1047,7 @@ public final class Endpoint {
         byte[] payload = Arrays.copyOfRange(bytes, payloadAt, payloadAt + PING_PAYLOAD_SIZE);
         if (ack) {
             // 보낸 PING과 맞춰 보는 일은 로컬 몫이고, 맞지 않는 ACK는 무시한다(규격 3.4절).
-            endOldestWait(payload);
+            endOldestWait(AckWait.Kind.PING, payload);
         } else {
             send(Frames.control(FrameType.PING, Flags.ACK, payload));
         }
@@ -1173,17 +1171,18 @@ public final class Endpoint {
     }
 
     private void sendHello() {
-        sendAwaitingAck(Frames.hello(config), null);
+        sendAwaitingAck(Frames.hello(config), AckWait.Kind.HELLO, null);
     }
 
     private void sendPing(byte[] payload) {
-        sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), payload);
+        sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), AckWait.Kind.PING, payload);
     }
 
-    /** ACK 하나가 끝내는 대기는 payload가 같은 것 중 가장 먼저 등록한 하나다. 프레임을 넘기기 전에 도착한 ACK도 그 대기를 끝낸다. HELLO 대기는 payload가 null이다. */
-    private void endOldestWait(byte @Nullable [] payload) {
+    /** ACK 하나가 끝내는 대기는 종류와 payload가 같은 것 중 가장 먼저 등록한 하나다. 프레임을 넘기기 전에 도착한 ACK도 그 대기를 끝낸다. */
+    private void endOldestWait(AckWait.Kind kind, byte @Nullable [] payload) {
         for (Iterator<AckWait> it = ackWaits.iterator(); it.hasNext(); ) {
-            if (Arrays.equals(it.next().payload, payload)) {
+            AckWait wait = it.next();
+            if (wait.kind == kind && Arrays.equals(wait.payload, payload)) {
                 it.remove();
                 return;
             }
@@ -1239,9 +1238,9 @@ public final class Endpoint {
     }
 
     /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
-    private void sendAwaitingAck(byte[] frame, byte @Nullable [] payload) {
+    private void sendAwaitingAck(byte[] frame, AckWait.Kind kind, byte @Nullable [] payload) {
         Outbox.Node node = send(frame);
-        AckWait wait = new AckWait(payload);
+        AckWait wait = new AckWait(kind, payload);
         node.ackWait = wait;
         ackWaits.add(wait);
     }
