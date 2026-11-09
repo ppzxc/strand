@@ -420,6 +420,16 @@ class ConnectionPhaseTest {
         }
     }
 
+    /** 기다릴 스트림이 없어진 정상 종료도 끊기면 정상 종료가 아니다. */
+    @Test
+    void disconnectAfterDrainedIsNotANormalEnd() {
+        ConnectionPhase subject = closing(Phase.OPEN);
+        subject.pendingStreamsReachedZero();
+        subject.transportDisconnected();
+        assertThat(subject.endsNormally()).isFalse();
+        assertThat(subject.shouldCloseTransport()).isTrue();
+    }
+
     /** 끊긴 뒤에 CLOSE나 연결 오류가 겹치면 이전처럼 CLOSE 교환으로 넘어가되 정상 종료가 아니다. */
     @ParameterizedTest
     @EnumSource(

@@ -34,7 +34,7 @@ final class ConnectionPhase {
         OPEN,
         /** CLOSE를 보냈거나 받았다(규격 3.5절). 오류 CLOSE이면 곧 닫고, {@code NO_ERROR}이면 대기 중인 스트림이 없어질 때까지 둔다. */
         CLOSING,
-        /** 전송 계층이 닫혀 연결이 끝났다(규격 1.3절 연결이 끝남). 어떤 프레임도 받지 않는다. */
+        /** 전송 계층이 닫혀 연결이 끝났다(규격 1.3절 연결이 끝남). 어떤 프레임도 받지 않으므로 {@link #admit}을 부를 수 없다. */
         CLOSED
     }
 
@@ -72,7 +72,7 @@ final class ConnectionPhase {
         /** CLOSE 없이 오류로 끝나기로 했다(전송 계층이 끊겼다). 곧 닫는다. */
         DISCONNECTED;
 
-        /** CLOSE를 보냈거나 받았는가. */
+        /** CLOSE 교환 쪽으로 넘어갔는가. CLOSE를 보냈거나 받은 경우와, 연결 오류로 CLOSE 없이 CLOSE 교환으로 친 경우(규격 3.5절, {@link #connectionFailed})를 포함한다. */
         boolean exchanged() {
             return this != NONE && this != DISCONNECTED;
         }
