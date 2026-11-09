@@ -54,6 +54,8 @@ final class ConnectionPhase {
     private boolean closeReceived;
     /** 이 연결의 끝이 {@code NO_ERROR}로 정리되는 중이다. 오류나 전송 계층 끊김이 겹치면 꺼진다. */
     private boolean normalEnd;
+    /** 오류나 끊김으로 끝나기로 했다. 이후 NO_ERROR CLOSE가 겹쳐도 정상 종료로 되돌리지 않는다. */
+    private boolean failed;
     /** 지금 전송 계층을 닫아야 한다. */
     private boolean closeDue;
 
@@ -111,7 +113,7 @@ final class ConnectionPhase {
 
     /** 지금 전송 계층을 닫아야 하는가. 닫은 뒤에는 {@link #transportClosed()}를 알린다. */
     boolean shouldCloseTransport() {
-        return closeDue && !closed;
+        return closeDue;
     }
 
     /** 닫는 일이 {@code NO_ERROR}로 끝나는가. 참이면 WebSocket Close(1000)를 덧붙인다(규격 1.2절). */
@@ -238,8 +240,7 @@ final class ConnectionPhase {
             return;
         }
         closeExchanged = true;
-        normalEnd = false;
-        closeDue = true;
+        fail();
     }
 
     /** 상대가 CLOSE 없이 전송 계층을 끊었다(TCP EOF·RST, WebSocket close). 곧 닫을 때가 되고 정상 종료가 아니다. */
@@ -247,8 +248,7 @@ final class ConnectionPhase {
         if (closed) {
             return;
         }
-        normalEnd = false;
-        closeDue = true;
+        fail();
     }
 
     /** 대기 중인 스트림이 0개다. 종료 중이면 닫을 때가 된다(규격 3.5절). 종료 중이 아니면 아무것도 하지 않는다. */
@@ -284,11 +284,16 @@ final class ConnectionPhase {
         closeExchanged = true;
         if (errorCode == ErrorCode.NO_ERROR) {
             // 이미 오류로 끝나기로 했으면 정상 종료로 되돌리지 않는다.
-            normalEnd = !closeDue;
+            normalEnd = !failed;
         } else {
-            normalEnd = false;
-            closeDue = true;
+            fail();
         }
+    }
+
+    private void fail() {
+        failed = true;
+        normalEnd = false;
+        closeDue = true;
     }
 
     private void advance(Phase from, Phase to) {
