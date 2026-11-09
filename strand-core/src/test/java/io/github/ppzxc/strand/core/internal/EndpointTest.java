@@ -3113,9 +3113,12 @@ class EndpointTest {
 
         server.close(ErrorCode.INTERNAL_ERROR);
 
-        String sent = sent(server);
-        assertThat(sent).startsWith(RESET_REFUSED_5 + RESET_REFUSED_7);
-        assertThat(sent).doesNotContain(RESET_REFUSED_1).doesNotContain(RESET_REFUSED_3);
+        assertThat(sent(server))
+                .isEqualTo(RESET_REFUSED_5
+                        + RESET_REFUSED_7
+                        + "0000001c00030000000000000000000000000000"
+                        + "00000002"
+                        + "0000000000000007");
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 
