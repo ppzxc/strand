@@ -334,7 +334,10 @@ class EndpointEndedConnectionTest {
             server.receive(bytes(AUTH_ANONYMOUS));
 
             assertThat(server.drainMessages()).as(decision.name()).isEmpty();
-            assertThat(server.drainEvents()).as(decision.name()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+            assertThat(server.drainEvents())
+                    .as(decision.name())
+                    .extracting(Event::kind)
+                    .containsExactly(Event.Kind.CLOSED);
         }
     }
 
