@@ -231,7 +231,6 @@ class LivenessTimersTest {
 
     @Test
     void idlePingIsDueOnlyAfterTheIdleInterval() {
-        timers.authGatePassed();
         timers.frameReceived(100);
 
         assertThat(timers.idlePing(100 + IDLE_INTERVAL - 1)).isNull();
@@ -241,14 +240,12 @@ class LivenessTimersTest {
     @Test
     void idlePingIsSuppressedWithoutAnIdleInterval() {
         LivenessTimers off = new LivenessTimers(ACK_TIMEOUT, AUTH_TIMEOUT, 0);
-        off.authGatePassed();
 
         assertThat(off.idlePing(Long.MAX_VALUE)).isNull();
     }
 
     @Test
     void idlePingIsSuppressedWhileAPingIsAwaited() {
-        timers.authGatePassed();
         await(Kind.PING);
 
         assertThat(timers.idlePing(IDLE_INTERVAL)).isNull();
@@ -259,18 +256,7 @@ class LivenessTimersTest {
     }
 
     @Test
-    void idlePingIsSuppressedBeforeTheAuthGate() {
-        assertThat(timers.idlePing(Long.MAX_VALUE)).isNull();
-
-        timers.authGatePassed();
-
-        assertThat(timers.idlePing(Long.MAX_VALUE)).isNotNull();
-    }
-
-    @Test
     void consecutiveIdlePingsCarryAnIncreasingCounter() {
-        timers.authGatePassed();
-
         assertThat(timers.idlePing(IDLE_INTERVAL)).isEqualTo(new byte[] {0, 0, 0, 0, 0, 0, 0, 0});
         assertThat(timers.idlePing(IDLE_INTERVAL)).isEqualTo(new byte[] {0, 0, 0, 0, 0, 0, 0, 1});
         assertThat(timers.idlePing(IDLE_INTERVAL)).isEqualTo(new byte[] {0, 0, 0, 0, 0, 0, 0, 2});
@@ -278,7 +264,6 @@ class LivenessTimersTest {
 
     @Test
     void receivingAFrameDelaysTheNextIdlePing() {
-        timers.authGatePassed();
         timers.frameReceived(IDLE_INTERVAL - 1);
 
         assertThat(timers.idlePing(IDLE_INTERVAL)).isNull();
@@ -298,8 +283,6 @@ class LivenessTimersTest {
 
     @Test
     void noIdlePingIsJudgedAfterTheConnectionEnded() {
-        timers.authGatePassed();
-
         timers.clear();
 
         assertThat(timers.idlePing(Long.MAX_VALUE)).isNull();

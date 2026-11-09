@@ -947,7 +947,6 @@ public final class Endpoint {
      */
     private void openAuthGate() {
         phase.authGatePassed();
-        timers.authGatePassed();
         while (true) {
             DeferredPing ping = deferredPings.peekFirst();
             OwnRequestLedger.Admission admission =
