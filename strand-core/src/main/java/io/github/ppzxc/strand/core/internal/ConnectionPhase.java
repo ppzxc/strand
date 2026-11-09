@@ -67,7 +67,7 @@ final class ConnectionPhase {
     private boolean closeReceived;
     /** 오류나 끊김으로 끝나기로 했다. 이후 NO_ERROR CLOSE가 겹쳐도 정상 종료로 되돌리지 않는다. */
     private boolean failed;
-    /** 닫는 중에 대기 중인 스트림이 없어졌다. 오류로 끝나기로 한 경우는 {@link #failed}가 닫을 때를 정한다. */
+    /** 닫는 중에 더 기다릴 스트림이 없어졌다(대기 중인 스트림이 0개가 됐거나 애플리케이션이 더 기다리지 않기로 했다). 오류로 끝나기로 한 경우는 {@link #failed}가 닫을 때를 정한다. */
     private boolean drained;
 
     private boolean closed;
@@ -130,7 +130,7 @@ final class ConnectionPhase {
         return !closed && (failed || drained);
     }
 
-    /** 닫는 일이 {@code NO_ERROR}로 끝나는가. 참이면 WebSocket Close(1000)를 덧붙인다(규격 1.2절). */
+    /** 닫는 일이 {@code NO_ERROR}로 끝나는가. 이미 오류로 끝나기로 했으면 이후 NO_ERROR CLOSE가 겹쳐도 아니다. 참이면 WebSocket Close(1000)를 덧붙인다(규격 1.2절). */
     boolean endsNormally() {
         return closeExchanged && !failed;
     }
@@ -285,9 +285,7 @@ final class ConnectionPhase {
             return;
         }
         closeExchanged = true;
-        if (errorCode == ErrorCode.NO_ERROR) {
-            // 이미 오류로 끝나기로 했으면 정상 종료로 되돌리지 않는다(endsNormally).
-        } else {
+        if (errorCode != ErrorCode.NO_ERROR) {
             fail();
         }
     }
