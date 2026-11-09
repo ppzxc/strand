@@ -40,7 +40,7 @@ final class LivenessTimers {
     }
 
     private final long ackTimeoutMs;
-    /** 보낸 순서대로다. */
+    /** 보낸 순서대로다. 식별자는 등록할 때마다 커지고 지울 때도 순서가 유지되므로 식별자 오름차순이다({@link #started}가 이 순서에 기댄다). */
     private final List<Wait> waits = new ArrayList<>();
 
     private long lastId = NO_WAIT;

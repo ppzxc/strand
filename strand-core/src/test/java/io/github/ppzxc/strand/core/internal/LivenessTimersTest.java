@@ -149,4 +149,26 @@ class LivenessTimersTest {
         timers.started(id, 0);
         assertThat(timers.ackExpired(Long.MAX_VALUE)).isFalse();
     }
+
+    @Test
+    void everyWaitStartsAfterOthersWereEndedInAnyOrder() {
+        long[] ids = new long[9];
+        for (int i = 0; i < ids.length; i++) {
+            ids[i] = timers.await(Kind.PING, ping(i));
+        }
+        timers.ackReceived(Kind.PING, ping(0));
+        timers.ackReceived(Kind.PING, ping(4));
+        timers.ackReceived(Kind.PING, ping(8));
+        for (int i = ids.length - 1; i >= 0; i--) {
+            timers.started(ids[i], 10L * i);
+        }
+
+        // 남은 대기 가운데 가장 이른 기한은 ping(1)의 10 + 1000이다.
+        assertThat(timers.ackExpired(1010)).isFalse();
+        assertThat(timers.ackExpired(1011)).isTrue();
+        for (int i : new int[] {1, 2, 3, 5, 6, 7}) {
+            timers.ackReceived(Kind.PING, ping(i));
+        }
+        assertThat(timers.hasPing()).isFalse();
+    }
 }
