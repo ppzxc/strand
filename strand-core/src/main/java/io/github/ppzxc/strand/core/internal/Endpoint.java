@@ -101,16 +101,10 @@ public final class Endpoint {
     private boolean transportClosed;
 
     private long now;
-    /** 서버의 AUTH 대기가 끝나는 시각. 대기 중이 아니면 null이다(규격 3.3절 AUTH 대기). */
-    private @Nullable Long authDeadline;
-    /** ACK를 기다리는 HELLO, AUTH, PING의 확인 대기(규격 3.3절). */
+    /** ACK를 기다리는 HELLO, AUTH, PING의 확인 대기, 서버의 AUTH 대기 기한, 유휴 PING 일정(규격 3.3절, 3.4.1절). */
     private final LivenessTimers timers;
     /** 쓰기 대기열에서 꺼낸 확인 대기를 시작한다. 시작 시각은 꺼낸 때의 가상 시각이다. */
     private final LongConsumer startWait;
-    /** 마지막으로 프레임을 받은 가상 시각(규격 3.4.1절 유휴 판단). */
-    private long lastReceivedAt;
-
-    private long idlePingCount;
 
     private final boolean server;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
@@ -118,7 +112,7 @@ public final class Endpoint {
 
     private Endpoint(boolean server, EndpointConfig config) {
         this.config = config;
-        this.timers = new LivenessTimers(config.ackTimeoutMs());
+        this.timers = new LivenessTimers(config.ackTimeoutMs(), config.authTimeoutMs(), config.idleIntervalMs());
         this.startWait = id -> timers.started(id, now);
         long firstStreamId = config.firstStreamId(server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID);
         int ownParity = server ? 0 : 1;
@@ -312,36 +306,20 @@ public final class Endpoint {
             return;
         }
         now += ms;
-        if (authDeadline != null && now > authDeadline) {
+        LivenessTimers.Expiry expiry = timers.expiry(now);
+        if (expiry == LivenessTimers.Expiry.UNAUTHENTICATED) {
             closeWithError(ErrorCode.UNAUTHENTICATED);
             return;
         }
-        if (timers.ackExpired(now)) {
+        if (expiry == LivenessTimers.Expiry.UNRESPONSIVE) {
             closeWithError(ErrorCode.UNRESPONSIVE);
             return;
         }
         expireRequests();
-        byte[] idlePing = nextIdlePing();
+        byte[] idlePing = timers.idlePing(now);
         if (idlePing != null) {
             sendPing(idlePing);
         }
-    }
-
-    /**
-     * 유휴 간격 동안 받은 프레임이 없고 ACK를 기다리는 PING이 없으면 보낼 PING의 payload를 돌려준다(규격 3.4.1절). 간격이 설정돼 있지 않으면 보내지 않는다.
-     * 보내는 때는 규격 3.3절의 송신 규칙을 따라 AUTH 관문을 통과한 뒤에만 보낸다. 종료 중에도 보낸다.
-     */
-    private byte @Nullable [] nextIdlePing() {
-        long idle = config.idleIntervalMs();
-        if (idle <= 0 || !authGatePassed || now - lastReceivedAt < idle || timers.hasPing()) {
-            return null;
-        }
-        byte[] payload = new byte[PING_PAYLOAD_SIZE];
-        for (int i = PING_PAYLOAD_SIZE - 1; i >= 0; i--) {
-            payload[i] = (byte) (idlePingCount >>> (8 * (PING_PAYLOAD_SIZE - 1 - i)));
-        }
-        idlePingCount++;
-        return payload;
     }
 
     /**
@@ -687,7 +665,7 @@ public final class Endpoint {
      * 돌아온 뒤에는 읽지 않으며 배열을 붙잡지도 않는다(애플리케이션으로 넘기는 바이트는 복사한다).
      */
     private void handle(byte[] bytes, int off, int size) {
-        lastReceivedAt = now;
+        timers.frameReceived(now);
         int type = Frames.typeOf(bytes, off);
         int extensionsLength = Frames.extensionsLengthOf(bytes, off);
         long streamId = Frames.streamIdOf(bytes, off);
@@ -890,7 +868,7 @@ public final class Endpoint {
         peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
         if (server) {
-            authDeadline = now + config.authTimeoutMs();
+            timers.authWaitStarted(now);
             return;
         }
         byte[] auth = Frames.auth(config.authMechanism(), config.authCredentials());
@@ -922,7 +900,7 @@ public final class Endpoint {
     }
 
     private void handleServerAuth(byte[] bytes, int payloadAt, int payloadSize) {
-        authDeadline = null;
+        timers.authWaitEnded();
         int mechanismLength = payloadSize == 0 ? 0 : bytes[payloadAt] & 0xFF;
         if (mechanismLength < 1
                 || mechanismLength > EndpointConfig.MAX_AUTH_MECHANISM_LENGTH
@@ -982,6 +960,7 @@ public final class Endpoint {
      */
     private void openAuthGate() {
         authGatePassed = true;
+        timers.authGatePassed();
         while (true) {
             DeferredPing ping = deferredPings.peekFirst();
             OwnRequestLedger.Admission admission =

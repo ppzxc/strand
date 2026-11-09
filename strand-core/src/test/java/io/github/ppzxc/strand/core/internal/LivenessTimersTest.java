@@ -2,20 +2,24 @@ package io.github.ppzxc.strand.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ppzxc.strand.core.internal.LivenessTimers.Expiry;
 import io.github.ppzxc.strand.core.internal.LivenessTimers.Kind;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 /**
- * 생존 확인 타이머의 internal seam 테스트. 가상 시계 값만 넣고 판단만 확인한다(핸드셰이크 바이트 없음): 대기 종류별 기한 경계값, ACK와 가장
+ * 생존 확인 타이머의 internal seam 테스트. 가상 시계 값만 넣고 판단만 확인한다(핸드셰이크 바이트 없음): 대기 종류별 기한 경계값, AUTH 대기 기한, 유휴 PING 일정, ACK와 가장
  * 오래된 대기의 짝 맞춤, HELLO와 PING 대기의 독립, 꺼내기 전 프레임의 대기 미시작, 연결 끝 정리(규격 3.3절, 3.4절).
  */
 class LivenessTimersTest {
 
     private static final long ACK_TIMEOUT = 1000;
 
-    private final LivenessTimers timers = new LivenessTimers(ACK_TIMEOUT);
+    private static final long AUTH_TIMEOUT = 5000;
+    private static final long IDLE_INTERVAL = 3000;
+
+    private final LivenessTimers timers = new LivenessTimers(ACK_TIMEOUT, AUTH_TIMEOUT, IDLE_INTERVAL);
 
     private static byte[] ping(int tag) {
         return new byte[] {0, 0, 0, 0, 0, 0, 0, (byte) tag};
@@ -30,9 +34,9 @@ class LivenessTimersTest {
     void waitExpiresOnlyAfterTheDeadline(Kind kind) {
         timers.started(await(kind), 100);
 
-        assertThat(timers.ackExpired(100 + ACK_TIMEOUT - 1)).isFalse();
-        assertThat(timers.ackExpired(100 + ACK_TIMEOUT)).isFalse();
-        assertThat(timers.ackExpired(100 + ACK_TIMEOUT + 1)).isTrue();
+        assertThat(timers.expiry(100 + ACK_TIMEOUT - 1)).isEqualTo(Expiry.NONE);
+        assertThat(timers.expiry(100 + ACK_TIMEOUT)).isEqualTo(Expiry.NONE);
+        assertThat(timers.expiry(100 + ACK_TIMEOUT + 1)).isEqualTo(Expiry.UNRESPONSIVE);
     }
 
     @ParameterizedTest
@@ -40,7 +44,7 @@ class LivenessTimersTest {
     void waitNotYetHandedOverNeverExpires(Kind kind) {
         await(kind);
 
-        assertThat(timers.ackExpired(Long.MAX_VALUE)).isFalse();
+        assertThat(timers.expiry(Long.MAX_VALUE)).isEqualTo(Expiry.NONE);
     }
 
     @Test
@@ -49,8 +53,8 @@ class LivenessTimersTest {
         timers.ackReceived(Kind.HELLO, null);
         timers.started(await(Kind.AUTH), 500);
 
-        assertThat(timers.ackExpired(500 + ACK_TIMEOUT)).isFalse();
-        assertThat(timers.ackExpired(500 + ACK_TIMEOUT + 1)).isTrue();
+        assertThat(timers.expiry(500 + ACK_TIMEOUT)).isEqualTo(Expiry.NONE);
+        assertThat(timers.expiry(500 + ACK_TIMEOUT + 1)).isEqualTo(Expiry.UNRESPONSIVE);
     }
 
     @Test
@@ -62,8 +66,8 @@ class LivenessTimersTest {
 
         timers.ackReceived(Kind.PING, ping(1));
 
-        assertThat(timers.ackExpired(1001)).isFalse();
-        assertThat(timers.ackExpired(1601)).isTrue();
+        assertThat(timers.expiry(1001)).isEqualTo(Expiry.NONE);
+        assertThat(timers.expiry(1601)).isEqualTo(Expiry.UNRESPONSIVE);
     }
 
     @Test
@@ -73,7 +77,7 @@ class LivenessTimersTest {
         timers.ackReceived(Kind.PING, ping(2));
 
         assertThat(timers.hasPing()).isTrue();
-        assertThat(timers.ackExpired(1001)).isTrue();
+        assertThat(timers.expiry(1001)).isEqualTo(Expiry.UNRESPONSIVE);
 
         timers.ackReceived(Kind.PING, ping(1));
 
@@ -88,11 +92,11 @@ class LivenessTimersTest {
         timers.ackReceived(Kind.PING, ping(1));
 
         assertThat(timers.hasPing()).isFalse();
-        assertThat(timers.ackExpired(1001)).isTrue();
+        assertThat(timers.expiry(1001)).isEqualTo(Expiry.UNRESPONSIVE);
 
         timers.ackReceived(Kind.HELLO, null);
 
-        assertThat(timers.ackExpired(1001)).isFalse();
+        assertThat(timers.expiry(1001)).isEqualTo(Expiry.NONE);
     }
 
     @Test
@@ -102,7 +106,7 @@ class LivenessTimersTest {
         timers.ackReceived(Kind.HELLO, null);
         timers.ackReceived(Kind.PING, ping(1));
 
-        assertThat(timers.ackExpired(1001)).isTrue();
+        assertThat(timers.expiry(1001)).isEqualTo(Expiry.UNRESPONSIVE);
     }
 
     @Test
@@ -112,7 +116,7 @@ class LivenessTimersTest {
         timers.ackReceived(Kind.HELLO, null);
         timers.started(id, 0);
 
-        assertThat(timers.ackExpired(Long.MAX_VALUE)).isFalse();
+        assertThat(timers.expiry(Long.MAX_VALUE)).isEqualTo(Expiry.NONE);
     }
 
     @Test
@@ -121,7 +125,7 @@ class LivenessTimersTest {
         timers.started(id, 0);
         timers.started(id, 900);
 
-        assertThat(timers.ackExpired(1001)).isTrue();
+        assertThat(timers.expiry(1001)).isEqualTo(Expiry.UNRESPONSIVE);
     }
 
     @Test
@@ -145,9 +149,9 @@ class LivenessTimersTest {
         timers.clear();
 
         assertThat(timers.hasPing()).isFalse();
-        assertThat(timers.ackExpired(Long.MAX_VALUE)).isFalse();
+        assertThat(timers.expiry(Long.MAX_VALUE)).isEqualTo(Expiry.NONE);
         timers.started(id, 0);
-        assertThat(timers.ackExpired(Long.MAX_VALUE)).isFalse();
+        assertThat(timers.expiry(Long.MAX_VALUE)).isEqualTo(Expiry.NONE);
     }
 
     @Test
@@ -164,11 +168,103 @@ class LivenessTimersTest {
         }
 
         // 남은 대기 가운데 가장 이른 기한은 ping(1)의 10 + 1000이다.
-        assertThat(timers.ackExpired(1010)).isFalse();
-        assertThat(timers.ackExpired(1011)).isTrue();
+        assertThat(timers.expiry(1010)).isEqualTo(Expiry.NONE);
+        assertThat(timers.expiry(1011)).isEqualTo(Expiry.UNRESPONSIVE);
         for (int i : new int[] {1, 2, 3, 5, 6, 7}) {
             timers.ackReceived(Kind.PING, ping(i));
         }
+        assertThat(timers.hasPing()).isFalse();
+    }
+
+    @Test
+    void authWaitExpiresOnlyAfterTheDeadline() {
+        timers.authWaitStarted(200);
+
+        assertThat(timers.expiry(200 + AUTH_TIMEOUT - 1)).isEqualTo(Expiry.NONE);
+        assertThat(timers.expiry(200 + AUTH_TIMEOUT)).isEqualTo(Expiry.NONE);
+        assertThat(timers.expiry(200 + AUTH_TIMEOUT + 1)).isEqualTo(Expiry.UNAUTHENTICATED);
+    }
+
+    @Test
+    void authWaitEndedNoLongerExpires() {
+        timers.authWaitStarted(0);
+        timers.authWaitEnded();
+
+        assertThat(timers.expiry(Long.MAX_VALUE)).isEqualTo(Expiry.NONE);
+    }
+
+    @Test
+    void authDeadlineIsJudgedBeforeAckDeadline() {
+        timers.started(await(Kind.HELLO), 0);
+        timers.authWaitStarted(0);
+
+        assertThat(timers.expiry(AUTH_TIMEOUT + 1)).isEqualTo(Expiry.UNAUTHENTICATED);
+    }
+
+    @Test
+    void idlePingIsDueOnlyAfterTheIdleInterval() {
+        timers.authGatePassed();
+        timers.frameReceived(100);
+
+        assertThat(timers.idlePing(100 + IDLE_INTERVAL - 1)).isNull();
+        assertThat(timers.idlePing(100 + IDLE_INTERVAL)).isNotNull();
+    }
+
+    @Test
+    void idlePingIsSuppressedWithoutAnIdleInterval() {
+        LivenessTimers off = new LivenessTimers(ACK_TIMEOUT, AUTH_TIMEOUT, 0);
+        off.authGatePassed();
+
+        assertThat(off.idlePing(Long.MAX_VALUE)).isNull();
+    }
+
+    @Test
+    void idlePingIsSuppressedWhileAPingIsAwaited() {
+        timers.authGatePassed();
+        await(Kind.PING);
+
+        assertThat(timers.idlePing(IDLE_INTERVAL)).isNull();
+
+        timers.ackReceived(Kind.PING, ping(1));
+
+        assertThat(timers.idlePing(IDLE_INTERVAL)).isNotNull();
+    }
+
+    @Test
+    void idlePingIsSuppressedBeforeTheAuthGate() {
+        assertThat(timers.idlePing(Long.MAX_VALUE)).isNull();
+
+        timers.authGatePassed();
+
+        assertThat(timers.idlePing(Long.MAX_VALUE)).isNotNull();
+    }
+
+    @Test
+    void consecutiveIdlePingsCarryAnIncreasingCounter() {
+        timers.authGatePassed();
+
+        assertThat(timers.idlePing(IDLE_INTERVAL)).isEqualTo(new byte[] {0, 0, 0, 0, 0, 0, 0, 0});
+        assertThat(timers.idlePing(IDLE_INTERVAL)).isEqualTo(new byte[] {0, 0, 0, 0, 0, 0, 0, 1});
+        assertThat(timers.idlePing(IDLE_INTERVAL)).isEqualTo(new byte[] {0, 0, 0, 0, 0, 0, 0, 2});
+    }
+
+    @Test
+    void receivingAFrameDelaysTheNextIdlePing() {
+        timers.authGatePassed();
+        timers.frameReceived(IDLE_INTERVAL - 1);
+
+        assertThat(timers.idlePing(IDLE_INTERVAL)).isNull();
+        assertThat(timers.idlePing(2 * IDLE_INTERVAL - 1)).isNotNull();
+    }
+
+    @Test
+    void noExpiryIsJudgedAfterTheConnectionEnded() {
+        timers.authWaitStarted(0);
+        timers.started(await(Kind.HELLO), 0);
+
+        timers.clear();
+
+        assertThat(timers.expiry(Long.MAX_VALUE)).isEqualTo(Expiry.NONE);
         assertThat(timers.hasPing()).isFalse();
     }
 }
