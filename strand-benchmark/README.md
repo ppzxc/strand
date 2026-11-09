@@ -20,3 +20,5 @@
 | `ReceiveManySmallFramesBenchmark` | 청크 하나에 작은 프레임이 가득 찬 입력의 `receive()` |
 | `ReceiveBigFrameBenchmark` | 큰 프레임 하나가 작은 조각으로 도착하는 입력의 `receive()` |
 | `OutboxBenchmark` | 오류로 닫기, 번호표 취소, 번호표 상태 조회, 기한 확인의 쓰기 대기열 비용 |
+| `TicketLookupBenchmark` | 번호 없는 대기열 요청, 번호 받은 쓰기 전 요청, 쓰기 시작한 요청을 번호표로 상태 조회, 취소 후 재충전하는 비용. 대기 수 2000/20000/200000에서 퍼뜨린 표본과 이웃 표본을 비교한다. 대기 수와 무관해야 한다(#207) |
+| `DeadlineExpiryBenchmark` | 기한 있는 대기 요청이 많을 때 `advance`의 비용. 만료 수(10/100/1000)에만 비례하고 대기 수와 무관해야 한다(#207) |
