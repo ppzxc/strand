@@ -76,6 +76,11 @@ final class OwnRequestLedger {
             this.certainty = certainty;
             this.resetToSend = resetToSend;
         }
+
+        /** 번호를 받은 요청의 결과인가. 번호 없는 요청의 결과는 스트림 번호가 없다. */
+        boolean numbered() {
+            return streamId != 0;
+        }
     }
 
     /** 내 요청 하나의 기록. */
@@ -212,6 +217,9 @@ final class OwnRequestLedger {
         Admission admission = number(record, payload, peerMaxFrameSize);
         if (admission != Admission.OVERSIZE) {
             nextTicket++;
+        }
+        if (admission == Admission.ADMITTED && record.expiry != null) {
+            expirations.add(record.expiry);
         }
         return admission;
     }
@@ -492,13 +500,10 @@ final class OwnRequestLedger {
         return record.state == RequestState.WRITING_STARTED ? Certainty.UNKNOWN : Certainty.NOT_PROCESSED;
     }
 
-    /** 번호를 받은 요청을 색인에 함께 넣는다. 쓰기 전 요청의 연결 리스트 끝에도 잇는다. 기한 색인에는 이미 있을 수 있다(번호 없는 요청). */
+    /** 번호를 받은 요청을 색인에 함께 넣는다. 쓰기 전 요청의 연결 리스트 끝에도 잇는다. 기한 색인은 건드리지 않는다. 번호 없는 요청은 {@link #queue}가, 바로 번호를 받는 요청은 {@link #open}이 넣는다. */
     private void register(Record record) {
         byStream.put(record.streamId, record);
         byTicket.put(record.ticket, record);
-        if (record.expiry != null) {
-            expirations.add(record.expiry);
-        }
         record.prevUnwritten = lastUnwritten;
         if (lastUnwritten == null) {
             firstUnwritten = record;

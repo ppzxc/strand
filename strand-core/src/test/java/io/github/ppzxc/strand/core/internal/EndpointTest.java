@@ -887,6 +887,20 @@ class EndpointTest {
         assertFailedLocally(server);
     }
 
+    /** CLOSE를 보내고도 대기 중인 스트림 때문에 연결이 열려 있는 동안에도 새 요청은 번호를 받지 못한다(장부의 닫는 중과 Endpoint의 CLOSE 교환이 같은 값). */
+    @Test
+    void requestAfterCloseWasSentWhileAStreamIsPendingIsFailedLocally() {
+        Endpoint server = established();
+        server.request(257, new byte[0]);
+        server.close(ErrorCode.NO_ERROR);
+        server.drainMessages();
+        server.drainEvents();
+
+        server.request(257, new byte[0]);
+
+        assertFailedLocally(server);
+    }
+
     @Test
     void requestAfterCloseWasReceivedWhileAStreamIsPendingIsFailedLocally() {
         Endpoint server = established();

@@ -10,8 +10,9 @@ import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 
 /**
- * 내 요청 장부(#217)의 internal seam 테스트. 장부 interface 너머로 보이는 결과만 확인한다: 번호표 색인과 스트림 색인의 동기화, 끝난 요청이
- * 어떤 색인에도 남지 않음, 확정성 판정 표(상태 x 사건, 규격 3.5절, 4.4절, 4.4.1절), 기한 만료 순서, 넘긴 가장 큰 번호의 갱신 시점.
+ * 내 요청 장부(#217, #218)의 internal seam 테스트. 장부 interface 너머로 보이는 결과만 확인한다: 번호 없는 요청을 포함한 번호표·스트림 색인의
+ * 동기화(독립 모델과 무작위 사건 순서 비교), 끝난 요청이 어떤 색인에도 남지 않음, 확정성 판정 표(번호 없음·쓰기 전·쓰기 시작 x 사건, 규격
+ * 3.5절, 4.4절, 4.4.1절), 기한 만료 순서(번호 없는 요청 먼저), 번호를 줄 수 없음 답과 번호표·스트림 번호 소비, 넘긴 가장 큰 번호의 갱신 시점.
  */
 class OwnRequestLedgerTest {
 
@@ -38,6 +39,15 @@ class OwnRequestLedgerTest {
         assertThat(ledger.open(TYPE, new byte[0], deadlineAt, MAX_FRAME))
                 .isEqualTo(OwnRequestLedger.Admission.ADMITTED);
         assertThat(ledger.streamIdOf(ticket)).isEqualTo(streamId);
+    }
+
+    /** 결과가 번호를 받은 요청의 것인지는 번호 없는 요청의 결과(스트림 번호 0)와 구별된다. */
+    @Test
+    void outcomeTellsNumberedFromQueuedRequests() {
+        accept(1, 0);
+        long queuedTicket = ledger.queue(TYPE, new byte[0], null);
+        assertThat(ledger.cancelTicket(0).numbered()).isTrue();
+        assertThat(ledger.cancelTicket(queuedTicket).numbered()).isFalse();
     }
 
     private void assertEnded(

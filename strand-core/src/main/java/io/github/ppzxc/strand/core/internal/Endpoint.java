@@ -53,8 +53,14 @@ public final class Endpoint {
     private final Outbox outbox = new Outbox();
     private final List<Event> events = new ArrayList<>();
     /**
-     * 번호를 받은 내 요청(결과를 기다리는 내 스트림)의 장부. 프레임 하나가 메시지 하나이므로 {@link #drainMessages()}로 메시지를 꺼내면
-     * 마지막 바이트가 넘어간 것으로 보고 장부에 쓰기 시작을 알린다(규격 3.5절 "연결이 끝날 때").
+     * 내 요청(번호표를 받은 뒤 결과가 나올 때까지)의 장부. 번호를 받기 전(AUTH 관문 전에 미룬 요청)과 번호를 받은 뒤(쓰기 전, 쓰기 시작)를
+     * 모두 가진다. 프레임 하나가 메시지 하나이므로 {@link #drainMessages()}로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 보고 장부에 쓰기
+     * 시작을 알린다(규격 3.5절 "연결이 끝날 때").
+     *
+     * <p>장부의 닫는 중({@code onClosing})과 {@link #closeExchanged}는 같은 사건이다. {@link #closeExchanged}를 켜는 곳 가운데 연결이 계속
+     * 열려 있을 수 있는 두 곳({@link #close}, {@link #handleClose})은 {@link #endQueuedRequests}로 장부에 알린다. 나머지 셋(형태가 잘못된 CLOSE,
+     * 너무 큰 AUTH, {@link #closeTransportAfterNoError})은 곧바로 전송 계층을 닫아 {@link #transportClosed}가 새 요청을 먼저 막으므로 장부의
+     * 닫는 중이 필요 없다.
      */
     private final OwnRequestLedger ledger;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
@@ -480,15 +486,18 @@ public final class Endpoint {
     }
 
     /**
-     * 장부가 끝낸 내 요청 하나의 결과를 반영하고, 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). 대기 중이 아닌 스트림이라 장부가 null을
-     * 돌려줬으면 아무것도 하지 않는다.
+     * 장부가 끝낸 내 요청 하나의 결과를 반영하고, 종료 중이고 마지막 스트림이었다면 닫는다(규격 3.5절). 번호를 받지 못한 요청의 결과는 스트림이
+     * 아니므로 닫는 판단을 하지 않는다. 대기 중이 아니라 장부가 null을 돌려줬으면 아무것도 하지 않는다.
      */
     private void endOwnRequest(OwnRequestLedger.@Nullable Outcome outcome) {
         if (outcome == null) {
             return;
         }
         applyOutcome(outcome);
-        closeTransportIfNoPendingStreams();
+        if (outcome.numbered()) {
+            // 번호 없는 요청은 대기 중인 스트림이 아니라서 닫을 수 있게 되는 일이 없다.
+            closeTransportIfNoPendingStreams();
+        }
     }
 
     /** 장부가 돌려준 결과를 반영한다: 쓰기를 시작한 요청이면 {@code RESET(CANCEL)}을 보내고 결과 이벤트를 낸다. */
