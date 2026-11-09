@@ -1,17 +1,19 @@
 package io.github.ppzxc.strand.core.internal;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Deque;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.TreeSet;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -64,7 +66,16 @@ public final class Endpoint {
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
     private final Map<Long, Integer> peerPendingStreams = new LinkedHashMap<>();
     /** AUTH 관문을 통과하기 전이라 미뤄 둔 송신(규격 3.3절). */
-    private final Deque<DeferredSend> deferredSends = new ArrayDeque<>();
+    private final Set<DeferredSend> deferredSends = new LinkedHashSet<>();
+    /** {@link #deferredSends} 가운데 요청을 번호표로 찾는 색인. {@link #deferredSends}와 함께만 고친다(#202). */
+    private final Map<Long, DeferredSend> deferredByTicket = new HashMap<>();
+    /** 번호를 받아 대기 중인 내 요청의 번호표 → 스트림 번호 색인. {@link #ownPendingStreams}와 함께만 고친다(#202). */
+    private final Map<Long, Long> streamIdByTicket = new HashMap<>();
+    /**
+     * 기한이 있는 대기 요청(번호 없는 대기열 요청과 번호를 받은 내 요청)의 기한 순 색인. 요청이 끝나면 함께 지운다. 가장 이른 기한만 보므로 {@link
+     * #advance}는 만료된 요청 수에 비례해서만 일한다(#202).
+     */
+    private final TreeSet<Expiry> expirations = new TreeSet<>();
 
     /**
      * 받은 바이트 가운데 아직 한 단위(서문 또는 프레임)가 되지 못한 앞부분. 청크 경계에 걸친 단위 하나만 모으므로 비어 있는 때가 대부분이다.
@@ -388,7 +399,7 @@ public final class Endpoint {
         }
         long ticket = nextTicket++;
         byte[] copy = payload.clone();
-        deferredSends.add(DeferredSend.request(ticket, deadlineAt, () -> {
+        addDeferred(DeferredSend.request(ticket, deadlineAt, () -> {
             if (sendRequest(ticket, type, copy, deadlineAt) == RequestOutcome.OVERSIZE) {
                 failLocally();
             }
@@ -425,19 +436,15 @@ public final class Endpoint {
         if (transportClosed) {
             return;
         }
-        for (Iterator<DeferredSend> it = deferredSends.iterator(); it.hasNext(); ) {
-            DeferredSend deferred = it.next();
-            if (deferred.isRequest() && deferred.ticket == ticket) {
-                it.remove();
-                events.add(Event.result(0, Status.CANCELLED, Certainty.NOT_PROCESSED));
-                return;
-            }
+        DeferredSend deferred = deferredByTicket.get(ticket);
+        if (deferred != null) {
+            removeDeferred(deferred);
+            events.add(Event.result(0, Status.CANCELLED, Certainty.NOT_PROCESSED));
+            return;
         }
-        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
-            if (entry.getValue().ticket == ticket) {
-                endOwnRequest(entry.getKey(), Status.CANCELLED);
-                return;
-            }
+        Long streamId = streamIdByTicket.get(ticket);
+        if (streamId != null) {
+            endOwnRequest(streamId, Status.CANCELLED);
         }
     }
 
@@ -481,21 +488,23 @@ public final class Endpoint {
      * #endOwnRequest}로 끝낸다.
      */
     private void expireRequests() {
-        deferredSends.removeIf(deferred -> {
-            if (deferred.isRequest() && deferred.expiredAt(now)) {
+        // 만료된 것만 색인에서 꺼낸다. 끝내는 순서는 기한 순이 아니라 예전 그대로다: 번호 없는 요청이 먼저(낸 순서), 번호를 받은 요청이 뒤(스트림 번호 순).
+        List<Long> expiredTickets = new ArrayList<>();
+        List<Long> expiredStreams = new ArrayList<>();
+        while (!expirations.isEmpty() && now > expirations.first().deadlineAt) {
+            Expiry expired = expirations.pollFirst();
+            (expired.deferred ? expiredTickets : expiredStreams).add(expired.key);
+        }
+        Collections.sort(expiredTickets);
+        Collections.sort(expiredStreams);
+        for (long ticket : expiredTickets) {
+            DeferredSend deferred = deferredByTicket.get(ticket);
+            if (deferred != null) {
+                removeDeferred(deferred);
                 events.add(Event.result(0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED));
-                return true;
-            }
-            return false;
-        });
-        List<Long> expired = new ArrayList<>();
-        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
-            Long deadlineAt = entry.getValue().deadlineAt;
-            if (deadlineAt != null && now > deadlineAt) {
-                expired.add(entry.getKey());
             }
         }
-        for (long streamId : expired) {
+        for (long streamId : expiredStreams) {
             endOwnRequest(streamId, Status.DEADLINE_EXCEEDED);
         }
     }
@@ -1007,8 +1016,9 @@ public final class Endpoint {
     private void openAuthGate() {
         authGatePassed = true;
         // 보내다가 닫히면 closeTransport가 남은 요청을 closed 이벤트 이전에 실패시키고 목록을 비운다. CLOSE를 보낸 뒤에는 PING을 보내지 않는다.
-        DeferredSend deferred;
-        while ((deferred = deferredSends.poll()) != null) {
+        while (!deferredSends.isEmpty()) {
+            DeferredSend deferred = deferredSends.iterator().next();
+            removeDeferred(deferred);
             if (deferred.isRequest() || !closeExchanged) {
                 deferred.sending.run();
             }
@@ -1089,11 +1099,14 @@ public final class Endpoint {
      * 상대가 처리하지 않은 요청이므로 아직 넘기지 못한 프레임도 보내지 않는다.
      */
     private void endRequestsAfter(long lastStreamId) {
-        Iterator<Long> pending = ownPendingStreams.keySet().iterator();
+        Iterator<Map.Entry<Long, OwnStream>> pending =
+                ownPendingStreams.entrySet().iterator();
         while (pending.hasNext()) {
-            long streamId = pending.next();
+            Map.Entry<Long, OwnStream> entry = pending.next();
+            long streamId = entry.getKey();
             if (streamId > lastStreamId) {
                 pending.remove();
+                forgetOwn(streamId, entry.getValue());
                 unwrite(streamId);
                 events.add(Event.result(streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED));
             }
@@ -1105,12 +1118,14 @@ public final class Endpoint {
      * 3.5절). 미룬 PING은 그대로 둔다.
      */
     private void endQueuedRequests() {
-        deferredSends.removeIf(deferred -> {
+        for (Iterator<DeferredSend> it = deferredSends.iterator(); it.hasNext(); ) {
+            DeferredSend deferred = it.next();
             if (deferred.isRequest()) {
+                it.remove();
+                forgetDeferred(deferred);
                 failLocally();
             }
-            return deferred.isRequest();
-        });
+        }
     }
 
     /**
@@ -1203,7 +1218,10 @@ public final class Endpoint {
             }
         }
         deferredSends.clear();
+        deferredByTicket.clear();
         ownPendingStreams.clear();
+        streamIdByTicket.clear();
+        expirations.clear();
         peerPendingStreams.clear();
         events.add(Event.closed(closeCause));
     }
@@ -1231,7 +1249,44 @@ public final class Endpoint {
         if (authGatePassed) {
             sending.run();
         } else {
-            deferredSends.add(sending);
+            addDeferred(sending);
+        }
+    }
+
+    private void addDeferred(DeferredSend deferred) {
+        deferredSends.add(deferred);
+        if (deferred.isRequest()) {
+            deferredByTicket.put(deferred.ticket, deferred);
+            Expiry expiry = deferred.expiry();
+            if (expiry != null) {
+                expirations.add(expiry);
+            }
+        }
+    }
+
+    /** 미룬 송신을 대기열에서 빼고 색인도 함께 지운다. */
+    private void removeDeferred(DeferredSend deferred) {
+        deferredSends.remove(deferred);
+        forgetDeferred(deferred);
+    }
+
+    /** 대기열 밖에서 이미 뺀 미룬 송신의 색인만 지운다. */
+    private void forgetDeferred(DeferredSend deferred) {
+        if (deferred.isRequest()) {
+            deferredByTicket.remove(deferred.ticket);
+            Expiry expiry = deferred.expiry();
+            if (expiry != null) {
+                expirations.remove(expiry);
+            }
+        }
+    }
+
+    /** {@link #ownPendingStreams}에서 이미 뺀 내 스트림의 색인만 지운다. */
+    private void forgetOwn(long streamId, OwnStream stream) {
+        streamIdByTicket.remove(stream.ticket);
+        Expiry expiry = stream.expiry(streamId);
+        if (expiry != null) {
+            expirations.remove(expiry);
         }
     }
 
@@ -1254,17 +1309,11 @@ public final class Endpoint {
      */
     @Nullable
     RequestState requestState(long ticket) {
-        for (DeferredSend deferred : deferredSends) {
-            if (deferred.isRequest() && deferred.ticket == ticket) {
-                return RequestState.QUEUED_WITHOUT_NUMBER;
-            }
+        if (deferredByTicket.containsKey(ticket)) {
+            return RequestState.QUEUED_WITHOUT_NUMBER;
         }
-        for (Map.Entry<Long, OwnStream> entry : ownPendingStreams.entrySet()) {
-            if (entry.getValue().ticket == ticket) {
-                return stateOf(entry.getKey());
-            }
-        }
-        return null;
+        Long streamId = streamIdByTicket.get(ticket);
+        return streamId == null ? null : stateOf(streamId);
     }
 
     /** 번호를 받아 아직 끝나지 않은 내 스트림의 수. 요청 기록이 끝난 요청 뒤에 남지 않는지 보는 기준이다. */
@@ -1290,7 +1339,11 @@ public final class Endpoint {
     /** 내 스트림을 끝낸다. 대기 중이던 요청의 type을 돌려주고, 대기 중이 아니면 null이다. */
     private @Nullable Integer endOwnStream(long streamId) {
         OwnStream ended = ownPendingStreams.remove(streamId);
-        return ended == null ? null : ended.type;
+        if (ended == null) {
+            return null;
+        }
+        forgetOwn(streamId, ended);
+        return ended.type;
     }
 
     /** 대기 중인 내 스트림 하나. 요청 type과 요청 번호표를 한 기록에 두어, 스트림이 끝나면 번호표 기록도 함께 없어진다. */
@@ -1304,6 +1357,12 @@ public final class Endpoint {
             this.type = type;
             this.ticket = ticket;
             this.deadlineAt = deadlineAt;
+        }
+
+        /** 기한 색인 항목. 기한이 없으면 null. */
+        @Nullable
+        Expiry expiry(long streamId) {
+            return deadlineAt == null ? null : Expiry.ofOwn(deadlineAt, streamId);
         }
     }
 
@@ -1332,7 +1391,13 @@ public final class Endpoint {
             return RequestOutcome.OVERSIZE;
         }
         nextStreamId += 2; // 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다.
-        ownPendingStreams.put(streamId, new OwnStream(type, ticket, deadlineAt));
+        OwnStream stream = new OwnStream(type, ticket, deadlineAt);
+        ownPendingStreams.put(streamId, stream);
+        streamIdByTicket.put(ticket, streamId);
+        Expiry expiry = stream.expiry(streamId);
+        if (expiry != null) {
+            expirations.add(expiry);
+        }
         undrainedRequests.put(streamId, outbox.addApplication(OutboundMessage.binary(frame)));
         return RequestOutcome.SENT;
     }
@@ -1413,6 +1478,41 @@ public final class Endpoint {
         ackWaits.add(wait);
     }
 
+    /** 기한이 있는 대기 요청 하나의 기한 색인 항목. 기한 순이고, 같은 기한이면 번호 없는 요청이 먼저다. */
+    private static final class Expiry implements Comparable<Expiry> {
+        final long deadlineAt;
+        /** true면 번호 없는 대기열 요청({@code key}는 번호표), false면 번호를 받은 요청({@code key}는 스트림 번호). */
+        final boolean deferred;
+
+        final long key;
+
+        private Expiry(long deadlineAt, boolean deferred, long key) {
+            this.deadlineAt = deadlineAt;
+            this.deferred = deferred;
+            this.key = key;
+        }
+
+        static Expiry ofDeferred(long deadlineAt, long ticket) {
+            return new Expiry(deadlineAt, true, ticket);
+        }
+
+        static Expiry ofOwn(long deadlineAt, long streamId) {
+            return new Expiry(deadlineAt, false, streamId);
+        }
+
+        @Override
+        public int compareTo(Expiry other) {
+            int byDeadline = Long.compare(deadlineAt, other.deadlineAt);
+            if (byDeadline != 0) {
+                return byDeadline;
+            }
+            if (deferred != other.deferred) {
+                return deferred ? -1 : 1;
+            }
+            return Long.compare(key, other.key);
+        }
+    }
+
     /** AUTH 관문을 통과할 때까지 미룬 송신 하나. 요청이면 보내지 못하고 끝날 때 로컬에서 실패시킨다. */
     private static final class DeferredSend {
         /** 요청이면 요청 번호표, 아니면 -1. */
@@ -1432,8 +1532,10 @@ public final class Endpoint {
             return ticket >= 0;
         }
 
-        boolean expiredAt(long now) {
-            return deadlineAt != null && now > deadlineAt;
+        /** 기한 색인 항목. 기한이 없으면 null. */
+        @Nullable
+        Expiry expiry() {
+            return deadlineAt == null ? null : Expiry.ofDeferred(deadlineAt, ticket);
         }
 
         void run() {
