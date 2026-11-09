@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,16 +49,23 @@ public final class Endpoint {
 
     private final EndpointConfig config;
     private final Outbox outbox = new Outbox();
+    /** 애플리케이션에 낼 이벤트. 쌓기만 하고 고치지 않는다. 돌려보낸 요청의 거름은 꺼낼 때({@link #drainEvents()}) 한다. */
     private final List<Event> events = new ArrayList<>();
+    /**
+     * 이벤트를 마지막으로 꺼낸 때의 {@link #highestPeerStreamId}. 상대 요청 번호는 늘어나기만 하므로, 이보다 큰 번호의 대기 중인 요청이 아직
+     * 애플리케이션이 이벤트로 받지 않은 요청이다.
+     */
+    private long drainedPeerStreamId;
+    /** 돌려보내서 {@code REQUEST_RECEIVED}를 애플리케이션에 내지 않을 요청의 번호. 상대가 먼저 RESET한 요청은 대기 중이 아니므로 여기에 오르지 않는다. */
+    private final Set<Long> refusedRequests = new HashSet<>();
     /**
      * 내 요청(번호표를 받은 뒤 결과가 나올 때까지)의 장부. 번호를 받기 전(AUTH 관문 전에 미룬 요청)과 번호를 받은 뒤(쓰기 전, 쓰기 시작)를
      * 모두 가진다. 프레임 하나가 메시지 하나이므로 {@link #drainMessages()}로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 보고 장부에 쓰기
      * 시작을 알린다(규격 3.5절 "연결이 끝날 때").
      *
-     * <p>장부의 닫는 중({@code onClosing})과 {@link #closeExchanged}는 같은 사건이다. {@link #closeExchanged}를 켜는 곳 가운데 연결이 계속
-     * 열려 있을 수 있는 두 곳({@link #close}, {@link #handleClose})은 {@link #endQueuedRequests}로 장부에 알린다. 나머지 셋(형태가 잘못된 CLOSE,
-     * 너무 큰 AUTH, {@link #closeTransportAfterNoError})은 곧바로 전송 계층을 닫아 {@link #transportClosed}가 새 요청을 먼저 막으므로 장부의
-     * 닫는 중이 필요 없다.
+     * <p>장부의 닫는 중({@code onClosing})과 연결 단계의 CLOSE 교환은 같은 사건이다. 연결이 계속 열려 있을 수 있는 두 곳({@link #close},
+     * {@link #handleClose})은 {@link #endQueuedRequests}로 장부에 알린다. 나머지(형태가 잘못된 CLOSE, 연결 오류, 너무 큰 AUTH)는 곧바로
+     * 전송 계층을 닫아 {@link ConnectionPhase#isActive()}가 새 요청을 먼저 막으므로 장부의 닫는 중이 필요 없다.
      */
     private final OwnRequestLedger ledger;
     /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
@@ -80,24 +88,13 @@ public final class Endpoint {
     /** 입력 처리 중이다. 애플리케이션 콜백이 같은 엔드포인트에 다시 입력하는 것을 막는다. */
     private boolean receiving;
 
-    private boolean prefaceChecked;
-    private boolean firstFrameChecked;
-    /** 상대의 파라미터 HELLO를 받아 내가 ACK를 보냈다(규격 3.3절). */
-    private boolean peerHelloAcked;
-    /** 내가 보낸 HELLO에 대해 상대가 보낸 ACK를 받았다(규격 3.3절 ACK 관문). */
-    private boolean ownHelloAcked;
-    /** 서버는 {@code AUTH(ACK)}를 보냈고 클라이언트는 {@code AUTH(ACK)}를 받았다(규격 3.3절 AUTH 관문). */
-    private boolean authGatePassed;
+    /**
+     * 연결의 단계: 수립과 관문(규격 3.3절), CLOSE 교환과 종료(규격 3.5절). 받아도 되는 프레임 타입, 송신을 미룰지, 새 요청을 열 수 있는지,
+     * 지금 전송 계층을 닫아야 하는지, 연결이 끝났는지, 닫은 로컬 원인은 여기에 묻는다.
+     */
+    private final ConnectionPhase phase;
     /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
-    /** 연결을 닫게 한 로컬 원인. 닫을 때 {@code CLOSED} 이벤트에 싣는다. */
-    private @Nullable Throwable closeCause;
-    /** CLOSE 교환: CLOSE를 보냈거나 받았다(규격 1.3절, 3.5절). */
-    private boolean closeExchanged;
-    /** 상대의 CLOSE를 이미 받았다. 처음 받은 CLOSE의 {@code last_stream_id}만 쓴다(규격 3.5절). */
-    private boolean closeReceived;
-    /** 전송 계층이 닫혀 연결이 끝났다(규격 1.3절 연결이 끝남). */
-    private boolean transportClosed;
 
     private long now;
     /** ACK를 기다리는 HELLO, AUTH, PING의 확인 대기, 서버의 AUTH 대기 기한, 유휴 PING 일정(규격 3.3절, 3.4.1절). */
@@ -118,6 +115,7 @@ public final class Endpoint {
         }
         this.ledger = new OwnRequestLedger(outbox, firstStreamId, ownParity);
         this.server = server;
+        this.phase = server ? ConnectionPhase.server() : ConnectionPhase.client();
     }
 
     /**
@@ -140,7 +138,6 @@ public final class Endpoint {
      */
     public static Endpoint client(EndpointConfig config) {
         Endpoint endpoint = new Endpoint(false, config);
-        endpoint.prefaceChecked = true;
         endpoint.send(Frames.preface());
         endpoint.sendHello();
         return endpoint;
@@ -160,22 +157,30 @@ public final class Endpoint {
         if (config.isWebSocket()) {
             throw new IllegalStateException("WebSocket 엔드포인트는 receiveMessage로 입력한다");
         }
-        enterReceive();
+        if (!enterReceive()) {
+            return;
+        }
         try {
-            if (!transportClosed) {
-                receiveBytes(bytes);
-            }
+            receiveBytes(bytes);
         } finally {
             receiving = false;
         }
     }
 
-    /** 입력 처리에 들어간다. 이미 처리 중이면(애플리케이션 콜백이 다시 입력함) 상태를 건드리지 않고 던진다. */
-    private void enterReceive() {
+    /**
+     * 입력 처리에 들어간다. 이미 처리 중이면(애플리케이션 콜백이 다시 입력함) 상태를 건드리지 않고 던진다. 연결이 끝났으면 입력을 받지 않는다.
+     *
+     * @return 입력을 처리해도 되는가
+     */
+    private boolean enterReceive() {
         if (receiving) {
             throw new IllegalStateException("입력을 처리하는 중에 같은 엔드포인트에 다시 입력할 수 없다");
         }
+        if (phase.isEnded()) {
+            return false;
+        }
         receiving = true;
+        return true;
     }
 
     /**
@@ -187,7 +192,7 @@ public final class Endpoint {
         int end = bytes.length;
         while (pendingLength > 0) {
             int consumed = consumeUnit(pending, 0, pendingLength);
-            if (transportClosed) {
+            if (phase.isEnded()) {
                 return;
             }
             if (consumed > 0) {
@@ -206,14 +211,14 @@ public final class Endpoint {
             appendPending(bytes, at, take);
             at += take;
         }
-        while (!transportClosed && at < end) {
+        while (!phase.isEnded() && at < end) {
             int consumed = consumeUnit(bytes, at, end - at);
             if (consumed == 0) {
                 break;
             }
             at += consumed;
         }
-        if (!transportClosed && at < end) {
+        if (!phase.isEnded() && at < end) {
             appendPending(bytes, at, end - at);
         }
     }
@@ -251,7 +256,9 @@ public final class Endpoint {
         if (!config.isWebSocket()) {
             throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
         }
-        enterReceive();
+        if (!enterReceive()) {
+            return;
+        }
         try {
             receiveWebSocketMessage(kind, message);
         } finally {
@@ -260,22 +267,19 @@ public final class Endpoint {
     }
 
     private void receiveWebSocketMessage(WebSocketMessageKind kind, byte[] message) {
-        if (transportClosed) {
-            return;
-        }
-        if (!prefaceChecked) {
+        if (phase.awaitingPreface()) {
             if (kind == WebSocketMessageKind.BINARY
                     && message.length == Frames.preface().length
                     && matchesPrefacePrefix(message, 0, message.length)) {
-                prefaceChecked = true;
+                phase.prefaceVerified();
                 sendHello();
             } else {
-                closeTransport();
+                closeWithoutClose();
             }
             return;
         }
-        if (!firstFrameChecked && !checkFirstMessage(kind, message)) {
-            closeTransport();
+        if (phase.awaitingFirstFrame() && !checkFirstMessage(kind, message)) {
+            closeWithoutClose();
             return;
         }
         if (kind != WebSocketMessageKind.BINARY || message.length < Frames.TYPE_END) {
@@ -298,21 +302,21 @@ public final class Endpoint {
      * @param ms 밀리초
      */
     public void advance(long ms) {
-        if (transportClosed) {
+        if (phase.isEnded()) {
             return;
         }
         now += ms;
         LivenessTimers.Expiry expiry = timers.expiry(now);
         if (expiry == LivenessTimers.Expiry.UNAUTHENTICATED) {
-            closeWithError(ErrorCode.UNAUTHENTICATED);
+            connectionError(ErrorCode.UNAUTHENTICATED);
             return;
         }
         if (expiry == LivenessTimers.Expiry.UNRESPONSIVE) {
-            closeWithError(ErrorCode.UNRESPONSIVE);
+            connectionError(ErrorCode.UNRESPONSIVE);
             return;
         }
         expireRequests();
-        byte[] idlePing = timers.idlePing(now);
+        byte[] idlePing = phase.mayIdlePing() ? timers.idlePing(now) : null;
         if (idlePing != null) {
             sendPing(idlePing);
         }
@@ -337,20 +341,21 @@ public final class Endpoint {
     }
 
     private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
-        if (transportClosed) {
+        ConnectionPhase.ApplicationSend send = phase.applicationSend();
+        if (send == ConnectionPhase.ApplicationSend.DEFER) {
+            return ledger.queue(type, payload, deadlineAt);
+        }
+        if (!phase.isActive()) {
             failLocally();
             return ledger.issueTicket();
         }
-        if (authGatePassed) {
-            // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
-            long ticket = ledger.nextTicket();
-            if (refuseLocally(ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
-                    == OwnRequestLedger.Admission.OVERSIZE) {
-                throw oversizeFrame("요청");
-            }
-            return ticket;
+        // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
+        long ticket = ledger.nextTicket();
+        if (refuseLocally(ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
+                == OwnRequestLedger.Admission.OVERSIZE) {
+            throw oversizeFrame("요청");
         }
-        return ledger.queue(type, payload, deadlineAt);
+        return ticket;
     }
 
     /**
@@ -400,9 +405,6 @@ public final class Endpoint {
      * @param ticket {@link #request}가 돌려준 번호표
      */
     public void cancelRequest(long ticket) {
-        if (transportClosed) {
-            return;
-        }
         endOwnRequest(ledger.cancelTicket(ticket));
     }
 
@@ -416,7 +418,7 @@ public final class Endpoint {
      *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
     public void respond(long streamId, int status, byte[] payload) {
-        Integer type = transportClosed ? null : peerPendingStreams.get(streamId);
+        Integer type = peerPendingStreams.get(streamId);
         if (type == null) {
             return;
         }
@@ -426,7 +428,7 @@ public final class Endpoint {
         }
         peerPendingStreams.remove(streamId);
         send(frame);
-        closeTransportIfNoPendingStreams();
+        conclude();
     }
 
     /**
@@ -436,15 +438,13 @@ public final class Endpoint {
      * @param streamId 내가 연 스트림 번호
      */
     public void cancel(long streamId) {
-        if (!transportClosed) {
-            endOwnRequest(ledger.cancelStream(streamId, Status.CANCELLED));
-        }
+        endOwnRequest(ledger.cancelStream(streamId, Status.CANCELLED));
     }
 
     /** 기한이 지난 요청을 끝낸다(규격 4.4.1절). 순서는 장부가 정한다. 번호를 받은 요청이 끝났으면 종료 중인 연결을 닫을 수 있는지 본다. */
     private void expireRequests() {
         if (ledger.expire(now, this::applyOutcome)) {
-            closeTransportIfNoPendingStreams();
+            conclude();
         }
     }
 
@@ -459,7 +459,7 @@ public final class Endpoint {
         applyOutcome(outcome);
         if (outcome.numbered()) {
             // 번호 없는 요청은 대기 중인 스트림이 아니라서 닫을 수 있게 되는 일이 없다.
-            closeTransportIfNoPendingStreams();
+            conclude();
         }
     }
 
@@ -481,13 +481,15 @@ public final class Endpoint {
         if (payload.length != PING_PAYLOAD_SIZE) {
             throw new IllegalArgumentException("PING payload는 정확히 8바이트여야 한다: " + payload.length);
         }
-        if (!transportClosed) {
-            byte[] copy = payload.clone();
-            if (authGatePassed) {
-                sendPing(copy);
-            } else {
-                deferredPings.addLast(new DeferredPing(copy, ledger.nextTicket()));
-            }
+        ConnectionPhase.ApplicationSend send = phase.applicationSend();
+        if (send == ConnectionPhase.ApplicationSend.REFUSE) {
+            return;
+        }
+        byte[] copy = payload.clone();
+        if (send == ConnectionPhase.ApplicationSend.DEFER) {
+            deferredPings.addLast(new DeferredPing(copy, ledger.nextTicket()));
+        } else {
+            sendPing(copy);
         }
     }
 
@@ -497,16 +499,16 @@ public final class Endpoint {
      * @param errorCode 규격 2.5.2절의 error_code 값
      */
     public void close(int errorCode) {
-        if (transportClosed || closeExchanged) {
+        if (!phase.isActive()) {
             return;
         }
         if (errorCode != ErrorCode.NO_ERROR) {
             refuseUnhandedRequests();
         }
         send(Frames.close(errorCode, highestPeerStreamId));
-        closeExchanged = true;
+        phase.closeSent(errorCode);
         endQueuedRequests();
-        closeTransportUnlessClosing(errorCode);
+        conclude();
     }
 
     /**
@@ -514,7 +516,8 @@ public final class Endpoint {
      * 이미 닫혔다면 아무것도 하지 않는다(규격 3.5절).
      */
     public void disconnect() {
-        closeTransport();
+        phase.transportDisconnected();
+        conclude();
     }
 
     /**
@@ -523,11 +526,13 @@ public final class Endpoint {
      * 아무것도 하지 않는다.
      */
     public void abortClosing() {
-        if (transportClosed || !closeExchanged) {
+        if (phase.phase() != ConnectionPhase.Phase.CLOSING) {
             return;
         }
         refuseUnhandedRequests();
-        closeTransportAfterNoError();
+        // 더 기다리지 않으므로 대기 중인 스트림이 없어진 것으로 본다.
+        phase.pendingStreamsReachedZero();
+        conclude();
     }
 
     /**
@@ -550,8 +555,20 @@ public final class Endpoint {
      * @return 이벤트 목록. 없으면 빈 목록
      */
     public List<Event> drainEvents() {
-        List<Event> drained = new ArrayList<>(events);
+        List<Event> drained;
+        if (refusedRequests.isEmpty()) {
+            drained = new ArrayList<>(events);
+        } else {
+            drained = new ArrayList<>(events.size());
+            for (Event event : events) {
+                if (event.kind() != Event.Kind.REQUEST_RECEIVED || !refusedRequests.contains(event.streamId())) {
+                    drained.add(event);
+                }
+            }
+        }
         events.clear();
+        drainedPeerStreamId = highestPeerStreamId;
+        refusedRequests.clear();
         return drained;
     }
 
@@ -561,7 +578,7 @@ public final class Endpoint {
      * 따라 결과가 달라지면 안 되므로, 판정에 필요한 바이트가 모이기 전에는 아무것도 하지 않는다.
      */
     private int consumeUnit(byte[] bytes, int off, int available) {
-        if (!prefaceChecked) {
+        if (phase.awaitingPreface()) {
             return consumePreface(bytes, off, available);
         }
         if (available < Frames.LENGTH_FIELD_SIZE) {
@@ -569,10 +586,10 @@ public final class Endpoint {
             return 0;
         }
         long length = Frames.readUnsignedInt(bytes, off);
-        if (!firstFrameChecked) {
+        if (phase.awaitingFirstFrame()) {
             // 첫 프레임 검사(규격 3.2.4절): 헤더를 읽을 수 없거나 HELLO가 아니면 아무것도 보내지 않고 닫는다.
             if (length < Frames.MIN_LENGTH) {
-                closeTransport();
+                closeWithoutClose();
                 return 0;
             }
             if (available < Frames.HEADER_SIZE) {
@@ -580,10 +597,10 @@ public final class Endpoint {
                 return 0;
             }
             if (!isFirstFrameHeader(bytes, off)) {
-                closeTransport();
+                closeWithoutClose();
                 return 0;
             }
-            firstFrameChecked = true;
+            phase.firstFrameVerified();
         }
         if (length < Frames.MIN_LENGTH || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE) {
             if (available < Frames.TYPE_END) {
@@ -607,14 +624,14 @@ public final class Endpoint {
     private int consumePreface(byte[] bytes, int off, int available) {
         byte[] preface = Frames.preface();
         if (!matchesPrefacePrefix(bytes, off, available)) {
-            closeTransport();
+            closeWithoutClose();
             return 0;
         }
         if (available < preface.length) {
             wantedLength = preface.length;
             return 0;
         }
-        prefaceChecked = true;
+        phase.prefaceVerified();
         sendHello();
         return preface.length;
     }
@@ -638,20 +655,23 @@ public final class Endpoint {
                 && Frames.flagsOf(bytes, off) == 0;
     }
 
-    /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 첫 프레임 검사를 마친 것으로 기록한다. */
+    /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 연결 단계에 알린다. */
     private boolean checkFirstMessage(WebSocketMessageKind kind, byte[] message) {
         boolean valid = kind == WebSocketMessageKind.BINARY
                 && message.length >= Frames.HEADER_SIZE
                 && Frames.readUnsignedInt(message, 0) >= Frames.MIN_LENGTH
                 && isFirstFrameHeader(message, 0);
-        firstFrameChecked = valid;
+        if (valid) {
+            phase.firstFrameVerified();
+        }
         return valid;
     }
 
     /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */
     private void rejectBadLength(byte[] bytes, int off) {
         if (Frames.typeOf(bytes, off) == FrameType.CLOSE) {
-            closeReceivedMalformed();
+            phase.connectionFailed();
+            conclude();
         } else {
             connectionError();
         }
@@ -662,6 +682,13 @@ public final class Endpoint {
      * 돌아온 뒤에는 읽지 않으며 배열을 붙잡지도 않는다(애플리케이션으로 넘기는 바이트는 복사한다).
      */
     private void handle(byte[] bytes, int off, int size) {
+        dispatch(bytes, off, size);
+        // 프레임 하나를 처리한 뒤 종료 경로를 한 번 지난다. 응답·RESET·CLOSE·오류로 대기 중인 스트림이 0개가 됐는지, 닫을 때가 됐는지는
+        // 여기서 본다. 연결 오류를 내는 핸들러는 스스로 conclude하며, conclude는 멱등이라 여기서 한 번 더 불러도 안전하다.
+        conclude();
+    }
+
+    private void dispatch(byte[] bytes, int off, int size) {
         timers.frameReceived(now);
         int type = Frames.typeOf(bytes, off);
         int extensionsLength = Frames.extensionsLengthOf(bytes, off);
@@ -678,8 +705,13 @@ public final class Endpoint {
             handleApplication(bytes, off, type, extensionsLength, streamId);
             return;
         }
-        if (FrameType.isReserved(type)) {
-            // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 ACK 관문은 보지 않는다.
+        boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
+        ConnectionPhase.Admission admission = phase.admit(type, ack);
+        if (admission == ConnectionPhase.Admission.ENDED) {
+            return;
+        }
+        if (admission == ConnectionPhase.Admission.RESERVED) {
+            // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 관문은 보지 않는다.
             if (extensionsLength != 0) {
                 connectionError();
             }
@@ -689,19 +721,13 @@ public final class Endpoint {
             connectionError();
             return;
         }
-        if (!ownHelloAcked && type != FrameType.HELLO) {
-            // ACK 관문(규격 3.3절): 내 HELLO의 ACK를 받기 전에는 HELLO와 CLOSE만 받는다. AUTH는 예약이 아니라서 여기에 걸린다.
-            connectionError();
-            return;
-        }
-        if (!authGatePassed && type != FrameType.HELLO && type != FrameType.AUTH) {
-            // AUTH 관문(규격 3.3절): 통과 전에는 HELLO·AUTH·CLOSE만 받는다. ACK 관문이 먼저 적용된다.
+        if (admission == ConnectionPhase.Admission.CONNECTION_ERROR) {
+            // 관문(규격 3.3절)이나 HELLO·AUTH의 횟수·방향을 어겼다.
             connectionError();
             return;
         }
         int payloadAt = off + Frames.HEADER_SIZE;
         int payloadSize = size - Frames.HEADER_SIZE;
-        boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
         if (type == FrameType.HELLO) {
             handleHello(ack, bytes, payloadAt, payloadSize);
         } else if (type == FrameType.PING) {
@@ -709,7 +735,7 @@ public final class Endpoint {
         } else if (type == FrameType.RESET) {
             handleReset(streamId, bytes, payloadAt, payloadSize);
         } else if (type == FrameType.AUTH) {
-            handleAuth(ack, bytes, payloadAt, payloadSize);
+            handleAuth(bytes, payloadAt, payloadSize);
         }
     }
 
@@ -731,7 +757,6 @@ public final class Endpoint {
         } else {
             peerPendingStreams.remove(streamId);
         }
-        closeTransportIfNoPendingStreams();
     }
 
     /** {@code stream_id}가 0이거나 최상위 비트가 1이다(규격 2.2.5절). 최상위 비트가 1이면 {@code long}으로 음수다. */
@@ -753,8 +778,7 @@ public final class Endpoint {
                 ? Extensions.MALFORMED
                 : scanExtensions(bytes, off, extensionsLength);
         if (extensionsResult == Extensions.MALFORMED
-                || !ownHelloAcked
-                || !authGatePassed
+                || phase.admit(type, false) != ConnectionPhase.Admission.ALLOW
                 || isInvalidStreamId(streamId)) {
             connectionError();
         } else if (isOwnSpace(streamId)) {
@@ -775,7 +799,7 @@ public final class Endpoint {
             return;
         }
         highestPeerStreamId = streamId;
-        if (closeExchanged) {
+        if (phase.closeExchanged()) {
             // CLOSE를 보냈거나 받은 뒤의 새 요청은 끝까지 읽고 조용히 버린다. 어떤 프레임도 보내지 않는다(규격 3.5절).
             return;
         }
@@ -786,6 +810,7 @@ public final class Endpoint {
         } else if (extensionsResult == Extensions.INVALID_VALUE) {
             send(Frames.response(type, streamId, Status.INVALID_ARGUMENT));
         } else {
+            // 대기 중인 요청은 항상 REQUEST_RECEIVED 이벤트와 함께 생긴다. refuseUnhandedRequests가 이 짝에 기댄다.
             peerPendingStreams.put(streamId, type);
             events.add(Event.requestReceived(streamId, type));
         }
@@ -834,33 +859,25 @@ public final class Endpoint {
             return;
         }
         applyOutcome(outcome);
-        closeTransportIfNoPendingStreams();
-    }
-
-    /** CLOSE를 보냈거나 받아 종료 중인데 대기 중인 스트림이 모두 끝났으면 닫는다(규격 3.5절). */
-    private void closeTransportIfNoPendingStreams() {
-        if (closeExchanged && ledger.openCount() == 0 && peerPendingStreams.isEmpty()) {
-            closeTransportAfterNoError();
-        }
     }
 
     private void handleHello(boolean ack, byte[] bytes, int payloadAt, int payloadSize) {
         if (ack) {
             // 합친 프레임(ACK이면서 payload가 있음)과 두 번째 ACK는 연결 오류다(규격 3.2.5절).
-            if (payloadSize != 0 || ownHelloAcked) {
+            if (payloadSize != 0) {
                 connectionError();
                 return;
             }
-            ownHelloAcked = true;
+            phase.ownHelloAckReceived();
             timers.ackReceived(LivenessTimers.Kind.HELLO, null);
             return;
         }
-        PeerLimits peer = peerHelloAcked ? null : peerLimitsOf(bytes, payloadAt, payloadSize);
+        PeerLimits peer = peerLimitsOf(bytes, payloadAt, payloadSize);
         if (peer == null) {
             connectionError();
             return;
         }
-        peerHelloAcked = true;
+        phase.peerHelloAcked();
         ledger.setPeerMaxConcurrentStreams(peer.maxConcurrentStreams);
         peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
@@ -872,9 +889,8 @@ public final class Endpoint {
         if (exceedsPeerFrameSize(auth)) {
             // 3.2.1절은 상대 max_frame_size를 넘는 프레임을 금지(MUST NOT)하며 AUTH도 예외가 아니다. 상대 HELLO는 유효하므로 ACK는 3.2.3절이
             // 요구한 대로 보냈다. 그다음 닫는 처리만 규격에 정의가 없다(#196): AUTH도 CLOSE도 보내지 않고 전송 계층만 닫는다. 아무것도 보내지
-            // 않았으므로 대기 요청은 closeTransport가 처리 안 됨으로 끝낸다.
-            closeExchanged = true;
-            closeTransport();
+            // 않았으므로 대기 요청은 연결이 끝날 때 처리 안 됨으로 끝난다.
+            phase.connectionFailed();
             return;
         }
         // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
@@ -886,13 +902,12 @@ public final class Endpoint {
      * {@code AUTH(ACK)}에서 {@code credential_lifetime}을 알린다. 방향 위반, 두 번째 {@code AUTH}·{@code AUTH(ACK)},
      * 형태 위반은 연결 오류다.
      */
-    private void handleAuth(boolean ack, byte[] bytes, int payloadAt, int payloadSize) {
-        if (server && !ack && !authGatePassed) {
+    private void handleAuth(byte[] bytes, int payloadAt, int payloadSize) {
+        // 방향과 횟수는 연결 단계가 이미 걸렀다: 서버는 첫 AUTH만, 클라이언트는 첫 AUTH(ACK)만 여기에 온다.
+        if (server) {
             handleServerAuth(bytes, payloadAt, payloadSize);
-        } else if (!server && ack && peerHelloAcked && !authGatePassed) {
-            handleClientAuthAck(bytes, payloadAt, payloadSize);
         } else {
-            connectionError();
+            handleClientAuthAck(bytes, payloadAt, payloadSize);
         }
     }
 
@@ -917,12 +932,12 @@ public final class Endpoint {
             decision = config.authenticator().authenticate(mechanism, credentials);
         } catch (RuntimeException e) {
             // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다. 원인은 CLOSED 이벤트에 싣는다.
-            closeCause = e;
+            phase.causedBy(e);
             decision = AuthDecision.TRANSIENT_FAILURE;
         }
         if (decision != AuthDecision.PASS) {
             // 거부와 모르는 메커니즘은 UNAUTHENTICATED, 일시 실패는 INTERNAL_ERROR. 이유는 비운다(규격 3.3.1절).
-            closeWithError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);
+            connectionError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);
             return;
         }
         send(Frames.control(FrameType.AUTH, Flags.ACK, new byte[0]));
@@ -956,9 +971,7 @@ public final class Endpoint {
      * 않는다), 전송 계층이 닫히면 모두 끝나므로, 한 단계마다 장부와 연결 상태를 다시 본다.
      */
     private void openAuthGate() {
-        // 두 값은 이 한 곳에서만 함께 바뀐다. 엔드포인트는 요청 송신과 프레임 검사에, 타이머는 유휴 PING 억제에 쓴다.
-        authGatePassed = true;
-        timers.authGatePassed();
+        phase.authGatePassed();
         while (true) {
             DeferredPing ping = deferredPings.peekFirst();
             OwnRequestLedger.Admission admission =
@@ -972,7 +985,7 @@ public final class Endpoint {
                 return;
             } else {
                 deferredPings.removeFirst();
-                if (!closeExchanged) {
+                if (!phase.closeExchanged()) {
                     sendPing(ping.payload);
                 }
             }
@@ -1028,26 +1041,26 @@ public final class Endpoint {
     /** 받은 CLOSE(규격 3.5절). 형태가 잘못돼도 받은 CLOSE로 치고, 그때는 오류 CLOSE처럼 CLOSE 없이 닫는다. */
     private void handleClose(byte[] bytes, int off, int size, int extensionsLength, long streamId) {
         int payloadSize = size - Frames.HEADER_SIZE - extensionsLength;
-        if (extensionsLength != 0 || streamId != 0 || payloadSize < CLOSE_MIN_PAYLOAD_SIZE) {
-            closeReceivedMalformed();
-            return;
-        }
-        long lastStreamId = Frames.readLong(bytes, off + Frames.HEADER_SIZE + CLOSE_ERROR_CODE_SIZE);
-        if (lastStreamId != 0
-                && (!isOwnSpace(lastStreamId) || lastStreamId < 0 || lastStreamId > ledger.highestWrittenStreamId())) {
+        long lastStreamId = 0;
+        boolean malformed = extensionsLength != 0 || streamId != 0 || payloadSize < CLOSE_MIN_PAYLOAD_SIZE;
+        if (!malformed) {
+            lastStreamId = Frames.readLong(bytes, off + Frames.HEADER_SIZE + CLOSE_ERROR_CODE_SIZE);
             // 최상위 비트가 1이면 long으로 음수이고 보낸 번호보다 크다. 이 값은 쓰지 않는다.
-            closeReceivedMalformed();
+            malformed = lastStreamId != 0
+                    && (!isOwnSpace(lastStreamId)
+                            || lastStreamId < 0
+                            || lastStreamId > ledger.highestWrittenStreamId());
+        }
+        if (malformed) {
+            phase.connectionFailed();
             return;
         }
-        closeExchanged = true;
-        if (!closeReceived) {
-            closeReceived = true;
+        if (phase.closeReceived(Frames.readUnsignedInt(bytes, off + Frames.HEADER_SIZE))) {
             for (OwnRequestLedger.Outcome outcome : ledger.endAfter(lastStreamId)) {
                 applyOutcome(outcome);
             }
         }
         endQueuedRequests();
-        closeTransportUnlessClosing(Frames.readUnsignedInt(bytes, off + Frames.HEADER_SIZE));
     }
 
     /**
@@ -1063,42 +1076,21 @@ public final class Endpoint {
     /**
      * 끊기 전에 돌려보낸다(규격 3.5.1절, SHOULD). 받아들였지만 아직 애플리케이션이 이벤트로 받지 않은 상대의 요청을 {@code
      * RESET(REFUSED)}로 돌려보내고 스트림을 끝낸다. 오류 CLOSE보다 먼저 호출한다.
+     *
+     * <p>암묵 불변식: {@code drainedPeerStreamId}보다 큰 번호의 대기 스트림은 항상 아직 꺼내지 않은 REQUEST_RECEIVED 이벤트와 짝이다
+     * ({@link #handleRequest}가 둘을 함께 만들고, 이벤트는 {@link #drainEvents}가 {@code drainedPeerStreamId}를 올릴 때만 사라진다).
+     * 그래서 여기서 돌려보낸 요청의 이벤트를 {@link #drainEvents}가 가려낼 수 있다.
      */
     private void refuseUnhandedRequests() {
-        events.removeIf(event -> {
-            if (event.kind() != Event.Kind.REQUEST_RECEIVED || peerPendingStreams.remove(event.streamId()) == null) {
-                return false;
+        Iterator<Long> pending = peerPendingStreams.keySet().iterator();
+        while (pending.hasNext()) {
+            long streamId = pending.next();
+            if (streamId > drainedPeerStreamId) {
+                pending.remove();
+                send(Frames.reset(streamId, ErrorCode.REFUSED));
+                refusedRequests.add(streamId);
             }
-            send(Frames.reset(event.streamId(), ErrorCode.REFUSED));
-            return true;
-        });
-    }
-
-    /** 형태가 잘못된 CLOSE를 받았다. 받은 CLOSE로 치고 CLOSE를 보내지 않은 채 닫는다(규격 3.5절). */
-    private void closeReceivedMalformed() {
-        closeExchanged = true;
-        closeTransport();
-    }
-
-    /** 오류 CLOSE이거나 대기 중인 스트림이 없으면 닫고, 아니면 대기 중인 스트림이 끝날 때까지 종료 중으로 둔다(규격 3.5절). */
-    private void closeTransportUnlessClosing(long errorCode) {
-        if (errorCode != ErrorCode.NO_ERROR) {
-            closeTransport();
-        } else if (ledger.openCount() == 0 && peerPendingStreams.isEmpty()) {
-            closeTransportAfterNoError();
         }
-    }
-
-    /**
-     * {@code NO_ERROR} CLOSE를 보냈거나 받아 끝나는 연결을 닫는다. 호출부는 이 경우에만 이 메서드를 부른다(오류 CLOSE는 곧바로 {@link
-     * #closeTransport()}로 닫는다). WebSocket이면 마지막 프레임 뒤에 WebSocket Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket
-     * 상태 코드는 규격이 정하지 않아 모델링하지 않는다.
-     */
-    private void closeTransportAfterNoError() {
-        if (!transportClosed && config.isWebSocket()) {
-            outbox.addLast(OutboundMessage.normalWebSocketClose());
-        }
-        closeTransport();
     }
 
     /**
@@ -1106,31 +1098,49 @@ public final class Endpoint {
      * 이 호출 뒤에는 CLOSE 교환이 된 상태다.
      */
     private void connectionError() {
-        closeWithError(ErrorCode.PROTOCOL_ERROR);
+        connectionError(ErrorCode.PROTOCOL_ERROR);
     }
 
     /**
      * 오류 {@code errorCode}의 CLOSE를 보내고 닫는다(연결 오류, 확인 대기 초과, 연결 인증의 거부·일시 실패·대기 초과). 이미 CLOSE를 보냈거나
      * 받았다면 보내지 않는다(규격 3.5절).
      */
-    private void closeWithError(int errorCode) {
+    private void connectionError(int errorCode) {
         refuseUnhandedRequests();
-        if (!closeExchanged) {
+        if (!phase.closeExchanged()) {
             send(Frames.close(errorCode, highestPeerStreamId));
         }
-        closeExchanged = true;
-        closeTransport();
+        phase.connectionFailed();
+        conclude();
+    }
+
+    /** CLOSE를 보내지 않고 닫는다. 서문과 첫 프레임 검사(규격 3.1절, 3.2.4절)가 어긋났을 때다. */
+    private void closeWithoutClose() {
+        phase.connectionFailed();
+        conclude();
     }
 
     /**
-     * 연결이 끝난다. 결과를 받지 못한 요청마다 로컬 UNAVAILABLE을 한 번씩 넘긴 뒤 closed를 낸다(규격 3.5절). 이후 받은 바이트와
-     * 시간은 처리하지 않는다.
+     * 종료 경로: 전송 계층을 닫는 유일한 곳이다. 대기 중인 스트림이 0개이면 그 사건을 단계에 알리고, 단계가 닫을 때라고 하면 닫아 연결을 끝낸다.
+     * {@code NO_ERROR}로 끝나는 WebSocket 연결이면 마지막 프레임 뒤에 WebSocket Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket
+     * 상태 코드는 규격이 정하지 않아 모델링하지 않는다. 연결이 끝날 때 내 요청 장부와 생존 확인 타이머에 알리고, 결과를 받지 못한 요청마다 로컬
+     * UNAVAILABLE을 한 번씩 넘긴 뒤 상대가 연 스트림을 비우고 닫은 로컬 원인과 함께 closed를 낸다(규격 3.5절). 이후 받은 바이트와 시간은
+     * 처리하지 않는다.
      */
-    private void closeTransport() {
-        if (transportClosed) {
+    private void conclude() {
+        if (phase.isEnded()) {
             return;
         }
-        transportClosed = true;
+        if (ledger.openCount() == 0 && peerPendingStreams.isEmpty()) {
+            phase.pendingStreamsReachedZero();
+        }
+        if (!phase.shouldCloseTransport()) {
+            return;
+        }
+        if (phase.endsNormally() && config.isWebSocket()) {
+            outbox.addLast(OutboundMessage.normalWebSocketClose());
+        }
+        phase.transportClosed();
         pending = NO_BYTES;
         pendingLength = 0;
         timers.clear();
@@ -1139,7 +1149,7 @@ public final class Endpoint {
         }
         deferredPings.clear();
         peerPendingStreams.clear();
-        events.add(Event.closed(closeCause));
+        events.add(Event.closed(phase.closeCause()));
     }
 
     private void sendHello() {
