@@ -73,6 +73,8 @@ class EndpointTicketOrderTest {
         endpoint.drainMessages();
         // 이 걸음에서 AUTH 관문을 통과한다. 그 전의 요청은 번호 없는 대기열에 있다.
         int authAtStep = random.nextInt(OPERATIONS);
+        // 이 걸음에서 시계를 크게 밀어 여럿을 만료시키고 곧바로 닫는다(만료 중 닫힘 경로).
+        int expireAndCloseAtStep = random.nextInt(OPERATIONS * 3);
         StringBuilder trace = new StringBuilder();
         List<Long> tickets = new ArrayList<>();
         List<Long> sentStreams = new ArrayList<>();
@@ -80,7 +82,11 @@ class EndpointTicketOrderTest {
             if (step == authAtStep) {
                 endpoint.receive(Frames.control(FrameType.AUTH, Flags.ACK, new byte[0]));
             }
-            switch (random.nextInt(10)) {
+            if (step == expireAndCloseAtStep) {
+                endpoint.advance(70);
+                endpoint.close(random.nextBoolean() ? ErrorCode.NO_ERROR : ErrorCode.PROTOCOL_ERROR);
+            }
+            switch (random.nextInt(13)) {
                 case 0:
                 case 1:
                     tickets.add(endpoint.request(REQUEST_TYPE, new byte[random.nextInt(8)]));
@@ -106,7 +112,20 @@ class EndpointTicketOrderTest {
                     endpoint.advance(random.nextInt(random.nextBoolean() ? 20 : 150));
                     break;
                 case 8:
+                case 11:
                     append(trace, endpoint, tickets, sentStreams);
+                    break;
+                case 9:
+                    // 상대 CLOSE: last_stream_id보다 큰 번호의 내 요청이 로컬 UNAVAILABLE로 끝난다.
+                    endpoint.receive(Frames.close(ErrorCode.NO_ERROR, streamOf(random, sentStreams)));
+                    break;
+                case 10:
+                    // 상대의 max_frame_size를 넘는 요청. 관문 뒤면 던지고, 관문 전이면 미뤘다가 관문이 열릴 때 로컬로 실패한다.
+                    try {
+                        tickets.add(endpoint.request(REQUEST_TYPE, new byte[70000], 1 + random.nextInt(60)));
+                    } catch (IllegalArgumentException expected) {
+                        trace.append("oversize\n");
+                    }
                     break;
                 default:
                     if (!sentStreams.isEmpty()) {
@@ -157,6 +176,8 @@ class EndpointTicketOrderTest {
                 .contains("RESULT 1 " + Status.DEADLINE_EXCEEDED + " Optional[UNKNOWN]")
                 .contains("RESULT 0 " + Status.CANCELLED + " Optional[NOT_PROCESSED]")
                 .contains("RESULT 3 " + Status.CANCELLED)
+                .contains("oversize")
+                .containsPattern("RESULT [1-9][0-9]* " + Status.UNAVAILABLE + " Optional\\[NOT_PROCESSED\\]")
                 .contains("state 0 QUEUED_WITHOUT_NUMBER")
                 .contains("NUMBERED_UNWRITTEN")
                 .contains("WRITING_STARTED");
