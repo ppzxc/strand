@@ -294,23 +294,34 @@ class EndpointEndedConnectionTest {
     }
 
     @Test
-    void endingClearsTheLedger() {
+    void endingClearsAWrittenRequestFromTheLedger() {
         Endpoint client = settle(openClient());
         long written = client.request(257, new byte[0]);
         client.drainMessages();
-        long numbered = client.request(257, new byte[0]);
-        assertThat(client.openStreamCount()).isEqualTo(2);
+        assertThat(client.openStreamCount()).isEqualTo(1);
         assertThat(client.requestState(written)).isNotNull();
-        assertThat(client.requestState(numbered)).isNotNull();
         client.disconnect();
         settle(client);
 
         assertThat(client.openStreamCount()).isZero();
         assertThat(client.requestState(written)).isNull();
+        client.cancel(1);
+        client.cancelRequest(written);
+        assertSilent(client);
+    }
+
+    @Test
+    void endingClearsAnUnwrittenRequestFromTheLedger() {
+        Endpoint client = settle(openClient());
+        long numbered = client.request(257, new byte[0]);
+        assertThat(client.openStreamCount()).isEqualTo(1);
+        assertThat(client.requestState(numbered)).isNotNull();
+        client.disconnect();
+        settle(client);
+
+        assertThat(client.openStreamCount()).isZero();
         assertThat(client.requestState(numbered)).isNull();
         client.cancel(1);
-        client.cancel(3);
-        client.cancelRequest(written);
         client.cancelRequest(numbered);
         assertSilent(client);
     }
