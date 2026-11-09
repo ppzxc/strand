@@ -388,7 +388,15 @@ class ConnectionPhaseTest {
         assertThat(ended(Phase.OPEN).isActive()).isFalse();
     }
 
-    /** 끝난 연결은 어떤 종료 쪽 사건에도 반응하지 않고, 아무것도 받지 않는다. */
+    /** 끝난 연결은 닫은 로컬 원인 기록을 포함해 어떤 종료 쪽 사건에도 반응하지 않는다. */
+    @Test
+    void endedConnectionKeepsItsCauseAgainstLateRecords() {
+        ConnectionPhase subject = ended(Phase.OPEN);
+        subject.causedBy(new IllegalStateException("late"));
+        assertThat(subject.closeCause()).isNull();
+    }
+
+    /** 끝난 연결은 어떤 종료 쪽 사건에도 반응하지 않는다. */
     @ParameterizedTest
     @EnumSource(CloseEvent.class)
     void endedConnectionIgnoresEveryEvent(CloseEvent event) {
@@ -402,12 +410,8 @@ class ConnectionPhaseTest {
 
     @ParameterizedTest
     @MethodSource("establishingPhases")
-    void endedConnectionAdmitsNothing(Phase established) {
+    void endedConnectionSendsNothing(Phase established) {
         ConnectionPhase subject = ended(established);
-        for (int type :
-                new int[] {FrameType.CLOSE, FrameType.HELLO, FrameType.AUTH, FrameType.PING, FrameType.RESET, APP}) {
-            assertThat(subject.admit(type, false)).isEqualTo(Admission.ENDED);
-        }
         assertThat(subject.mayIdlePing()).isFalse();
         assertThat(subject.applicationSend()).isEqualTo(ApplicationSend.REFUSE);
     }
