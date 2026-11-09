@@ -49,7 +49,7 @@ public final class Endpoint {
 
     private final EndpointConfig config;
     private final Outbox outbox = new Outbox();
-    /** 애플리케이션에 낼 이벤트. 쓰기만 한다. 꺼낼 때({@link #drainEvents()}) 비운다. */
+    /** 애플리케이션에 낼 이벤트. 쌓기만 하고 고치지 않는다. 돌려보낸 요청의 거름은 꺼낼 때({@link #drainEvents()}) 한다. */
     private final List<Event> events = new ArrayList<>();
     /** 이벤트로 쌓았지만 아직 꺼내지 않은 상대 요청의 번호(받은 순서). */
     private final Set<Long> unhandedRequests = new LinkedHashSet<>();
@@ -558,7 +558,9 @@ public final class Endpoint {
     public List<Event> drainEvents() {
         List<Event> drained = new ArrayList<>(events.size());
         for (Event event : events) {
-            if (event.kind() != Event.Kind.REQUEST_RECEIVED || !refusedRequests.contains(event.streamId())) {
+            if (refusedRequests.isEmpty()
+                    || event.kind() != Event.Kind.REQUEST_RECEIVED
+                    || !refusedRequests.contains(event.streamId())) {
                 drained.add(event);
             }
         }
