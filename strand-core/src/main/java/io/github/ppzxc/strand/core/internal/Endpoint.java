@@ -25,6 +25,11 @@ import org.jspecify.annotations.Nullable;
 public final class Endpoint {
 
     private static final int PREFACE_PREFIX_LENGTH = 6;
+    private static final byte[] NO_BYTES = new byte[0];
+    /** 경계에 걸친 단위를 모으는 버퍼의 처음 크기. */
+    private static final int PENDING_MIN_CAPACITY = 64;
+    /** 다 비웠을 때 이 크기를 넘는 버퍼는 놓는다. 큰 프레임 하나 때문에 연결이 그 크기를 계속 붙잡지 않게 한다. */
+    private static final int PENDING_RELEASE_ABOVE = 65_536;
     /** 서버는 짝수, 클라이언트는 홀수 번호를 쓰고 첫 번호는 각각 2와 1이다(규격 2.2.5절). */
     private static final int FIRST_SERVER_STREAM_ID = 2;
 
@@ -64,7 +69,18 @@ public final class Endpoint {
     /** AUTH 관문을 통과하기 전이라 미뤄 둔 송신(규격 3.3절). */
     private final Deque<DeferredSend> deferredSends = new ArrayDeque<>();
 
-    private byte[] receiveBuffer = new byte[0];
+    /**
+     * 받은 바이트 가운데 아직 한 단위(서문 또는 프레임)가 되지 못한 앞부분. 청크 경계에 걸친 단위 하나만 모으므로 비어 있는 때가 대부분이다.
+     * 한 청크 안에 통째로 든 단위는 들어온 배열에서 바로 처리해 복사하지 않는다.
+     */
+    private byte[] pending = NO_BYTES;
+    /** {@link #pending}에서 쓰인 바이트 수. 0이면 모은 것이 없다. */
+    private int pendingLength;
+    /** {@link #consumeUnit}이 0을 돌려줄 때, 진행하려면 단위의 앞에서부터 있어야 하는 총 바이트 수. */
+    private int wantedLength;
+    /** 입력 처리 중이다. 애플리케이션 콜백이 같은 엔드포인트에 다시 입력하는 것을 막는다. */
+    private boolean receiving;
+
     private boolean prefaceChecked;
     private boolean firstFrameChecked;
     /** 상대의 파라미터 HELLO를 받아 내가 ACK를 보냈다(규격 3.3절). */
@@ -153,15 +169,79 @@ public final class Endpoint {
         if (config.isWebSocket()) {
             throw new IllegalStateException("WebSocket 엔드포인트는 receiveMessage로 입력한다");
         }
-        if (transportClosed) {
-            return;
+        enterReceive();
+        try {
+            if (!transportClosed) {
+                receiveBytes(bytes);
+            }
+        } finally {
+            receiving = false;
         }
-        receiveBuffer = Frames.concat(receiveBuffer, bytes);
-        if (!prefaceChecked && !checkPreface()) {
-            return;
+    }
+
+    /** 입력 처리에 들어간다. 이미 처리 중이면(애플리케이션 콜백이 다시 입력함) 상태를 건드리지 않고 던진다. */
+    private void enterReceive() {
+        if (receiving) {
+            throw new IllegalStateException("입력을 처리하는 중에 같은 엔드포인트에 다시 입력할 수 없다");
         }
-        while (!transportClosed && readFrame()) {
-            // 한 프레임씩 처리한다.
+        receiving = true;
+    }
+
+    /**
+     * 받은 바이트를 처리한다. 먼저 경계에 걸친 단위를 모아서 끝내고, 그 뒤로는 들어온 배열에서 바로 처리한다. 남은 꼬리만 복사해 둔다.
+     * 어디서 잘라 넣어도 {@link #consumeUnit}이 보는 바이트는 같으므로 결과가 같다.
+     */
+    private void receiveBytes(byte[] bytes) {
+        int at = 0;
+        int end = bytes.length;
+        while (pendingLength > 0) {
+            int consumed = consumeUnit(pending, 0, pendingLength);
+            if (transportClosed) {
+                return;
+            }
+            if (consumed > 0) {
+                // 모은 바이트는 정확히 한 단위다. wantedLength는 처리 중인 단위의 크기를 넘지 않고, 그만큼까지만 모으기 때문이다.
+                releasePending();
+                continue;
+            }
+            if (at == end) {
+                return;
+            }
+            // 판정에 필요한 만큼만 더 모은다. 헤더가 알린 길이만큼 미리 잡지 않는다(상대가 정하는 값이다).
+            if (wantedLength <= pendingLength) {
+                throw new IllegalStateException("더 필요한 바이트 수가 정해지지 않았다");
+            }
+            int take = Math.min(wantedLength - pendingLength, end - at);
+            appendPending(bytes, at, take);
+            at += take;
+        }
+        while (!transportClosed && at < end) {
+            int consumed = consumeUnit(bytes, at, end - at);
+            if (consumed == 0) {
+                break;
+            }
+            at += consumed;
+        }
+        if (!transportClosed && at < end) {
+            appendPending(bytes, at, end - at);
+        }
+    }
+
+    private void appendPending(byte[] bytes, int at, int length) {
+        int needed = pendingLength + length;
+        if (needed > pending.length) {
+            // 받은 만큼에 맞춰 두 배씩 키운다. 처리 중인 단위(최대 max_frame_size)보다 두 배를 넘지 않는다.
+            pending = Arrays.copyOf(pending, Math.max(needed, Math.max(PENDING_MIN_CAPACITY, pending.length * 2)));
+        }
+        System.arraycopy(bytes, at, pending, pendingLength, length);
+        pendingLength = needed;
+    }
+
+    /** 모은 바이트를 모두 처리했다. 큰 버퍼는 놓는다. */
+    private void releasePending() {
+        pendingLength = 0;
+        if (pending.length > PENDING_RELEASE_ABOVE) {
+            pending = NO_BYTES;
         }
     }
 
@@ -176,13 +256,22 @@ public final class Endpoint {
         if (!config.isWebSocket()) {
             throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
         }
+        enterReceive();
+        try {
+            receiveWebSocketMessage(kind, message);
+        } finally {
+            receiving = false;
+        }
+    }
+
+    private void receiveWebSocketMessage(WebSocketMessageKind kind, byte[] message) {
         if (transportClosed) {
             return;
         }
         if (!prefaceChecked) {
             if (kind == WebSocketMessageKind.BINARY
                     && message.length == Frames.preface().length
-                    && matchesPrefacePrefix(message)) {
+                    && matchesPrefacePrefix(message, 0, message.length)) {
                 prefaceChecked = true;
                 sendHello();
             } else {
@@ -202,10 +291,10 @@ public final class Endpoint {
         if (length < Frames.MIN_LENGTH
                 || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE
                 || message.length != Frames.LENGTH_FIELD_SIZE + length) {
-            rejectBadLength(message);
+            rejectBadLength(message, 0);
             return;
         }
-        handle(message);
+        handle(message, 0, message.length);
     }
 
     /**
@@ -516,28 +605,76 @@ public final class Endpoint {
         return drained;
     }
 
-    /** 서문의 앞 6바이트를 비교한다(규격 3.1절). 판정할 만큼 모였으면 true. 서문은 8바이트를 모두 받은 뒤 건너뛴다. */
-    private boolean checkPreface() {
+    /**
+     * {@code off}에서 시작하는 {@code available}바이트에서 한 단위(서문 또는 프레임)를 처리한다. 처리했으면 소비한 바이트 수를 돌려준다.
+     * 모자라면 0을 돌려주고 {@link #wantedLength}에 진행하려면 있어야 하는 총 바이트 수를 둔다. 판정이 나서 닫았으면 0을 돌려준다. 도착 단위에
+     * 따라 결과가 달라지면 안 되므로, 판정에 필요한 바이트가 모이기 전에는 아무것도 하지 않는다.
+     */
+    private int consumeUnit(byte[] bytes, int off, int available) {
+        if (!prefaceChecked) {
+            return consumePreface(bytes, off, available);
+        }
+        if (available < Frames.LENGTH_FIELD_SIZE) {
+            wantedLength = Frames.LENGTH_FIELD_SIZE;
+            return 0;
+        }
+        long length = Frames.readUnsignedInt(bytes, off);
+        if (!firstFrameChecked) {
+            // 첫 프레임 검사(규격 3.2.4절): 헤더를 읽을 수 없거나 HELLO가 아니면 아무것도 보내지 않고 닫는다.
+            if (length < Frames.MIN_LENGTH) {
+                closeTransport();
+                return 0;
+            }
+            if (available < Frames.HEADER_SIZE) {
+                wantedLength = Frames.HEADER_SIZE;
+                return 0;
+            }
+            if (!isFirstFrameHeader(bytes, off)) {
+                closeTransport();
+                return 0;
+            }
+            firstFrameChecked = true;
+        }
+        if (length < Frames.MIN_LENGTH || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE) {
+            if (available < Frames.TYPE_END) {
+                // type을 읽을 때까지 기다린다. CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫아야 하므로 도착 단위에 따라 결과가 달라지면 안 된다.
+                wantedLength = Frames.TYPE_END;
+                return 0;
+            }
+            rejectBadLength(bytes, off);
+            return 0;
+        }
+        int frameSize = (int) (Frames.LENGTH_FIELD_SIZE + length);
+        if (available < frameSize) {
+            wantedLength = frameSize;
+            return 0;
+        }
+        handle(bytes, off, frameSize);
+        return frameSize;
+    }
+
+    /** 서문의 앞 6바이트를 비교한다(규격 3.1절). 판정할 만큼 모였으면 서문 8바이트를 건너뛴다. 서문은 8바이트를 모두 받은 뒤 건너뛴다. */
+    private int consumePreface(byte[] bytes, int off, int available) {
         byte[] preface = Frames.preface();
-        if (!matchesPrefacePrefix(receiveBuffer)) {
+        if (!matchesPrefacePrefix(bytes, off, available)) {
             closeTransport();
-            return false;
+            return 0;
         }
-        if (receiveBuffer.length < preface.length) {
-            return false;
+        if (available < preface.length) {
+            wantedLength = preface.length;
+            return 0;
         }
-        receiveBuffer = Arrays.copyOfRange(receiveBuffer, preface.length, receiveBuffer.length);
         prefaceChecked = true;
         sendHello();
-        return true;
+        return preface.length;
     }
 
     /** 서문의 앞 6바이트와, 받은 만큼의 앞부분이 일치하는가. */
-    private static boolean matchesPrefacePrefix(byte[] bytes) {
+    private static boolean matchesPrefacePrefix(byte[] bytes, int off, int available) {
         byte[] preface = Frames.preface();
-        int compared = Math.min(bytes.length, PREFACE_PREFIX_LENGTH);
+        int compared = Math.min(available, PREFACE_PREFIX_LENGTH);
         for (int i = 0; i < compared; i++) {
-            if (bytes[i] != preface[i]) {
+            if (bytes[off + i] != preface[i]) {
                 return false;
             }
         }
@@ -545,8 +682,10 @@ public final class Endpoint {
     }
 
     /** 첫 프레임의 헤더가 첫 프레임 검사(규격 3.2.4절)를 통과하는가: HELLO이고 stream_id 0, flags 0. */
-    private static boolean isFirstFrameHeader(byte[] bytes) {
-        return Frames.typeOf(bytes) == FrameType.HELLO && Frames.streamIdOf(bytes) == 0 && Frames.flagsOf(bytes) == 0;
+    private static boolean isFirstFrameHeader(byte[] bytes, int off) {
+        return Frames.typeOf(bytes, off) == FrameType.HELLO
+                && Frames.streamIdOf(bytes, off) == 0
+                && Frames.flagsOf(bytes, off) == 0;
     }
 
     /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 첫 프레임 검사를 마친 것으로 기록한다. */
@@ -554,74 +693,39 @@ public final class Endpoint {
         boolean valid = kind == WebSocketMessageKind.BINARY
                 && message.length >= Frames.HEADER_SIZE
                 && Frames.readUnsignedInt(message, 0) >= Frames.MIN_LENGTH
-                && isFirstFrameHeader(message);
+                && isFirstFrameHeader(message, 0);
         firstFrameChecked = valid;
         return valid;
     }
 
     /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */
-    private void rejectBadLength(byte[] bytes) {
-        if (Frames.typeOf(bytes) == FrameType.CLOSE) {
+    private void rejectBadLength(byte[] bytes, int off) {
+        if (Frames.typeOf(bytes, off) == FrameType.CLOSE) {
             closeReceivedMalformed();
         } else {
             connectionError();
         }
     }
 
-    /** 프레임 하나를 읽어 처리한다. 더 읽을 수 있으면 true. */
-    private boolean readFrame() {
-        if (receiveBuffer.length < Frames.LENGTH_FIELD_SIZE) {
-            return false;
-        }
-        long length = Frames.readUnsignedInt(receiveBuffer, 0);
-        if (!firstFrameChecked) {
-            // 첫 프레임 검사(규격 3.2.4절): 헤더를 읽을 수 없거나 HELLO가 아니면 아무것도 보내지 않고 닫는다.
-            if (length < Frames.MIN_LENGTH) {
-                closeTransport();
-                return false;
-            }
-            if (receiveBuffer.length < Frames.HEADER_SIZE) {
-                return false;
-            }
-            if (!isFirstFrameHeader(receiveBuffer)) {
-                closeTransport();
-                return false;
-            }
-            firstFrameChecked = true;
-        }
-        if (length < Frames.MIN_LENGTH || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE) {
-            if (receiveBuffer.length < Frames.TYPE_END) {
-                // type을 읽을 때까지 기다린다. CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫아야 하므로 도착 단위에 따라 결과가 달라지면 안 된다.
-                return false;
-            }
-            rejectBadLength(receiveBuffer);
-            return false;
-        }
-        int frameSize = (int) (Frames.LENGTH_FIELD_SIZE + length);
-        if (receiveBuffer.length < frameSize) {
-            return false;
-        }
-        byte[] frame = Arrays.copyOfRange(receiveBuffer, 0, frameSize);
-        receiveBuffer = Arrays.copyOfRange(receiveBuffer, frameSize, receiveBuffer.length);
-        handle(frame);
-        return true;
-    }
-
-    private void handle(byte[] frame) {
+    /**
+     * 프레임 하나를 처리한다. 프레임은 {@code bytes}의 {@code off}부터 {@code size}바이트이고, 호출자의 배열을 그대로 읽는다. 이 호출이
+     * 돌아온 뒤에는 읽지 않으며 배열을 붙잡지도 않는다(애플리케이션으로 넘기는 바이트는 복사한다).
+     */
+    private void handle(byte[] bytes, int off, int size) {
         lastReceivedAt = now;
-        int type = Frames.typeOf(frame);
-        int extensionsLength = Frames.extensionsLengthOf(frame);
-        long streamId = Frames.streamIdOf(frame);
+        int type = Frames.typeOf(bytes, off);
+        int extensionsLength = Frames.extensionsLengthOf(bytes, off);
+        long streamId = Frames.streamIdOf(bytes, off);
         if (type == FrameType.CLOSE) {
-            handleClose(frame, extensionsLength, streamId);
+            handleClose(bytes, off, size, extensionsLength, streamId);
             return;
         }
-        if (extensionsLength > frame.length - Frames.HEADER_SIZE) {
+        if (extensionsLength > size - Frames.HEADER_SIZE) {
             connectionError();
             return;
         }
         if (type >= FrameType.FIRST_APPLICATION) {
-            handleApplication(frame, type, extensionsLength, streamId);
+            handleApplication(bytes, off, type, extensionsLength, streamId);
             return;
         }
         if (FrameType.isReserved(type)) {
@@ -645,16 +749,17 @@ public final class Endpoint {
             connectionError();
             return;
         }
-        byte[] payload = Arrays.copyOfRange(frame, Frames.HEADER_SIZE, frame.length);
-        boolean ack = (Frames.flagsOf(frame) & Flags.ACK) != 0;
+        int payloadAt = off + Frames.HEADER_SIZE;
+        int payloadSize = size - Frames.HEADER_SIZE;
+        boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
         if (type == FrameType.HELLO) {
-            handleHello(ack, payload);
+            handleHello(ack, bytes, payloadAt, payloadSize);
         } else if (type == FrameType.PING) {
-            handlePing(ack, payload);
+            handlePing(ack, bytes, payloadAt, payloadSize);
         } else if (type == FrameType.RESET) {
-            handleReset(streamId, payload);
+            handleReset(streamId, bytes, payloadAt, payloadSize);
         } else if (type == FrameType.AUTH) {
-            handleAuth(ack, payload);
+            handleAuth(ack, bytes, payloadAt, payloadSize);
         }
     }
 
@@ -663,15 +768,15 @@ public final class Endpoint {
      * 스트림이면 끝내고, 내 요청이었다면 로컬 결과를 넘긴다. 대기 중이 아니면 조용히 버린다(규격 4.3절). flags는 모두 미정의라 보지
      * 않는다(규격 2.3절).
      */
-    private void handleReset(long streamId, byte[] payload) {
-        if (isInvalidStreamId(streamId) || payload.length != RESET_PAYLOAD_SIZE) {
+    private void handleReset(long streamId, byte[] bytes, int payloadAt, int payloadSize) {
+        if (isInvalidStreamId(streamId) || payloadSize != RESET_PAYLOAD_SIZE) {
             connectionError();
             return;
         }
         if (isOwnSpace(streamId)) {
             if (endOwnStream(streamId) != null) {
                 dropUnwrittenRequest(streamId);
-                long errorCode = Frames.readUnsignedInt(payload, 0);
+                long errorCode = Frames.readUnsignedInt(bytes, payloadAt);
                 // 거절한 요청은 처리를 시작하지 않았다(규격 4.4절 결과 표).
                 Certainty certainty = errorCode == ErrorCode.REFUSED ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
                 events.add(Event.result(streamId, Status.forReset(errorCode), certainty));
@@ -695,18 +800,18 @@ public final class Endpoint {
      * 애플리케이션 프레임. 확장 영역 형식 위반은 요청인지 응답인지, type을 아는지와 상관없이 연결 오류다(규격 2.4.1절). 내 번호 공간의
      * 프레임은 응답이고 상대 공간의 프레임은 새 요청이다(규격 4.2절).
      */
-    private void handleApplication(byte[] frame, int type, int extensionsLength, long streamId) {
+    private void handleApplication(byte[] bytes, int off, int type, int extensionsLength, long streamId) {
         // 연결 오류 집합은 검사 순서가 없다(규격 5.1절 3번). 확장 영역 형식, 상대 ACK 전의 프레임(3.3절), 잘못된 stream_id.
         Extensions extensionsResult = extensionsLength > MAX_EXTENSIONS_LENGTH
                 ? Extensions.MALFORMED
-                : scanExtensions(frame, extensionsLength);
+                : scanExtensions(bytes, off, extensionsLength);
         if (extensionsResult == Extensions.MALFORMED
                 || !ownHelloAcked
                 || !authGatePassed
                 || isInvalidStreamId(streamId)) {
             connectionError();
         } else if (isOwnSpace(streamId)) {
-            handleResponse(frame, streamId);
+            handleResponse(bytes, off, streamId);
         } else {
             handleRequest(type, extensionsResult, streamId);
         }
@@ -750,17 +855,17 @@ public final class Endpoint {
      * 확장 영역을 한 번 훑어 검사한다. 형식(규격 2.4.1절)은 항목 길이의 합이 {@code extensions_length}와 같고 같은 tag가 없는 것이고, 값(규격
      * 2.4.2절)은 timeout이 4바이트, idempotency-key가 1~64바이트인 것이다.
      */
-    private static Extensions scanExtensions(byte[] frame, int extensionsLength) {
+    private static Extensions scanExtensions(byte[] bytes, int off, int extensionsLength) {
         Set<Integer> tags = new HashSet<>();
         boolean valuesValid = true;
-        int at = Frames.HEADER_SIZE;
+        int at = off + Frames.HEADER_SIZE;
         int end = at + extensionsLength;
         while (at < end) {
             if (end - at < TLV_HEADER_SIZE) {
                 return Extensions.MALFORMED;
             }
-            int tag = Frames.readUnsignedShort(frame, at);
-            int length = Frames.readUnsignedShort(frame, at + 2);
+            int tag = Frames.readUnsignedShort(bytes, at);
+            int length = Frames.readUnsignedShort(bytes, at + 2);
             at += TLV_HEADER_SIZE + length;
             if (at > end || !tags.add(tag)) {
                 return Extensions.MALFORMED;
@@ -774,15 +879,15 @@ public final class Endpoint {
     }
 
     /** 내 요청의 응답. 대기 중인 요청이면 결과를 애플리케이션에 넘긴다. 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). */
-    private void handleResponse(byte[] frame, long streamId) {
+    private void handleResponse(byte[] bytes, int off, long streamId) {
         Integer requestType = endOwnStream(streamId);
         if (requestType == null) {
             // 대기 중이 아닌 스트림의 프레임은 조용히 버린다(규격 4.3절).
             return;
         }
         // 응답 type이 요청과 다르면 status와 payload를 버리고 로컬 INTERNAL을 넘긴다. 와이어로는 아무것도 보내지 않는다(규격 4.1절).
-        int status = Frames.typeOf(frame) == requestType
-                ? Status.normalize(Frames.statusOf(frame))
+        int status = Frames.typeOf(bytes, off) == requestType
+                ? Status.normalize(Frames.statusOf(bytes, off))
                 : Event.RESPONSE_TYPE_MISMATCH;
         dropUnwrittenRequest(streamId);
         events.add(Event.result(streamId, status, Certainty.RESPONSE));
@@ -796,10 +901,10 @@ public final class Endpoint {
         }
     }
 
-    private void handleHello(boolean ack, byte[] payload) {
+    private void handleHello(boolean ack, byte[] bytes, int payloadAt, int payloadSize) {
         if (ack) {
             // 합친 프레임(ACK이면서 payload가 있음)과 두 번째 ACK는 연결 오류다(규격 3.2.5절).
-            if (payload.length != 0 || ownHelloAcked) {
+            if (payloadSize != 0 || ownHelloAcked) {
                 connectionError();
                 return;
             }
@@ -807,7 +912,7 @@ public final class Endpoint {
             endOldestWait(null);
             return;
         }
-        PeerLimits peer = peerHelloAcked ? null : peerLimitsOf(payload);
+        PeerLimits peer = peerHelloAcked ? null : peerLimitsOf(bytes, payloadAt, payloadSize);
         if (peer == null) {
             connectionError();
             return;
@@ -838,31 +943,32 @@ public final class Endpoint {
      * {@code AUTH(ACK)}에서 {@code credential_lifetime}을 알린다. 방향 위반, 두 번째 {@code AUTH}·{@code AUTH(ACK)},
      * 형태 위반은 연결 오류다.
      */
-    private void handleAuth(boolean ack, byte[] payload) {
+    private void handleAuth(boolean ack, byte[] bytes, int payloadAt, int payloadSize) {
         if (server && !ack && !authGatePassed) {
-            handleServerAuth(payload);
+            handleServerAuth(bytes, payloadAt, payloadSize);
         } else if (!server && ack && peerHelloAcked && !authGatePassed) {
-            handleClientAuthAck(payload);
+            handleClientAuthAck(bytes, payloadAt, payloadSize);
         } else {
             connectionError();
         }
     }
 
-    private void handleServerAuth(byte[] payload) {
+    private void handleServerAuth(byte[] bytes, int payloadAt, int payloadSize) {
         authDeadline = null;
-        int mechanismLength = payload.length == 0 ? 0 : payload[0] & 0xFF;
+        int mechanismLength = payloadSize == 0 ? 0 : bytes[payloadAt] & 0xFF;
         if (mechanismLength < 1
                 || mechanismLength > EndpointConfig.MAX_AUTH_MECHANISM_LENGTH
-                || payload.length < 1 + mechanismLength) {
+                || payloadSize < 1 + mechanismLength) {
             connectionError();
             return;
         }
-        String mechanism = new String(payload, 1, mechanismLength, StandardCharsets.US_ASCII);
+        String mechanism = new String(bytes, payloadAt + 1, mechanismLength, StandardCharsets.US_ASCII);
         if (!EndpointConfig.isValidAuthMechanism(mechanism)) {
             connectionError();
             return;
         }
-        byte[] credentials = Arrays.copyOfRange(payload, 1 + mechanismLength, payload.length);
+        // 자격 증명은 애플리케이션으로 넘어가므로 복사한다.
+        byte[] credentials = Arrays.copyOfRange(bytes, payloadAt + 1 + mechanismLength, payloadAt + payloadSize);
         AuthDecision decision;
         try {
             decision = config.authenticator().authenticate(mechanism, credentials);
@@ -880,21 +986,21 @@ public final class Endpoint {
         openAuthGate();
     }
 
-    private void handleClientAuthAck(byte[] payload) {
-        if (payload.length % AUTH_ACK_PARAM_SIZE != 0) {
+    private void handleClientAuthAck(byte[] bytes, int payloadAt, int payloadSize) {
+        if (payloadSize % AUTH_ACK_PARAM_SIZE != 0) {
             connectionError();
             return;
         }
         OptionalLong lifetime = OptionalLong.empty();
         Set<Integer> seen = new HashSet<>();
-        for (int at = 0; at < payload.length; at += AUTH_ACK_PARAM_SIZE) {
-            if (!seen.add(Frames.readUnsignedShort(payload, at))) {
+        for (int at = payloadAt; at < payloadAt + payloadSize; at += AUTH_ACK_PARAM_SIZE) {
+            if (!seen.add(Frames.readUnsignedShort(bytes, at))) {
                 connectionError();
                 return;
             }
             // 모르는 identifier는 무시한다(규격 3.3.1절).
-            if (Frames.readUnsignedShort(payload, at) == CREDENTIAL_LIFETIME_ID) {
-                lifetime = OptionalLong.of(Frames.readUnsignedInt(payload, at + 2));
+            if (Frames.readUnsignedShort(bytes, at) == CREDENTIAL_LIFETIME_ID) {
+                lifetime = OptionalLong.of(Frames.readUnsignedInt(bytes, at + 2));
             }
         }
         endOldestWait(AUTH_WAIT);
@@ -918,19 +1024,19 @@ public final class Endpoint {
      * HELLO payload를 한 번 훑는다(규격 3.2.3절, 3.2.5절). 6의 배수, identifier 중복 없음, max_frame_size 범위를 검증하고, 유효하면 상대가 알린
      * {@code max_concurrent_streams}와 {@code max_frame_size}(없으면 각 기본값)를 돌려주고, 유효하지 않으면 null을 돌려준다.
      */
-    private static @Nullable PeerLimits peerLimitsOf(byte[] payload) {
-        if (payload.length % HelloParams.HELLO_PARAM_SIZE != 0) {
+    private static @Nullable PeerLimits peerLimitsOf(byte[] bytes, int payloadAt, int payloadSize) {
+        if (payloadSize % HelloParams.HELLO_PARAM_SIZE != 0) {
             return null;
         }
         long maxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
         long maxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
         Set<Integer> seen = new HashSet<>();
-        for (int at = 0; at < payload.length; at += HelloParams.HELLO_PARAM_SIZE) {
-            int identifier = Frames.readUnsignedShort(payload, at);
+        for (int at = payloadAt; at < payloadAt + payloadSize; at += HelloParams.HELLO_PARAM_SIZE) {
+            int identifier = Frames.readUnsignedShort(bytes, at);
             if (!seen.add(identifier)) {
                 return null;
             }
-            long value = Frames.readUnsignedInt(payload, at + 2);
+            long value = Frames.readUnsignedInt(bytes, at + 2);
             if (identifier == HelloParams.MAX_FRAME_SIZE_ID
                     && (value < HelloParams.MAX_FRAME_SIZE_LOWER_LIMIT
                             || value > HelloParams.MAX_FRAME_SIZE_UPPER_LIMIT)) {
@@ -945,10 +1051,14 @@ public final class Endpoint {
         return new PeerLimits(maxConcurrentStreams, maxFrameSize);
     }
 
-    private void handlePing(boolean ack, byte[] payload) {
-        if (payload.length != PING_PAYLOAD_SIZE) {
+    private void handlePing(boolean ack, byte[] bytes, int payloadAt, int payloadSize) {
+        if (payloadSize != PING_PAYLOAD_SIZE) {
             connectionError();
-        } else if (ack) {
+            return;
+        }
+        // 8바이트만 복사한다. 확인 대기와 맞춰 보거나 ACK로 되돌려 보낼 때 쓴다.
+        byte[] payload = Arrays.copyOfRange(bytes, payloadAt, payloadAt + PING_PAYLOAD_SIZE);
+        if (ack) {
             // 보낸 PING과 맞춰 보는 일은 로컬 몫이고, 맞지 않는 ACK는 무시한다(규격 3.4절).
             endOldestWait(payload);
         } else {
@@ -957,13 +1067,13 @@ public final class Endpoint {
     }
 
     /** 받은 CLOSE(규격 3.5절). 형태가 잘못돼도 받은 CLOSE로 치고, 그때는 오류 CLOSE처럼 CLOSE 없이 닫는다. */
-    private void handleClose(byte[] frame, int extensionsLength, long streamId) {
-        int payloadSize = frame.length - Frames.HEADER_SIZE - extensionsLength;
+    private void handleClose(byte[] bytes, int off, int size, int extensionsLength, long streamId) {
+        int payloadSize = size - Frames.HEADER_SIZE - extensionsLength;
         if (extensionsLength != 0 || streamId != 0 || payloadSize < CLOSE_MIN_PAYLOAD_SIZE) {
             closeReceivedMalformed();
             return;
         }
-        long lastStreamId = Frames.readLong(frame, Frames.HEADER_SIZE + CLOSE_ERROR_CODE_SIZE);
+        long lastStreamId = Frames.readLong(bytes, off + Frames.HEADER_SIZE + CLOSE_ERROR_CODE_SIZE);
         if (lastStreamId != 0
                 && (!isOwnSpace(lastStreamId) || lastStreamId < 0 || lastStreamId > highestSentOwnStreamId)) {
             // 최상위 비트가 1이면 long으로 음수이고 보낸 번호보다 크다. 이 값은 쓰지 않는다.
@@ -976,7 +1086,7 @@ public final class Endpoint {
             endRequestsAfter(lastStreamId);
         }
         endQueuedRequests();
-        closeTransportUnlessClosing(Frames.readUnsignedInt(frame, Frames.HEADER_SIZE));
+        closeTransportUnlessClosing(Frames.readUnsignedInt(bytes, off + Frames.HEADER_SIZE));
     }
 
     /**
@@ -1084,7 +1194,8 @@ public final class Endpoint {
             return;
         }
         transportClosed = true;
-        receiveBuffer = new byte[0];
+        pending = NO_BYTES;
+        pendingLength = 0;
         ackWaits.clear();
         Set<OutboundMessage> unsentMessages = newIdentitySet();
         for (long streamId : ownPendingStreams.keySet()) {
@@ -1286,7 +1397,7 @@ public final class Endpoint {
             return message;
         }
         int at = firstApplicationIndex();
-        if (Frames.typeOf(frame) == FrameType.CLOSE) {
+        if (Frames.typeOf(frame, 0) == FrameType.CLOSE) {
             at = Math.max(at, afterLastUnwrittenRequest());
         }
         outbox.add(at, message);
