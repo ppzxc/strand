@@ -69,17 +69,19 @@ final class OwnRequestLedger {
         final Certainty certainty;
         /** 쓰기를 시작한 요청을 끝낸 것이라 {@code RESET(CANCEL)}을 보내야 한다. */
         final boolean resetToSend;
+        /** 번호를 받은 요청의 결과인가. 번호 없는 요청의 결과는 스트림 번호가 없다(0). */
+        private final boolean numbered;
 
-        Outcome(long streamId, int status, Certainty certainty, boolean resetToSend) {
+        Outcome(long streamId, int status, Certainty certainty, boolean resetToSend, boolean numbered) {
             this.streamId = streamId;
             this.status = status;
             this.certainty = certainty;
             this.resetToSend = resetToSend;
+            this.numbered = numbered;
         }
 
-        /** 번호를 받은 요청의 결과인가. 번호 없는 요청의 결과는 스트림 번호가 없다. */
         boolean numbered() {
-            return streamId != 0;
+            return numbered;
         }
     }
 
@@ -104,6 +106,9 @@ final class OwnRequestLedger {
 
         @Nullable
         Record nextUnwritten;
+
+        /** 쓰기 대기열 노드와 쓰기 전 연결 리스트에 이어져 있다. {@link #unwrite}를 두 번 불러도 한 번만 거두게 한다. */
+        boolean linked;
 
         /** 번호 없는 요청의 연결 리스트(낸 순서). 번호가 없을 때만 이어져 있다. */
         @Nullable
@@ -293,6 +298,7 @@ final class OwnRequestLedger {
         record.state = RequestState.NUMBERED_UNWRITTEN;
         record.payload = null;
         record.node = outbox.addApplication(OutboundMessage.binary(frame));
+        record.linked = true;
         register(record);
         return Admission.ADMITTED;
     }
@@ -306,6 +312,7 @@ final class OwnRequestLedger {
             Record next = record.nextUnwritten;
             highestWrittenStreamId = Math.max(highestWrittenStreamId, record.streamId);
             record.state = RequestState.WRITING_STARTED;
+            record.linked = false;
             record.node = null;
             record.prevUnwritten = null;
             record.nextUnwritten = null;
@@ -326,13 +333,14 @@ final class OwnRequestLedger {
         return record == null ? null : record.state;
     }
 
+    /** 스트림 번호로 요청의 상태를 본다. 테스트 전용 package-private 엿보기이고 {@link Endpoint}는 쓰지 않는다. 대기 중이 아니면 null이다. */
     @Nullable
     RequestState stateOfStream(long streamId) {
         Record record = byStream.get(streamId);
         return record == null ? null : record.state;
     }
 
-    /** 번호표가 받은 스트림 번호. 끝났거나 번호를 받지 못했거나 낸 적 없으면 null이다. */
+    /** 번호표가 받은 스트림 번호. 테스트 전용 package-private 엿보기이고 {@link Endpoint}는 쓰지 않는다. 끝났거나 번호를 받지 못했거나 낸 적 없으면 null이다. */
     @Nullable
     Long streamIdOf(long ticket) {
         Record record = byTicket.get(ticket);
@@ -407,7 +415,7 @@ final class OwnRequestLedger {
         int status = responseType == record.type ? Status.normalize(rawStatus) : Event.RESPONSE_TYPE_MISMATCH;
         unregister(record);
         unwrite(record);
-        return new Outcome(streamId, status, Certainty.RESPONSE, false);
+        return new Outcome(streamId, status, Certainty.RESPONSE, false, true);
     }
 
     /**
@@ -422,7 +430,7 @@ final class OwnRequestLedger {
         unregister(record);
         unwrite(record);
         Certainty certainty = errorCode == ErrorCode.REFUSED ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
-        return new Outcome(streamId, Status.forReset(errorCode), certainty, false);
+        return new Outcome(streamId, Status.forReset(errorCode), certainty, false, true);
     }
 
     /**
@@ -440,7 +448,7 @@ final class OwnRequestLedger {
         for (Record record : ended) {
             unregister(record);
             unwrite(record);
-            outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false));
+            outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false, true));
         }
         return outcomes;
     }
@@ -453,7 +461,7 @@ final class OwnRequestLedger {
         closing = true;
         List<Outcome> outcomes = new ArrayList<>(queued.size());
         for (Record record = firstQueued; record != null; record = record.nextQueued) {
-            outcomes.add(new Outcome(0, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false));
+            outcomes.add(new Outcome(0, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false, false));
             if (record.expiry != null) {
                 expirations.remove(record.expiry);
             }
@@ -469,10 +477,10 @@ final class OwnRequestLedger {
     List<Outcome> onTransportClosed() {
         List<Outcome> outcomes = new ArrayList<>(byStream.size() + queued.size());
         for (Record record : byStream.values()) {
-            outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, unfinishedCertainty(record), false));
+            outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, endUnfinished(record), false, true));
         }
         for (Record record = firstQueued; record != null; record = record.nextQueued) {
-            outcomes.add(new Outcome(0, Status.UNAVAILABLE, unfinishedCertainty(record), false));
+            outcomes.add(new Outcome(0, Status.UNAVAILABLE, endUnfinished(record), false, false));
         }
         byStream.clear();
         byTicket.clear();
@@ -487,17 +495,31 @@ final class OwnRequestLedger {
      */
     private Outcome abort(Record record, int status) {
         unregister(record);
-        Certainty certainty = unfinishedCertainty(record);
-        return new Outcome(record.streamId, status, certainty, certainty == Certainty.UNKNOWN);
+        Certainty certainty = endUnfinished(record);
+        return new Outcome(
+                record.streamId,
+                status,
+                certainty,
+                certainty == Certainty.UNKNOWN,
+                record.state != RequestState.QUEUED_WITHOUT_NUMBER);
     }
 
     /**
      * 응답이나 RESET을 받지 못한 채 끝나는 요청(취소, 기한, 전송 계층 닫힘)의 확정성을 정하는 유일한 자리(규격 3.5절, 4.4절, 4.4.1절). 쓰기를
-     * 시작했으면 프레임을 이미 끊을 수 없어 결과 모름이다. 번호가 없거나 쓰기 전이면 프레임을 거두고(번호가 없으면 프레임이 없다) 처리 안 됨이다.
+     * 시작했으면 프레임을 이미 끊을 수 없어 결과 모름이다. 번호가 없거나 쓰기 전이면 처리 안 됨이다. 요청의 상태만 보고 아무것도 바꾸지 않는다.
      */
-    private Certainty unfinishedCertainty(Record record) {
-        unwrite(record);
+    private static Certainty unfinishedCertainty(Record record) {
         return record.state == RequestState.WRITING_STARTED ? Certainty.UNKNOWN : Certainty.NOT_PROCESSED;
+    }
+
+    /**
+     * 응답이나 RESET 없이 끝나는 요청을 거두고 확정성을 돌려준다. 쓰기 전이면 프레임을 쓰기 대기열에서 거둔다(번호가 없으면 프레임이 없다). 확정성은
+     * {@link #unfinishedCertainty}가 정한다.
+     */
+    private Certainty endUnfinished(Record record) {
+        Certainty certainty = unfinishedCertainty(record);
+        unwrite(record);
+        return certainty;
     }
 
     /** 번호를 받은 요청을 색인에 함께 넣는다. 쓰기 전 요청의 연결 리스트 끝에도 잇는다. 기한 색인은 건드리지 않는다. 번호 없는 요청은 {@link #queue}가, 바로 번호를 받는 요청은 {@link #open}이 넣는다. */
@@ -552,14 +574,14 @@ final class OwnRequestLedger {
     }
 
     /**
-     * 아직 쓰기 전인 요청의 프레임을 쓰기 대기열에서 거두고 쓰기 전 연결 리스트에서 뺀다.
-     *
-     * @return 쓰기 전이어서 거뒀으면 true, 이미 쓰기를 시작했으면 false
+     * 아직 쓰기 전인 요청의 프레임을 쓰기 대기열에서 거두고 쓰기 전 연결 리스트에서 뺀다. 이미 거뒀거나 쓰기를 시작했거나 번호가 없으면 아무것도
+     * 하지 않는다(두 번 불러도 안전하다).
      */
-    private boolean unwrite(Record record) {
-        if (record.state != RequestState.NUMBERED_UNWRITTEN) {
-            return false;
+    private void unwrite(Record record) {
+        if (!record.linked) {
+            return;
         }
+        record.linked = false;
         Outbox.Node node = record.node;
         if (node != null) {
             outbox.remove(node);
@@ -579,6 +601,5 @@ final class OwnRequestLedger {
         record.node = null;
         record.prevUnwritten = null;
         record.nextUnwritten = null;
-        return true;
     }
 }
