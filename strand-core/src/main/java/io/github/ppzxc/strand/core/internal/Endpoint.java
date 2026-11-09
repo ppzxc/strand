@@ -935,6 +935,10 @@ public final class Endpoint {
             phase.causedBy(e);
             decision = AuthDecision.TRANSIENT_FAILURE;
         }
+        if (!phase.isActive()) {
+            // 콜백 안에서 CLOSE를 보냈거나 연결이 끝났다. 판정과 무관하게 CLOSE·CLOSED 뒤 프레임을 쌓지 않는다(규격 3.5절).
+            return;
+        }
         if (decision != AuthDecision.PASS) {
             // 거부와 모르는 메커니즘은 UNAUTHENTICATED, 일시 실패는 INTERNAL_ERROR. 이유는 비운다(규격 3.3.1절).
             connectionError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);

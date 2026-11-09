@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
@@ -290,6 +291,76 @@ class EndpointEndedConnectionTest {
             endpoint.abortClosing();
             endpoint.disconnect();
             assertSilent(endpoint);
+        }
+    }
+
+    /** 인증 콜백 안에서 {@code onCallback}이 연결을 끝내도록 한 서버로 AUTH를 받게 하고, 그 서버를 돌려준다. */
+    private static Endpoint serverEndedInsideAuthCallback(AuthAction onCallback) {
+        AtomicReference<Endpoint> self = new AtomicReference<>();
+        Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+            self.get().disconnect();
+            return onCallback.decide();
+        }));
+        self.set(server);
+        server.receive(bytes(PREFACE));
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+        server.drainEvents();
+        server.receive(bytes(AUTH_ANONYMOUS));
+        return server;
+    }
+
+    @FunctionalInterface
+    private interface AuthAction {
+        AuthDecision decide();
+    }
+
+    @Test
+    void authDecisionAfterTheConnectionEndedInsideTheCallbackQueuesNoFrames() {
+        for (AuthDecision decision : AuthDecision.values()) {
+            Endpoint server = serverEndedInsideAuthCallback(() -> decision);
+
+            assertThat(server.drainMessages()).as(decision.name()).isEmpty();
+            assertThat(server.drainEvents())
+                    .as(decision.name())
+                    .extracting(Event::kind)
+                    .containsExactly(Event.Kind.CLOSED);
+        }
+    }
+
+    @Test
+    void authenticatorThrowingAfterTheConnectionEndedQueuesNoFramesAndNoSecondClosed() {
+        Endpoint server = serverEndedInsideAuthCallback(() -> {
+            throw new IllegalStateException("late");
+        });
+
+        assertThat(server.drainMessages()).isEmpty();
+        List<Event> events = server.drainEvents();
+        assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        assertThat(events.get(0).cause()).isEmpty();
+    }
+
+    @Test
+    void closingInsideTheAuthCallbackEndsTheConnectionSoNoAuthAckFollowsTheClose() {
+        // AUTH 단계에는 대기 중인 스트림이 없어, 콜백 안의 CLOSE는 곧바로 연결을 끝낸다. "닫는 중이지만 안 끝난" 상태는 생기지 않는다.
+        for (int code : new int[] {ErrorCode.NO_ERROR, ErrorCode.PROTOCOL_ERROR}) {
+            AtomicReference<Endpoint> self = new AtomicReference<>();
+            Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+                self.get().close(code);
+                return AuthDecision.PASS;
+            }));
+            self.set(server);
+            server.receive(bytes(PREFACE));
+            server.receive(bytes(HELLO));
+            server.receive(bytes(HELLO_ACK));
+            server.drainMessages();
+            server.drainEvents();
+
+            server.receive(bytes(AUTH_ANONYMOUS));
+
+            assertThat(server.drainMessages()).as("code " + code).hasSize(1); // CLOSE 하나뿐, AUTH ACK 없음
+            assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
         }
     }
 

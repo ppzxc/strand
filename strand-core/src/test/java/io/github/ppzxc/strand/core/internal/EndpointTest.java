@@ -3120,9 +3120,7 @@ class EndpointTest {
         server.close(ErrorCode.INTERNAL_ERROR);
 
         assertThat(sent(server))
-                .isEqualTo(RESET_REFUSED_5
-                        + RESET_REFUSED_7
-                        + closeWithLast(ErrorCode.INTERNAL_ERROR, 7));
+                .isEqualTo(RESET_REFUSED_5 + RESET_REFUSED_7 + closeWithLast(ErrorCode.INTERNAL_ERROR, 7));
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 
