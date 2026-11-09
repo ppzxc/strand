@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
-import java.util.function.LongConsumer;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -103,8 +102,6 @@ public final class Endpoint {
     private long now;
     /** ACK를 기다리는 HELLO, AUTH, PING의 확인 대기, 서버의 AUTH 대기 기한, 유휴 PING 일정(규격 3.3절, 3.4.1절). */
     private final LivenessTimers timers;
-    /** 쓰기 대기열에서 꺼낸 확인 대기를 시작한다. 시작 시각은 꺼낸 때의 가상 시각이다. */
-    private final LongConsumer startWait;
 
     private final boolean server;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
@@ -113,7 +110,6 @@ public final class Endpoint {
     private Endpoint(boolean server, EndpointConfig config) {
         this.config = config;
         this.timers = new LivenessTimers(config.ackTimeoutMs(), config.authTimeoutMs(), config.idleIntervalMs());
-        this.startWait = id -> timers.started(id, now);
         long firstStreamId = config.firstStreamId(server ? FIRST_SERVER_STREAM_ID : FIRST_CLIENT_STREAM_ID);
         int ownParity = server ? 0 : 1;
         if ((firstStreamId & 1) != ownParity) {
@@ -542,7 +538,8 @@ public final class Endpoint {
      */
     public List<OutboundMessage> drainMessages() {
         // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
-        List<OutboundMessage> drained = outbox.drain(startWait);
+        long drainedAt = now;
+        List<OutboundMessage> drained = outbox.drain(id -> timers.started(id, drainedAt));
         ledger.onWriteStarted();
         return drained;
     }
