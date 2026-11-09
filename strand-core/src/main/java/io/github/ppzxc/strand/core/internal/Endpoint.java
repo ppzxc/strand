@@ -935,8 +935,8 @@ public final class Endpoint {
             phase.causedBy(e);
             decision = AuthDecision.TRANSIENT_FAILURE;
         }
-        if (phase.isEnded()) {
-            // 콜백 안에서 연결이 이미 끝났다. 판정과 무관하게 CLOSED 뒤 프레임을 쌓지 않는다(규격 3.5절).
+        if (!phase.isActive()) {
+            // 콜백 안에서 CLOSE를 보냈거나 연결이 끝났다. 판정과 무관하게 CLOSE·CLOSED 뒤 프레임을 쌓지 않는다(규격 3.5절).
             return;
         }
         if (decision != AuthDecision.PASS) {
@@ -1107,13 +1107,9 @@ public final class Endpoint {
 
     /**
      * 오류 {@code errorCode}의 CLOSE를 보내고 닫는다(연결 오류, 확인 대기 초과, 연결 인증의 거부·일시 실패·대기 초과). 이미 CLOSE를 보냈거나
-     * 받았다면 보내지 않는다(규격 3.5절). 이미 끝난 연결이면 아무것도 하지 않는다.
+     * 받았다면 보내지 않는다(규격 3.5절).
      */
     private void connectionError(int errorCode) {
-        if (phase.isEnded()) {
-            // 애플리케이션 콜백 안에서 연결이 이미 끝났을 수 있다. 끝난 연결에는 CLOSED 뒤 프레임을 쌓지 않는다(규격 3.5절).
-            return;
-        }
         refuseUnhandedRequests();
         if (!phase.closeExchanged()) {
             send(Frames.close(errorCode, highestPeerStreamId));
