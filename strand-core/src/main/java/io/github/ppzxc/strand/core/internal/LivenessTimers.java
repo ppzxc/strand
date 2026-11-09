@@ -63,8 +63,17 @@ final class LivenessTimers {
 
     /** 대기에 매인 프레임을 전송 계층에 넘겼다. 이때부터 {@code now + ackTimeoutMs}가 기한이다. 이미 끝났거나 시작한 대기는 그대로다. */
     void started(long id, long now) {
-        for (Wait wait : waits) {
-            if (wait.id == id) {
+        // 대기는 등록 순서이고 식별자는 등록할 때마다 커지므로 식별자로 이분 탐색한다.
+        int low = 0;
+        int high = waits.size() - 1;
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            Wait wait = waits.get(mid);
+            if (wait.id < id) {
+                low = mid + 1;
+            } else if (wait.id > id) {
+                high = mid - 1;
+            } else {
                 if (!wait.started) {
                     wait.started = true;
                     wait.deadline = now + ackTimeoutMs;
