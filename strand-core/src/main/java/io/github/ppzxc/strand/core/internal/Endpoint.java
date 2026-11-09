@@ -490,11 +490,7 @@ public final class Endpoint {
                 events.add(Event.result(0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED));
             }
         }
-        List<OwnRequestLedger.Outcome> expired = ledger.expire(now);
-        for (OwnRequestLedger.Outcome outcome : expired) {
-            applyOutcome(outcome);
-        }
-        if (!expired.isEmpty()) {
+        if (ledger.expire(now, this::applyOutcome)) {
             closeTransportIfNoPendingStreams();
         }
     }

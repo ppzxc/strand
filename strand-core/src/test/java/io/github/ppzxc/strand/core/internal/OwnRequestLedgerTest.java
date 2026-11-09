@@ -21,6 +21,12 @@ class OwnRequestLedgerTest {
     private final Outbox outbox = new Outbox();
     private final OwnRequestLedger ledger = new OwnRequestLedger(outbox);
 
+    private static List<OwnRequestLedger.Outcome> expire(OwnRequestLedger target, long now) {
+        List<OwnRequestLedger.Outcome> ended = new ArrayList<>();
+        target.expire(now, ended::add);
+        return ended;
+    }
+
     private void accept(long streamId, long ticket) {
         accept(streamId, ticket, null);
     }
@@ -117,7 +123,7 @@ class OwnRequestLedgerTest {
                         break;
                     default:
                         now += random.nextInt(4);
-                        for (OwnRequestLedger.Outcome o : l.expire(now)) {
+                        for (OwnRequestLedger.Outcome o : expire(l, now)) {
                             forget(o, written, streamOf);
                         }
                         break;
@@ -189,8 +195,8 @@ class OwnRequestLedgerTest {
         accept(1, 0, 5L);
         startWrite();
         accept(3, 1, 5L);
-        assertThat(ledger.expire(5)).isEmpty();
-        List<OwnRequestLedger.Outcome> ended = ledger.expire(6);
+        assertThat(expire(ledger, 5)).isEmpty();
+        List<OwnRequestLedger.Outcome> ended = expire(ledger, 6);
         assertThat(ended).hasSize(2);
         assertEnded(ended.get(0), 1, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN, true);
         assertEnded(ended.get(1), 3, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED, false);
@@ -202,7 +208,7 @@ class OwnRequestLedgerTest {
         accept(1, 0, 9L);
         accept(3, 1, 2L);
         accept(5, 2, 4L);
-        List<OwnRequestLedger.Outcome> ended = ledger.expire(10);
+        List<OwnRequestLedger.Outcome> ended = expire(ledger, 10);
         assertThat(ended).extracting(o -> o.streamId).containsExactly(1L, 3L, 5L);
     }
 
@@ -266,6 +272,37 @@ class OwnRequestLedgerTest {
         assertThat(drain()).isEmpty();
     }
 
+    /** CLOSE last_stream_id 뒤의 쓰기를 시작한 요청도 처리 안 됨이고 RESET을 보내지 않는다. */
+    @Test
+    void writtenRequestAfterCloseLastStreamIdIsNotProcessedWithoutReset() {
+        accept(1, 0);
+        accept(3, 1);
+        startWrite();
+        accept(5, 2);
+        List<OwnRequestLedger.Outcome> ended = ledger.endAfter(1);
+        assertThat(ended).hasSize(2);
+        assertEnded(ended.get(0), 3, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false);
+        assertEnded(ended.get(1), 5, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false);
+        assertThat(ledger.stateOfStream(1)).isEqualTo(Endpoint.RequestState.WRITING_STARTED);
+    }
+
+    /** 쓰기 전 요청의 REFUSED RESET은 처리 안 됨이다. */
+    @Test
+    void refusedResetOfUnwrittenRequestIsNotProcessed() {
+        accept(1, 0);
+        assertEnded(ledger.onReset(1, ErrorCode.REFUSED), 1, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false);
+        assertThat(drain()).isEmpty();
+    }
+
+    /** 쓰기를 시작한 요청의 응답은 RESPONSE이고 프레임은 이미 나갔다. */
+    @Test
+    void responseToWrittenRequestIsResponse() {
+        accept(1, 0);
+        startWrite();
+        assertEnded(ledger.onResponse(1, TYPE, 7), 1, 7, Certainty.RESPONSE, false);
+        assertThat(ledger.openCount()).isZero();
+    }
+
     /** 전송 계층이 닫히면 쓰기 전은 처리 안 됨 쓰기 시작 뒤는 결과 모름이고 모두 비운다. */
     @Test
     void transportClosedJudgesByStateAndClearsEverything() {
@@ -280,7 +317,7 @@ class OwnRequestLedgerTest {
         assertThat(ledger.streamIdOf(0)).isNull();
         assertThat(ledger.streamIdOf(1)).isNull();
         assertThat(drain()).isEmpty();
-        assertThat(ledger.expire(Long.MAX_VALUE)).isEmpty();
+        assertThat(expire(ledger, Long.MAX_VALUE)).isEmpty();
     }
 
     // ---- 쓰기 대기열과 넘긴 번호 ----

@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -17,8 +18,8 @@ import org.jspecify.annotations.Nullable;
  * Endpoint.RequestState#WRITING_STARTED})는 기록의 값이다. 스트림→요청 색인, 번호표→요청 색인, 기한 색인, 쓰기 전 요청의 연결 리스트는
  * {@link #register}와 {@link #unregister}에서만 함께 고치므로 어긋날 수 없다. 끝난 요청은 어떤 색인에도 남지 않는다.
  *
- * <p>결과 확정성 판정(규격 3.5절, 4.4절, 4.4.1절)은 이 클래스의 {@link #abort}, {@link #onResponse}, {@link #onReset}, {@link
- * #endAfter}, {@link #onTransportClosed}에만 있다. 쓰기 전이면 처리 안 됨, 쓰기를 시작한 뒤면 결과 모름, 거절(REFUSED)은 쓰기를 시작했어도 처리
+ * <p>결과 확정성 판정(규격 3.5절, 4.4절, 4.4.1절)은 이 클래스의 {@link #unfinishedCertainty}, {@link #onResponse}, {@link
+ * #onReset}, {@link #endAfter}에만 있다. 쓰기 전이면 처리 안 됨, 쓰기를 시작한 뒤면 결과 모름, 거절(REFUSED)은 쓰기를 시작했어도 처리
  * 안 됨이다.
  *
  * <p>번호표 조회와 기한 색인의 비용 특성은 #202를 따른다. 번호표 조회는 O(1)이고 {@link #expire}는 만료된 요청 수에 비례해서만 일한다.
@@ -178,27 +179,28 @@ final class OwnRequestLedger {
     }
 
     /**
-     * 시계 진행 사건. 기한이 지난 요청을 끝낸다(규격 4.4.1절). 끝내는 순서는 기한 순이 아니라 스트림 번호 순이다.
+     * 시계 진행 사건. 기한이 지난 요청을 끝낸다(규격 4.4.1절). 끝내는 순서는 기한 순이 아니라 스트림 번호 순이다. 결과는 요청 하나를 끝낼
+     * 때마다 곧바로 {@code sink}에 넘긴다. 쓰기를 시작한 요청의 {@code RESET}을 보내는 일과 쓰기 전 요청의 프레임을 거두는 일이 요청 순서대로
+     * 엇갈려야 쓰기 대기열의 송신 순서가 바뀌지 않기 때문이다.
      *
-     * @return 끝난 요청의 결과. 없으면 빈 목록
+     * @return 끝낸 요청이 있으면 true
      */
-    List<Outcome> expire(long now) {
+    boolean expire(long now, Consumer<Outcome> sink) {
         if (expirations.isEmpty() || now <= expirations.first().deadlineAt) {
-            return Collections.emptyList();
+            return false;
         }
         List<Long> expired = new ArrayList<>();
         while (!expirations.isEmpty() && now > expirations.first().deadlineAt) {
             expired.add(expirations.pollFirst().streamId);
         }
         Collections.sort(expired);
-        List<Outcome> outcomes = new ArrayList<>(expired.size());
         for (long streamId : expired) {
             Record record = byStream.get(streamId);
             if (record != null) {
-                outcomes.add(abort(record, Status.DEADLINE_EXCEEDED));
+                sink.accept(abort(record, Status.DEADLINE_EXCEEDED));
             }
         }
-        return Collections.unmodifiableList(outcomes);
+        return true;
     }
 
     /**
@@ -276,10 +278,16 @@ final class OwnRequestLedger {
      */
     private Outcome abort(Record record, int status) {
         unregister(record);
-        if (unwrite(record)) {
-            return new Outcome(record.streamId, status, Certainty.NOT_PROCESSED, false);
-        }
-        return new Outcome(record.streamId, status, Certainty.UNKNOWN, true);
+        Certainty certainty = unfinishedCertainty(record);
+        return new Outcome(record.streamId, status, certainty, certainty == Certainty.UNKNOWN);
+    }
+
+    /**
+     * 응답이나 RESET을 받지 못한 채 끝나는 요청의 확정성을 정하는 유일한 자리(규격 3.5절, 4.4절, 4.4.1절). 쓰기 전이면 프레임을 거두고 처리
+     * 안 됨, 쓰기를 시작했으면 프레임을 이미 끊을 수 없어 결과 모름이다.
+     */
+    private Certainty unfinishedCertainty(Record record) {
+        return unwrite(record) ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
     }
 
     /** 요청을 모든 색인에 함께 넣는다. 쓰기 전 요청의 연결 리스트 끝에도 잇는다. */
