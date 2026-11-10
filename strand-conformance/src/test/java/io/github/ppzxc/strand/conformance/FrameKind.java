@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.IntPredicate;
 
 /**
  * 프레임 종류 하나의 정의. 종류마다 기대 JSON의 형태, 기대 JSON의 렌더링, 기대 JSON의 바이트 인코딩, 실제 바이트의 디코딩을 한 곳에
@@ -42,12 +43,11 @@ final class FrameKind {
         final byte[] payload;
 
         Wire(byte[] frame) {
-            this.type = ((frame[Protocol.TYPE_AT] & 0xFF) << 8) | (frame[Protocol.TYPE_AT + 1] & 0xFF);
+            this.type = Bytes.readUnsignedShort(frame, Protocol.TYPE_AT);
             this.flags = frame[Protocol.FLAGS_AT] & 0xFF;
             this.status = frame[Protocol.STATUS_AT] & 0xFF;
             this.streamId = Bytes.readLong(frame, Protocol.STREAM_ID_AT);
-            this.extensions = ((frame[Protocol.EXTENSIONS_LENGTH_AT] & 0xFF) << 8)
-                    | (frame[Protocol.EXTENSIONS_LENGTH_AT + 1] & 0xFF);
+            this.extensions = Bytes.readUnsignedShort(frame, Protocol.EXTENSIONS_LENGTH_AT);
             this.payload = Arrays.copyOfRange(frame, Protocol.HEADER_SIZE + extensions, frame.length);
         }
 
@@ -66,23 +66,21 @@ final class FrameKind {
         }
     }
 
+    // 초기화 순서: VectorSchema의 static 초기화는 FrameKind를 건드리지 않는다. VectorSchema가 FrameKind를 부르는 것은 검사 시점뿐이다.
     private static final Shape FRAME_BASE = Shape.EMPTY.require(VectorSchema.FRAME_TAG, FieldCheck.DEFERRED);
+
+    private static final byte[] PREFACE_BYTES = Bytes.fromHex(Protocol.PREFACE_HEX);
 
     private static final String PREFACE = "PREFACE";
     private static final String WEBSOCKET_CLOSE = "WEBSOCKET_CLOSE";
     private static final String APP = "APP";
 
     private static final FrameKind PREFACE_KIND = new FrameKind(
-            PREFACE,
-            -1,
-            FRAME_BASE,
-            frame -> new Fields(),
-            frame -> Bytes.fromHex(Protocol.PREFACE_HEX),
-            (wire, client) -> null);
+            PREFACE, null, FRAME_BASE, frame -> new Fields(), frame -> PREFACE_BYTES.clone(), (wire, client) -> null);
 
     private static final FrameKind HELLO_KIND = new FrameKind(
             "HELLO",
-            Protocol.TYPE_HELLO,
+            typeIs(Protocol.TYPE_HELLO),
             FRAME_BASE
                     .allow("flags", FieldCheck.flags(VectorSchema.ACK_FLAGS))
                     .allow("stream_id", VectorSchema.ZERO_STREAM_ID)
@@ -100,7 +98,7 @@ final class FrameKind {
 
     private static final FrameKind PING_KIND = new FrameKind(
             "PING",
-            Protocol.TYPE_PING,
+            typeIs(Protocol.TYPE_PING),
             FRAME_BASE
                     .require("payload", Check::pingPayload)
                     .allow("flags", FieldCheck.flags(VectorSchema.ACK_FLAGS))
@@ -115,7 +113,7 @@ final class FrameKind {
 
     private static final FrameKind AUTH_KIND = new FrameKind(
             "AUTH",
-            Protocol.TYPE_AUTH,
+            typeIs(Protocol.TYPE_AUTH),
             FRAME_BASE
                     .allow("flags", FieldCheck.flags(VectorSchema.ACK_FLAGS))
                     .allow("stream_id", VectorSchema.ZERO_STREAM_ID)
@@ -171,7 +169,7 @@ final class FrameKind {
 
     private static final FrameKind CLOSE_KIND = new FrameKind(
             "CLOSE",
-            Protocol.TYPE_CLOSE,
+            typeIs(Protocol.TYPE_CLOSE),
             FRAME_BASE
                     .require("error_code", VectorSchema.ERROR_CODE)
                     .require("last_stream_id", VectorSchema.LAST_STREAM_ID)
@@ -195,7 +193,7 @@ final class FrameKind {
 
     private static final FrameKind RESET_KIND = new FrameKind(
             "RESET",
-            Protocol.TYPE_RESET,
+            typeIs(Protocol.TYPE_RESET),
             FRAME_BASE
                     .require("stream_id", VectorSchema.POSITIVE_STREAM_ID)
                     .require("error_code", VectorSchema.ERROR_CODE),
@@ -218,7 +216,7 @@ final class FrameKind {
     /** WebSocket Close는 바이트가 아니라 전송 메시지다. 인코딩·디코딩할 바이트가 없다. */
     private static final FrameKind WEBSOCKET_CLOSE_KIND = new FrameKind(
             WEBSOCKET_CLOSE,
-            -1,
+            null,
             FRAME_BASE.require("code", VectorSchema.WEBSOCKET_CLOSE_CODE),
             frame -> new Fields().with("code", String.valueOf(frame.get("code").getAsInt())),
             null,
@@ -227,7 +225,7 @@ final class FrameKind {
     /** 숫자 type이 256 이상인 애플리케이션 프레임. 확장 영역은 쓰지 않는다. */
     private static final FrameKind APPLICATION_KIND = new FrameKind(
             APP,
-            -1,
+            type -> type >= Protocol.FIRST_APPLICATION_TYPE,
             FRAME_BASE
                     .require("stream_id", VectorSchema.STREAM_ID)
                     .allow("status", VectorSchema.STATUS)
@@ -272,8 +270,30 @@ final class FrameKind {
     private static final List<FrameKind> NAMED = Collections.unmodifiableList(Arrays.asList(
             PREFACE_KIND, HELLO_KIND, PING_KIND, AUTH_KIND, CLOSE_KIND, RESET_KIND, WEBSOCKET_CLOSE_KIND));
 
+    /** 실제 바이트를 풀 때 type 번호로 찾는 종류, 앞에서부터. */
+    private static final List<FrameKind> DECODING;
+
+    /** 이름 있는 프레임의 이름에서 형태로. */
+    private static final Map<String, Shape> SHAPES_BY_NAME;
+
+    static {
+        List<FrameKind> decoding = new ArrayList<>();
+        Map<String, Shape> shapes = new LinkedHashMap<>();
+        for (FrameKind kind : NAMED) {
+            shapes.put(kind.name, kind.shape);
+            if (kind.onWire != null) {
+                decoding.add(kind);
+            }
+        }
+        decoding.add(APPLICATION_KIND);
+        DECODING = Collections.unmodifiableList(decoding);
+        SHAPES_BY_NAME = Collections.unmodifiableMap(shapes);
+    }
+
     private final String name;
-    private final int type;
+    /** 실제 바이트의 type 번호가 이 종류인가. 바이트에 type이 없는 종류(PREFACE, WEBSOCKET_CLOSE)는 null이다. */
+    private final IntPredicate onWire;
+
     private final Shape shape;
     private final Function<JsonObject, Fields> expected;
     private final Function<JsonObject, byte[]> encoder;
@@ -281,28 +301,28 @@ final class FrameKind {
 
     private FrameKind(
             String name,
-            int type,
+            IntPredicate onWire,
             Shape shape,
             Function<JsonObject, Fields> expected,
             Function<JsonObject, byte[]> encoder,
             BiFunction<Wire, Boolean, Fields> decoder) {
         this.name = name;
-        this.type = type;
+        this.onWire = onWire;
         this.shape = shape;
         this.expected = expected;
         this.encoder = encoder;
         this.decoder = decoder;
     }
 
+    private static IntPredicate typeIs(int type) {
+        return actual -> actual == type;
+    }
+
     // ---- 파생: 형태 검사 표, 지원 여부 ----
 
     /** 이름 있는 프레임의 이름에서 형태로. */
     static Map<String, Shape> shapesByName() {
-        Map<String, Shape> shapes = new LinkedHashMap<>();
-        for (FrameKind kind : NAMED) {
-            shapes.put(kind.name, kind.shape);
-        }
-        return shapes;
+        return SHAPES_BY_NAME;
     }
 
     /** 숫자 type 애플리케이션 프레임의 형태. */
@@ -317,7 +337,7 @@ final class FrameKind {
             return byName(type) != null;
         }
         return (!frame.has("extensions") || frame.getAsJsonArray("extensions").size() == 0)
-                && frame.get("type").getAsInt() >= Protocol.FIRST_APPLICATION_TYPE;
+                && APPLICATION_KIND.onWire.test(frame.get("type").getAsInt());
     }
 
     /** 기대 프레임의 flags를 비교할 수 있는가: 비었거나 ACK뿐. */
@@ -336,7 +356,14 @@ final class FrameKind {
 
     private static FrameKind of(JsonObject frame) {
         String type = VectorSchema.frameType(frame);
-        return type == null ? APPLICATION_KIND : byName(type);
+        if (type == null) {
+            return APPLICATION_KIND;
+        }
+        FrameKind kind = byName(type);
+        if (kind == null) {
+            throw new IllegalArgumentException("알 수 없는 프레임 종류: " + type);
+        }
+        return kind;
     }
 
     // ---- 기대 JSON: 렌더링과 인코딩 ----
@@ -373,7 +400,7 @@ final class FrameKind {
     static List<String> describe(byte[] output, boolean startsWithPreface, boolean client) {
         List<String> result = new ArrayList<>();
         byte[] rest = output;
-        byte[] preface = PREFACE_KIND.encoder.apply(null);
+        byte[] preface = PREFACE_BYTES;
         if (startsWithPreface
                 && rest.length >= preface.length
                 && Arrays.equals(Arrays.copyOf(rest, preface.length), preface)) {
@@ -387,17 +414,15 @@ final class FrameKind {
     }
 
     private static String describeFrame(Wire wire, boolean client) {
-        for (FrameKind kind : NAMED) {
-            if (kind.type == wire.type) {
+        for (FrameKind kind : DECODING) {
+            if (kind.onWire.test(wire.type)) {
                 Fields fields = kind.decoder.apply(wire, client);
                 if (fields != null) {
                     return format(kind.name, fields);
                 }
             }
         }
-        if (wire.type >= Protocol.FIRST_APPLICATION_TYPE) {
-            return format(APPLICATION_KIND.name, APPLICATION_KIND.decoder.apply(wire, client));
-        }
+        // 어느 종류도 아닌 바이트는 type 번호 그대로 그려 비교가 실패하게 한다.
         return format(String.format("type=0x%04x", wire.type), wire.head().with("payload", Bytes.toHex(wire.payload)));
     }
 
@@ -445,7 +470,7 @@ final class FrameKind {
     private static String paramsText(byte[] payload) {
         Map<String, Long> filled = new LinkedHashMap<>(Protocol.HELLO_DEFAULTS);
         for (int at = 0; at + Protocol.PARAM_ENTRY_SIZE <= payload.length; at += Protocol.PARAM_ENTRY_SIZE) {
-            int id = ((payload[at] & 0xFF) << 8) | (payload[at + 1] & 0xFF);
+            int id = Bytes.readUnsignedShort(payload, at);
             String name = Protocol.HELLO_PARAM_NAMES.containsKey(id)
                     ? Protocol.HELLO_PARAM_NAMES.get(id)
                     : String.format("0x%04x", id);
@@ -461,7 +486,7 @@ final class FrameKind {
         }
         StringBuilder text = new StringBuilder();
         for (int at = 0; at + Protocol.PARAM_ENTRY_SIZE <= payload.length; at += Protocol.PARAM_ENTRY_SIZE) {
-            int id = ((payload[at] & 0xFF) << 8) | (payload[at + 1] & 0xFF);
+            int id = Bytes.readUnsignedShort(payload, at);
             text.append(text.length() == 0 ? "" : ",")
                     .append(
                             id == Protocol.AUTH_PARAM_CREDENTIAL_LIFETIME

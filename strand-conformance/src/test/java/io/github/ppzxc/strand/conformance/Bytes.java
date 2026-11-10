@@ -30,6 +30,11 @@ final class Bytes {
         return sb.toString();
     }
 
+    /** 2바이트 부호 없는 빅 엔디언 정수. */
+    static int readUnsignedShort(byte[] bytes, int at) {
+        return ((bytes[at] & 0xFF) << 8) | (bytes[at + 1] & 0xFF);
+    }
+
     /** 4바이트 부호 없는 빅 엔디언 정수. */
     static long readUnsignedInt(byte[] bytes, int at) {
         return ((long) (bytes[at] & 0xFF) << 24)
