@@ -441,7 +441,7 @@ class ConnectionDriverTest {
     }
 
     @Test
-    void aRejectingHandlerExecutorEndsTheDriverAndFailsItsOwnPendingRequests() throws Exception {
+    void aRejectingHandlerExecutorEndsTheConnectionAndPendingRequestsGetTheCoreResult() throws Exception {
         InMemoryPassage.Pair link = InMemoryPassage.streams();
         ConnectionDriver server = start(ConnectionDriver.server(EndpointConfig.defaults(), link.second())
                 .handler(
@@ -455,7 +455,24 @@ class ConnectionDriverTest {
         CompletableFuture<RequestResult> clientOwn =
                 client.request(APPLICATION_TYPE, bytes("trigger")).result();
 
-        assertThat(serverOwn).failsWithin(5, TimeUnit.SECONDS);
+        // 드라이버가 결과를 지어내지 않는다. core가 끊김으로 내는 결과(UNAVAILABLE와 결과 확정성)로 끝난다.
+        assertThat(await(serverOwn).status()).isEqualTo(STATUS_UNAVAILABLE);
+        assertThat(await(serverOwn).certainty()).isNotEqualTo(Certainty.RESPONSE);
         assertThat(await(clientOwn).status()).isEqualTo(STATUS_UNAVAILABLE);
+    }
+
+    @Test
+    void anInputTheEndpointRejectsEndsTheConnectionAndPendingRequestsGetTheCoreResult() throws Exception {
+        // 서버는 메시지 통로 설정인데 통로는 바이트 스트림이라 receive가 IllegalStateException을 던진다.
+        InMemoryPassage.Pair link = InMemoryPassage.streams();
+        ConnectionDriver server =
+                start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), link.second()));
+        client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
+
+        RequestResult result =
+                await(server.request(APPLICATION_TYPE, bytes("never-sent")).result());
+
+        assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
+        assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
     }
 }

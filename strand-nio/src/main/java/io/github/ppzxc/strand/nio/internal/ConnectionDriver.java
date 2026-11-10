@@ -47,7 +47,9 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         /**
-         * 상대가 낸 요청을 받는 핸들러와, 핸들러를 돌릴 실행기를 정한다. 정하지 않으면 받은 요청은 응답 없이 둔다.
+         * 상대가 낸 요청을 받는 핸들러와, 핸들러를 돌릴 실행기를 정한다. 정하지 않으면 받은 요청은 응답 없이 둔다. 실행기가 요청을 받지 않고
+         * 예외를 던지면(예: {@code RejectedExecutionException}) 연결을 끊고 전송 스레드를 끝낸다. 남은 요청의 Future는 core가 끊김으로 내는
+         * 결과로 끝나고, 예외는 전송 스레드의 처리기로 전해진다.
          *
          * @param executor 핸들러를 돌리는 실행기. 전송 스레드를 막지 않게 블로킹 작업을 맡길 수 있는 것이어야 한다
          * @param requestHandler 핸들러
@@ -234,17 +236,28 @@ public final class ConnectionDriver implements AutoCloseable {
 
     /** 전송 스레드의 본체. */
     private void run() {
-        Loop loop = new Loop(role == Role.CLIENT ? Endpoint.client(config) : Endpoint.server(config));
+        try {
+            drive(new Loop(role == Role.CLIENT ? Endpoint.client(config) : Endpoint.server(config)));
+        } finally {
+            stopped = true;
+            passage.close();
+            abandonRemainingCommands();
+        }
+    }
+
+    private void drive(Loop loop) {
         try {
             loop.settle();
             while (!loop.finished) {
                 loop.step();
             }
+        } catch (RuntimeException | Error e) {
+            // 예기치 못한 오류(핸들러 실행기 거부, 엔드포인트가 거부한 입력 등). 연결을 끊어 core가 내는 결과로 Future를 끝내고,
+            // 오류는 스레드의 처리기가 보게 다시 던진다.
+            loop.abort();
+            throw e;
         } finally {
-            stopped = true;
-            passage.close();
             loop.failPending();
-            abandonRemainingCommands();
         }
     }
 
@@ -307,6 +320,13 @@ public final class ConnectionDriver implements AutoCloseable {
             }
         }
 
+        /** 오류로 멈출 때 연결을 끊고 core가 내는 결과를 내보낸다. 이것마저 실패하면 {@link #failPending}이 남은 Future를 끝낸다. */
+        void abort() {
+            endpoint.disconnect();
+            dispatchEvents();
+            write();
+        }
+
         private boolean write() {
             try {
                 for (OutboundMessage message : endpoint.drainMessages()) {
@@ -319,13 +339,19 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         private void dispatchEvents() {
+            RuntimeException deliveryFailure = null;
             for (Event event : endpoint.drainEvents()) {
                 switch (event.kind()) {
                     case RESULT:
                         complete(event);
                         break;
                     case REQUEST_RECEIVED:
-                        deliver(event);
+                        // 같은 묶음의 다른 이벤트(결과, 종료)를 잃지 않도록 실패를 모았다가 다 내보낸 뒤 던진다.
+                        try {
+                            deliver(event);
+                        } catch (RuntimeException e) {
+                            deliveryFailure = e;
+                        }
                         break;
                     case CLOSED:
                         finished = true;
@@ -333,6 +359,9 @@ public final class ConnectionDriver implements AutoCloseable {
                     default:
                         break;
                 }
+            }
+            if (deliveryFailure != null) {
+                throw deliveryFailure;
             }
         }
 
@@ -356,7 +385,7 @@ public final class ConnectionDriver implements AutoCloseable {
             executor.execute(() -> target.handle(request));
         }
 
-        // 전송 스레드가 끝날 때 아직 끝나지 않은 Future를 예외로 끝낸다. 정상 종료에서는 core가 이미 결과를 냈으므로 비어 있다.
+        // 최후 수단. core가 낸 결과로 끝나지 않고 남은 Future만 예외로 끝낸다. 정상 종료와 abort 뒤에는 비어 있다.
         void failPending() {
             for (CompletableFuture<RequestResult> future : pending.values()) {
                 future.completeExceptionally(new IllegalStateException("연결이 끝났다"));
