@@ -14,6 +14,7 @@ import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
@@ -38,6 +39,8 @@ import org.jspecify.annotations.Nullable;
 public final class ConnectionDriver implements AutoCloseable {
 
     private static final int NO_ERROR = 0;
+    /** 프레임 헤더 크기(규격 2.1절). 이보다 짧은 바이너리 메시지는 8바이트 연결 서문이라 프레임으로 세지 않는다. */
+    private static final int FRAME_HEADER_BYTES = 20;
     /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
 
@@ -163,6 +166,10 @@ public final class ConnectionDriver implements AutoCloseable {
     private final Thread thread;
     private volatile boolean closeRequested;
     private volatile boolean stopped;
+    // 관찰 지점. 전송 스레드만 늘리고 다른 스레드는 읽기만 한다.
+    private final AtomicLong receivedBytes = new AtomicLong();
+    private final AtomicLong writtenBytes = new AtomicLong();
+    private final AtomicLong writtenFrames = new AtomicLong();
 
     private ConnectionDriver(
             Role role,
@@ -357,6 +364,34 @@ public final class ConnectionDriver implements AutoCloseable {
         return future;
     }
 
+    /**
+     * 지금까지 {@code Endpoint}가 처리를 끝낸 받은 바이트 수(메시지 통로면 받은 메시지 내용의 합). 처리를 끝낸 뒤에 늘므로, 이 값이 어떤 입력을
+     * 포함하면 그 입력의 결과 이벤트가 나오기 전이라도 이미 처리된 것이다. 어느 스레드에서든 읽을 수 있다.
+     *
+     * @return 받은 바이트 수
+     */
+    public long receivedBytes() {
+        return receivedBytes.get();
+    }
+
+    /**
+     * 지금까지 통로에 다 쓴 바이트 수(연결 서문 포함). 어느 스레드에서든 읽을 수 있다.
+     *
+     * @return 보낸 바이트 수
+     */
+    public long writtenBytes() {
+        return writtenBytes.get();
+    }
+
+    /**
+     * 지금까지 통로에 다 쓴 프레임 수. 8바이트 연결 서문은 프레임이 아니라서 세지 않는다. 어느 스레드에서든 읽을 수 있다.
+     *
+     * @return 보낸 프레임 수
+     */
+    public long writtenFrames() {
+        return writtenFrames.get();
+    }
+
     /** 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 남은 Future는 core가 내는 결과로 끝난다. 여러 번 불러도 된다. */
     @Override
     public void close() {
@@ -493,9 +528,11 @@ public final class ConnectionDriver implements AutoCloseable {
             switch (inbound.kind()) {
                 case BYTES:
                     endpoint.receive(inbound.data());
+                    receivedBytes.addAndGet(inbound.data().length);
                     break;
                 case MESSAGE:
                     endpoint.receiveMessage(inbound.messageKind(), inbound.data());
+                    receivedBytes.addAndGet(inbound.data().length);
                     break;
                 case END:
                     transportFailed(new EOFException("상대가 연결을 끊었다"));
@@ -572,6 +609,12 @@ public final class ConnectionDriver implements AutoCloseable {
             try {
                 for (OutboundMessage message : endpoint.drainMessages()) {
                     passage.write(message);
+                    if (message.kind() == OutboundMessage.Kind.BINARY) {
+                        writtenBytes.addAndGet(message.length());
+                        if (message.length() >= FRAME_HEADER_BYTES) {
+                            writtenFrames.incrementAndGet();
+                        }
+                    }
                 }
                 return true;
             } catch (IOException e) {
