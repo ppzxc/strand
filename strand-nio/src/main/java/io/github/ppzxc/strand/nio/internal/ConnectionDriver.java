@@ -35,6 +35,10 @@ import org.jspecify.annotations.Nullable;
  * <p>끝내는 방법은 셋이다. {@link #closeConnection}은 연결 종료(CLOSE)를 보내고 대기 중인 스트림이 끝나길 기다리고, {@link #abortClosing}은
  * 종료 중인 연결에서 기다림을 그만두고, {@link #close}는 즉시 끊는다. 연결이 끝나면 core가 낸 결과로 남은 Future가 모두 끝나고, 종료 알림이 핸들러
  * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다.
+ *
+ * <p><b>알려진 한계.</b> 통로 쓰기가 막히면(상대가 읽지 않아 소켓 버퍼가 찬 경우) 전송 스레드가 그 쓰기에서 돌아오지 못한다. 그동안 시계가 가지 않아 확인
+ * 대기, 요청 기한, 유휴 PING이 동작하지 않고, 풀린 뒤에 흐른 시간이 한꺼번에 {@code advance}된다. 이 상태에서 빠져나가는 유일한 길은 {@link
+ * #close()}(즉시 끊기)다. 통로 구현이 쌓는 읽기 입력의 한계는 {@link TcpPassage}를 본다.
  */
 public final class ConnectionDriver implements AutoCloseable {
 
@@ -394,6 +398,8 @@ public final class ConnectionDriver implements AutoCloseable {
 
     /**
      * 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 통로를 닫으므로 상대가 읽지 않아 쓰기가 막혀 있어도 끝난다. 남은 Future는 core가 내는 결과로 끝난다.
+     * 즉시 끊기라서 이미 큐에 넣은 출력은 보장하지 않는다. 아직 처리되지 않은 {@link #request}, {@link #respond}, {@link #ping}은 전송 스레드가 통로
+     * 닫힘을 보기 전에 처리되지 못할 수 있고, 그 요청은 core가 내는 결과나 예외로 끝난다. 출력을 다 내보내고 끝내려면 {@link #closeConnection()}을 쓴다.
      * 여러 번 불러도 된다.
      */
     @Override

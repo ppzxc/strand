@@ -13,9 +13,9 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link Passage#await}와 {@link Passage#wakeup}이 지켜야 하는 계약. 통로 구현의 테스트가 이 클래스를 상속해 {@link #create}만 채운다. 읽을 것이
- * 있을 때의 동작은 통로마다 읽을 것을 만드는 방법이 달라 여기서 다루지 않는다.
- * (TODO #239: NIO 통로가 이 계약을 상속할 때, 읽을 것이 있을 때 {@code await(0)}이 그것을 돌려주는지도 보강한다.)
+ * {@link Passage#await}와 {@link Passage#wakeup}이 지켜야 하는 계약. 통로 구현의 테스트가 이 클래스를 상속해 {@link #create}와 {@link #peer}를 채운다.
+ * 읽을 것은 상대 끝에 {@link Passage#write}로 써서 만든다. 상대가 쓴 것이 이쪽에 닿는 데 걸리는 시간은 통로마다 달라(TCP는 즉시가 아니다), 읽는 시험은
+ * {@code await}를 상한 시간(5초) 안에서만 되풀이한다.
  */
 public abstract class PassageContract {
 
