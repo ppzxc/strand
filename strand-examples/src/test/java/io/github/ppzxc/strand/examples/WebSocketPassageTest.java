@@ -241,4 +241,55 @@ class WebSocketPassageTest {
 
         assertThat(socket.aborted).isTrue();
     }
+
+    @Test
+    void manyOneCharFragmentsAreEncodedOnlyOnceEach() throws Exception {
+        listener.onOpen(socket);
+
+        for (int i = 0; i < 999; i++) {
+            listener.onText(socket, "a", false);
+        }
+        listener.onText(socket, "a", true);
+
+        assertThat(passage.await(0).data()).hasSize(1000);
+        assertThat(passage.encodedCharCount())
+                .as("조각마다 전체를 다시 인코딩하면 이 값이 제곱으로 는다")
+                .isEqualTo(1000);
+    }
+
+    @Test
+    void theTextLimitCountsMultiByteCharactersAtTheirUtf8Size() throws Exception {
+        WebSocketPassage limited = new WebSocketPassage(6);
+        limited.listener().onOpen(socket);
+
+        limited.listener().onText(socket, "한", false);
+        limited.listener().onText(socket, "글", true);
+
+        assertThat(limited.await(0).data()).hasSize(6);
+        assertThat(socket.aborted).isFalse();
+    }
+
+    @Test
+    void oneByteMoreThanTheLimitAcrossTextFragmentsIsAnError() {
+        WebSocketPassage limited = new WebSocketPassage(6);
+        limited.listener().onOpen(socket);
+
+        limited.listener().onText(socket, "한", false);
+        limited.listener().onText(socket, "글", false);
+        limited.listener().onText(socket, "a", true);
+
+        assertThat(socket.aborted).isTrue();
+        assertThatThrownBy(() -> limited.await(0)).isInstanceOf(IOException.class);
+    }
+
+    @Test
+    void aSurrogatePairSplitAcrossFragmentsIsEncodedAsOneCharacter() throws Exception {
+        WebSocketPassage limited = new WebSocketPassage(4);
+        limited.listener().onOpen(socket);
+
+        limited.listener().onText(socket, "\uD83D", false);
+        limited.listener().onText(socket, "\uDE00", true);
+
+        assertThat(limited.await(0).data()).isEqualTo("\uD83D\uDE00".getBytes(StandardCharsets.UTF_8));
+    }
 }

@@ -11,10 +11,14 @@ import io.github.ppzxc.strand.nio.internal.ConnectionDriver;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.RequestResult;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -160,5 +164,39 @@ class WebSocketOverRealSocketTest {
         assertThat(frame.opcode).isEqualTo(2);
         assertThat(frame.fin).isTrue();
         assertThat(frame.payload).isEqualTo(message.bytes());
+    }
+
+    @Test
+    void aServerThatNeverAnswersTheHandshakeEndsTheConnectWithAnIoExceptionAndTheSocketIsReleased() throws Exception {
+        CompletableFuture<Boolean> sawClientGone = new CompletableFuture<>();
+        try (ServerSocket silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            Thread server = new Thread(
+                    () -> {
+                        try (Socket accepted = silent.accept()) {
+                            accepted.setSoTimeout((int) LIMIT_MS);
+                            InputStream in = accepted.getInputStream();
+                            // 핸드셰이크 요청을 읽고도 응답하지 않는다. 클라이언트가 소켓을 정리하면 EOF나 리셋이 온다.
+                            int read;
+                            do {
+                                read = in.read(new byte[1024]);
+                            } while (read > 0);
+                            sawClientGone.complete(true);
+                        } catch (IOException e) {
+                            sawClientGone.complete(!(e instanceof SocketTimeoutException));
+                        }
+                    },
+                    "silent-server");
+            server.setDaemon(true);
+            server.start();
+            URI uri = URI.create("ws://127.0.0.1:" + silent.getLocalPort() + "/");
+
+            assertThatThrownBy(() -> WebSocketPassage.connect(
+                            uri, WebSocketPassage.DEFAULT_MAX_MESSAGE_BYTES, Duration.ofMillis(200)))
+                    .isInstanceOf(IOException.class);
+
+            assertThat(sawClientGone.get(LIMIT_MS, TimeUnit.MILLISECONDS))
+                    .as("서버가 클라이언트의 소켓 정리(EOF·리셋)를 보았다")
+                    .isTrue();
+        }
     }
 }
