@@ -71,8 +71,8 @@ class WebSocketConnectionTest {
                 .listener(closedInto(clientClosed))
                 .start();
 
-        RequestResult result =
-                within(client.request(256, "hi".getBytes(StandardCharsets.UTF_8)).result());
+        RequestResult result = within(
+                client.request(256, "hi".getBytes(StandardCharsets.UTF_8)).result());
         client.closeConnection();
 
         assertThat(result.certainty()).isEqualTo(Certainty.RESPONSE);
