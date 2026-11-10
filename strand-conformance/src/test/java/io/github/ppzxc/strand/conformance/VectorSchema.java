@@ -36,7 +36,7 @@ final class VectorSchema {
     private static final BigInteger STREAM_ID_MAX = BigInteger.ONE.shiftLeft(63).subtract(BigInteger.ONE);
 
     private static final FieldCheck U16 = FieldCheck.range(0, U16_MAX);
-    static final FieldCheck U32 = FieldCheck.range(0, U32_MAX);
+    private static final FieldCheck U32 = FieldCheck.range(0, U32_MAX);
     /** 1 이상의 u32. 0이 아닌 스트림 ID와 시간(ms)에 쓴다. */
     static final FieldCheck POSITIVE_U32 = FieldCheck.range(1, U32_MAX);
     /** 애플리케이션 프레임·요청의 type. 0~255는 제어 프레임용으로 예약돼 있다. */
