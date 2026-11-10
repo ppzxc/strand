@@ -489,7 +489,8 @@ class ConnectionDriverTest {
 
     @Test
     void aRequestQueuedBeforeTheTransportEndsGetsTheCoreResult() throws Exception {
-        GatedFailingPassage gated = new GatedFailingPassage(InMemoryPassage.streams().first());
+        GatedFailingPassage gated =
+                new GatedFailingPassage(InMemoryPassage.streams().first());
         ConnectionDriver client = clientWhoseFirstWriteFails(gated);
         CompletableFuture<RequestResult> queued =
                 client.request(APPLICATION_TYPE, bytes("queued")).result();
@@ -503,7 +504,8 @@ class ConnectionDriverTest {
 
     @Test
     void otherCommandsQueuedBeforeTheTransportEndsAreHandledWithoutFailingTheDriver() throws Exception {
-        GatedFailingPassage gated = new GatedFailingPassage(InMemoryPassage.streams().first());
+        GatedFailingPassage gated =
+                new GatedFailingPassage(InMemoryPassage.streams().first());
         AtomicReference<Throwable> uncaught = new AtomicReference<>();
         ConnectionDriver client = clientWhoseFirstWriteFails(gated);
         client.transportThread().setUncaughtExceptionHandler((t, e) -> uncaught.set(e));
@@ -524,7 +526,8 @@ class ConnectionDriverTest {
         assertThat(ping).isDone();
         assertThat(respond).isDone();
         for (CompletableFuture<Void> future : java.util.Arrays.asList(ping, respond)) {
-            assertThat(future.handle((v, e) -> e == null ? "" : String.valueOf(e.getMessage())).join())
+            assertThat(future.handle((v, e) -> e == null ? "" : String.valueOf(e.getMessage()))
+                            .join())
                     .isNotEqualTo("연결이 끝났다");
         }
     }
