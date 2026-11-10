@@ -9,7 +9,7 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.util.ArrayDeque;
-import org.jspecify.annotations.Nullable;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * JDK NIO 기반 TCP 통로. 이미 맺어진 {@link SocketChannel} 하나를 받아 바이트 스트림 통로({@link Inbound#bytes})로 쓴다. 채널은 이 통로가
@@ -31,15 +31,21 @@ public final class TcpPassage implements Passage {
     private final Selector readSelector;
     private final ByteBuffer readBuffer;
     private final ArrayDeque<Inbound> stashed = new ArrayDeque<>();
-    private final Object closeLock = new Object();
-    private @Nullable Selector writeSelector;
-    private @Nullable SelectionKey writeKey;
+    private final Selector writeSelector;
+    private final SelectionKey writeKey;
+    private final AtomicBoolean closed = new AtomicBoolean();
     private boolean ended;
-    private volatile boolean closed;
 
-    private TcpPassage(SocketChannel channel, Selector readSelector, int readBufferBytes) {
+    private TcpPassage(
+            SocketChannel channel,
+            Selector readSelector,
+            Selector writeSelector,
+            SelectionKey writeKey,
+            int readBufferBytes) {
         this.channel = channel;
         this.readSelector = readSelector;
+        this.writeSelector = writeSelector;
+        this.writeKey = writeKey;
         this.readBuffer = ByteBuffer.allocateDirect(readBufferBytes);
     }
 
@@ -68,14 +74,18 @@ public final class TcpPassage implements Passage {
             throw new IllegalArgumentException("readBufferBytes는 1 이상이어야 한다: " + readBufferBytes);
         }
         channel.configureBlocking(false);
-        Selector selector = Selector.open();
+        // 읽기 기다림과 쓰기 기다림은 선택기를 따로 쓴다. 쓰기는 소켓 버퍼가 찼을 때만 기다리므로 쓰기 쪽 관심은 그때 켠다.
+        Selector readSelector = Selector.open();
+        Selector writeSelector = Selector.open();
         try {
-            channel.register(selector, SelectionKey.OP_READ);
+            channel.register(readSelector, SelectionKey.OP_READ);
+            SelectionKey writeKey = channel.register(writeSelector, 0);
+            return new TcpPassage(channel, readSelector, writeSelector, writeKey, readBufferBytes);
         } catch (IOException | RuntimeException e) {
-            selector.close();
+            closeQuietly(readSelector);
+            closeQuietly(writeSelector);
             throw e;
         }
-        return new TcpPassage(channel, selector, readBufferBytes);
     }
 
     @Override
@@ -123,10 +133,7 @@ public final class TcpPassage implements Passage {
 
     @Override
     public void write(OutboundMessage message) throws IOException {
-        if (message.kind() != OutboundMessage.Kind.BINARY) {
-            // TCP에는 WebSocket Close에 해당하는 것이 없다.
-            return;
-        }
+        // TCP에는 WebSocket Close에 해당하는 것이 없다. 그런 메시지는 내용이 비어 있어 아무것도 쓰지 않는다.
         ByteBuffer remaining = ByteBuffer.wrap(message.bytes());
         try {
             while (remaining.hasRemaining()) {
@@ -141,32 +148,14 @@ public final class TcpPassage implements Passage {
 
     /** 소켓 버퍼에 자리가 날 때까지 기다린다. 기다리는 동안 읽을 수 있는 것은 읽어 쌓아 둔다. */
     private void awaitWritable() throws IOException {
-        SelectionKey key = writeKey();
-        key.interestOps(ended ? SelectionKey.OP_WRITE : SelectionKey.OP_WRITE | SelectionKey.OP_READ);
-        Selector selector = key.selector();
-        selector.select();
-        selector.selectedKeys().clear();
+        writeKey.interestOps(ended ? SelectionKey.OP_WRITE : SelectionKey.OP_WRITE | SelectionKey.OP_READ);
+        writeSelector.select();
+        writeSelector.selectedKeys().clear();
         if (!ended) {
             Inbound inbound = readNow();
             if (inbound.kind() != Inbound.Kind.NONE) {
                 stashed.add(inbound);
             }
-        }
-    }
-
-    private SelectionKey writeKey() throws IOException {
-        synchronized (closeLock) {
-            if (closed) {
-                throw new IOException("닫힌 통로");
-            }
-            SelectionKey key = writeKey;
-            if (key == null) {
-                Selector selector = Selector.open();
-                writeSelector = selector;
-                key = channel.register(selector, SelectionKey.OP_WRITE);
-                writeKey = key;
-            }
-            return key;
         }
     }
 
@@ -190,18 +179,12 @@ public final class TcpPassage implements Passage {
 
     @Override
     public void close() {
-        synchronized (closeLock) {
-            if (closed) {
-                return;
-            }
-            closed = true;
+        if (!closed.compareAndSet(false, true)) {
+            return;
         }
         closeQuietly(channel);
         closeQuietly(readSelector);
-        Selector writing = writeSelector;
-        if (writing != null) {
-            closeQuietly(writing);
-        }
+        closeQuietly(writeSelector);
     }
 
     private static void closeQuietly(java.io.Closeable closeable) {
