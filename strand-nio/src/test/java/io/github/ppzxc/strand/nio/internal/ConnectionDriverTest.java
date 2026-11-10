@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -533,6 +534,31 @@ class ConnectionDriverTest {
     }
 
     @Test
+    void anErrorWhileTheTransportStopsStillEndsTheQueuedCommandsAndKeepsTheOriginalError() throws Exception {
+        GatedFailingPassage gated =
+                new GatedFailingPassage(InMemoryPassage.streams().first());
+        AtomicReference<Throwable> uncaught = new AtomicReference<>();
+        AssertionError original = new AssertionError("알림 실행기 오류");
+        // 연결이 끝났다는 알림을 내보내다 Error가 난다. 전송 스레드는 이 Error로 멈춘다.
+        Executor failing = task -> {
+            throw original;
+        };
+        ConnectionDriver client = start(ConnectionDriver.client(EndpointConfig.defaults(), gated)
+                .handler(failing, ConnectionDriverTest::ignore)
+                .listener(new ConnectionListener() {}));
+        assertThat(gated.writing.await(5, TimeUnit.SECONDS)).isTrue();
+        client.transportThread().setUncaughtExceptionHandler((t, e) -> uncaught.set(e));
+        CompletableFuture<RequestResult> queued =
+                client.request(APPLICATION_TYPE, bytes("queued")).result();
+
+        gated.release.countDown();
+        client.transportThread().join(5000);
+
+        assertThat(await(queued).status()).isEqualTo(STATUS_UNAVAILABLE);
+        assertThat(uncaught.get()).isSameAs(original);
+    }
+
+    @Test
     void aServerWithoutAHandlerLeavesRequestsUnansweredUntilTheConnectionEnds() throws Exception {
         InMemoryPassage.Pair link = InMemoryPassage.streams();
         ConnectionDriver server = start(ConnectionDriver.server(EndpointConfig.defaults(), link.second()));
@@ -651,56 +677,15 @@ class ConnectionDriverTest {
         assertThat(await(clientOwn).status()).isEqualTo(STATUS_UNAVAILABLE);
     }
 
-    /**
-     * 전송 스레드가 명령을 처리했는지 통로로 관찰한다. 명령은 깨움({@code wakeup})으로 읽기가 끝난 뒤 처리되고, 그 처리가 끝나야 다음 {@code await}가
-     * 시작되므로, 아무것도 없이 깨어난 뒤 다시 시작한 {@code await}는 그 사이에 명령 처리가 끝났다는 뜻이다.
-     */
-    private static final class ObservedPassage implements Passage {
-        private final Passage delegate;
-        final CountDownLatch commandsHandled = new CountDownLatch(1);
-        private boolean wokeWithoutInput;
-
-        ObservedPassage(Passage delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public Inbound await(long timeoutMs) throws IOException {
-            if (wokeWithoutInput) {
-                commandsHandled.countDown();
-            }
-            Inbound inbound = delegate.await(timeoutMs);
-            wokeWithoutInput |= inbound.kind() == Inbound.Kind.NONE;
-            return inbound;
-        }
-
-        @Override
-        public void write(OutboundMessage message) throws IOException {
-            delegate.write(message);
-        }
-
-        @Override
-        public void wakeup() {
-            delegate.wakeup();
-        }
-
-        @Override
-        public void close() {
-            delegate.close();
-        }
-    }
-
     @Test
     void anInputTheEndpointRejectsEndsTheConnectionAndPendingRequestsGetTheCoreResult() throws Exception {
         // 서버는 메시지 통로 설정인데 통로는 바이트 스트림이라 receive가 IllegalStateException을 던진다.
         InMemoryPassage.Pair link = InMemoryPassage.streams();
-        ObservedPassage serverSide = new ObservedPassage(link.second());
         ConnectionDriver server =
-                start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), serverSide));
+                start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), link.second()));
         CompletableFuture<RequestResult> pending =
                 server.request(APPLICATION_TYPE, bytes("never-sent")).result();
-        // 서버가 그 요청 명령을 처리한 뒤에 상대를 띄운다. 그래야 서버가 오류로 멈춰도 명령이 큐에 남아 abandon되지 않는다.
-        assertThat(serverSide.commandsHandled.await(5, TimeUnit.SECONDS)).isTrue();
+        // 요청 명령이 아직 큐에 있는 채 서버가 오류로 멈춰도, 멈추기 전에 큐를 소진해 core 결과로 끝나므로 순서를 맞출 필요가 없다.
         client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
 
         RequestResult result = await(pending);
