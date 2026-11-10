@@ -90,6 +90,12 @@ class ConnectionNotificationTest {
     /** 미리 정한 바이트를 읽게 하고 쓴 것은 버리는 통로. 상대 쪽 core가 낼 수 없는 입력(자격 증명 수명 등)을 먹일 때 쓴다. */
     private static final class ScriptedPassage implements Passage {
         private final LinkedBlockingQueue<Inbound> inbox = new LinkedBlockingQueue<>();
+        final CountDownLatch closed = new CountDownLatch(1);
+
+        /** 상대가 끊었음을 읽게 한다. 앞서 먹인 바이트 뒤에 온다. */
+        void feedEnd() {
+            inbox.add(Inbound.end());
+        }
 
         void feed(String hex) {
             String clean = hex.replaceAll("\\s", "");
@@ -123,7 +129,9 @@ class ConnectionNotificationTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            closed.countDown();
+        }
     }
 
     @Test
@@ -634,5 +642,64 @@ class ConnectionNotificationTest {
         assertThat(closed.ioException()).get().isInstanceOf(java.io.EOFException.class);
         held.awaitEnded();
         assertThat(held.clientSide.closedNotices()).hasSize(1);
+    }
+
+    private static final String SERVER_HELLO = "0000001000010000000000000000000000000000";
+    private static final String HELLO_ACK = "0000001000010100000000000000000000000000";
+    private static final String AUTH_ACK = "0000001000050100000000000000000000000000";
+    private static final String CLOSE_NO_ERROR =
+            "0000001c00030000000000000000000000000000" + "00000000" + "0000000000000000";
+
+    @Test
+    void closeAndEndOfStreamReadTogetherAreOneCloseNoticeWithoutAnIoException() throws Exception {
+        // 서버의 CLOSE와 EOF가 같은 읽기에 와 있다. CLOSE 교환이 먼저 처리되므로 EOF는 종료 뒤의 일이다.
+        ScriptedPassage passage = new ScriptedPassage();
+        Recorder recorder = new Recorder();
+        passage.feed(SERVER_HELLO);
+        passage.feed(HELLO_ACK);
+        passage.feed(AUTH_ACK);
+        passage.feed(CLOSE_NO_ERROR);
+        passage.feedEnd();
+        start(ConnectionDriver.client(EndpointConfig.defaults(), passage)
+                .executor(handlers)
+                .listener(recorder));
+
+        ConnectionClosed closed = await(recorder.closed);
+
+        assertThat(closed.reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
+        assertThat(closed.reason().sender()).hasValue(CloseReason.Sender.PEER);
+        assertThat(closed.ioException()).isEmpty();
+        awaitLatch(passage.closed);
+        drainNotifications();
+        assertThat(recorder.closedNotices()).hasSize(1);
+    }
+
+    @Test
+    void whenTheExecutorRejectsANoticeInTheSameReadAsTheEndOfStreamTheNoticeStillCarriesIt() throws Exception {
+        // AUTH 관문 통과 알림이 거부당한 읽기에서 EOF도 함께 온다. 거부로 abort 경로를 타도 종료 알림에 EOF가 실린다.
+        ScriptedPassage passage = new ScriptedPassage();
+        Recorder recorder = new Recorder();
+        AtomicInteger tasks = new AtomicInteger();
+        Executor firstRejected = runnable -> {
+            if (tasks.getAndIncrement() == 0) {
+                throw new RejectedExecutionException("가득 참");
+            }
+            handlers.execute(runnable);
+        };
+        passage.feed(SERVER_HELLO);
+        passage.feed(HELLO_ACK);
+        passage.feed(AUTH_ACK);
+        passage.feedEnd();
+        start(ConnectionDriver.client(EndpointConfig.defaults(), passage)
+                .executor(firstRejected)
+                .listener(recorder));
+
+        ConnectionClosed closed = await(recorder.closed);
+
+        assertThat(closed.reason().kind()).isEqualTo(CloseReason.Kind.DISCONNECTED);
+        assertThat(closed.ioException()).get().isInstanceOf(java.io.EOFException.class);
+        awaitLatch(passage.closed);
+        drainNotifications();
+        assertThat(recorder.closedNotices()).hasSize(1);
     }
 }
