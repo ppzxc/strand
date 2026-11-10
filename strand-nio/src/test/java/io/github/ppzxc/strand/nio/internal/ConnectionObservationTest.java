@@ -20,8 +20,8 @@ import org.junit.jupiter.api.Test;
 class ConnectionObservationTest {
 
     private static final int APPLICATION_TYPE = 256;
-    /** 연결 서문(8바이트)은 프레임이 아니라 바이트 스트림 통로에서만 첫 메시지로 나간다. */
-    private static final int PREFACES_ON_A_STREAM = 1;
+    /** 클라이언트의 첫 메시지는 8바이트 연결 서문이다(규격 3.1절, 통로 종류와 무관). 프레임이 아니고 서버는 서문을 보내지 않는다. */
+    private static final int CLIENT_PREFACE_MESSAGES = 1;
 
     private final List<ConnectionDriver> started = new ArrayList<>();
     private final ExecutorService handlers = Executors.newCachedThreadPool(runnable -> {
@@ -60,7 +60,7 @@ class ConnectionObservationTest {
 
         List<byte[]> written = link.first().written();
         assertThat(client.writtenBytes()).isEqualTo(totalBytes(written));
-        assertThat(client.writtenFrames()).isEqualTo(written.size() - PREFACES_ON_A_STREAM);
+        assertThat(client.writtenFrames()).isEqualTo(written.size() - CLIENT_PREFACE_MESSAGES);
         assertThat(client.writtenFrames()).isPositive();
         assertThat(client.receivedBytes()).isZero();
     }
@@ -70,7 +70,10 @@ class ConnectionObservationTest {
         InMemoryPassage.Pair link = InMemoryPassage.streams();
         ConnectionDriver server = start(ConnectionDriver.server(
                         EndpointConfig.defaults(), link.second().manualTime())
-                .handler(handlers, request -> request.respond(0, "re".getBytes(StandardCharsets.UTF_8))));
+                .handler(
+                        handlers,
+                        request -> request.respond(0, "re".getBytes(StandardCharsets.UTF_8))
+                                .join()));
         ConnectionDriver client = start(
                 ConnectionDriver.client(EndpointConfig.defaults(), link.first().manualTime()));
         CompletableFuture<RequestResult> result = client.request(
@@ -84,27 +87,27 @@ class ConnectionObservationTest {
         List<byte[]> serverWrote = link.second().written();
         assertThat(client.writtenBytes()).isEqualTo(totalBytes(clientWrote));
         assertThat(server.writtenBytes()).isEqualTo(totalBytes(serverWrote));
-        assertThat(client.writtenFrames()).isEqualTo(clientWrote.size() - PREFACES_ON_A_STREAM);
-        assertThat(server.writtenFrames()).isEqualTo(serverWrote.size() - PREFACES_ON_A_STREAM);
+        assertThat(client.writtenFrames()).isEqualTo(clientWrote.size() - CLIENT_PREFACE_MESSAGES);
+        assertThat(server.writtenFrames()).isEqualTo(serverWrote.size());
         // 한쪽이 보낸 바이트는 상대가 받아 처리한 바이트와 같다.
         assertThat(server.receivedBytes()).isEqualTo(client.writtenBytes());
         assertThat(client.receivedBytes()).isEqualTo(server.writtenBytes());
     }
 
     @Test
-    void onAMessagePassageEveryWrittenMessageIsAFrame() throws Exception {
+    void onAMessagePassageEveryWrittenMessageButThePrefaceIsAFrame() throws Exception {
         InMemoryPassage.Pair link = InMemoryPassage.messages();
         EndpointConfig config = EndpointConfig.defaults().webSocket();
-        ConnectionDriver server =
-                start(ConnectionDriver.server(config, link.second().manualTime())
-                        .handler(handlers, request -> request.respond(0, new byte[0])));
+        ConnectionDriver server = start(ConnectionDriver.server(
+                        config, link.second().manualTime())
+                .handler(handlers, request -> request.respond(0, new byte[0]).join()));
         ConnectionDriver client =
                 start(ConnectionDriver.client(config, link.first().manualTime()));
         client.request(APPLICATION_TYPE, new byte[3]).result().get(5, TimeUnit.SECONDS);
 
         InMemoryPassage.awaitQuiescence(link.first(), link.second());
 
-        assertThat(client.writtenFrames()).isEqualTo(link.first().written().size());
+        assertThat(client.writtenFrames()).isEqualTo(link.first().written().size() - CLIENT_PREFACE_MESSAGES);
         assertThat(server.writtenFrames()).isEqualTo(link.second().written().size());
         assertThat(server.receivedBytes()).isEqualTo(client.writtenBytes());
         assertThat(client.receivedBytes()).isEqualTo(server.writtenBytes());
