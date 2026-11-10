@@ -152,27 +152,31 @@ class TcpPassageTest {
     }
 
     @Test
-    void bothSidesWritingALotAtOnceWithoutReadingDoNotDeadlock() throws Exception {
+    void bothSidesWritingALotAtOnceBeforeReadingDoNotDeadlock() throws Exception {
         List<OutboundMessage> messages = largeRequestMessages();
         TcpLoopback link = TcpLoopback.open(SMALL_SOCKET_BUFFER);
         Passage a = TcpPassage.of(link.client);
         Passage b = TcpPassage.of(link.accepted);
+        byte[][] receivedBy = new byte[2][];
 
-        CompletableFuture<Void> aWriting = inBackground(() -> {
+        // 양쪽이 모두 다 쓴 뒤에야 읽는다. 쓰는 동안 읽지 않으면 두 끝이 서로의 소켓 버퍼를 채워 멈춘다.
+        CompletableFuture<Void> aDone = inBackground(() -> {
             for (OutboundMessage message : messages) {
                 a.write(message);
             }
+            receivedBy[0] = readExactly(a, totalBytes(messages));
         });
-        CompletableFuture<Void> bWriting = inBackground(() -> {
+        CompletableFuture<Void> bDone = inBackground(() -> {
             for (OutboundMessage message : messages) {
                 b.write(message);
             }
+            receivedBy[1] = readExactly(b, totalBytes(messages));
         });
 
-        within(aWriting);
-        within(bWriting);
-        assertThat(readExactly(a, totalBytes(messages))).isEqualTo(concatenated(messages));
-        assertThat(readExactly(b, totalBytes(messages))).isEqualTo(concatenated(messages));
+        within(aDone);
+        within(bDone);
+        assertThat(receivedBy[0]).isEqualTo(concatenated(messages));
+        assertThat(receivedBy[1]).isEqualTo(concatenated(messages));
         a.close();
         b.close();
     }
