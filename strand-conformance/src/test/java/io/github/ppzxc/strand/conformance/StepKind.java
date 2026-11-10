@@ -141,7 +141,9 @@ final class StepKind {
 
     private static StepKind define(String name, Shape shape, BiConsumer<Endpoint, JsonObject> execution) {
         StepKind kind = new StepKind(name, shape, execution);
-        REGISTRY.put(name, kind);
+        if (REGISTRY.put(name, kind) != null) {
+            throw new IllegalStateException("단계 종류 정의가 겹친다: " + name);
+        }
         return kind;
     }
 

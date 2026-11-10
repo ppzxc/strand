@@ -111,7 +111,7 @@ final class VectorRunner {
     }
 
     private static boolean isWebSocket(JsonObject setup) {
-        return setup.has("transport") && setup.get("transport").getAsString().equals("websocket");
+        return setup.has("transport") && setup.get("transport").getAsString().equals(VectorSchema.WEBSOCKET);
     }
 
     /** {@code setup.auth}의 메커니즘. 생략하면 {@code ANONYMOUS}다(벡터 형식 5절). */
