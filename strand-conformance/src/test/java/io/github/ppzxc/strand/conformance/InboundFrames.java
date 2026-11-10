@@ -1,10 +1,8 @@
 package io.github.ppzxc.strand.conformance;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * 벡터의 `recv`·`recv_message` 단계로 들어온 바이트를 프레임 단위로 읽는다. 바이트는 `recv` 단계에 걸쳐 이어 읽고(프레임 경계와
@@ -22,7 +20,7 @@ final class InboundFrames {
 
     /** 이 단계로 들어온 바이트에서 새로 완결된 프레임들. 연결 하나의 흐름은 `stream`이 이어 읽는다. */
     static List<Frame> receivedBy(JsonObject step, InboundFrames stream) {
-        String kind = kindOf(step);
+        String kind = Steps.kindOf(step);
         if (kind.equals("recv")) {
             return stream.feed(hexOf(step));
         }
@@ -32,31 +30,8 @@ final class InboundFrames {
         return new ArrayList<>();
     }
 
-    /** 이 단계 뒤에 연결이 끝나는가: 상대가 끊었거나(disconnect) 연결이 닫혔음이 애플리케이션에 전달됐다(closed 이벤트). */
-    static boolean endsConnection(JsonObject step) {
-        if (kindOf(step).equals("disconnect")) {
-            return true;
-        }
-        for (JsonElement event : step.getAsJsonArray("events")) {
-            JsonElement name = event.getAsJsonObject().get("event");
-            if (name != null && name.isJsonPrimitive() && name.getAsString().equals("closed")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    static String kindOf(JsonObject step) {
-        return step.get("kind").getAsString();
-    }
-
-    /** 공백을 지우고 소문자로 맞춘 hex. 로더를 거치지 않은 JSON을 읽으므로 표기를 여기서 맞춘다. */
-    static String normalizedHex(String hex) {
-        return Bytes.compactHex(hex).toLowerCase(Locale.ROOT);
-    }
-
     private static String hexOf(JsonObject step) {
-        return normalizedHex(step.get("hex").getAsString());
+        return Steps.normalizedHex(step.get("hex").getAsString());
     }
 
     /** 완결된 프레임 하나. */

@@ -61,7 +61,7 @@ final class AckWaits {
 
     /** 벡터에 advance 단계가 있는가. */
     static boolean hasAdvance(JsonObject vector) {
-        return anyStep(vector, step -> InboundFrames.kindOf(step).equals("advance"));
+        return anyStep(vector, step -> Steps.kindOf(step).equals("advance"));
     }
 
     private static boolean anyStep(JsonObject vector, Predicate<JsonObject> matches) {
@@ -131,7 +131,7 @@ final class AckWaits {
                 endOldestMatching(running, ack);
             }
             running.addAll(startedBy(step, server));
-            if (InboundFrames.kindOf(step).equals("advance")) {
+            if (Steps.kindOf(step).equals("advance")) {
                 long ms = step.get("ms").getAsLong();
                 for (Wait wait : running) {
                     wait.elapsed += ms;
@@ -144,7 +144,7 @@ final class AckWaits {
                             authWait ? "UNAUTHENTICATED" : "UNRESPONSIVE"));
                 }
             }
-            if (InboundFrames.endsConnection(step)) {
+            if (Steps.endsConnection(step)) {
                 // 연결이 끝나면 구현은 타이머를 거두고, 새 연결의 바이트는 새 흐름이다. close 단계는 CLOSE를 보낼 뿐이라
                 // 연결이 끝나지 않고 대기가 이어진다(규격 3.3절).
                 running.clear();
@@ -161,7 +161,7 @@ final class AckWaits {
             int type = frame.type;
             if (type == Protocol.TYPE_AUTH) {
                 // ACK가 없는 AUTH는 서버의 AUTH 대기를 끝낸다.
-                acks.add(new Ack(AuthGate.isAuthAck(frame) ? Protocol.TYPE_AUTH : AUTH_REQUEST, null));
+                acks.add(new Ack(AuthGate.isAuthRequest(frame) ? AUTH_REQUEST : Protocol.TYPE_AUTH, null));
             } else if (frame.hasAckFlag() && (type == Protocol.TYPE_HELLO || type == Protocol.TYPE_PING)) {
                 acks.add(new Ack(type, frame.pingSizedPayload()));
             }
@@ -210,11 +210,11 @@ final class AckWaits {
 
     /** 보낸 PING의 payload. ping 단계는 단계의 payload이고, 아니면 프레임의 payload이며, 알 수 없으면 null이다. */
     private static String pingPayload(JsonObject step, JsonObject frame) {
-        JsonElement payload = InboundFrames.kindOf(step).equals("ping") ? step.get("payload") : frame.get("payload");
+        JsonElement payload = Steps.kindOf(step).equals("ping") ? step.get("payload") : frame.get("payload");
         return payload != null
                         && payload.isJsonPrimitive()
                         && payload.getAsJsonPrimitive().isString()
-                ? InboundFrames.normalizedHex(payload.getAsString())
+                ? Steps.normalizedHex(payload.getAsString())
                 : null;
     }
 

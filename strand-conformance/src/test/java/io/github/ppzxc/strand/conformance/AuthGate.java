@@ -15,6 +15,11 @@ final class AuthGate {
         return frame.type == Protocol.TYPE_AUTH && frame.hasAckFlag();
     }
 
+    /** 받은 프레임이 ACK 없는 AUTH(서버가 받는 AUTH 요청)인가. */
+    static boolean isAuthRequest(InboundFrames.Frame frame) {
+        return frame.type == Protocol.TYPE_AUTH && !frame.hasAckFlag();
+    }
+
     /** 각 단계가 끝난 시점까지 AUTH(ACK)를 받았는가. 연결이 끝나면 새 연결은 다시 받지 않은 상태에서 시작한다. */
     static boolean[] ackReceivedThrough(JsonObject vector) {
         int count = vector.getAsJsonArray("steps").size();
@@ -27,7 +32,7 @@ final class AuthGate {
                 received |= isAuthAck(frame);
             }
             result[i] = received;
-            if (InboundFrames.endsConnection(step)) {
+            if (Steps.endsConnection(step)) {
                 stream = new InboundFrames();
                 received = false;
             }
