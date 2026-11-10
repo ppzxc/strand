@@ -130,6 +130,14 @@ final class ConnectionPhase {
     private boolean closed;
     /** 연결을 닫게 한 로컬 원인. {@code CLOSED} 이벤트에 싣는다(규격 3.5절). */
     private @Nullable Throwable cause;
+    /** 처음 보냈거나 받은 CLOSE를 보낸 쪽. CLOSE를 주고받은 적이 없으면 null이다. */
+    private CloseReason.@Nullable Sender firstCloseSender;
+    /** 처음 보냈거나 받은 오류 CLOSE의 {@code error_code}와 보낸 쪽. 오류 CLOSE를 주고받은 적이 없으면 보낸 쪽이 null이다. */
+    private long errorCloseCode;
+
+    private CloseReason.@Nullable Sender errorCloseSender;
+    /** 전송 계층이 CLOSE 없이 끊겼다(종료 중에 끊긴 경우를 포함). */
+    private boolean disconnected;
 
     private ConnectionPhase(boolean server, Phase established) {
         this.server = server;
@@ -202,6 +210,21 @@ final class ConnectionPhase {
     @Nullable
     Throwable closeCause() {
         return cause;
+    }
+
+    /** 연결이 어떻게 끝났는지. 끝나기 전에 부르면 지금까지의 판단이다. */
+    CloseReason closeReason() {
+        if (errorCloseSender != null) {
+            return CloseReason.errorClose(errorCloseCode, errorCloseSender);
+        }
+        if (disconnected) {
+            return CloseReason.disconnected();
+        }
+        if (ending == Ending.FAILED) {
+            // 실제로 오류 CLOSE를 주고받지 않은 연결 오류(서문·첫 프레임 검사 실패, 형태가 잘못된 CLOSE)다. 로컬이 닫았다.
+            return CloseReason.errorClose(ErrorCode.PROTOCOL_ERROR, CloseReason.Sender.LOCAL);
+        }
+        return CloseReason.close(firstCloseSender != null ? firstCloseSender : CloseReason.Sender.LOCAL);
     }
 
     /**
@@ -284,7 +307,7 @@ final class ConnectionPhase {
      * @param errorCode 보낸 CLOSE의 {@code error_code}
      */
     void closeSent(long errorCode) {
-        exchange(errorCode);
+        exchange(errorCode, CloseReason.Sender.LOCAL);
     }
 
     /**
@@ -298,7 +321,7 @@ final class ConnectionPhase {
         }
         boolean first = !closeReceived;
         closeReceived = true;
-        exchange(errorCode);
+        exchange(errorCode, CloseReason.Sender.PEER);
         return first;
     }
 
@@ -319,6 +342,9 @@ final class ConnectionPhase {
     void transportDisconnected() {
         if (closed) {
             return;
+        }
+        if (!ending.due()) {
+            disconnected = true;
         }
         ending = ending.afterDisconnect();
     }
@@ -349,9 +375,16 @@ final class ConnectionPhase {
         closed = true;
     }
 
-    private void exchange(long errorCode) {
+    private void exchange(long errorCode, CloseReason.Sender sender) {
         if (closed) {
             return;
+        }
+        if (firstCloseSender == null) {
+            firstCloseSender = sender;
+        }
+        if (errorCode != ErrorCode.NO_ERROR && errorCloseSender == null) {
+            errorCloseCode = errorCode;
+            errorCloseSender = sender;
         }
         if (errorCode != ErrorCode.NO_ERROR) {
             ending = ending.afterError();

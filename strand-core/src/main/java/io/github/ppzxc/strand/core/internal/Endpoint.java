@@ -1115,6 +1115,7 @@ public final class Endpoint {
         refuseUnhandedRequests();
         if (!phase.closeExchanged()) {
             send(Frames.close(errorCode, highestPeerStreamId));
+            phase.closeSent(errorCode);
         }
         phase.connectionFailed();
         conclude();
@@ -1155,7 +1156,7 @@ public final class Endpoint {
         }
         deferredPings.clear();
         peerPendingStreams.clear();
-        events.add(Event.closed(phase.closeCause()));
+        events.add(Event.closed(phase.closeCause(), phase.closeReason()));
     }
 
     private void sendHello() {
