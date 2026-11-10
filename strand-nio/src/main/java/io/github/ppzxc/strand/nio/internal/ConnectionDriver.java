@@ -44,7 +44,7 @@ public final class ConnectionDriver implements AutoCloseable {
 
     private static final int NO_ERROR = 0;
     /** 프레임 헤더 크기(규격 2.1절). 이보다 짧은 바이너리 메시지는 8바이트 연결 서문이라 프레임으로 세지 않는다. */
-    private static final int FRAME_HEADER_BYTES = 20;
+    private static final int FRAME_HEADER_BYTES = Endpoint.FRAME_HEADER_SIZE;
     /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
 
