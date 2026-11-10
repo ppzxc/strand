@@ -9,9 +9,19 @@ import java.util.concurrent.CompletableFuture;
 public final class RequestHandle {
 
     private final CompletableFuture<RequestResult> result;
+    private final Runnable canceller;
 
-    RequestHandle(CompletableFuture<RequestResult> result) {
+    RequestHandle(CompletableFuture<RequestResult> result, Runnable canceller) {
         this.result = result;
+        this.canceller = canceller;
+    }
+
+    /**
+     * 요청을 취소한다. 번호를 받기 전에 미뤄 둔 요청도 취소할 수 있다. 결과 Future는 core가 내는 결과({@code CANCELLED}와 결과 확정성)로 끝난다.
+     * 이미 끝난 요청이면 아무 일도 없다. 어느 스레드에서든 부를 수 있고, 요청을 낸 뒤에 부르면 그 요청보다 먼저 처리되는 일은 없다.
+     */
+    public void cancel() {
+        canceller.run();
     }
 
     /**
