@@ -34,6 +34,34 @@ class FieldCheckTest {
     }
 
     @Test
+    void namedAcceptsListedNamesAndReservedIntegersAfterThem() {
+        FieldCheck check = FieldCheck.named(Arrays.asList("A", "B"), 5);
+        assertThatCode(() -> check.check(CHECK, "s", JsonParser.parseString("\"B\"")))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> check.check(CHECK, "s", JsonParser.parseString("5")))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> check.check(CHECK, "s", JsonParser.parseString("1")))
+                .hasMessage("f.json: s: 2 이상 5 이하여야 한다: 1");
+        assertThatThrownBy(() -> check.check(CHECK, "s", JsonParser.parseString("\"C\"")))
+                .hasMessage("f.json: s: 알 수 없는 이름: C");
+    }
+
+    @Test
+    void oneOfAndFlagsRejectValuesOutsideTheAllowedList() {
+        assertThatCode(() -> FieldCheck.oneOf(Arrays.asList("x")).check(CHECK, "o", JsonParser.parseString("\"x\"")))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(
+                        () -> FieldCheck.oneOf(Arrays.asList("x")).check(CHECK, "o", JsonParser.parseString("\"y\"")))
+                .isInstanceOf(InvalidVectorException.class);
+        assertThatCode(() ->
+                        FieldCheck.flags(Arrays.asList("ACK")).check(CHECK, "f", JsonParser.parseString("[\"ACK\"]")))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() ->
+                        FieldCheck.flags(Arrays.asList("ACK")).check(CHECK, "f", JsonParser.parseString("[\"NAK\"]")))
+                .isInstanceOf(InvalidVectorException.class);
+    }
+
+    @Test
     void deferredNeverInspectsTheValue() {
         assertThatCode(() -> FieldCheck.DEFERRED.check(CHECK, "x", JsonParser.parseString("[]")))
                 .doesNotThrowAnyException();
