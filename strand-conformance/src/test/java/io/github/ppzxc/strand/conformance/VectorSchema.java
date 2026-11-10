@@ -7,9 +7,7 @@ import com.google.gson.JsonPrimitive;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 벡터 형식 문서가 정한 객체 형태의 단일 표. 단계 kind·프레임 type·이벤트 이름마다 필드 규칙을 한 곳에 모아 두므로, 형식에
@@ -21,8 +19,10 @@ final class VectorSchema {
     static final int KNOWN_FORMAT = 2;
 
     static final List<String> ROLES = Arrays.asList("client", "server");
-    static final String DEFAULT_TRANSPORT = "tcp";
-    static final List<String> TRANSPORTS = Arrays.asList("tcp", "websocket");
+    static final String TCP = "tcp";
+    static final String WEBSOCKET = "websocket";
+    static final String DEFAULT_TRANSPORT = TCP;
+    static final List<String> TRANSPORTS = Arrays.asList(TCP, WEBSOCKET);
     private static final List<String> LOCAL_RESULT_STATUSES =
             Arrays.asList("UNAVAILABLE", "CANCELLED", "DEADLINE_EXCEEDED");
     static final List<String> CERTAINTIES = Arrays.asList("response", "not_processed", "unknown");
@@ -40,7 +40,7 @@ final class VectorSchema {
     private static final FieldCheck U16 = FieldCheck.range(0, U16_MAX);
     private static final FieldCheck U32 = FieldCheck.range(0, U32_MAX);
     /** 1 이상의 u32. 0이 아닌 스트림 ID와 시간(ms)에 쓴다. */
-    private static final FieldCheck POSITIVE_U32 = FieldCheck.range(1, U32_MAX);
+    static final FieldCheck POSITIVE_U32 = FieldCheck.range(1, U32_MAX);
     /** 애플리케이션 프레임·요청의 type. 0~255는 제어 프레임용으로 예약돼 있다. */
     static final FieldCheck APP_TYPE = FieldCheck.range(Protocol.FIRST_APPLICATION_TYPE, U16_MAX);
     /** 2.5.1절의 이름이거나, 이름 목록 다음부터 255까지의 예약 정수. */
@@ -114,43 +114,7 @@ final class VectorSchema {
             .allow("next_stream_id", POSITIVE_STREAM_ID)
             .allow("known_types", Check::uniqueAppTypes);
 
-    // ---- 단계: kind별 필드 ----
-
-    private static final String STEP_TAG = "kind";
-    private static final String STEP_LABEL = "단계 kind";
-
-    private static final Shape STEP_BASE = Shape.EMPTY
-            .require(STEP_TAG, FieldCheck.DEFERRED)
-            .require("send", VectorSchema::frames)
-            .require("events", VectorSchema::events);
-
-    private static final Map<String, Shape> STEPS_BY_KIND = new HashMap<>();
-
-    static {
-        STEPS_BY_KIND.put("recv", STEP_BASE.require("hex", Check::hex));
-        STEPS_BY_KIND.put(
-                "recv_message",
-                STEP_BASE.require("opcode", FieldCheck.oneOf(OPCODES)).require("hex", Check::hex));
-        STEPS_BY_KIND.put("ping", STEP_BASE.require("payload", Check::pingPayload));
-        STEPS_BY_KIND.put(
-                "request",
-                STEP_BASE
-                        .require("type", APP_TYPE)
-                        .allow("extensions", Check::extensions)
-                        .allow("payload", Check::hex)
-                        .allow("deadline_ms", POSITIVE_U32));
-        STEPS_BY_KIND.put(
-                "respond",
-                STEP_BASE
-                        .require("stream_id", STREAM_ID)
-                        .require("status", STATUS)
-                        .allow("extensions", Check::extensions)
-                        .allow("payload", Check::hex));
-        STEPS_BY_KIND.put("cancel", STEP_BASE.require("stream_id", STREAM_ID));
-        STEPS_BY_KIND.put("close", STEP_BASE.require("error_code", ERROR_CODE));
-        STEPS_BY_KIND.put("advance", STEP_BASE.require("ms", POSITIVE_U32));
-        STEPS_BY_KIND.put("disconnect", STEP_BASE);
-    }
+    // ---- 단계: kind별 필드는 StepKind가 정의한다 ----
 
     // ---- 프레임: type별 필드 ----
 
@@ -181,26 +145,25 @@ final class VectorSchema {
     static void crossCheck(Check c, JsonObject vector) {
         JsonObject setup = vector.getAsJsonObject("setup");
         String transport = setup.has("transport") ? setup.get("transport").getAsString() : DEFAULT_TRANSPORT;
-        String forbidden = transport.equals("tcp") ? "recv_message" : "recv";
         JsonArray steps = vector.getAsJsonArray("steps");
         boolean server = "server".equals(setup.get("role").getAsString());
         boolean[] authAckReceived = AuthGate.ackReceivedThrough(vector);
         boolean authGateOpen = false;
         for (int i = 0; i < steps.size(); i++) {
             JsonObject step = steps.get(i).getAsJsonObject();
-            String kind = step.get(STEP_TAG).getAsString();
-            if (kind.equals(forbidden)) {
+            StepKind kind = StepKind.of(step);
+            if (kind.onlyOnTransport() != null && !kind.onlyOnTransport().equals(transport)) {
                 throw c.failAt(
-                        Check.child(Check.item("steps", i), STEP_TAG),
-                        "transport가 " + transport + "인 벡터에는 " + forbidden + " 단계를 쓸 수 없다");
+                        Check.child(Check.item("steps", i), StepKind.TAG),
+                        "transport가 " + transport + "인 벡터에는 " + kind.name() + " 단계를 쓸 수 없다");
             }
             // 벡터 형식 문서 8.1절 3번: 확립 전 벡터는 AUTH 관문이 열리기 전에 ping 단계를 쓰지 않는다.
-            if (kind.equals("ping") && !setup.get("established").getAsBoolean() && !authGateOpen) {
+            if (kind.sendsPing() && !setup.get("established").getAsBoolean() && !authGateOpen) {
                 throw c.failAt(
-                        Check.child(Check.item("steps", i), STEP_TAG),
+                        Check.child(Check.item("steps", i), StepKind.TAG),
                         "established가 false인 벡터는 AUTH 관문 통과(서버 역할은 send의 AUTH ACK, 클라이언트 역할은 recv한 AUTH ACK) 이전에 ping 단계를 쓸 수 없다");
             }
-            if (transport.equals("tcp")) {
+            if (transport.equals(TCP)) {
                 rejectWebSocketClose(c, i, step);
             }
             authGateOpen |= server ? sendsAuthAck(step) : authAckReceived[i];
@@ -267,7 +230,7 @@ final class VectorSchema {
         }
         for (int i = 0; i < array.size(); i++) {
             String stepPath = Check.item(path, i);
-            c.objectNamedBy(stepPath, array.get(i), STEP_TAG, STEP_LABEL, STEPS_BY_KIND);
+            c.objectNamedBy(stepPath, array.get(i), StepKind.TAG, StepKind.LABEL, StepKind.shapesByName());
         }
     }
 

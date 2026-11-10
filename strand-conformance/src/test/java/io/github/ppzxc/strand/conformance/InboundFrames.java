@@ -20,11 +20,12 @@ final class InboundFrames {
 
     /** 이 단계로 들어온 바이트에서 새로 완결된 프레임들. 연결 하나의 흐름은 `stream`이 이어 읽는다. */
     static List<Frame> receivedBy(JsonObject step, InboundFrames stream) {
-        String kind = Steps.kindOf(step);
-        if (kind.equals("recv")) {
+        StepKind.Inbound inbound = StepKind.of(step).inbound();
+        if (inbound == StepKind.Inbound.STREAM) {
             return stream.feed(hexOf(step));
         }
-        if (kind.equals("recv_message") && step.get("opcode").getAsString().equals("binary")) {
+        if (inbound == StepKind.Inbound.MESSAGE
+                && step.get("opcode").getAsString().equals("binary")) {
             return new InboundFrames().feed(hexOf(step));
         }
         return new ArrayList<>();
