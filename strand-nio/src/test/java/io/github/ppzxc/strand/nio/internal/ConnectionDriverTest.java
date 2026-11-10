@@ -467,10 +467,12 @@ class ConnectionDriverTest {
         InMemoryPassage.Pair link = InMemoryPassage.streams();
         ConnectionDriver server =
                 start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), link.second()));
+        // 상대를 띄우기 전에 낸 요청이어야 서버가 오류로 멈추기 전에 명령이 닿는다.
+        CompletableFuture<RequestResult> pending =
+                server.request(APPLICATION_TYPE, bytes("never-sent")).result();
         client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
 
-        RequestResult result =
-                await(server.request(APPLICATION_TYPE, bytes("never-sent")).result());
+        RequestResult result = await(pending);
 
         assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
         assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
