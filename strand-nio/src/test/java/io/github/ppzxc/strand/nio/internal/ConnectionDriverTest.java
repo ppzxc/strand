@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -443,6 +444,120 @@ class ConnectionDriverTest {
         assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
     }
 
+    /** 첫 쓰기(HELLO)를 {@code release}가 열릴 때까지 붙잡았다가 실패시키는 통로. 전송 스레드가 끝나기 직전에 명령이 큐에 들어 있게 순서를 강제한다. */
+    private static final class GatedFailingPassage implements Passage {
+        private final Passage delegate;
+        final CountDownLatch writing = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+
+        GatedFailingPassage(Passage delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public Inbound await(long timeoutMs) throws IOException {
+            return delegate.await(timeoutMs);
+        }
+
+        @Override
+        public void write(OutboundMessage message) throws IOException {
+            writing.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            throw new IOException("쓸 수 없음");
+        }
+
+        @Override
+        public void wakeup() {
+            delegate.wakeup();
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
+        }
+    }
+
+    private ConnectionDriver clientWhoseFirstWriteFails(GatedFailingPassage gated) throws Exception {
+        ConnectionDriver client = client(Wire.STREAM, gated, ConnectionDriverTest::ignore);
+        // 전송 스레드는 첫 쓰기에서 붙잡혀 있다. 이 뒤에 낸 명령은 연결이 끝나기 전에 큐에 들어간 명령이다.
+        assertThat(gated.writing.await(5, TimeUnit.SECONDS)).isTrue();
+        return client;
+    }
+
+    @Test
+    void aRequestQueuedBeforeTheTransportEndsGetsTheCoreResult() throws Exception {
+        GatedFailingPassage gated =
+                new GatedFailingPassage(InMemoryPassage.streams().first());
+        ConnectionDriver client = clientWhoseFirstWriteFails(gated);
+        CompletableFuture<RequestResult> queued =
+                client.request(APPLICATION_TYPE, bytes("queued")).result();
+
+        gated.release.countDown();
+
+        RequestResult result = await(queued);
+        assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
+        assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+    }
+
+    @Test
+    void otherCommandsQueuedBeforeTheTransportEndsAreHandledWithoutFailingTheDriver() throws Exception {
+        GatedFailingPassage gated =
+                new GatedFailingPassage(InMemoryPassage.streams().first());
+        AtomicReference<Throwable> uncaught = new AtomicReference<>();
+        ConnectionDriver client = clientWhoseFirstWriteFails(gated);
+        client.transportThread().setUncaughtExceptionHandler((t, e) -> uncaught.set(e));
+        RequestHandle handle = client.request(APPLICATION_TYPE, bytes("queued"));
+        CompletableFuture<Void> ping = client.ping(new byte[8]);
+        CompletableFuture<Void> respond = client.respond(1, STATUS_OK, bytes("x"));
+        client.closeConnection();
+        client.abortClosing();
+        handle.cancel();
+
+        gated.release.countDown();
+        client.transportThread().join(5000);
+
+        assertThat(client.transportThread().isAlive()).isFalse();
+        assertThat(uncaught.get()).isNull();
+        assertThat(await(handle.result()).status()).isIn(STATUS_UNAVAILABLE, STATUS_CANCELLED);
+        // 이 명령들은 core(종료된 Endpoint)가 처리한 결과로 끝나야 하며 드라이버가 지어낸 "연결이 끝났다"가 아니다.
+        assertThat(ping).isDone();
+        assertThat(respond).isDone();
+        for (CompletableFuture<Void> future : java.util.Arrays.asList(ping, respond)) {
+            assertThat(future.handle((v, e) -> e == null ? "" : String.valueOf(e.getMessage()))
+                            .join())
+                    .isNotEqualTo("연결이 끝났다");
+        }
+    }
+
+    @Test
+    void anErrorWhileTheTransportStopsStillEndsTheQueuedCommandsAndKeepsTheOriginalError() throws Exception {
+        GatedFailingPassage gated =
+                new GatedFailingPassage(InMemoryPassage.streams().first());
+        AtomicReference<Throwable> uncaught = new AtomicReference<>();
+        AssertionError original = new AssertionError("알림 실행기 오류");
+        // 연결이 끝났다는 알림을 내보내다 Error가 난다. 전송 스레드는 이 Error로 멈춘다.
+        Executor failing = task -> {
+            throw original;
+        };
+        ConnectionDriver client = start(ConnectionDriver.client(EndpointConfig.defaults(), gated)
+                .handler(failing, ConnectionDriverTest::ignore)
+                .listener(new ConnectionListener() {}));
+        assertThat(gated.writing.await(5, TimeUnit.SECONDS)).isTrue();
+        client.transportThread().setUncaughtExceptionHandler((t, e) -> uncaught.set(e));
+        CompletableFuture<RequestResult> queued =
+                client.request(APPLICATION_TYPE, bytes("queued")).result();
+
+        gated.release.countDown();
+        client.transportThread().join(5000);
+
+        assertThat(await(queued).status()).isEqualTo(STATUS_UNAVAILABLE);
+        assertThat(uncaught.get()).isSameAs(original);
+    }
+
     @Test
     void aServerWithoutAHandlerLeavesRequestsUnansweredUntilTheConnectionEnds() throws Exception {
         InMemoryPassage.Pair link = InMemoryPassage.streams();
@@ -562,56 +677,15 @@ class ConnectionDriverTest {
         assertThat(await(clientOwn).status()).isEqualTo(STATUS_UNAVAILABLE);
     }
 
-    /**
-     * 전송 스레드가 명령을 처리했는지 통로로 관찰한다. 명령은 깨움({@code wakeup})으로 읽기가 끝난 뒤 처리되고, 그 처리가 끝나야 다음 {@code await}가
-     * 시작되므로, 아무것도 없이 깨어난 뒤 다시 시작한 {@code await}는 그 사이에 명령 처리가 끝났다는 뜻이다.
-     */
-    private static final class ObservedPassage implements Passage {
-        private final Passage delegate;
-        final CountDownLatch commandsHandled = new CountDownLatch(1);
-        private boolean wokeWithoutInput;
-
-        ObservedPassage(Passage delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public Inbound await(long timeoutMs) throws IOException {
-            if (wokeWithoutInput) {
-                commandsHandled.countDown();
-            }
-            Inbound inbound = delegate.await(timeoutMs);
-            wokeWithoutInput |= inbound.kind() == Inbound.Kind.NONE;
-            return inbound;
-        }
-
-        @Override
-        public void write(OutboundMessage message) throws IOException {
-            delegate.write(message);
-        }
-
-        @Override
-        public void wakeup() {
-            delegate.wakeup();
-        }
-
-        @Override
-        public void close() {
-            delegate.close();
-        }
-    }
-
     @Test
     void anInputTheEndpointRejectsEndsTheConnectionAndPendingRequestsGetTheCoreResult() throws Exception {
         // 서버는 메시지 통로 설정인데 통로는 바이트 스트림이라 receive가 IllegalStateException을 던진다.
         InMemoryPassage.Pair link = InMemoryPassage.streams();
-        ObservedPassage serverSide = new ObservedPassage(link.second());
         ConnectionDriver server =
-                start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), serverSide));
+                start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), link.second()));
         CompletableFuture<RequestResult> pending =
                 server.request(APPLICATION_TYPE, bytes("never-sent")).result();
-        // 서버가 그 요청 명령을 처리한 뒤에 상대를 띄운다. 그래야 서버가 오류로 멈춰도 명령이 큐에 남아 abandon되지 않는다.
-        assertThat(serverSide.commandsHandled.await(5, TimeUnit.SECONDS)).isTrue();
+        // 요청 명령이 아직 큐에 있는 채 서버가 오류로 멈춰도, 멈추기 전에 큐를 소진해 core 결과로 끝나므로 순서를 맞출 필요가 없다.
         client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
 
         RequestResult result = await(pending);
