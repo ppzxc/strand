@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.TreeSet;
 import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
@@ -376,6 +377,16 @@ final class OwnRequestLedger {
             record = byTicket.get(ticket);
         }
         return record == null ? null : abort(record, Status.CANCELLED);
+    }
+
+    /**
+     * {@link #expire}가 처음으로 요청을 끝내는 가장 이른 시각(기한 다음 밀리초). 기한 있는 요청이 없으면 비어 있다. 기한 색인의 첫 원소만 본다.
+     */
+    OptionalLong nextExpiryAt() {
+        if (expirations.isEmpty()) {
+            return OptionalLong.empty();
+        }
+        return OptionalLong.of(Deadlines.after(expirations.first().deadlineAt));
     }
 
     /**
