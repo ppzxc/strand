@@ -70,13 +70,19 @@ final class EventKind {
         this.actual = actual;
     }
 
-    /** 형태 검사 표: 이벤트 이름마다 형태. */
-    static Map<String, Shape> shapesByName() {
+    private static final Map<String, Shape> SHAPES_BY_NAME = shapes();
+
+    private static Map<String, Shape> shapes() {
         Map<String, Shape> shapes = new LinkedHashMap<>();
         for (EventKind kind : ALL) {
             shapes.put(kind.name, kind.shape);
         }
         return Collections.unmodifiableMap(shapes);
+    }
+
+    /** 형태 검사 표: 이벤트 이름마다 형태. */
+    static Map<String, Shape> shapesByName() {
+        return SHAPES_BY_NAME;
     }
 
     /** 러너가 비교할 수 있는 이벤트인가. */
@@ -93,14 +99,17 @@ final class EventKind {
         return kind.expected.apply(event);
     }
 
-    /** 실제 이벤트를 같은 표기로. 벡터 형식에 없는 이벤트(AUTHENTICATED 등)는 null이다. */
+    /** 실제 이벤트를 같은 표기로. 벡터 형식에 없는 이벤트(AUTHENTICATED)는 null이다. 정의도 없고 제외로 정해지지도 않은 종류는 오류다. */
     static String actual(Event event) {
+        if (event.kind() == Event.Kind.AUTHENTICATED) {
+            return null;
+        }
         for (EventKind kind : ALL) {
             if (kind.coreKind == event.kind()) {
                 return kind.actual.apply(event);
             }
         }
-        return null;
+        throw new AssertionError("정의 없는 이벤트 종류: " + event.kind());
     }
 
     private static EventKind find(String name) {

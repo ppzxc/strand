@@ -204,7 +204,7 @@ final class VectorSchema {
 
     // ---- 이벤트: 이름별 필드는 EventKind가 정의한다 ----
 
-    private static final String EVENT_LABEL = "event";
+    private static final String EVENT_LABEL = EventKind.TAG;
 
     private VectorSchema() {}
 
