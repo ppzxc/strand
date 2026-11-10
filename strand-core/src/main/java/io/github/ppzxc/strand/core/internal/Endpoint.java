@@ -323,6 +323,26 @@ public final class Endpoint {
     }
 
     /**
+     * 시계를 다음으로 진행해야 하는 가장 이른 가상 시각(마지막 {@link #advance(long)}까지 흐른 시각부터 센 절대 시각)을 돌려준다. 대상은 요청 기한,
+     * 확인 대기(HELLO, AUTH, PING), 서버의 AUTH 대기, 유휴 PING이다. 이 시각까지 {@code advance}하면 그 기한이 처리된다. 기한은 정각이 지나야
+     * 처리되므로 기한 다음 밀리초를 돌려준다. 아무 기한도 없거나 연결이 끝났으면 비어 있다.
+     */
+    public OptionalLong nextDeadline() {
+        if (phase.isEnded()) {
+            return OptionalLong.empty();
+        }
+        OptionalLong requests = ledger.nextExpiryAt();
+        OptionalLong liveness = timers.nextAt(phase.mayIdlePing());
+        if (!requests.isPresent()) {
+            return liveness;
+        }
+        if (!liveness.isPresent()) {
+            return requests;
+        }
+        return OptionalLong.of(Math.min(requests.getAsLong(), liveness.getAsLong()));
+    }
+
+    /**
      * 애플리케이션이 요청을 보내게 한다. AUTH 관문을 통과하기 전이면 그 뒤로 미룬다(규격 3.3절). CLOSE를 보냈거나 받은 뒤,
      * 번호 소진(규격 2.2.5절), 상대가 알린 {@code max_concurrent_streams} 도달(규격 3.2.1절)이면 프레임을 보내지 않고 로컬에서
      * 실패시킨다. 이때 스트림 번호 없는 {@link Event.Kind#RESULT} 이벤트(status {@code UNAVAILABLE})가 한 번 나온다. 한도에 닿은

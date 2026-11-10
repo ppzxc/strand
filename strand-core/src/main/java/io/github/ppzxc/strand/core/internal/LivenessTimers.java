@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.OptionalLong;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -151,6 +152,36 @@ final class LivenessTimers {
             }
         }
         return Expiry.NONE;
+    }
+
+    /**
+     * 시계를 진행해야 하는 가장 이른 시각. AUTH 대기 기한, 시작한 확인 대기의 기한(둘 다 기한 다음 밀리초), 그리고 유휴 PING을 보낼 수 있으면 그 일정
+     * (마지막 수신 + 간격) 가운데 가장 이른 것이다. 보낼 일정이 없거나 연결이 끝났으면 비어 있다. 이미 지난 일정은 호출 시점의 판단이 아니라 일정 시각
+     * 그대로 돌려준다.
+     *
+     * @param mayIdlePing 지금 유휴 PING을 보낼 수 있는 연결 단계인가
+     */
+    OptionalLong nextAt(boolean mayIdlePing) {
+        if (ended) {
+            return OptionalLong.empty();
+        }
+        long earliest = Long.MAX_VALUE;
+        boolean found = false;
+        if (authDeadline != null) {
+            earliest = Deadlines.after(authDeadline);
+            found = true;
+        }
+        for (Wait wait : waits.values()) {
+            if (wait.started) {
+                earliest = Math.min(earliest, Deadlines.after(wait.deadline));
+                found = true;
+            }
+        }
+        if (mayIdlePing && idleIntervalMs > 0 && !hasPing()) {
+            earliest = Math.min(earliest, Deadlines.plus(lastReceivedAt, idleIntervalMs));
+            found = true;
+        }
+        return found ? OptionalLong.of(earliest) : OptionalLong.empty();
     }
 
     /**
