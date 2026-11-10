@@ -65,6 +65,8 @@ class TransportFailureIntegrationTest {
         try (ServerSocket silentServer = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
                 Peer client = Peer.connect(silentServer.getLocalPort(), null)) {
             Socket accepted = silentServer.accept();
+            // HELLO는 전송 스레드가 비동기로 쓴다. 쓰기 전에 연결을 끊으면 보낸 프레임 수가 0이 되어 아래 단언이 경쟁한다.
+            Peer.awaitUntil(() -> client.driver().writtenFrames() >= 1, "HELLO가 통로에 쓰이지 않았다");
             RequestHandle handle = client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
             client.logResult(handle.result());
 
