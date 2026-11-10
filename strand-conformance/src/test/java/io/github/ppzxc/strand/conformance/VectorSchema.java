@@ -218,7 +218,7 @@ final class VectorSchema {
         String forbidden = transport.equals("tcp") ? "recv_message" : "recv";
         JsonArray steps = vector.getAsJsonArray("steps");
         boolean server = "server".equals(setup.get("role").getAsString());
-        boolean[] authAckReceived = AckWaits.authAckReceivedThrough(vector);
+        boolean[] authAckReceived = AuthGate.ackReceivedThrough(vector);
         boolean authGateOpen = false;
         for (int i = 0; i < steps.size(); i++) {
             JsonObject step = steps.get(i).getAsJsonObject();
