@@ -29,17 +29,48 @@ final class VectorSchema {
     static final List<String> OPCODES = Arrays.asList("binary", "text");
     static final List<String> ACK_FLAGS = Arrays.asList("ACK");
 
-    static final Shape FILE = Shape.EMPTY.require("format", FieldKind.FORMAT).require("vectors", FieldKind.ARRAY);
+    // ---- 필드 값 규칙 ----
+
+    private static final long U8_MAX = 255L;
+    private static final long U16_MAX = 65535L;
+    private static final long U32_MAX = 4294967295L;
+    private static final BigInteger U64_MAX = BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE);
+    private static final BigInteger STREAM_ID_MAX = BigInteger.ONE.shiftLeft(63).subtract(BigInteger.ONE);
+
+    private static final FieldCheck U16 = FieldCheck.range(0, U16_MAX);
+    private static final FieldCheck U32 = FieldCheck.range(0, U32_MAX);
+    /** 1 이상의 u32. 0이 아닌 스트림 ID와 시간(ms)에 쓴다. */
+    private static final FieldCheck POSITIVE_U32 = FieldCheck.range(1, U32_MAX);
+    /** 애플리케이션 프레임·요청의 type. 0~255는 제어 프레임용으로 예약돼 있다. */
+    static final FieldCheck APP_TYPE = FieldCheck.range(Protocol.FIRST_APPLICATION_TYPE, U16_MAX);
+    /** 2.5.1절의 이름이거나, 이름 목록 다음부터 255까지의 예약 정수. */
+    private static final FieldCheck STATUS = FieldCheck.named(Protocol.STATUS_NAMES, U8_MAX);
+    /** 2.5.2절의 이름이거나, 이름 목록 다음부터 u32 끝까지의 예약 정수. */
+    private static final FieldCheck ERROR_CODE = FieldCheck.named(Protocol.ERROR_CODE_NAMES, U32_MAX);
+    /** 스트림 번호. 0 이상 2^63-1 이하의 10진수 문자열(번호는 JSON 수로 쓰지 않는다). */
+    private static final FieldCheck STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, STREAM_ID_MAX);
+    /** CLOSE의 last_stream_id. 0 이상 2^64-1 이하의 10진수 문자열(형태가 잘못된 CLOSE를 위해 번호 범위 밖 값도 쓴다). */
+    private static final FieldCheck LAST_STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, U64_MAX);
+    /** 1 이상 2^63-1 이하의 10진수 문자열. RESET의 stream_id와 next_stream_id에 쓴다(홀짝은 role과 함께 보는 검사라 {@link #setup}이 따로 본다). */
+    private static final FieldCheck POSITIVE_STREAM_ID = FieldCheck.decimal(BigInteger.ONE, STREAM_ID_MAX);
+    /** 제어 프레임의 stream_id처럼 값이 0으로 고정된 필드. 문자열 {@code "0"}이다. */
+    private static final FieldCheck ZERO_STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, BigInteger.ZERO);
+    /** WebSocket Close의 상태 코드. 규격 1.2절이 정한 {@code 1000 Normal Closure}만 모델링한다. */
+    private static final FieldCheck WEBSOCKET_CLOSE_CODE =
+            FieldCheck.range(Protocol.NORMAL_CLOSURE, Protocol.NORMAL_CLOSURE);
+
+    private static final FieldCheck FORMAT = (c, path, element) -> c.format(path, element, KNOWN_FORMAT);
+
+    static final Shape FILE = Shape.EMPTY.require("format", FORMAT).require("vectors", Check::array);
 
     static final Shape VECTOR = Shape.EMPTY
-            .require("id", FieldKind.VECTOR_ID)
-            .require("description", FieldKind.DESCRIPTION)
-            .require("spec", FieldKind.SPEC_SECTIONS)
-            .require("setup", FieldKind.SETUP)
-            .require("steps", FieldKind.STEPS);
+            .require("id", Check::id)
+            .require("description", Check::nonEmptyText)
+            .require("spec", Check::specSections)
+            .require("setup", VectorSchema::setup)
+            .require("steps", VectorSchema::steps);
 
-    static final Shape EXTENSION_ENTRY =
-            Shape.EMPTY.require("tag", FieldKind.U16).require("value", FieldKind.HEX);
+    static final Shape EXTENSION_ENTRY = Shape.EMPTY.require("tag", U16).require("value", Check::hex);
 
     /** HELLO 파라미터 이름은 모두 u32다. 이름 목록은 {@link Protocol#HELLO_DEFAULTS}에서 나온다. */
     static final Shape HELLO_PARAMS = helloShape();
@@ -47,7 +78,7 @@ final class VectorSchema {
     private static Shape helloShape() {
         Shape shape = Shape.EMPTY;
         for (String name : Protocol.HELLO_DEFAULTS.keySet()) {
-            shape = shape.allow(name, FieldKind.U32);
+            shape = shape.allow(name, U32);
         }
         return shape;
     }
@@ -58,7 +89,7 @@ final class VectorSchema {
     private static Shape configShape() {
         Shape shape = Shape.EMPTY;
         for (String key : Protocol.CONFIG_DEFAULTS.keySet()) {
-            shape = shape.allow(key, FieldKind.POSITIVE_U32);
+            shape = shape.allow(key, POSITIVE_U32);
         }
         return shape;
     }
@@ -69,20 +100,20 @@ final class VectorSchema {
     }
 
     static final Shape AUTH_SETUP =
-            Shape.EMPTY.allow("mechanism", FieldKind.MECHANISM).allow("credentials", FieldKind.HEX);
+            Shape.EMPTY.allow("mechanism", Check::mechanism).allow("credentials", Check::hex);
 
-    static final Shape AUTH_PARAMS = Shape.EMPTY.allow("credential_lifetime", FieldKind.U32);
+    static final Shape AUTH_PARAMS = Shape.EMPTY.allow("credential_lifetime", U32);
 
     private static final Shape SETUP = Shape.EMPTY
-            .require("role", FieldKind.ROLE)
-            .require("established", FieldKind.BOOLEAN)
-            .allow("local_hello", FieldKind.HELLO_PARAMS)
-            .allow("peer_hello", FieldKind.HELLO_PARAMS)
-            .allow("config", FieldKind.SETUP_CONFIG)
-            .allow("auth", FieldKind.AUTH_SETUP)
-            .allow("transport", FieldKind.TRANSPORT)
-            .allow("next_stream_id", FieldKind.POSITIVE_STREAM_ID)
-            .allow("known_types", FieldKind.KNOWN_TYPES);
+            .require("role", FieldCheck.oneOf(ROLES))
+            .require("established", Check::bool)
+            .allow("local_hello", FieldCheck.object(HELLO_PARAMS))
+            .allow("peer_hello", FieldCheck.object(HELLO_PARAMS))
+            .allow("config", FieldCheck.object(SETUP_CONFIG))
+            .allow("auth", FieldCheck.object(AUTH_SETUP))
+            .allow("transport", FieldCheck.oneOf(TRANSPORTS))
+            .allow("next_stream_id", POSITIVE_STREAM_ID)
+            .allow("known_types", Check::uniqueAppTypes);
 
     // ---- 단계: kind별 필드 ----
 
@@ -90,34 +121,35 @@ final class VectorSchema {
     private static final String STEP_LABEL = "단계 kind";
 
     private static final Shape STEP_BASE = Shape.EMPTY
-            .require(STEP_TAG, FieldKind.DEFERRED)
-            .require("send", FieldKind.FRAMES)
-            .require("events", FieldKind.EVENTS);
+            .require(STEP_TAG, FieldCheck.DEFERRED)
+            .require("send", VectorSchema::frames)
+            .require("events", VectorSchema::events);
 
     private static final Map<String, Shape> STEPS_BY_KIND = new HashMap<>();
 
     static {
-        STEPS_BY_KIND.put("recv", STEP_BASE.require("hex", FieldKind.HEX));
+        STEPS_BY_KIND.put("recv", STEP_BASE.require("hex", Check::hex));
         STEPS_BY_KIND.put(
-                "recv_message", STEP_BASE.require("opcode", FieldKind.OPCODE).require("hex", FieldKind.HEX));
-        STEPS_BY_KIND.put("ping", STEP_BASE.require("payload", FieldKind.PING_PAYLOAD));
+                "recv_message",
+                STEP_BASE.require("opcode", FieldCheck.oneOf(OPCODES)).require("hex", Check::hex));
+        STEPS_BY_KIND.put("ping", STEP_BASE.require("payload", Check::pingPayload));
         STEPS_BY_KIND.put(
                 "request",
                 STEP_BASE
-                        .require("type", FieldKind.APP_TYPE)
-                        .allow("extensions", FieldKind.EXTENSIONS)
-                        .allow("payload", FieldKind.HEX)
-                        .allow("deadline_ms", FieldKind.POSITIVE_U32));
+                        .require("type", APP_TYPE)
+                        .allow("extensions", Check::extensions)
+                        .allow("payload", Check::hex)
+                        .allow("deadline_ms", POSITIVE_U32));
         STEPS_BY_KIND.put(
                 "respond",
                 STEP_BASE
-                        .require("stream_id", FieldKind.STREAM_ID)
-                        .require("status", FieldKind.STATUS)
-                        .allow("extensions", FieldKind.EXTENSIONS)
-                        .allow("payload", FieldKind.HEX));
-        STEPS_BY_KIND.put("cancel", STEP_BASE.require("stream_id", FieldKind.STREAM_ID));
-        STEPS_BY_KIND.put("close", STEP_BASE.require("error_code", FieldKind.ERROR_CODE));
-        STEPS_BY_KIND.put("advance", STEP_BASE.require("ms", FieldKind.POSITIVE_U32));
+                        .require("stream_id", STREAM_ID)
+                        .require("status", STATUS)
+                        .allow("extensions", Check::extensions)
+                        .allow("payload", Check::hex));
+        STEPS_BY_KIND.put("cancel", STEP_BASE.require("stream_id", STREAM_ID));
+        STEPS_BY_KIND.put("close", STEP_BASE.require("error_code", ERROR_CODE));
+        STEPS_BY_KIND.put("advance", STEP_BASE.require("ms", POSITIVE_U32));
         STEPS_BY_KIND.put("disconnect", STEP_BASE);
     }
 
@@ -126,51 +158,48 @@ final class VectorSchema {
     private static final String FRAME_TAG = "type";
     private static final String FRAME_LABEL = "프레임 type";
 
-    private static final Shape FRAME_BASE = Shape.EMPTY.require(FRAME_TAG, FieldKind.DEFERRED);
+    private static final Shape FRAME_BASE = Shape.EMPTY.require(FRAME_TAG, FieldCheck.DEFERRED);
 
     private static final Map<String, Shape> FRAMES_BY_TYPE = new HashMap<>();
 
     /** type이 256 이상의 정수인 애플리케이션 프레임. */
     private static final Shape APP_FRAME = FRAME_BASE
-            .require("stream_id", FieldKind.STREAM_ID)
-            .allow("status", FieldKind.STATUS)
-            .allow("extensions", FieldKind.EXTENSIONS)
-            .allow("payload", FieldKind.HEX);
+            .require("stream_id", STREAM_ID)
+            .allow("status", STATUS)
+            .allow("extensions", Check::extensions)
+            .allow("payload", Check::hex);
 
     static {
         FRAMES_BY_TYPE.put("PREFACE", FRAME_BASE);
         FRAMES_BY_TYPE.put(
                 "HELLO",
                 FRAME_BASE
-                        .allow("flags", FieldKind.ACK_FLAGS)
-                        .allow("stream_id", FieldKind.ZERO_STREAM_ID)
-                        .allow("params", FieldKind.HELLO_PARAMS));
+                        .allow("flags", FieldCheck.flags(ACK_FLAGS))
+                        .allow("stream_id", ZERO_STREAM_ID)
+                        .allow("params", FieldCheck.object(HELLO_PARAMS)));
         FRAMES_BY_TYPE.put(
                 "AUTH",
                 FRAME_BASE
-                        .allow("flags", FieldKind.ACK_FLAGS)
-                        .allow("stream_id", FieldKind.ZERO_STREAM_ID)
-                        .allow("mechanism", FieldKind.MECHANISM)
-                        .allow("credentials", FieldKind.HEX)
-                        .allow("params", FieldKind.AUTH_PARAMS));
+                        .allow("flags", FieldCheck.flags(ACK_FLAGS))
+                        .allow("stream_id", ZERO_STREAM_ID)
+                        .allow("mechanism", Check::mechanism)
+                        .allow("credentials", Check::hex)
+                        .allow("params", FieldCheck.object(AUTH_PARAMS)));
         FRAMES_BY_TYPE.put(
                 "PING",
                 FRAME_BASE
-                        .require("payload", FieldKind.PING_PAYLOAD)
-                        .allow("flags", FieldKind.ACK_FLAGS)
-                        .allow("stream_id", FieldKind.ZERO_STREAM_ID));
+                        .require("payload", Check::pingPayload)
+                        .allow("flags", FieldCheck.flags(ACK_FLAGS))
+                        .allow("stream_id", ZERO_STREAM_ID));
         FRAMES_BY_TYPE.put(
                 "CLOSE",
                 FRAME_BASE
-                        .require("error_code", FieldKind.ERROR_CODE)
-                        .require("last_stream_id", FieldKind.LAST_STREAM_ID)
-                        .allow("stream_id", FieldKind.ZERO_STREAM_ID));
-        FRAMES_BY_TYPE.put("WEBSOCKET_CLOSE", FRAME_BASE.require("code", FieldKind.WEBSOCKET_CLOSE_CODE));
+                        .require("error_code", ERROR_CODE)
+                        .require("last_stream_id", LAST_STREAM_ID)
+                        .allow("stream_id", ZERO_STREAM_ID));
+        FRAMES_BY_TYPE.put("WEBSOCKET_CLOSE", FRAME_BASE.require("code", WEBSOCKET_CLOSE_CODE));
         FRAMES_BY_TYPE.put(
-                "RESET",
-                FRAME_BASE
-                        .require("stream_id", FieldKind.POSITIVE_STREAM_ID)
-                        .require("error_code", FieldKind.ERROR_CODE));
+                "RESET", FRAME_BASE.require("stream_id", POSITIVE_STREAM_ID).require("error_code", ERROR_CODE));
     }
 
     // ---- 이벤트: 이름별 필드 ----
@@ -178,20 +207,19 @@ final class VectorSchema {
     private static final String EVENT_TAG = "event";
     private static final String EVENT_LABEL = "event";
 
-    private static final Shape EVENT_BASE = Shape.EMPTY.require(EVENT_TAG, FieldKind.DEFERRED);
+    private static final Shape EVENT_BASE = Shape.EMPTY.require(EVENT_TAG, FieldCheck.DEFERRED);
 
     private static final Map<String, Shape> EVENTS_BY_NAME = new HashMap<>();
 
     static {
         EVENTS_BY_NAME.put(
-                "request_received",
-                EVENT_BASE.require("stream_id", FieldKind.STREAM_ID).require("type", FieldKind.APP_TYPE));
+                "request_received", EVENT_BASE.require("stream_id", STREAM_ID).require("type", APP_TYPE));
         EVENTS_BY_NAME.put(
                 "result",
                 EVENT_BASE
-                        .allow("stream_id", FieldKind.STREAM_ID)
-                        .require("status", FieldKind.STATUS)
-                        .require("certainty", FieldKind.CERTAINTY));
+                        .allow("stream_id", STREAM_ID)
+                        .require("status", STATUS)
+                        .require("certainty", FieldCheck.oneOf(CERTAINTIES)));
         EVENTS_BY_NAME.put("closed", EVENT_BASE);
     }
 
@@ -331,7 +359,7 @@ final class VectorSchema {
         if (Check.isString(type)) {
             shape = c.shapeFor(typePath, FRAME_LABEL, FRAMES_BY_TYPE, type.getAsString());
         } else {
-            FieldKind.APP_TYPE.check(c, typePath, type);
+            APP_TYPE.check(c, typePath, type);
             shape = APP_FRAME;
         }
         JsonObject frame = c.object(path, element, shape);
