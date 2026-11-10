@@ -14,6 +14,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.channels.SocketChannel;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.OptionalLong;
 import java.util.concurrent.BlockingQueue;
@@ -25,6 +26,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntUnaryOperator;
 
@@ -41,11 +43,18 @@ final class Peer implements AutoCloseable {
         return thread;
     });
 
+    private static final long POLL_NANOS = TimeUnit.MICROSECONDS.toNanos(200);
+
+    static final String REQUEST_RECEIVED = "REQUEST_RECEIVED";
+    static final String RESULT = "RESULT";
+    static final String CLOSED = "CLOSED";
+
     private final ConnectionDriver driver;
     private final BlockingQueue<IncomingRequest> requests = new LinkedBlockingQueue<>();
     private final CompletableFuture<OptionalLong> authenticated = new CompletableFuture<>();
     private final CompletableFuture<ConnectionClosed> closed = new CompletableFuture<>();
     private final List<ConnectionClosed> closedNotices = new CopyOnWriteArrayList<>();
+    private final List<String> log = Collections.synchronizedList(new ArrayList<>());
     private final ControlledPassage controlled;
 
     private Peer(Passage passage, boolean client, IntUnaryOperator statusForType) {
@@ -54,6 +63,7 @@ final class Peer implements AutoCloseable {
         ConnectionDriver.Builder builder =
                 client ? ConnectionDriver.client(config, passage) : ConnectionDriver.server(config, passage);
         this.driver = builder.handler(HANDLERS, request -> {
+                    log.add(REQUEST_RECEIVED);
                     requests.add(request);
                     if (statusForType != null) {
                         request.respond(statusForType.applyAsInt(request.type()), Fixtures.payload("ok"));
@@ -67,6 +77,7 @@ final class Peer implements AutoCloseable {
 
                     @Override
                     public void onClosed(ConnectionClosed event) {
+                        log.add(CLOSED);
                         closedNotices.add(event);
                         closed.complete(event);
                     }
@@ -156,6 +167,22 @@ final class Peer implements AutoCloseable {
         }
     }
 
+    /**
+     * 이 연결에서 일어난 일을 일어난 순서대로 적은 기록({@link #REQUEST_RECEIVED}, {@link #RESULT}, {@link #CLOSED}). 받은 요청은 핸들러가 응답하기 전에,
+     * 종료 알림은 리스너가 불릴 때 적는다. 결과는 {@link #logResult}로 맡긴 Future가 끝날 때 전송 스레드에서 적으므로, 연결 종료 때 core가 낸 결과가
+     * 종료 알림보다 먼저 적힌다.
+     */
+    List<String> log() {
+        synchronized (log) {
+            return new ArrayList<>(log);
+        }
+    }
+
+    /** 이 요청 결과가 끝나는 순간을 {@link #log()}에 적게 한다. 결과가 나오기 전에, 즉 요청을 낸 직후에 걸어야 순서를 놓치지 않는다. */
+    void logResult(CompletableFuture<?> result) {
+        result.thenRun(() -> log.add(RESULT));
+    }
+
     /** 지금까지 받은 종료 알림. 연결당 정확히 한 번이어야 한다. */
     List<ConnectionClosed> closedNotices() {
         return new ArrayList<>(closedNotices);
@@ -174,7 +201,8 @@ final class Peer implements AutoCloseable {
             if (System.nanoTime() > limit) {
                 throw new AssertionError(failure);
             }
-            Thread.yield();
+            // 관찰 지점 카운터는 바뀔 때 알려 주지 않는다. 바쁘게 돌면 CPU만 쓰므로 짧게 쉬며 상한까지 확인한다.
+            LockSupport.parkNanos(POLL_NANOS);
         }
     }
 

@@ -38,8 +38,11 @@ class MultiClientIntegrationTest {
     }
 
     private static CompletableFuture<RequestResult> requestFor(Peer client, int index) {
-        return client.request(APPLICATION_TYPE + index, Fixtures.payload("client-" + index))
+        CompletableFuture<RequestResult> result = client.request(
+                        APPLICATION_TYPE + index, Fixtures.payload("client-" + index))
                 .result();
+        client.logResult(result);
+        return result;
     }
 
     private static RequestResult await(CompletableFuture<RequestResult> future) throws Exception {
@@ -148,6 +151,7 @@ class MultiClientIntegrationTest {
             assertThat(abortedNotice.reason().kind()).isEqualTo(CloseReason.Kind.DISCONNECTED);
             assertThat(serverSides.get(aborted).closedNotices()).hasSize(1);
             assertThat(serverSides.get(aborted).drainRequests()).hasSize(1);
+            assertThat(serverSides.get(aborted).log()).containsExactly(Peer.REQUEST_RECEIVED, Peer.CLOSED);
             for (int i = 0; i < CLIENT_COUNT; i++) {
                 if (i != aborted) {
                     assertThat(clients.get(i).closedNotices())

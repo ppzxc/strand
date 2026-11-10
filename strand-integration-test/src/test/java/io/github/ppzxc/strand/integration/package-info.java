@@ -16,7 +16,7 @@
  * <p>확인하지 않는 것: 프레임 필드 검증과 오류 코드는 {@code strand-conformance}가 맡는다. 네트워크 지연, 부하, 보안, WebSocket 전송도 범위
  * 밖이다.
  *
- * <p>작성 규칙: 포트는 0에 바인딩하고, 대기는 {@code sleep} 없이 알림과 Future, 상한 시간 대기로 한다. 새 시나리오는 무엇을 예방하는지 Javadoc과
+ * <p>작성 규칙: 포트는 0에 바인딩하고, 대기는 {@code sleep} 없이 알림과 Future, 상한 시간 대기로 한다. 변경을 알려 주지 않는 관찰 지점 카운터만 상한이 있는 짧은 {@code parkNanos} 폴링으로 본다. 새 시나리오는 무엇을 예방하는지 Javadoc과
  * {@code @DisplayName}에 적는다.
  */
 package io.github.ppzxc.strand.integration;

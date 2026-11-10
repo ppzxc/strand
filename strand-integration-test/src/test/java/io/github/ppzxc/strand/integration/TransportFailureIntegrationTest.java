@@ -36,6 +36,7 @@ class TransportFailureIntegrationTest {
                 Peer client = Peer.connect(server.port(), null)) {
             Peer serverSide = server.awaitPeer();
             RequestHandle handle = client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
+            client.logResult(handle.result());
             serverSide.awaitRequest();
 
             serverSide.stop();
@@ -48,6 +49,8 @@ class TransportFailureIntegrationTest {
             assertThat(closed.reason().kind()).isEqualTo(CloseReason.Kind.DISCONNECTED);
             assertThat(closed.ioException()).isPresent();
             assertThat(client.closedNotices()).hasSize(1);
+            // 결과가 종료 알림보다 먼저다. 요청 하나가 결과를 정확히 한 번 받고 알림이 그 뒤에 한 번 온다.
+            assertThat(client.log()).containsExactly(Peer.RESULT, Peer.CLOSED);
         }
     }
 
@@ -62,6 +65,7 @@ class TransportFailureIntegrationTest {
                 Peer client = Peer.connect(silentServer.getLocalPort(), null)) {
             Socket accepted = silentServer.accept();
             RequestHandle handle = client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
+            client.logResult(handle.result());
 
             accepted.close();
             RequestResult result = await(handle);
@@ -71,6 +75,10 @@ class TransportFailureIntegrationTest {
             assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
             assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
             assertThat(client.closedNotices()).hasSize(1);
+            assertThat(client.log()).containsExactly(Peer.RESULT, Peer.CLOSED);
+            // 결과 Future는 스트림 번호를 드러내지 않아 "스트림 번호 미배정"은 볼 수 없다. 대신 요청 프레임이 통로에 쓰이지 않았음을 보낸 프레임 수로 본다.
+            // 말 없는 서버에 클라이언트가 쓴 것은 HELLO 하나뿐이다.
+            assertThat(client.driver().writtenFrames()).isEqualTo(1);
         }
     }
 
