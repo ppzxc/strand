@@ -531,7 +531,10 @@ final class VectorRunner {
         for (int at = 0; at + Protocol.PARAM_ENTRY_SIZE <= payload.length; at += Protocol.PARAM_ENTRY_SIZE) {
             int id = ((payload[at] & 0xFF) << 8) | (payload[at + 1] & 0xFF);
             text.append(text.length() == 0 ? "" : ",")
-                    .append(id == 1 ? "credential_lifetime" : String.format("0x%04x", id))
+                    .append(
+                            id == Protocol.AUTH_PARAM_CREDENTIAL_LIFETIME
+                                    ? "credential_lifetime"
+                                    : String.format("0x%04x", id))
                     .append('=')
                     .append(Bytes.readUnsignedInt(payload, at + 2));
         }
@@ -557,7 +560,7 @@ final class VectorRunner {
     private static List<byte[]> frames(byte[] output) {
         List<byte[]> result = new ArrayList<>();
         int at = 0;
-        while (at + 4 <= output.length) {
+        while (at + Protocol.LENGTH_SIZE <= output.length) {
             int size = (int) (Protocol.LENGTH_SIZE + Bytes.readUnsignedInt(output, at));
             assertThat(at + size).as("보낸 바이트가 프레임 경계에서 끝나야 한다").isLessThanOrEqualTo(output.length);
             result.add(Arrays.copyOfRange(output, at, at + size));

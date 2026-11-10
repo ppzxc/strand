@@ -70,6 +70,8 @@ final class Protocol {
     static final Map<String, Long> HELLO_DEFAULTS;
     /** 파라미터 항목 하나의 크기: 번호 2바이트와 값 4바이트. */
     static final int PARAM_ENTRY_SIZE = 6;
+    /** AUTH(ACK) 파라미터 중 이름이 있는 {@code credential_lifetime}의 번호. */
+    static final int AUTH_PARAM_CREDENTIAL_LIFETIME = 1;
 
     static {
         Map<Integer, String> names = new LinkedHashMap<>();
