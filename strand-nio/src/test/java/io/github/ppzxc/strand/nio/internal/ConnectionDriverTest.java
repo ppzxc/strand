@@ -31,6 +31,7 @@ class ConnectionDriverTest {
 
     private static final int APPLICATION_TYPE = 256;
     private static final int STATUS_OK = 0;
+    private static final int STATUS_CANCELLED = 1;
     private static final int STATUS_UNAVAILABLE = 14;
 
     /** 통로 종류와 거기에 맞는 엔드포인트 설정. */
@@ -244,6 +245,106 @@ class ConnectionDriverTest {
         for (CompletableFuture<Void> check : checks) {
             await(check);
         }
+    }
+
+    @ParameterizedTest
+    @EnumSource(Wire.class)
+    void cancellingARequestThePeerAlreadyReceivedEndsItWithCancelledAndAnUnknownOutcome(Wire wire) throws Exception {
+        InMemoryPassage.Pair link = wire.connect();
+        CountDownLatch received = new CountDownLatch(1);
+        server(wire, link.second(), request -> received.countDown());
+        ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
+        RequestHandle handle = client.request(APPLICATION_TYPE, bytes("unanswered"));
+        assertThat(received.await(5, TimeUnit.SECONDS)).isTrue();
+
+        handle.cancel();
+
+        RequestResult result = await(handle.result());
+        assertThat(result.status()).isEqualTo(STATUS_CANCELLED);
+        assertThat(result.certainty()).isEqualTo(Certainty.UNKNOWN);
+    }
+
+    @ParameterizedTest
+    @EnumSource(Wire.class)
+    void cancellingARequestStillWaitingForTheAuthGateEndsItWithCancelledAndNotProcessed(Wire wire) throws Exception {
+        InMemoryPassage.Pair link = wire.connect();
+        ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
+        RequestHandle deferred = client.request(APPLICATION_TYPE, bytes("deferred"));
+
+        deferred.cancel();
+
+        RequestResult result = await(deferred.result());
+        assertThat(result.status()).isEqualTo(STATUS_CANCELLED);
+        assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+    }
+
+    @Test
+    void cancellingAFinishedRequestChangesNothing() throws Exception {
+        Wire wire = Wire.STREAM;
+        InMemoryPassage.Pair link = wire.connect();
+        server(wire, link.second(), ConnectionDriverTest::echo);
+        ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
+        RequestHandle handle = client.request(APPLICATION_TYPE, bytes("done"));
+        RequestResult answered = await(handle.result());
+
+        handle.cancel();
+
+        assertThat(await(handle.result())).isSameAs(answered);
+        assertThat(text(await(
+                        client.request(APPLICATION_TYPE, bytes("next")).result().thenApply(RequestResult::body))))
+                .isEqualTo("re:next");
+    }
+
+    @Test
+    void cancellingAfterTheConnectionEndedIsHarmless() throws Exception {
+        Wire wire = Wire.STREAM;
+        InMemoryPassage.Pair link = wire.connect();
+        ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
+        RequestHandle handle = client.request(APPLICATION_TYPE, bytes("late"));
+        client.close();
+        RequestResult ended = await(handle.result());
+
+        handle.cancel();
+
+        assertThat(await(handle.result())).isSameAs(ended);
+    }
+
+    @Test
+    void aRequestOverThePeersConcurrentStreamLimitEndsAtOnceWithUnavailableAndNotProcessed() throws Exception {
+        InMemoryPassage.Pair link = InMemoryPassage.streams();
+        CountDownLatch received = new CountDownLatch(1);
+        start(ConnectionDriver.server(EndpointConfig.defaults().maxConcurrentStreams(1), link.second())
+                .handler(handlers, request -> received.countDown()));
+        ConnectionDriver client = client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
+        RequestHandle first = client.request(APPLICATION_TYPE, bytes("occupies the only stream"));
+        assertThat(received.await(5, TimeUnit.SECONDS)).isTrue();
+
+        RequestResult refused =
+                await(client.request(APPLICATION_TYPE, bytes("one too many")).result());
+
+        assertThat(refused.status()).isEqualTo(STATUS_UNAVAILABLE);
+        assertThat(refused.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+        assertThat(first.result()).isNotDone();
+    }
+
+    @Test
+    void aDeferredRequestLargerThanThePeersMaxFrameSizeEndsWithALocalUnavailableResult() throws Exception {
+        InMemoryPassage.Pair link = InMemoryPassage.streams();
+        ConnectionDriver client = client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
+        CompletableFuture<RequestResult> tooBig =
+                client.request(APPLICATION_TYPE, new byte[20000]).result();
+        assertThat(tooBig).isNotDone();
+
+        start(ConnectionDriver.server(EndpointConfig.defaults().maxFrameSize(16384), link.second())
+                .handler(handlers, ConnectionDriverTest::echo));
+
+        RequestResult result = await(tooBig);
+        assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
+        assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+        assertThat(text(await(client.request(APPLICATION_TYPE, bytes("after"))
+                        .result()
+                        .thenApply(RequestResult::body))))
+                .isEqualTo("re:after");
     }
 
     @Test

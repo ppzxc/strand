@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.nio.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
@@ -273,5 +274,27 @@ class ConnectionDriverClockTest {
         settle(client, server);
         assertThat(handle.result()).isDone();
         assertThat(client.passage.lastAwaitTimeoutMs()).isNegative();
+    }
+
+    @Test
+    void aDeadlineBelowOneMillisecondIsRejected() {
+        InMemoryPassage.Pair link = InMemoryPassage.messages();
+        Side client = new Side(link.first());
+        startClient(client, config());
+
+        assertThatThrownBy(() -> client.driver.request(APPLICATION_TYPE, bytes("x"), 0))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void aPingWithoutEightBytesFailsItsFutureAndKeepsTheConnection() {
+        InMemoryPassage.Pair link = InMemoryPassage.messages();
+        Side client = new Side(link.first());
+        startClient(client, config());
+
+        assertThat(client.driver.ping(new byte[3]))
+                .failsWithin(5, TimeUnit.SECONDS)
+                .withThrowableThat()
+                .withCauseInstanceOf(IllegalArgumentException.class);
     }
 }
