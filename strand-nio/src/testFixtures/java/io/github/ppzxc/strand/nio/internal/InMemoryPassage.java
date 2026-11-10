@@ -53,6 +53,7 @@ public final class InMemoryPassage implements Passage {
     private boolean outputShutdown;
     private boolean manualTime;
     private boolean muted;
+    private boolean held;
     private boolean parked;
     private long lastAwaitTimeoutMs = Long.MIN_VALUE;
     private long activity;
@@ -98,7 +99,7 @@ public final class InMemoryPassage implements Passage {
             }
             activity++;
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(timeoutMs, 0));
-            while (inbox.isEmpty() && !woken) {
+            while ((held || inbox.isEmpty()) && !woken) {
                 if (closed) {
                     throw new IOException("닫힌 통로");
                 }
@@ -126,7 +127,7 @@ public final class InMemoryPassage implements Passage {
                 }
             }
             activity++;
-            if (!inbox.isEmpty()) {
+            if (!held && !inbox.isEmpty()) {
                 return inbox.poll();
             }
             woken = false;
@@ -219,6 +220,25 @@ public final class InMemoryPassage implements Passage {
         }
     }
 
+    /**
+     * 상대가 보낸 것을 받아 두기만 하고 {@link #releaseDeliveries}까지 읽게 하지 않는다. 상대가 한 스텝에 나눠 쓴 여러 프레임이 읽는 쪽에 같은
+     * 읽기로 함께 도착하는 상황을 결정적으로 만든다(읽는 스레드가 첫 프레임만 보고 깨어나는 경쟁이 없다). 드라이버를 시작하기 전에 부른다.
+     */
+    public void holdDeliveries() {
+        synchronized (lock) {
+            held = true;
+        }
+    }
+
+    /** {@link #holdDeliveries}로 받아 둔 것을 한꺼번에 읽게 하고 기다리는 읽기를 깨운다. */
+    public void releaseDeliveries() {
+        synchronized (lock) {
+            activity++;
+            held = false;
+            lock.notifyAll();
+        }
+    }
+
     /** 이 통로로 쓰는 것을 상대에게 보내지 않고 버린다(쓰기는 성공한 것처럼 돌아온다). 말 없는 상대를 만든다. */
     public void mute() {
         synchronized (lock) {
@@ -253,7 +273,7 @@ public final class InMemoryPassage implements Passage {
      */
     private boolean parked() {
         synchronized (lock) {
-            return closed || (parked && inbox.isEmpty() && !woken);
+            return closed || (parked && (held || inbox.isEmpty()) && !woken);
         }
     }
 

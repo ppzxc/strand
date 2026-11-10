@@ -42,6 +42,7 @@ class TransportFailureIntegrationTest {
             serverSide.stop();
             RequestResult result = await(handle);
             ConnectionClosed closed = client.awaitClosed();
+            client.awaitResultsLogged();
             client.stop();
 
             assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
@@ -70,12 +71,15 @@ class TransportFailureIntegrationTest {
             accepted.close();
             RequestResult result = await(handle);
             client.awaitClosed();
+            // 결과를 적는 동작은 결과 Future를 끝낸 스레드에서, 종료 알림은 핸들러 실행기에서 돈다. 둘의 순서는 정해져 있지 않으므로
+            // 둘 다 적힌 뒤에 순서와 무관하게 본다.
+            client.awaitResultsLogged();
             client.stop();
 
             assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
             assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
             assertThat(client.closedNotices()).hasSize(1);
-            assertThat(client.log()).containsExactly(Peer.RESULT, Peer.CLOSED);
+            assertThat(client.log()).containsExactlyInAnyOrder(Peer.RESULT, Peer.CLOSED);
             // 결과 Future는 스트림 번호를 드러내지 않아 "스트림 번호 미배정"은 볼 수 없다. 대신 요청 프레임이 통로에 쓰이지 않았음을 보낸 프레임 수로 본다.
             // 말 없는 서버에 클라이언트가 쓴 것은 HELLO 하나뿐이다.
             assertThat(client.driver().writtenFrames()).isEqualTo(1);

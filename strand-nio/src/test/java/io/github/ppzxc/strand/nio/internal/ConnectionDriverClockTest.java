@@ -223,6 +223,9 @@ class ConnectionDriverClockTest {
         InMemoryPassage.Pair link = wire.connect();
         Side client = new Side(link.first());
         Side server = new Side(link.second());
+        // 서버가 한 스텝에 나눠 쓰는 프레임(HELLO, ACK)이 클라이언트에 한 읽기로 함께 도착하게 붙잡아 둔다. 붙잡지 않으면 클라이언트
+        // 스레드가 첫 프레임만 보고 깨어나 시계를 먼저 보낼 수 있고, 그것은 올바른 확인 대기 초과라 시험이 때로 실패한다.
+        client.passage.holdDeliveries();
         startClient(client, wire.config().ackTimeoutMs(1000));
         RequestHandle handle = client.driver.request(APPLICATION_TYPE, bytes("hello"));
         settle(client);
@@ -233,6 +236,8 @@ class ConnectionDriverClockTest {
                 server,
                 wire.config(),
                 request -> request.respond(0, bytes("re:hello")).join());
+        settle(server);
+        client.passage.releaseDeliveries();
         settle(client, server);
 
         // 핸들러는 다른 스레드에서 돌아 응답이 가라앉은 뒤에 올 수 있으므로 결과를 기다린다(시계와 무관하다).
