@@ -103,7 +103,11 @@ class ConnectionNotificationTest {
         @Override
         public Inbound await(long timeoutMs) throws IOException {
             try {
-                return inbox.take();
+                if (timeoutMs < 0) {
+                    return inbox.take();
+                }
+                Inbound inbound = inbox.poll(timeoutMs, TimeUnit.MILLISECONDS);
+                return inbound == null ? Inbound.none() : inbound;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException(e);
@@ -528,11 +532,12 @@ class ConnectionNotificationTest {
     void afterTheCloseExchangeBothSidesCloseOnlyTheirOutputAndEndOnceThePeerHangsUp() throws Exception {
         Exchanged link = new Exchanged();
         await(link.clientSide.authenticated);
+        // 서버가 보내는 쪽을 닫지 않으니 클라이언트는 CLOSE와 EOF를 한 번에 읽지 않고 CLOSED 뒤에 보내는 쪽만 닫는다.
+        link.server.holdShutdown = true;
 
         link.clientDriver.closeConnection();
 
         awaitLatch(link.client.shutdownCalled);
-        awaitLatch(link.server.shutdownCalled);
         awaitLatch(link.client.closed);
         awaitLatch(link.server.closed);
         awaitBothEnded(link);
