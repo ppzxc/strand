@@ -61,7 +61,7 @@ final class AckWaits {
 
     /** 벡터에 advance 단계가 있는가. */
     static boolean hasAdvance(JsonObject vector) {
-        return anyStep(vector, step -> Steps.kindOf(step).equals("advance"));
+        return anyStep(vector, step -> StepKind.of(step).advancesTime());
     }
 
     private static boolean anyStep(JsonObject vector, Predicate<JsonObject> matches) {
@@ -131,7 +131,7 @@ final class AckWaits {
                 endOldestMatching(running, ack);
             }
             running.addAll(startedBy(step, server));
-            if (Steps.kindOf(step).equals("advance")) {
+            if (StepKind.of(step).advancesTime()) {
                 long ms = step.get("ms").getAsLong();
                 for (Wait wait : running) {
                     wait.elapsed += ms;
@@ -212,7 +212,7 @@ final class AckWaits {
 
     /** 보낸 PING의 payload. ping 단계는 단계의 payload이고, 아니면 프레임의 payload이며, 알 수 없으면 null이다. */
     private static String pingPayload(JsonObject step, JsonObject frame) {
-        JsonElement payload = Steps.kindOf(step).equals("ping") ? step.get("payload") : frame.get("payload");
+        JsonElement payload = StepKind.of(step).sendsPing() ? step.get("payload") : frame.get("payload");
         return payload != null
                         && payload.isJsonPrimitive()
                         && payload.getAsJsonPrimitive().isString()

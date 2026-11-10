@@ -11,7 +11,7 @@ final class Steps {
 
     /** 이 단계 뒤에 연결이 끝나는가: 상대가 끊었거나(disconnect) 연결이 닫혔음이 애플리케이션에 전달됐다(closed 이벤트). */
     static boolean endsConnection(JsonObject step) {
-        if (kindOf(step).equals("disconnect")) {
+        if (StepKind.of(step).endsConnection()) {
             return true;
         }
         for (JsonElement event : step.getAsJsonArray("events")) {
@@ -21,10 +21,6 @@ final class Steps {
             }
         }
         return false;
-    }
-
-    static String kindOf(JsonObject step) {
-        return step.get("kind").getAsString();
     }
 
     /** 공백을 지우고 소문자로 맞춘 hex. 로더를 거치지 않은 JSON을 읽으므로 표기를 여기서 맞춘다. */

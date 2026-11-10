@@ -1,7 +1,5 @@
 package io.github.ppzxc.strand.conformance;
 
-import static io.github.ppzxc.strand.conformance.Protocol.errorCode;
-import static io.github.ppzxc.strand.conformance.Protocol.statusCode;
 import static io.github.ppzxc.strand.conformance.Protocol.streamId;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,11 +16,9 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.BiConsumer;
 
 /**
  * 벡터 하나를 엔드포인트에 실행한다. `setup`으로 엔드포인트를 만들고 단계마다 입력을 넣어, 보낸 바이트를 프레임으로 풀어 `send`와,
@@ -34,51 +30,6 @@ final class VectorRunner {
 
     /** 러너가 지원하는 setup 키. 형태 검사의 setup 키 목록에서 나온다. */
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(VectorSchema.setupKeys());
-    /** 실행할 수 있는 단계. 지원 여부와 실행이 이 표 하나에서 정해진다. */
-    private static final Map<String, BiConsumer<VectorRunner, JsonObject>> STEPS = new LinkedHashMap<>();
-
-    static {
-        STEPS.put(
-                "recv",
-                (runner, step) ->
-                        runner.endpoint.receive(Bytes.fromHex(step.get("hex").getAsString())));
-        STEPS.put(
-                "recv_message",
-                (runner, step) -> runner.endpoint.receiveMessage(
-                        step.get("opcode").getAsString().equals("binary")
-                                ? WebSocketMessageKind.BINARY
-                                : WebSocketMessageKind.TEXT,
-                        Bytes.fromHex(step.get("hex").getAsString())));
-        STEPS.put(
-                "advance",
-                (runner, step) -> runner.endpoint.advance(step.get("ms").getAsLong()));
-        STEPS.put(
-                "ping",
-                (runner, step) ->
-                        runner.endpoint.ping(Bytes.fromHex(step.get("payload").getAsString())));
-        STEPS.put("request", (runner, step) -> {
-            byte[] payload =
-                    Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "");
-            if (step.has("deadline_ms")) {
-                runner.endpoint.request(
-                        step.get("type").getAsInt(),
-                        payload,
-                        step.get("deadline_ms").getAsLong());
-            } else {
-                runner.endpoint.request(step.get("type").getAsInt(), payload);
-            }
-        });
-        STEPS.put("cancel", (runner, step) -> runner.endpoint.cancel(streamId(step.get("stream_id"))));
-        STEPS.put(
-                "respond",
-                (runner, step) -> runner.endpoint.respond(
-                        streamId(step.get("stream_id")),
-                        statusCode(step.get("status")),
-                        Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
-        STEPS.put("disconnect", (runner, step) -> runner.endpoint.disconnect());
-        STEPS.put("close", (runner, step) -> runner.endpoint.close(errorCode(step.get("error_code"))));
-    }
-
     private final boolean client;
     private final boolean webSocket;
     private final Endpoint endpoint;
@@ -134,14 +85,11 @@ final class VectorRunner {
             }
         }
         for (JsonObject step : vector.steps()) {
-            String kind = step.get("kind").getAsString();
-            requireSupportedPart(STEPS.containsKey(kind), vector, "단계 " + kind);
-            requireSupportedPart(
-                    !kind.equals("request")
-                            || !step.has("extensions")
-                            || step.getAsJsonArray("extensions").size() == 0,
-                    vector,
-                    "request.extensions");
+            String kindName = step.get(StepKind.TAG).getAsString();
+            StepKind kind = StepKind.named(kindName);
+            requireSupportedPart(kind != null && kind.isSupported(), vector, "단계 " + kindName);
+            String unsupportedPart = kind.unsupportedPart(step);
+            requireSupportedPart(unsupportedPart == null, vector, unsupportedPart);
             for (JsonElement element : step.getAsJsonArray("send")) {
                 JsonObject frame = element.getAsJsonObject();
                 requireSupportedPart(FrameKind.isSupported(frame), vector, "프레임 " + frame.get("type"));
@@ -281,7 +229,7 @@ final class VectorRunner {
     }
 
     private void apply(JsonObject step) {
-        STEPS.get(step.get("kind").getAsString()).accept(this, step);
+        StepKind.of(step).execute(endpoint, step);
     }
 
     private static List<String> expectedFrames(JsonObject step) {
