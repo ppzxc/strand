@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,18 @@ class ExamplesUseTheTransportModuleTest {
                 .extracting(path -> path.getFileName().toString())
                 .contains(
                         "BlockingTcpExample.java", "NioTcpExample.java", "ServerExample.java", "WebSocketExample.java");
+    }
+
+    @Test
+    void noExampleReferencesTheEndpointTypeItself() throws IOException {
+        // 변수로 받은 Endpoint의 ping, close, request 호출도 막으려고 타입 참조 자체를 금지한다. EndpointConfig는 설정이라 쓴다.
+        Pattern endpointType = Pattern.compile("\\bEndpoint\\b");
+        for (Path source : exampleSources()) {
+            String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+            assertThat(endpointType.matcher(text).find())
+                    .as(source.getFileName() + "가 Endpoint 타입을 참조한다")
+                    .isFalse();
+        }
     }
 
     @Test
