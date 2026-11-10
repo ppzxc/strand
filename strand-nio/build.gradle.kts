@@ -14,6 +14,7 @@ dependencies {
 }
 
 // 공개 API가 모두 internal 패키지라 japicmp가 비교할 대상이 없고, 아직 배포한 적 없어 기준선 jar도 없다.
+// 공개 API를 확정하거나 첫 배포를 해서 기준선 jar가 생기면 다시 켠다.
 tasks.named("japicmp") {
   enabled = false
 }

@@ -147,9 +147,10 @@ public final class ConnectionDriver implements AutoCloseable {
      *
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param body 요청 본문
-     * @return 결과(status, 결과 확정성, 응답 본문)가 오면 끝나는 Future. 보낼 수 없는 요청이면 예외로 끝난다
+     * @return 요청 핸들. {@link RequestHandle#result()}가 결과(status, 결과 확정성, 응답 본문)가 오면 끝나고, 보낼 수 없는 요청이면 예외로
+     *     끝난다
      */
-    public CompletableFuture<RequestResult> request(int type, byte[] body) {
+    public RequestHandle request(int type, byte[] body) {
         CompletableFuture<RequestResult> future = new CompletableFuture<>();
         byte[] copy = body.clone();
         submit(new Command() {
@@ -167,7 +168,7 @@ public final class ConnectionDriver implements AutoCloseable {
                 future.completeExceptionally(reason);
             }
         });
-        return future;
+        return new RequestHandle(future);
     }
 
     /**

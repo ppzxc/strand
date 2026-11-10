@@ -113,11 +113,14 @@ class ConnectionDriverTest {
     @ParameterizedTest
     @EnumSource(Wire.class)
     void clientRequestReceivesTheServerHandlersResponse(Wire wire) throws Exception {
+        // AUTH 관문 통과(AC1)는 알림이 아직 없어(#237) 간접으로 확인한다. 응용 요청은 관문 통과 뒤에야 서버에 닿으므로,
+        // 서버 핸들러가 불리고 그 응답이 클라이언트 Future에 닿았다면 두 연결 모두 관문을 통과한 것이다.
         InMemoryPassage.Pair link = wire.connect();
         server(wire, link.second(), ConnectionDriverTest::echo);
         ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
 
-        RequestResult result = await(client.request(APPLICATION_TYPE, bytes("hello")));
+        RequestResult result =
+                await(client.request(APPLICATION_TYPE, bytes("hello")).result());
 
         assertThat(result.status()).isEqualTo(STATUS_OK);
         assertThat(result.certainty()).isEqualTo(Certainty.RESPONSE);
@@ -131,7 +134,8 @@ class ConnectionDriverTest {
         ConnectionDriver server = server(wire, link.second(), ConnectionDriverTest::ignore);
         client(wire, link.first(), ConnectionDriverTest::echo);
 
-        RequestResult result = await(server.request(APPLICATION_TYPE + 1, bytes("from-server")));
+        RequestResult result =
+                await(server.request(APPLICATION_TYPE + 1, bytes("from-server")).result());
 
         assertThat(result.status()).isEqualTo(STATUS_OK);
         assertThat(text(result.body())).isEqualTo("re:from-server");
@@ -142,7 +146,8 @@ class ConnectionDriverTest {
     void requestIssuedBeforeThePeerStartsReceivesItsResultAfterTheAuthGate(Wire wire) throws Exception {
         InMemoryPassage.Pair link = wire.connect();
         ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
-        CompletableFuture<RequestResult> early = client.request(APPLICATION_TYPE, bytes("early"));
+        CompletableFuture<RequestResult> early =
+                client.request(APPLICATION_TYPE, bytes("early")).result();
         assertThat(early).isNotDone();
 
         server(wire, link.second(), ConnectionDriverTest::echo);
@@ -159,7 +164,7 @@ class ConnectionDriverTest {
 
         List<CompletableFuture<RequestResult>> futures = new ArrayList<>();
         for (int i = 0; i < 50; i++) {
-            futures.add(client.request(APPLICATION_TYPE, bytes("n" + i)));
+            futures.add(client.request(APPLICATION_TYPE, bytes("n" + i)).result());
         }
 
         for (int i = 0; i < 50; i++) {
@@ -192,7 +197,8 @@ class ConnectionDriverTest {
             });
             ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
 
-            RequestResult result = await(client.request(APPLICATION_TYPE + 7, bytes("payload")));
+            RequestResult result =
+                    await(client.request(APPLICATION_TYPE + 7, bytes("payload")).result());
 
             assertThat(text(result.body())).isEqualTo("late");
             assertThat(handlerThread.get()).isEqualTo("test-handler");
@@ -223,7 +229,8 @@ class ConnectionDriverTest {
                             go.await();
                             for (int i = 0; i < perThread; i++) {
                                 String body = id + "-" + i;
-                                RequestResult result = await(sender.request(APPLICATION_TYPE, bytes(body)));
+                                RequestResult result = await(sender.request(APPLICATION_TYPE, bytes(body))
+                                        .result());
                                 assertThat(text(result.body())).isEqualTo("re:" + body);
                             }
                         } catch (Exception e) {
@@ -246,7 +253,8 @@ class ConnectionDriverTest {
         CountDownLatch received = new CountDownLatch(1);
         server(wire, link.second(), request -> received.countDown());
         ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
-        CompletableFuture<RequestResult> pending = client.request(APPLICATION_TYPE, bytes("unanswered"));
+        CompletableFuture<RequestResult> pending =
+                client.request(APPLICATION_TYPE, bytes("unanswered")).result();
         assertThat(received.await(5, TimeUnit.SECONDS)).isTrue();
 
         link.second().close();
@@ -263,7 +271,8 @@ class ConnectionDriverTest {
         ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
         client.close();
 
-        CompletableFuture<RequestResult> late = client.request(APPLICATION_TYPE, bytes("late"));
+        CompletableFuture<RequestResult> late =
+                client.request(APPLICATION_TYPE, bytes("late")).result();
 
         assertThat(late).isCompletedExceptionally();
     }
@@ -275,7 +284,8 @@ class ConnectionDriverTest {
         CountDownLatch received = new CountDownLatch(1);
         server(wire, link.second(), request -> received.countDown());
         ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
-        CompletableFuture<RequestResult> pending = client.request(APPLICATION_TYPE, bytes("unanswered"));
+        CompletableFuture<RequestResult> pending =
+                client.request(APPLICATION_TYPE, bytes("unanswered")).result();
         assertThat(received.await(5, TimeUnit.SECONDS)).isTrue();
 
         link.first().close();
@@ -323,10 +333,11 @@ class ConnectionDriverTest {
         UnwritablePassage unwritable = new UnwritablePassage(link.first());
         server(wire, link.second(), ConnectionDriverTest::echo);
         ConnectionDriver client = client(wire, unwritable, ConnectionDriverTest::ignore);
-        await(client.request(APPLICATION_TYPE, bytes("warm-up")));
+        await(client.request(APPLICATION_TYPE, bytes("warm-up")).result());
         unwritable.failWrites.set(true);
 
-        RequestResult result = await(client.request(APPLICATION_TYPE, bytes("unsendable")));
+        RequestResult result =
+                await(client.request(APPLICATION_TYPE, bytes("unsendable")).result());
 
         assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
     }
@@ -336,9 +347,11 @@ class ConnectionDriverTest {
         InMemoryPassage.Pair link = InMemoryPassage.streams();
         ConnectionDriver server = start(ConnectionDriver.server(EndpointConfig.defaults(), link.second()));
         ConnectionDriver client = client(Wire.STREAM, link.first(), ConnectionDriverTest::echo);
-        CompletableFuture<RequestResult> pending = client.request(APPLICATION_TYPE, bytes("nobody-home"));
+        CompletableFuture<RequestResult> pending =
+                client.request(APPLICATION_TYPE, bytes("nobody-home")).result();
         // 서버 쪽 요청이 결과를 받으면 연결은 수립된 것이다.
-        assertThat(await(server.request(APPLICATION_TYPE, bytes("ping"))).status())
+        assertThat(await(server.request(APPLICATION_TYPE, bytes("ping")).result())
+                        .status())
                 .isEqualTo(STATUS_OK);
 
         server.close();
@@ -357,7 +370,8 @@ class ConnectionDriverTest {
                 })));
         ConnectionDriver client = client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
 
-        RequestResult result = await(client.request(APPLICATION_TYPE, bytes("close-me")));
+        RequestResult result =
+                await(client.request(APPLICATION_TYPE, bytes("close-me")).result());
 
         assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
     }
@@ -389,15 +403,18 @@ class ConnectionDriverTest {
         start(ConnectionDriver.server(EndpointConfig.defaults().maxFrameSize(16384), link.second())
                 .handler(handlers, ConnectionDriverTest::echo));
         ConnectionDriver client = client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
-        await(client.request(APPLICATION_TYPE, bytes("warm-up")));
+        await(client.request(APPLICATION_TYPE, bytes("warm-up")).result());
 
-        CompletableFuture<RequestResult> tooBig = client.request(APPLICATION_TYPE, new byte[20000]);
+        CompletableFuture<RequestResult> tooBig =
+                client.request(APPLICATION_TYPE, new byte[20000]).result();
 
         assertThat(tooBig)
                 .failsWithin(5, TimeUnit.SECONDS)
                 .withThrowableThat()
                 .withCauseInstanceOf(IllegalArgumentException.class);
-        assertThat(text(await(client.request(APPLICATION_TYPE, bytes("after")).thenApply(RequestResult::body))))
+        assertThat(text(await(client.request(APPLICATION_TYPE, bytes("after"))
+                        .result()
+                        .thenApply(RequestResult::body))))
                 .isEqualTo("re:after");
     }
 
@@ -417,7 +434,8 @@ class ConnectionDriverTest {
         start(ConnectionDriver.client(EndpointConfig.defaults().maxFrameSize(16384), link.first()));
         ConnectionDriver client = started.get(1);
 
-        RequestResult result = await(client.request(APPLICATION_TYPE, bytes("big-please")));
+        RequestResult result =
+                await(client.request(APPLICATION_TYPE, bytes("big-please")).result());
 
         assertThat(text(result.body())).isEqualTo("small");
     }
@@ -432,8 +450,10 @@ class ConnectionDriverTest {
                         },
                         ConnectionDriverTest::ignore));
         ConnectionDriver client = client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
-        CompletableFuture<RequestResult> serverOwn = server.request(APPLICATION_TYPE, bytes("server-own"));
-        CompletableFuture<RequestResult> clientOwn = client.request(APPLICATION_TYPE, bytes("trigger"));
+        CompletableFuture<RequestResult> serverOwn =
+                server.request(APPLICATION_TYPE, bytes("server-own")).result();
+        CompletableFuture<RequestResult> clientOwn =
+                client.request(APPLICATION_TYPE, bytes("trigger")).result();
 
         assertThat(serverOwn).failsWithin(5, TimeUnit.SECONDS);
         assertThat(await(clientOwn).status()).isEqualTo(STATUS_UNAVAILABLE);
