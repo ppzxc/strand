@@ -44,10 +44,7 @@ class ExamplesUseTheTransportModuleTest {
         assertThat(exampleSources())
                 .extracting(path -> path.getFileName().toString())
                 .contains(
-                        "BlockingTcpExample.java",
-                        "NioTcpExample.java",
-                        "ServerExample.java",
-                        "WebSocketExample.java");
+                        "BlockingTcpExample.java", "NioTcpExample.java", "ServerExample.java", "WebSocketExample.java");
     }
 
     @Test
