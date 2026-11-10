@@ -461,6 +461,7 @@ public final class ConnectionDriver implements AutoCloseable {
     }
 
     private void drive(Loop loop) {
+        Throwable failure = null;
         try {
             loop.settle();
             while (!loop.finished) {
@@ -469,11 +470,27 @@ public final class ConnectionDriver implements AutoCloseable {
         } catch (RuntimeException | Error e) {
             // 예기치 못한 오류(핸들러 실행기 거부, 엔드포인트가 거부한 입력 등). 연결을 끊어 core가 내는 결과로 Future를 끝내고,
             // 오류는 스레드의 처리기가 보게 다시 던진다.
+            failure = e;
             loop.abort(e);
             throw e;
         } finally {
-            // stopped를 올리기 전에, 연결이 끝나기 전에 큐에 들어간 명령을 이미 끊긴 엔드포인트로 흘려 core가 내는 결과로 끝낸다.
+            finish(loop, failure);
+        }
+    }
+
+    /**
+     * 전송 스레드가 끝나기 전의 마무리. {@code stopped}를 올리기 전에, 연결이 끝나기 전에 큐에 들어간 명령을 이미 끊긴 엔드포인트로 흘려 core가
+     * 내는 결과로 끝낸다. 소진 중 난 오류가 멈추게 한 원래 오류를 가리지 않으며, 어떤 경우에도 남은 Future는 끝낸다.
+     */
+    private void finish(Loop loop, @Nullable Throwable failure) {
+        try {
             loop.drainCommands();
+        } catch (RuntimeException | Error e) {
+            if (failure == null) {
+                throw e;
+            }
+            failure.addSuppressed(e);
+        } finally {
             loop.failPending();
         }
     }
