@@ -288,13 +288,13 @@ class AckWaitsTest {
     void authAckReceivedThroughMarksTheStepsFromTheOneThatCarriesIt() {
         JsonObject v = limit1000(recv(PREFACE), recv(AUTH_ACK), advance(1));
 
-        assertThat(AckWaits.authAckReceivedThrough(v)).containsExactly(false, true, true);
+        assertThat(AuthGate.ackReceivedThrough(v)).containsExactly(false, true, true);
     }
 
     @Test
     void anAuthFrameWithoutTheAckFlagIsNotAnAuthAck() {
         JsonObject v = limit1000(recv(AUTH_FRAME), advance(1));
 
-        assertThat(AckWaits.authAckReceivedThrough(v)).containsExactly(false, false);
+        assertThat(AuthGate.ackReceivedThrough(v)).containsExactly(false, false);
     }
 }

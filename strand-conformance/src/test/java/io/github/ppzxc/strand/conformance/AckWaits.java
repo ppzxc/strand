@@ -86,29 +86,6 @@ final class AckWaits {
     }
 
     /**
-     * 각 단계가 끝난 시점까지 AUTH(ACK)를 받았는가. 클라이언트 역할의 AUTH 관문(규격 3.3절)이 열렸는지 보는 데 쓴다. 바이트를 읽는
-     * 방법은 확인 대기와 같다.
-     */
-    static boolean[] authAckReceivedThrough(JsonObject vector) {
-        int count = vector.getAsJsonArray("steps").size();
-        boolean[] result = new boolean[count];
-        InboundFrames stream = new InboundFrames();
-        boolean received = false;
-        for (int i = 0; i < count; i++) {
-            JsonObject step = vector.getAsJsonArray("steps").get(i).getAsJsonObject();
-            for (Ack ack : acknowledgedBy(step, stream)) {
-                received |= ack.type == Protocol.TYPE_AUTH;
-            }
-            result[i] = received;
-            if (InboundFrames.endsConnection(step)) {
-                stream = new InboundFrames();
-                received = false;
-            }
-        }
-        return result;
-    }
-
-    /**
      * 대기가 시작된 시점부터 센 경과 시간을 advance 단계마다 모아 돌려준다. 대기 여러 개가 겹치면 각각 따로 센다. 대기가 시작된
      * 단계 자체가 advance이면 그 단계의 시간을 대기 안에 센다(송신이 advance 앞에서 일어났다고 보는, 한도에 더 가까운 쪽의 해석).
      */
@@ -184,7 +161,7 @@ final class AckWaits {
             int type = frame.type;
             if (type == Protocol.TYPE_AUTH) {
                 // ACK가 없는 AUTH는 서버의 AUTH 대기를 끝낸다.
-                acks.add(new Ack(frame.hasAckFlag() ? Protocol.TYPE_AUTH : AUTH_REQUEST, null));
+                acks.add(new Ack(AuthGate.isAuthAck(frame) ? Protocol.TYPE_AUTH : AUTH_REQUEST, null));
             } else if (frame.hasAckFlag() && (type == Protocol.TYPE_HELLO || type == Protocol.TYPE_PING)) {
                 acks.add(new Ack(type, frame.pingSizedPayload()));
             }
