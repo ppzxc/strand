@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 서버 역할로 받은 연결마다 연결 드라이버를 하나씩 만든다. 받은 요청에는 핸들러가 {@code echo:} 뒤에 본문을 붙여 {@code OK}로 응답한다. 클라이언트
@@ -69,8 +71,11 @@ public final class ServerExample {
         }
 
         private void serve(SocketChannel channel) throws IOException {
-            ConnectionDriver[] self = new ConnectionDriver[1];
-            self[0] = ConnectionDriver.server(
+            // 연결이 start()가 돌아오기 전에 끝나 onClosed가 먼저 불릴 수 있다. 끝났다는 표시를 남기고, 등록한 뒤에 다시 확인해 어느 순서로
+            // 와도 끝난 연결이 목록에 남지 않게 한다.
+            AtomicReference<ConnectionDriver> started = new AtomicReference<>();
+            AtomicBoolean ended = new AtomicBoolean();
+            ConnectionDriver driver = ConnectionDriver.server(
                             ExampleSupport.withAuthenticator(EndpointConfig.defaults()), TcpPassage.of(channel))
                     .handler(handlers, request -> {
                         String body = new String(request.body(), StandardCharsets.UTF_8);
@@ -81,11 +86,19 @@ public final class ServerExample {
                         @Override
                         public void onClosed(ConnectionClosed event) {
                             System.out.println("[서버] 연결 종료 " + event.reason().kind());
-                            connections.removeIf(connection -> connection == self[0]);
+                            ended.set(true);
+                            ConnectionDriver self = started.get();
+                            if (self != null) {
+                                connections.remove(self);
+                            }
                         }
                     })
                     .start();
-            connections.add(self[0]);
+            started.set(driver);
+            connections.add(driver);
+            if (ended.get()) {
+                connections.remove(driver);
+            }
         }
 
         @Override
