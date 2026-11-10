@@ -64,6 +64,9 @@ final class OwnRequestLedger {
 
     /** 요청 하나가 끝나며 장부가 {@link Endpoint}에 돌려주는 결과. 번호를 받지 못한 요청이면 {@code streamId}는 0이다. */
     static final class Outcome {
+        /** 요청을 낼 때 돌려준 번호표. 번호를 받지 못한 요청도 가진다. */
+        final long ticket;
+
         final long streamId;
         final int status;
         final Certainty certainty;
@@ -72,7 +75,8 @@ final class OwnRequestLedger {
         /** 번호를 받은 요청의 결과인가. 번호 없는 요청의 결과는 스트림 번호가 없다(0). */
         private final boolean numbered;
 
-        Outcome(long streamId, int status, Certainty certainty, boolean resetToSend, boolean numbered) {
+        Outcome(long ticket, long streamId, int status, Certainty certainty, boolean resetToSend, boolean numbered) {
+            this.ticket = ticket;
             this.streamId = streamId;
             this.status = status;
             this.certainty = certainty;
@@ -415,7 +419,7 @@ final class OwnRequestLedger {
         int status = responseType == record.type ? Status.normalize(rawStatus) : Event.RESPONSE_TYPE_MISMATCH;
         unregister(record);
         unwrite(record);
-        return new Outcome(streamId, status, Certainty.RESPONSE, false, true);
+        return new Outcome(record.ticket, streamId, status, Certainty.RESPONSE, false, true);
     }
 
     /**
@@ -430,7 +434,7 @@ final class OwnRequestLedger {
         unregister(record);
         unwrite(record);
         Certainty certainty = errorCode == ErrorCode.REFUSED ? Certainty.NOT_PROCESSED : Certainty.UNKNOWN;
-        return new Outcome(streamId, Status.forReset(errorCode), certainty, false, true);
+        return new Outcome(record.ticket, streamId, Status.forReset(errorCode), certainty, false, true);
     }
 
     /**
@@ -448,7 +452,8 @@ final class OwnRequestLedger {
         for (Record record : ended) {
             unregister(record);
             unwrite(record);
-            outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false, true));
+            outcomes.add(new Outcome(
+                    record.ticket, record.streamId, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false, true));
         }
         return outcomes;
     }
@@ -461,7 +466,7 @@ final class OwnRequestLedger {
         closing = true;
         List<Outcome> outcomes = new ArrayList<>(queued.size());
         for (Record record = firstQueued; record != null; record = record.nextQueued) {
-            outcomes.add(new Outcome(0, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false, false));
+            outcomes.add(new Outcome(record.ticket, 0, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false, false));
             if (record.expiry != null) {
                 expirations.remove(record.expiry);
             }
@@ -477,10 +482,11 @@ final class OwnRequestLedger {
     List<Outcome> onTransportClosed() {
         List<Outcome> outcomes = new ArrayList<>(byStream.size() + queued.size());
         for (Record record : byStream.values()) {
-            outcomes.add(new Outcome(record.streamId, Status.UNAVAILABLE, endUnfinished(record), false, true));
+            outcomes.add(new Outcome(
+                    record.ticket, record.streamId, Status.UNAVAILABLE, endUnfinished(record), false, true));
         }
         for (Record record = firstQueued; record != null; record = record.nextQueued) {
-            outcomes.add(new Outcome(0, Status.UNAVAILABLE, endUnfinished(record), false, false));
+            outcomes.add(new Outcome(record.ticket, 0, Status.UNAVAILABLE, endUnfinished(record), false, false));
         }
         byStream.clear();
         byTicket.clear();
@@ -497,6 +503,7 @@ final class OwnRequestLedger {
         unregister(record);
         Certainty certainty = endUnfinished(record);
         return new Outcome(
+                record.ticket,
                 record.streamId,
                 status,
                 certainty,
