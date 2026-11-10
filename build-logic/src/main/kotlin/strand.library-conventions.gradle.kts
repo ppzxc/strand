@@ -41,7 +41,10 @@ nullaway {
 // -Werror 대신 컴파일러 출력을 받아 이 경고 외의 경고가 있으면 태스크를 실패시킨다.
 tasks.named<JavaCompile>("compileJava") {
   options.compilerArgs.add("-Xlint:all,-options")
-  val collector = CompilerWarningCollector()
+  // 병렬 빌드에서 다른 태스크(다른 모듈의 compileTestJava 등)의 경고가 섞이므로 이 태스크의 main 소스 경로만 본다.
+  val collector = CompilerWarningCollector(
+    sourceSets.main.get().java.srcDirs.map { it.absolutePath },
+  )
   doFirst {
     logging.addStandardOutputListener(collector)
     logging.addStandardErrorListener(collector)
