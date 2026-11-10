@@ -36,13 +36,31 @@ class CompilerWarningCollectorTest {
   }
 
   @Test
-  fun `알려진 무해한 경고는 건너뛰고 경로 없는 다른 경고는 센다`() {
+  fun `경로 없는 경고는 어느 태스크의 것인지 알 수 없으므로 세지 않는다`() {
     val c = collector()
 
     c.onOutput("warning: unknown enum constant ElementType.MODULE\n")
-    c.failIfAny()
+    c.onOutput("warning: [options] source value 8 is obsolete and will be removed in a future release\n")
+    c.onOutput("warning: [options] To suppress warnings about obsolete options, use -Xlint:-options.\n")
 
-    c.onOutput("warning: something else\n")
+    c.failIfAny()
+  }
+
+  @Test
+  fun `자기 소스 경로의 알려진 무해한 경고는 건너뛴다`() {
+    val c = collector()
+
+    c.onOutput("$mine/p/Foo.java:3: warning: unknown enum constant ElementType.MODULE\n")
+
+    c.failIfAny()
+  }
+
+  @Test
+  fun `경로 구분자가 역슬래시여도 자기 소스의 경고를 센다`() {
+    val c = CompilerWarningCollector(listOf("C:\\w\\strand-nio\\src\\main\\java"))
+
+    c.onOutput("C:\\w\\strand-nio\\src\\main\\java\\p\\Foo.java:10: warning: [Xlint] something\n")
+
     assertThatThrownBy { c.failIfAny() }.isInstanceOf(GradleException::class.java)
   }
 }
