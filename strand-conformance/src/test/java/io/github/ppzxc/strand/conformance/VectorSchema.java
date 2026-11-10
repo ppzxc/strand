@@ -19,8 +19,10 @@ final class VectorSchema {
     static final int KNOWN_FORMAT = 2;
 
     static final List<String> ROLES = Arrays.asList("client", "server");
-    static final String DEFAULT_TRANSPORT = "tcp";
-    static final List<String> TRANSPORTS = Arrays.asList("tcp", "websocket");
+    static final String TCP = "tcp";
+    static final String WEBSOCKET = "websocket";
+    static final String DEFAULT_TRANSPORT = TCP;
+    static final List<String> TRANSPORTS = Arrays.asList(TCP, WEBSOCKET);
     private static final List<String> LOCAL_RESULT_STATUSES =
             Arrays.asList("UNAVAILABLE", "CANCELLED", "DEADLINE_EXCEEDED");
     static final List<String> CERTAINTIES = Arrays.asList("response", "not_processed", "unknown");
@@ -161,7 +163,7 @@ final class VectorSchema {
                         Check.child(Check.item("steps", i), StepKind.TAG),
                         "established가 false인 벡터는 AUTH 관문 통과(서버 역할은 send의 AUTH ACK, 클라이언트 역할은 recv한 AUTH ACK) 이전에 ping 단계를 쓸 수 없다");
             }
-            if (transport.equals("tcp")) {
+            if (transport.equals(TCP)) {
                 rejectWebSocketClose(c, i, step);
             }
             authGateOpen |= server ? sendsAuthAck(step) : authAckReceived[i];

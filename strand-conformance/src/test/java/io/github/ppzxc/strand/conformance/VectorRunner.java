@@ -89,7 +89,7 @@ final class VectorRunner {
             String kindName = step.get(StepKind.TAG).getAsString();
             StepKind kind = StepKind.named(kindName);
             requireSupportedPart(kind != null && kind.isSupported(), vector, "단계 " + kindName);
-            String unsupportedPart = kind.unsupportedPart(step);
+            String unsupportedPart = kind == null ? null : kind.unsupportedPart(step);
             requireSupportedPart(unsupportedPart == null, vector, unsupportedPart);
             for (JsonElement element : step.getAsJsonArray("send")) {
                 JsonObject frame = element.getAsJsonObject();

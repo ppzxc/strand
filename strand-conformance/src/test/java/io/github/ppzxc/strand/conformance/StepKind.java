@@ -22,8 +22,6 @@ final class StepKind {
 
     static final String TAG = "kind";
     static final String LABEL = "단계 kind";
-    private static final String TCP = "tcp";
-    private static final String WEBSOCKET = "websocket";
 
     /** 단계가 엔드포인트에 넣는 들어오는 바이트의 성격. */
     enum Inbound {
@@ -48,7 +46,7 @@ final class StepKind {
                     (endpoint, step) ->
                             endpoint.receive(Bytes.fromHex(step.get("hex").getAsString())))
             .inbound(Inbound.STREAM)
-            .onlyOnTransport(TCP);
+            .onlyOnTransport(VectorSchema.TCP);
 
     private static final StepKind RECV_MESSAGE = define(
                     "recv_message",
@@ -60,7 +58,7 @@ final class StepKind {
                                     : WebSocketMessageKind.TEXT,
                             Bytes.fromHex(step.get("hex").getAsString())))
             .inbound(Inbound.MESSAGE)
-            .onlyOnTransport(WEBSOCKET);
+            .onlyOnTransport(VectorSchema.WEBSOCKET);
 
     private static final StepKind PING = define(
                     "ping",
