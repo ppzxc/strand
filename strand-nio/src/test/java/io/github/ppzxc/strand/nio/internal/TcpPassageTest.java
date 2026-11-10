@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 
 /** TCP 통로만의 동작: 읽기 버퍼 크기, 부분 쓰기와 백프레셔, 리셋, 보내는 쪽만 닫기. */
@@ -23,9 +24,16 @@ class TcpPassageTest {
     private static final int LARGE_BODY_BYTES = 60_000;
     private static final int LARGE_MESSAGES = 20;
     private static final int SMALL_SOCKET_BUFFER = 4096;
+    /** 이 시간 동안 쓰기가 끝나지 않으면 막힌 것으로 본다. */
+    private static final int SILENCE_MS = 300;
 
     private static <T> T within(CompletableFuture<T> future) throws Exception {
         return future.get(5, TimeUnit.SECONDS);
+    }
+
+    /** 상대가 읽지 않는 동안 쓰기가 끝나지 않는다. 상한 부정 대기로 확인한다. */
+    private static void assertStaysBlocked(CompletableFuture<Void> writing) {
+        assertThatThrownBy(() -> writing.get(SILENCE_MS, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
     }
 
     private interface IoAction {
@@ -143,7 +151,7 @@ class TcpPassageTest {
         });
 
         // 읽는 쪽이 읽기 전에는 다 쓸 수 없다(백프레셔). 읽기 시작하면 모두 닿고 쓰기가 끝난다.
-        assertThat(writing).isNotDone();
+        assertStaysBlocked(writing);
         byte[] received = readExactly(reader, totalBytes(messages));
         within(writing);
         assertThat(received).isEqualTo(concatenated(messages));
@@ -191,7 +199,7 @@ class TcpPassageTest {
                 writer.write(message);
             }
         });
-        assertThat(writing).isNotDone();
+        assertStaysBlocked(writing);
 
         writer.close();
 

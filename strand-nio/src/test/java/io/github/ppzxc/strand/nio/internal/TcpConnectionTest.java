@@ -6,6 +6,7 @@ import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.StandardSocketOptions;
 import java.nio.charset.StandardCharsets;
@@ -121,7 +122,11 @@ class TcpConnectionTest {
         assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
         ConnectionClosed closed = await(notices.first);
         assertThat(closed.reason().kind()).isEqualTo(CloseReason.Kind.DISCONNECTED);
-        assertThat(closed.ioException()).isPresent();
+        if (reset) {
+            assertThat(closed.ioException()).get().isNotInstanceOf(EOFException.class);
+        } else {
+            assertThat(closed.ioException()).get().isInstanceOf(EOFException.class);
+        }
         client.close();
     }
 
