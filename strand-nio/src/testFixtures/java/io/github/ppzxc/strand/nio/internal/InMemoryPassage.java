@@ -46,6 +46,7 @@ public final class InMemoryPassage implements Passage {
     private final ArrayDeque<Inbound> inbox = new ArrayDeque<>();
     private boolean woken;
     private boolean closed;
+    private boolean outputShutdown;
     private InMemoryPassage peer;
 
     private InMemoryPassage(boolean messages) {
@@ -112,7 +113,7 @@ public final class InMemoryPassage implements Passage {
     @Override
     public void write(OutboundMessage message) throws IOException {
         synchronized (lock) {
-            if (closed) {
+            if (closed || outputShutdown) {
                 throw new IOException("닫힌 통로");
             }
         }
@@ -130,6 +131,17 @@ public final class InMemoryPassage implements Passage {
             woken = true;
             lock.notifyAll();
         }
+    }
+
+    @Override
+    public void shutdownOutput() {
+        synchronized (lock) {
+            if (closed || outputShutdown) {
+                return;
+            }
+            outputShutdown = true;
+        }
+        peer.deliver(Inbound.end());
     }
 
     @Override

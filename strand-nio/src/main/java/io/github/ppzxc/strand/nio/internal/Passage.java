@@ -33,6 +33,14 @@ public interface Passage {
     /** 기다리고 있거나 곧 기다릴 {@link #await}를 깨운다. 어느 스레드에서든 부를 수 있다. */
     void wakeup();
 
+    /**
+     * 보내는 쪽만 닫는다. 상대는 끊김(EOF)을 보지만 이쪽은 상대가 끊을 때까지 {@link #await}로 계속 읽을 수 있다(TCP의 {@code
+     * shutdownOutput}과 같다). 드라이버는 연결이 끝난 뒤(CLOSED), 쓸 것을 다 쓰고 나서 한 번 부른다. 기본 구현은 통로를 통째로 닫는다.
+     */
+    default void shutdownOutput() {
+        close();
+    }
+
     /** 통로를 닫는다. 상대는 끊김을 본다. 어느 스레드에서든 부를 수 있고 여러 번 불러도 된다. */
     void close();
 }
