@@ -209,6 +209,44 @@ class EndpointCloseReasonTest {
     }
 
     @Test
+    void ackTimeoutWhileClosingReportsTheActualErrorCodeSentByMe() {
+        EndpointConfig config = EndpointConfig.defaults().ackTimeoutMs(1000).idleIntervalMs(500);
+        Endpoint server = Endpoint.server(config);
+        server.receive(bytes(PREFACE));
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.receive(bytes(AUTH_ANONYMOUS));
+        server.receive(Frames.request(257, 1, new byte[0]));
+        server.advance(600);
+        server.drainMessages();
+        server.close(ErrorCode.NO_ERROR);
+        server.drainEvents();
+
+        server.advance(1500);
+
+        assertErrorClose(closedReason(server), ErrorCode.UNRESPONSIVE, CloseReason.Sender.LOCAL);
+    }
+
+    @Test
+    void ackTimeoutAfterThePeerClosedReportsTheActualErrorCode() {
+        EndpointConfig config = EndpointConfig.defaults().ackTimeoutMs(1000).idleIntervalMs(500);
+        Endpoint server = Endpoint.server(config);
+        server.receive(bytes(PREFACE));
+        server.receive(bytes(HELLO));
+        server.receive(bytes(HELLO_ACK));
+        server.receive(bytes(AUTH_ANONYMOUS));
+        server.receive(Frames.request(257, 1, new byte[0]));
+        server.advance(600);
+        server.drainMessages();
+        server.receive(Frames.close(ErrorCode.NO_ERROR, 0));
+        server.drainEvents();
+
+        server.advance(1500);
+
+        assertErrorClose(closedReason(server), ErrorCode.UNRESPONSIVE, CloseReason.Sender.LOCAL);
+    }
+
+    @Test
     void otherEventsCarryNoCloseReason() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
         client.receive(bytes(HELLO));

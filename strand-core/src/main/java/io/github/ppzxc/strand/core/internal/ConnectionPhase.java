@@ -220,10 +220,6 @@ final class ConnectionPhase {
         if (disconnected) {
             return CloseReason.disconnected();
         }
-        if (ending == Ending.FAILED) {
-            // 실제로 오류 CLOSE를 주고받지 않은 연결 오류(서문·첫 프레임 검사 실패, 형태가 잘못된 CLOSE)다. 로컬이 닫았다.
-            return CloseReason.errorClose(ErrorCode.PROTOCOL_ERROR, CloseReason.Sender.LOCAL);
-        }
         return CloseReason.close(firstCloseSender != null ? firstCloseSender : CloseReason.Sender.LOCAL);
     }
 
@@ -332,8 +328,22 @@ final class ConnectionPhase {
      * 전이다.
      */
     void connectionFailed() {
+        connectionFailed(ErrorCode.PROTOCOL_ERROR);
+    }
+
+    /**
+     * 연결 오류로 {@code errorCode}를 이유로 닫는다. 오류 CLOSE를 주고받은 적이 없으면 이 코드를 종료 원인으로 기록하고 로컬이 닫은 것으로 본다.
+     * CLOSE를 이미 보냈거나 받아 새로 보내지 않을 때(종료 중 확인 대기 초과 등)도 실제 이유를 잃지 않기 위해서다.
+     *
+     * @param errorCode 닫은 이유의 {@code error_code}
+     */
+    void connectionFailed(long errorCode) {
         if (closed) {
             return;
+        }
+        if (errorCloseSender == null) {
+            errorCloseCode = errorCode;
+            errorCloseSender = CloseReason.Sender.LOCAL;
         }
         ending = ending.afterError();
     }

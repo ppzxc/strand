@@ -1117,7 +1117,7 @@ public final class Endpoint {
             send(Frames.close(errorCode, highestPeerStreamId));
             phase.closeSent(errorCode);
         }
-        phase.connectionFailed();
+        phase.connectionFailed(errorCode);
         conclude();
     }
 
