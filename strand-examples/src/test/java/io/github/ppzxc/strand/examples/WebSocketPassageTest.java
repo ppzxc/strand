@@ -182,7 +182,9 @@ class WebSocketPassageTest {
         limited.listener().onBinary(socket, buffer(7, 8, 9, 10, 11), false);
 
         assertThat(socket.aborted).isTrue();
-        assertThatThrownBy(() -> limited.await(0)).isInstanceOf(IOException.class).hasMessageContaining("10");
+        assertThatThrownBy(() -> limited.await(0))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("10");
     }
 
     @Test
