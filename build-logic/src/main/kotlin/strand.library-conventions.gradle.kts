@@ -41,7 +41,10 @@ nullaway {
 // -Werror 대신 컴파일러 출력을 받아 이 경고 외의 경고가 있으면 태스크를 실패시킨다.
 tasks.named<JavaCompile>("compileJava") {
   options.compilerArgs.add("-Xlint:all,-options")
-  val collector = CompilerWarningCollector()
+  // 병렬 빌드에서 다른 태스크(다른 모듈의 compileTestJava 등)의 경고가 섞이므로 이 태스크의 main 소스 경로만 본다.
+  val collector = CompilerWarningCollector(
+    sourceSets.main.get().java.srcDirs.map { it.absolutePath },
+  )
   doFirst {
     logging.addStandardOutputListener(collector)
     logging.addStandardErrorListener(collector)
@@ -105,7 +108,7 @@ tasks.jacocoTestCoverageVerification {
 
 val verifyDependencies = tasks.register<VerifyDependencyAllowlist>("verifyDependencies") {
   group = "verification"
-  description = "런타임 의존성 0, 컴파일 의존성은 JSpecify만 허용하는지 검사한다."
+  description = "외부 런타임 의존성 0, 컴파일 의존성은 JSpecify만 허용하는지 검사한다(같은 저장소의 strand-core 프로젝트는 예외)."
   fun resolved(configurationName: String): Provider<Set<String>> {
     val result = configurations.getByName(configurationName).incoming.resolutionResult
     return result.rootComponent.map { root ->
@@ -117,6 +120,9 @@ val verifyDependencies = tasks.register<VerifyDependencyAllowlist>("verifyDepend
   compileComponents.set(resolved("compileClasspath"))
   val jspecify = catalog.library("jspecify").get()
   allowedCompile.add("${jspecify.module.group}:${jspecify.module.name}:${jspecify.versionConstraint.requiredVersion}")
+  // 전송 모듈(strand-nio)은 core에만 의존하고 core와 함께 배포한다. 같은 저장소의 core 프로젝트만 허용한다.
+  allowedRuntime.add("project ':strand-core'")
+  allowedCompile.add("project ':strand-core'")
   passedMarker.set(layout.buildDirectory.file("verifyDependencies/ok"))
 }
 

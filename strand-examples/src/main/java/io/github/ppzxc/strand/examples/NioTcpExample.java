@@ -1,75 +1,57 @@
 package io.github.ppzxc.strand.examples;
 
 import io.github.ppzxc.strand.core.StrandVersion;
-import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.core.internal.Event;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
-import java.io.IOException;
+import io.github.ppzxc.strand.nio.internal.ConnectionClosed;
+import io.github.ppzxc.strand.nio.internal.ConnectionDriver;
+import io.github.ppzxc.strand.nio.internal.RequestResult;
+import io.github.ppzxc.strand.nio.internal.TcpPassage;
 import java.net.InetSocketAddress;
-import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
- * NIO {@link SocketChannel}과 {@link ByteBuffer} 위에서 클라이언트 {@link Endpoint}를 돌린다. 논블로킹 {@code Selector} 대신 단순한
- * 블로킹 채널을 쓰지만, 부분 쓰기와 임의 위치에서 잘린 읽기를 core가 받아낸다는 점은 같다. 사용법: {@code NioTcpExample [host]
- * [port]} (상대는 {@link ServerExample})
+ * 논블로킹 방식으로 요청 하나를 보낸다. 결과를 기다리지 않고 {@code Future}에 이어 붙인 단계(결과 처리, 연결 종료, 종료 알림)가 차례로 돈다.
+ * 연결 드라이버가 NIO {@link SocketChannel}을 논블로킹으로 다루므로 부분 쓰기와 임의 위치에서 잘린 읽기는 신경 쓰지 않는다. 사용법: {@code
+ * NioTcpExample [host] [port]} (상대는 {@link ServerExample})
  */
 public final class NioTcpExample {
 
     private NioTcpExample() {}
 
-    public static void main(String[] args) throws IOException {
-        String host = ExampleSupport.arg(args, 0, "localhost");
-        int port = Integer.parseInt(ExampleSupport.arg(args, 1, "9000"));
+    public static void main(String[] args) throws Exception {
         System.out.println("strand core " + StrandVersion.get());
-        try (SocketChannel channel = SocketChannel.open(new InetSocketAddress(host, port))) {
-            Endpoint endpoint = Endpoint.client(ExampleSupport.withAuth(EndpointConfig.defaults()));
-            endpoint.request(ExampleSupport.DEMO_REQUEST_TYPE, "hello".getBytes(StandardCharsets.UTF_8));
-            endpoint.ping(new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
-            flush(endpoint, channel);
-
-            ByteBuffer in = ByteBuffer.allocate(4096);
-            boolean resultReceived = false;
-            boolean closed = false;
-            while (!closed) {
-                in.clear();
-                int n = channel.read(in);
-                if (n < 0) {
-                    endpoint.disconnect();
-                } else {
-                    in.flip();
-                    byte[] chunk = new byte[in.remaining()];
-                    in.get(chunk);
-                    endpoint.receive(chunk);
-                }
-                for (Event event : endpoint.drainEvents()) {
-                    System.out.println("[클라이언트] " + ExampleSupport.describe(event));
-                    if (event.kind() == Event.Kind.RESULT) {
-                        ExampleSupport.handleResult(event);
-                        resultReceived = true;
-                    }
-                    closed |= event.kind() == Event.Kind.CLOSED;
-                }
-                if (resultReceived && !closed) {
-                    endpoint.close(ExampleSupport.NO_ERROR);
-                }
-                flush(endpoint, channel);
-            }
-        }
+        run(ExampleSupport.arg(args, 0, "localhost"), Integer.parseInt(ExampleSupport.arg(args, 1, "9000")));
     }
 
-    /** 채널은 한 번에 일부만 쓸 수 있으므로 남은 바이트가 없을 때까지 쓴다. */
-    private static void flush(Endpoint endpoint, SocketChannel channel) throws IOException {
-        for (OutboundMessage message : endpoint.drainMessages()) {
-            if (message.kind() != OutboundMessage.Kind.BINARY) {
-                continue;
-            }
-            ByteBuffer out = ByteBuffer.wrap(message.bytes());
-            while (out.hasRemaining()) {
-                channel.write(out);
-            }
+    static RequestResult run(String host, int port) throws Exception {
+        ExecutorService executor = ExampleSupport.newHandlerExecutor("strand-nio-example");
+        CompletableFuture<ConnectionClosed> closed = new CompletableFuture<>();
+        try (ConnectionDriver driver = ConnectionDriver.client(
+                        ExampleSupport.withAuth(EndpointConfig.defaults()),
+                        TcpPassage.of(SocketChannel.open(new InetSocketAddress(host, port))))
+                .executor(executor)
+                .listener(ExampleSupport.printing("클라이언트", closed))
+                .start()) {
+            CompletableFuture<RequestResult> done = driver.request(
+                            ExampleSupport.DEMO_REQUEST_TYPE, "hello".getBytes(StandardCharsets.UTF_8))
+                    .result()
+                    .whenComplete((result, failure) -> {
+                        if (result != null) {
+                            ExampleSupport.handleResult(result);
+                        }
+                        driver.closeConnection();
+                    });
+            // PING도 기다리지 않는다. 결과가 오는 대로 위 단계와 나란히 돈다.
+            driver.ping(new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
+            // 호출한 스레드는 여기서 끝을 기다릴 뿐이다. 위 단계는 결과가 오는 대로 돈다.
+            closed.get(ExampleSupport.TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return done.get(ExampleSupport.TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
         }
     }
 }

@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.ppzxc.strand.core.internal.ConnectionPhase.Admission;
 import io.github.ppzxc.strand.core.internal.ConnectionPhase.ApplicationSend;
 import io.github.ppzxc.strand.core.internal.ConnectionPhase.Phase;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -207,20 +206,56 @@ class ConnectionPhaseTest {
 
     /** 종료 쪽 사건. */
     private enum CloseEvent {
-        CLOSE_SENT_NO_ERROR(p -> p.closeSent(NO_ERROR)),
-        CLOSE_SENT_ERROR(p -> p.closeSent(ERROR)),
-        CLOSE_RECEIVED_NO_ERROR(p -> p.closeReceived(NO_ERROR)),
-        CLOSE_RECEIVED_ERROR(p -> p.closeReceived(ERROR)),
-        CONNECTION_FAILED(ConnectionPhase::connectionFailed),
-        DISCONNECTED(ConnectionPhase::transportDisconnected),
-        PENDING_STREAMS_ZERO(ConnectionPhase::pendingStreamsReachedZero),
-        TRANSPORT_CLOSED(ConnectionPhase::transportClosed);
+        CLOSE_SENT_NO_ERROR {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.closeSent(NO_ERROR);
+            }
+        },
+        CLOSE_SENT_ERROR {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.closeSent(ERROR);
+            }
+        },
+        CLOSE_RECEIVED_NO_ERROR {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.closeReceived(NO_ERROR);
+            }
+        },
+        CLOSE_RECEIVED_ERROR {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.closeReceived(ERROR);
+            }
+        },
+        CONNECTION_FAILED {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.connectionFailed();
+            }
+        },
+        DISCONNECTED {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.transportDisconnected();
+            }
+        },
+        PENDING_STREAMS_ZERO {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.pendingStreamsReachedZero();
+            }
+        },
+        TRANSPORT_CLOSED {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.transportClosed();
+            }
+        };
 
-        private final Consumer<ConnectionPhase> action;
-
-        CloseEvent(Consumer<ConnectionPhase> action) {
-            this.action = action;
-        }
+        abstract void apply(ConnectionPhase p);
     }
 
     /** 수립 쪽 단계 하나에서 CLOSE를 NO_ERROR로 보낸 연결. 닫는 중이 된다. */
@@ -240,7 +275,7 @@ class ConnectionPhaseTest {
     static Stream<Arguments> closeTransitions() {
         Phase closing = Phase.CLOSING;
         Phase closed = Phase.CLOSED;
-        // 사건, 열림 단계에서 시작한 연결의 다음 단계, 닫을 때가 되는가, 정상 종료인가
+        // 사건, 열림 단계에서 시작한 연결의 다음 단계, 닫을 때가 되는가, 연결 종료(CLOSE)로 끝났는가
         return Stream.of(
                 Arguments.of(CloseEvent.CLOSE_SENT_NO_ERROR, closing, false, true),
                 Arguments.of(CloseEvent.CLOSE_SENT_ERROR, closing, true, false),
@@ -257,7 +292,7 @@ class ConnectionPhaseTest {
     @MethodSource("closeTransitions")
     void closeEventFromOpen(CloseEvent event, Phase next, boolean due, boolean normal) {
         ConnectionPhase subject = server(Phase.OPEN);
-        event.action.accept(subject);
+        event.apply(subject);
         assertThat(subject.phase()).isEqualTo(next);
         assertThat(subject.shouldCloseTransport()).isEqualTo(due);
         assertThat(subject.endsNormally()).isEqualTo(normal);
@@ -348,7 +383,7 @@ class ConnectionPhaseTest {
         assertThat(subject.endsNormally()).isFalse();
     }
 
-    /** 대기 중인 스트림 0개 도달과 중단은 종료 중일 때만 닫을 때로 만들고, 정상 종료로 남는다. */
+    /** 대기 중인 스트림 0개 도달과 중단은 종료 중일 때만 닫을 때로 만들고, 연결 종료(CLOSE)로 남는다. */
     @Test
     void closingEndsNormallyWhenNoStreamsRemainOrIsAborted() {
         ConnectionPhase subject = closing(Phase.OPEN);
@@ -358,7 +393,7 @@ class ConnectionPhaseTest {
         assertThat(subject.endsNormally()).isTrue();
     }
 
-    /** 오류나 끊김이 종료 중인 연결의 끝을 정상 종료에서 비정상으로 바꾼다(WebSocket Close를 덧붙이지 않는다). */
+    /** 오류나 끊김이 종료 중인 연결의 끝을 연결 종료(CLOSE)에서 오류 종료로 바꾼다(WebSocket Close를 덧붙이지 않는다). */
     @ParameterizedTest
     @EnumSource(
             value = CloseEvent.class,
@@ -366,12 +401,12 @@ class ConnectionPhaseTest {
     void failureWhileClosingIsNotANormalEnd(CloseEvent event) {
         ConnectionPhase subject = closing(Phase.OPEN);
         assertThat(subject.endsNormally()).isTrue();
-        event.action.accept(subject);
+        event.apply(subject);
         assertThat(subject.shouldCloseTransport()).isTrue();
         assertThat(subject.endsNormally()).isFalse();
     }
 
-    /** 오류로 끝나기로 한 연결은 뒤늦은 NO_ERROR CLOSE로 정상 종료가 되지 않는다. */
+    /** 오류로 끝나기로 한 연결은 뒤늦은 NO_ERROR CLOSE로 연결 종료(CLOSE)가 되지 않는다. */
     @Test
     void errorEndStaysErrorEnd() {
         ConnectionPhase subject = server(Phase.OPEN);
@@ -401,7 +436,7 @@ class ConnectionPhaseTest {
     @EnumSource(CloseEvent.class)
     void endedConnectionIgnoresEveryEvent(CloseEvent event) {
         ConnectionPhase subject = ended(Phase.OPEN);
-        event.action.accept(subject);
+        event.apply(subject);
         assertThat(subject.phase()).isEqualTo(Phase.CLOSED);
         assertThat(subject.isEnded()).isTrue();
         assertThat(subject.shouldCloseTransport()).isFalse();
@@ -420,7 +455,7 @@ class ConnectionPhaseTest {
         }
     }
 
-    /** 기다릴 스트림이 없어진 정상 종료도 끊기면 정상 종료가 아니다. */
+    /** 기다릴 스트림이 없어진 연결 종료(CLOSE)도 끊기면 연결 종료(CLOSE)로 끝난 것이 아니다. */
     @Test
     void disconnectAfterDrainedIsNotANormalEnd() {
         ConnectionPhase subject = closing(Phase.OPEN);
@@ -430,7 +465,7 @@ class ConnectionPhaseTest {
         assertThat(subject.shouldCloseTransport()).isTrue();
     }
 
-    /** 끊긴 뒤에 CLOSE나 연결 오류가 겹치면 이전처럼 CLOSE 교환으로 넘어가되 정상 종료가 아니다. */
+    /** 끊긴 뒤에 CLOSE나 연결 오류가 겹치면 이전처럼 CLOSE 교환으로 넘어가되 연결 종료(CLOSE)로 끝난 것이 아니다. */
     @ParameterizedTest
     @EnumSource(
             value = CloseEvent.class,
@@ -438,7 +473,7 @@ class ConnectionPhaseTest {
     void closeExchangeAfterDisconnectMovesToClosingAsAnError(CloseEvent event) {
         ConnectionPhase subject = server(Phase.OPEN);
         subject.transportDisconnected();
-        event.action.accept(subject);
+        event.apply(subject);
         assertThat(subject.phase()).isEqualTo(Phase.CLOSING);
         assertThat(subject.closeExchanged()).isTrue();
         assertThat(subject.endsNormally()).isFalse();
@@ -462,7 +497,7 @@ class ConnectionPhaseTest {
         assertThat(failed.phase()).isEqualTo(Phase.CLOSING);
     }
 
-    /** 대기 중인 스트림 0개 도달은 끊긴 연결(CLOSE 교환 없음)을 정상 종료로 바꾸지 않는다. */
+    /** 대기 중인 스트림 0개 도달은 끊긴 연결(CLOSE 교환 없음)을 연결 종료(CLOSE)로 바꾸지 않는다. */
     @Test
     void pendingStreamsZeroDoesNotMakeADisconnectNormal() {
         ConnectionPhase disconnected = server(Phase.OPEN);

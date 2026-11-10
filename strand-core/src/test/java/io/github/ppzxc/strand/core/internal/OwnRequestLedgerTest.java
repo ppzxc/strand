@@ -75,7 +75,7 @@ class OwnRequestLedgerTest {
     @Test
     void endedRequestIsInNoIndex() {
         accept(1, 0);
-        ledger.onResponse(1, TYPE, OK);
+        ledger.onResponse(1, TYPE, OK, new byte[0]);
         assertThat(ledger.streamIdOf(0)).isNull();
         assertThat(ledger.stateOfTicket(0)).isNull();
         assertThat(ledger.stateOfStream(1)).isNull();
@@ -315,7 +315,7 @@ class OwnRequestLedgerTest {
 
     private void respondOrReset(OwnRequestLedger l, Model m, long streamId, boolean response, String at) {
         OwnRequestLedger.Outcome actual =
-                response ? l.onResponse(streamId, TYPE, OK) : l.onReset(streamId, ErrorCode.CANCEL);
+                response ? l.onResponse(streamId, TYPE, OK, new byte[0]) : l.onReset(streamId, ErrorCode.CANCEL);
         Req r = m.numberedInStreamOrder().stream()
                 .filter(x -> x.streamId == streamId)
                 .findFirst()
@@ -475,7 +475,7 @@ class OwnRequestLedgerTest {
         accept(1, 0);
         assertThat(ledger.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.STREAM_LIMIT);
         assertThat(ledger.nextTicket()).isEqualTo(2);
-        assertThat(ledger.onResponse(1, TYPE, OK)).isNotNull();
+        assertThat(ledger.onResponse(1, TYPE, OK, new byte[0])).isNotNull();
         assertThat(ledger.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.ADMITTED);
         assertThat(ledger.streamIdOf(2)).isEqualTo(3L);
     }
@@ -495,7 +495,7 @@ class OwnRequestLedgerTest {
         OwnRequestLedger last = new OwnRequestLedger(new Outbox(), Long.MAX_VALUE, 1);
         last.setPeerMaxConcurrentStreams(1);
         assertThat(last.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.ADMITTED);
-        assertThat(last.onResponse(Long.MAX_VALUE, TYPE, OK)).isNotNull();
+        assertThat(last.onResponse(Long.MAX_VALUE, TYPE, OK, new byte[0])).isNotNull();
         assertThat(last.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.EXHAUSTED);
     }
 
@@ -584,7 +584,7 @@ class OwnRequestLedgerTest {
     void responseIsResponseCertaintyAndUnwritesUnwrittenFrame() {
         accept(1, 0);
         accept(3, 1);
-        assertEnded(ledger.onResponse(1, TYPE, 7), 1, 7, Certainty.RESPONSE, false);
+        assertEnded(ledger.onResponse(1, TYPE, 7, new byte[0]), 1, 7, Certainty.RESPONSE, false);
         assertThat(ledger.lastUnwrittenNode()).isNotNull();
         assertThat(drain().size()).isEqualTo(1);
     }
@@ -593,14 +593,19 @@ class OwnRequestLedgerTest {
     @Test
     void responseTypeMismatchIsLocalInternal() {
         accept(1, 0);
-        assertEnded(ledger.onResponse(1, TYPE + 1, OK), 1, Event.RESPONSE_TYPE_MISMATCH, Certainty.RESPONSE, false);
+        assertEnded(
+                ledger.onResponse(1, TYPE + 1, OK, new byte[0]),
+                1,
+                Event.RESPONSE_TYPE_MISMATCH,
+                Certainty.RESPONSE,
+                false);
     }
 
     /** 예약된 status는 UNKNOWN으로 본다. */
     @Test
     void reservedStatusIsUnknown() {
         accept(1, 0);
-        assertEnded(ledger.onResponse(1, TYPE, 200), 1, Status.UNKNOWN, Certainty.RESPONSE, false);
+        assertEnded(ledger.onResponse(1, TYPE, 200, new byte[0]), 1, Status.UNKNOWN, Certainty.RESPONSE, false);
     }
 
     /** REFUSED RESET은 쓰기 시작 뒤여도 처리 안 됨이다. */
@@ -666,7 +671,7 @@ class OwnRequestLedgerTest {
     void responseToWrittenRequestIsResponse() {
         accept(1, 0);
         startWrite();
-        assertEnded(ledger.onResponse(1, TYPE, 7), 1, 7, Certainty.RESPONSE, false);
+        assertEnded(ledger.onResponse(1, TYPE, 7, new byte[0]), 1, 7, Certainty.RESPONSE, false);
         assertThat(ledger.openCount()).isZero();
     }
 
@@ -714,7 +719,7 @@ class OwnRequestLedgerTest {
         assertThat(ledger.highestWrittenStreamId()).isEqualTo(3);
         accept(5, 2);
         ledger.cancelStream(5, Status.CANCELLED);
-        ledger.onResponse(1, TYPE, OK);
+        ledger.onResponse(1, TYPE, OK, new byte[0]);
         assertThat(ledger.highestWrittenStreamId()).isEqualTo(3);
     }
 

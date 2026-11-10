@@ -25,6 +25,11 @@ public final class Event {
     /** {@code AUTH(ACK)}가 자격 증명의 수명을 알리지 않았음을 나타내는 값. */
     private static final long NO_CREDENTIAL_LIFETIME = -1;
 
+    /** {@link Kind#RESULT}가 아니어서 번호표가 없음을 나타내는 값. 실제 번호표는 0 이상이다. */
+    private static final long NO_TICKET = -1;
+
+    private static final byte[] NO_BODY = new byte[0];
+
     private final Kind kind;
     private final long streamId;
     private final int status;
@@ -32,9 +37,12 @@ public final class Event {
     private final long credentialLifetime;
     private final @Nullable Certainty certainty;
     private final @Nullable Throwable cause;
+    private final @Nullable CloseReason closeReason;
+    private final long ticket;
+    private final byte[] body;
 
-    private Event(Kind kind, long streamId, int status, int type) {
-        this(kind, streamId, status, type, NO_CREDENTIAL_LIFETIME, null, null);
+    private Event(Kind kind, long streamId, int status, int type, byte[] body) {
+        this(kind, streamId, status, type, NO_CREDENTIAL_LIFETIME, null, null, null, NO_TICKET, body);
     }
 
     private Event(
@@ -44,7 +52,11 @@ public final class Event {
             int type,
             long credentialLifetime,
             @Nullable Certainty certainty,
-            @Nullable Throwable cause) {
+            @Nullable Throwable cause,
+            @Nullable CloseReason closeReason,
+            long ticket,
+            byte[] body) {
+        this.closeReason = closeReason;
         this.certainty = certainty;
         this.cause = cause;
         this.kind = kind;
@@ -52,6 +64,8 @@ public final class Event {
         this.status = status;
         this.type = type;
         this.credentialLifetime = credentialLifetime;
+        this.ticket = ticket;
+        this.body = body;
     }
 
     static Event authenticated(OptionalLong credentialLifetime) {
@@ -62,24 +76,39 @@ public final class Event {
                 0,
                 credentialLifetime.isPresent() ? credentialLifetime.getAsLong() : NO_CREDENTIAL_LIFETIME,
                 null,
-                null);
+                null,
+                null,
+                NO_TICKET,
+                NO_BODY);
     }
 
-    static Event closed(@Nullable Throwable cause) {
-        return new Event(Kind.CLOSED, 0, 0, 0, NO_CREDENTIAL_LIFETIME, null, cause);
+    static Event closed(@Nullable Throwable cause, CloseReason closeReason) {
+        return new Event(Kind.CLOSED, 0, 0, 0, NO_CREDENTIAL_LIFETIME, null, cause, closeReason, NO_TICKET, NO_BODY);
     }
 
-    static Event result(long streamId, int status, Certainty certainty) {
-        return new Event(Kind.RESULT, streamId, status, 0, NO_CREDENTIAL_LIFETIME, certainty, null);
+    /** @param body 응답 본문. 호출자가 이후 바꾸지 않는 배열이어야 한다(복사해서 넘긴다). */
+    static Event result(long ticket, long streamId, int status, Certainty certainty, byte[] body) {
+        return new Event(Kind.RESULT, streamId, status, 0, NO_CREDENTIAL_LIFETIME, certainty, null, null, ticket, body);
     }
 
     /** 스트림을 열기 전에 로컬에서 실패한 요청의 결과. 스트림 번호가 없다(규격 2.2.5절, 3.2.1절, 3.5절). */
-    static Event localUnavailable() {
-        return new Event(Kind.RESULT, 0, Status.UNAVAILABLE, 0, NO_CREDENTIAL_LIFETIME, Certainty.NOT_PROCESSED, null);
+    static Event localUnavailable(long ticket) {
+        return new Event(
+                Kind.RESULT,
+                0,
+                Status.UNAVAILABLE,
+                0,
+                NO_CREDENTIAL_LIFETIME,
+                Certainty.NOT_PROCESSED,
+                null,
+                null,
+                ticket,
+                NO_BODY);
     }
 
-    static Event requestReceived(long streamId, int type) {
-        return new Event(Kind.REQUEST_RECEIVED, streamId, 0, type);
+    /** @param body 요청 본문. 호출자가 이후 바꾸지 않는 배열이어야 한다(복사해서 넘긴다). */
+    static Event requestReceived(long streamId, int type, byte[] body) {
+        return new Event(Kind.REQUEST_RECEIVED, streamId, 0, type, body);
     }
 
     /**
@@ -130,6 +159,16 @@ public final class Event {
     }
 
     /**
+     * {@link Kind#CLOSED}의 종료 원인: 연결 종료(CLOSE)로 끝났는지, 오류 CLOSE로 끝났는지, CLOSE 없이 끊겼는지와 error_code, CLOSE를 보낸 쪽.
+     * 다른 종류의 이벤트면 비어 있다. {@link #cause()}와 별개이며 둘 다 올 수 있다.
+     *
+     * @return 종료 원인
+     */
+    public Optional<CloseReason> closeReason() {
+        return Optional.ofNullable(closeReason);
+    }
+
+    /**
      * {@link Kind#REQUEST_RECEIVED}의 애플리케이션 {@code type}. 다른 종류에서는 0이다.
      *
      * @return type 값
@@ -148,5 +187,25 @@ public final class Event {
         return credentialLifetime == NO_CREDENTIAL_LIFETIME
                 ? OptionalLong.empty()
                 : OptionalLong.of(credentialLifetime);
+    }
+
+    /**
+     * {@link Kind#RESULT}가 짝지어지는 요청의 번호표({@link Endpoint#request}가 돌려준 값). 번호를 받은 요청, AUTH 관문 전에 미룬 요청,
+     * 스트림을 열기 전에 로컬에서 실패한 요청의 결과 모두 그 요청에 쓰인 번호표를 담는다. 다른 종류에서는 비어 있다.
+     *
+     * @return 번호표
+     */
+    public OptionalLong ticket() {
+        return ticket == NO_TICKET ? OptionalLong.empty() : OptionalLong.of(ticket);
+    }
+
+    /**
+     * 본문. 응답을 받은 {@link Kind#RESULT}에서는 응답 본문, {@link Kind#REQUEST_RECEIVED}에서는 요청 본문이다. 본문이 없는 결과(처리
+     * 안 됨, 결과 모름, 로컬 실패)와 다른 종류에서는 빈 배열이다. 부를 때마다 복사본을 돌려주므로 고쳐도 이벤트와 엔드포인트의 상태는 바뀌지 않는다.
+     *
+     * @return 본문의 복사본
+     */
+    public byte[] body() {
+        return body.clone();
     }
 }

@@ -58,6 +58,15 @@ public final class OutboundMessage {
     }
 
     /**
+     * {@link Kind#BINARY}의 내용 길이(바이트). 복사하지 않는다. {@link Kind#WEBSOCKET_CLOSE}에서는 0이다.
+     *
+     * @return 내용 길이
+     */
+    public int length() {
+        return bytes.length;
+    }
+
+    /**
      * {@link Kind#WEBSOCKET_CLOSE}의 WebSocket 상태 코드. {@link Kind#BINARY}에서는 0이다.
      *
      * @return 상태 코드
