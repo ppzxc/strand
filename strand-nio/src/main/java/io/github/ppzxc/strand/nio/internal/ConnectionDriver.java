@@ -94,7 +94,10 @@ public final class ConnectionDriver implements AutoCloseable {
     private final Passage passage;
     private final @Nullable Executor handlerExecutor;
     private final @Nullable RequestHandler handler;
+    // 시계 진행은 다음 티켓(#236)이 전송 스레드에서 쓴다. 지금은 주입 지점만 둔다.
+    @SuppressWarnings("UnusedVariable")
     private final LongSupplier clock;
+
     private final Queue<Command> commands = new ConcurrentLinkedQueue<>();
     private final Thread thread;
     private volatile boolean closeRequested;
@@ -195,15 +198,6 @@ public final class ConnectionDriver implements AutoCloseable {
             }
         });
         return future;
-    }
-
-    /**
-     * 시계 주입 지점. 다음 티켓이 전송 스레드의 시계 진행에 쓴다.
-     *
-     * @return 단조 시계(밀리초)
-     */
-    LongSupplier clock() {
-        return clock;
     }
 
     /** 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 남은 Future는 core가 내는 결과로 끝난다. 여러 번 불러도 된다. */
