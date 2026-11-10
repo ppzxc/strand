@@ -50,6 +50,7 @@ public final class InMemoryPassage implements Passage {
     private final List<byte[]> written = new ArrayList<>();
     private boolean woken;
     private boolean closed;
+    private boolean outputShutdown;
     private boolean manualTime;
     private boolean muted;
     private boolean parked;
@@ -136,7 +137,7 @@ public final class InMemoryPassage implements Passage {
     @Override
     public void write(OutboundMessage message) throws IOException {
         synchronized (lock) {
-            if (closed) {
+            if (closed || outputShutdown) {
                 throw new IOException("닫힌 통로");
             }
             if (muted) {
@@ -161,6 +162,17 @@ public final class InMemoryPassage implements Passage {
             woken = true;
             lock.notifyAll();
         }
+    }
+
+    @Override
+    public void shutdownOutput() {
+        synchronized (lock) {
+            if (closed || outputShutdown) {
+                return;
+            }
+            outputShutdown = true;
+        }
+        peer.deliver(Inbound.end());
     }
 
     @Override

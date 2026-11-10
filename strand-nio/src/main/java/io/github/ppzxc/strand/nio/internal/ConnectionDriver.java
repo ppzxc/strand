@@ -1,9 +1,11 @@
 package io.github.ppzxc.strand.nio.internal;
 
+import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
@@ -12,6 +14,7 @@ import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 
@@ -23,11 +26,18 @@ import org.jspecify.annotations.Nullable;
  * 꺼내기, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을 잡는다. 읽기는 core의
  * {@code nextDeadline}까지만 기다리고 기한이 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
  *
- * <p>{@code Authenticator}는 core가 {@code receive} 안에서 동기로 부르므로 전송 스레드에서 돈다. 블로킹하지 않는 {@code Authenticator}만
- * 지원한다. 요청 Future는 전송 스레드에서 완료되므로, 그 위에 건 동기 콜백도 블로킹하면 안 된다.
+ * <p><b>{@code Authenticator}는 전송 스레드에서 불리며 블로킹하면 안 된다.</b> core가 {@code receive} 안에서 동기로 부르므로 {@code
+ * EndpointConfig.authenticator}에 넣은 구현은 전송 스레드에서 돈다. 블로킹하는 인증(원격 조회 등)을 넣으면 그 연결 전체가 멈추므로, 블로킹하지
+ * 않는 {@code Authenticator}만 지원한다. "전송 스레드는 블로킹하는 사용자 코드를 부르지 않는다"의 유일한 예외다. 요청 Future는 전송 스레드에서
+ * 완료되므로, 그 위에 건 동기 콜백도 블로킹하면 안 된다.
+ *
+ * <p>끝내는 방법은 셋이다. {@link #closeConnection}은 연결 종료(CLOSE)를 보내고 대기 중인 스트림이 끝나길 기다리고, {@link #abortClosing}은
+ * 종료 중인 연결에서 기다림을 그만두고, {@link #close}는 즉시 끊는다. 연결이 끝나면 core가 낸 결과로 남은 Future가 모두 끝나고, 종료 알림이 핸들러
+ * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다.
  */
 public final class ConnectionDriver implements AutoCloseable {
 
+    private static final int NO_ERROR = 0;
     /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
 
@@ -43,6 +53,7 @@ public final class ConnectionDriver implements AutoCloseable {
         private final Passage passage;
         private @Nullable Executor handlerExecutor;
         private @Nullable RequestHandler handler;
+        private @Nullable ConnectionListener listener;
         private LongSupplier clock = () -> System.nanoTime() / 1_000_000L;
 
         private Builder(Role role, EndpointConfig config, Passage passage) {
@@ -67,6 +78,29 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         /**
+         * 핸들러와 알림을 돌릴 실행기를 정한다. 핸들러 없이 알림만 받을 때 쓴다. {@link #handler}도 같은 실행기를 정한다.
+         *
+         * @param executor 실행기. 전송 스레드를 막지 않게 블로킹 작업을 맡길 수 있는 것이어야 한다
+         * @return 이 빌더
+         */
+        public Builder executor(Executor executor) {
+            this.handlerExecutor = executor;
+            return this;
+        }
+
+        /**
+         * 연결 알림(AUTH 관문 통과, 연결 종료)을 받는 리스너를 정한다. 알림은 핸들러 실행기에서 불린다. 실행기를 정하지 않으면 {@link #start}가
+         * 예외를 던진다.
+         *
+         * @param connectionListener 리스너
+         * @return 이 빌더
+         */
+        public Builder listener(ConnectionListener connectionListener) {
+            this.listener = connectionListener;
+            return this;
+        }
+
+        /**
          * 단조 시계(밀리초)를 주입한다. 전송 스레드가 매번 흐른 시간을 재서 엔드포인트의 {@code advance}를 부른다. 정하지 않으면 {@link System#nanoTime()}이다.
          *
          * @param monotonicMillis 단조 시계
@@ -83,7 +117,11 @@ public final class ConnectionDriver implements AutoCloseable {
          * @return 돌아가는 연결 드라이버
          */
         public ConnectionDriver start() {
-            ConnectionDriver driver = new ConnectionDriver(role, config, passage, handlerExecutor, handler, clock);
+            if (listener != null && handlerExecutor == null) {
+                throw new IllegalStateException("리스너를 받으려면 실행기가 있어야 한다");
+            }
+            ConnectionDriver driver =
+                    new ConnectionDriver(role, config, passage, handlerExecutor, handler, listener, clock);
             driver.thread.start();
             return driver;
         }
@@ -96,11 +134,29 @@ public final class ConnectionDriver implements AutoCloseable {
         void abandon(Throwable reason);
     }
 
+    /** 엔드포인트의 동작 하나를 그대로 부르는 명령. 결과를 돌려주지 않는다. */
+    private static final class EndpointCall implements Command {
+        private final Consumer<Endpoint> call;
+
+        EndpointCall(Consumer<Endpoint> call) {
+            this.call = call;
+        }
+
+        @Override
+        public void execute(Loop loop) {
+            call.accept(loop.endpoint);
+        }
+
+        @Override
+        public void abandon(Throwable reason) {}
+    }
+
     private final Role role;
     private final EndpointConfig config;
     private final Passage passage;
     private final @Nullable Executor handlerExecutor;
     private final @Nullable RequestHandler handler;
+    private final @Nullable ConnectionListener listener;
     private final LongSupplier clock;
 
     private final Queue<Command> commands = new ConcurrentLinkedQueue<>();
@@ -114,12 +170,14 @@ public final class ConnectionDriver implements AutoCloseable {
             Passage passage,
             @Nullable Executor handlerExecutor,
             @Nullable RequestHandler handler,
+            @Nullable ConnectionListener listener,
             LongSupplier clock) {
         this.role = role;
         this.config = config;
         this.passage = passage;
         this.handlerExecutor = handlerExecutor;
         this.handler = handler;
+        this.listener = listener;
         this.clock = clock;
         this.thread = new Thread(this::run, "strand-nio-transport");
         this.thread.setDaemon(true);
@@ -254,6 +312,23 @@ public final class ConnectionDriver implements AutoCloseable {
     }
 
     /**
+     * 연결 종료(CLOSE)를 보내고 대기 중인 스트림이 끝나길 기다린다. 새 요청은 받지 않는다. 모든 스트림이 끝나면 연결이 끝나고
+     * {@link ConnectionListener#onClosed}가 불린다. 어느 스레드에서든 부를 수 있다. 상대가 응답하지 않아 기다림이 늘어지면 {@link
+     * #abortClosing}으로 그만둔다.
+     */
+    public void closeConnection() {
+        submit(new EndpointCall(endpoint -> endpoint.close(NO_ERROR)));
+    }
+
+    /**
+     * 종료 중인 연결에서 더 기다리지 않고 닫는다. 아직 응답을 받지 못한 요청의 Future는 core가 내는 결과(결과 확정성)로 끝난다. 종료 중인
+     * 연결이 아니면 아무 일도 없다. 어느 스레드에서든 부를 수 있다.
+     */
+    public void abortClosing() {
+        submit(new EndpointCall(Endpoint::abortClosing));
+    }
+
+    /**
      * PING을 보낸다. AUTH 관문 전이면 core가 미뤘다가 통과 뒤에 보낸다. 어느 스레드에서든 부를 수 있다.
      *
      * @param payload 정확히 8바이트
@@ -333,7 +408,7 @@ public final class ConnectionDriver implements AutoCloseable {
         } catch (RuntimeException | Error e) {
             // 예기치 못한 오류(핸들러 실행기 거부, 엔드포인트가 거부한 입력 등). 연결을 끊어 core가 내는 결과로 Future를 끝내고,
             // 오류는 스레드의 처리기가 보게 다시 던진다.
-            loop.abort();
+            loop.abort(e);
             throw e;
         } finally {
             loop.failPending();
@@ -345,6 +420,13 @@ public final class ConnectionDriver implements AutoCloseable {
         final Endpoint endpoint;
         final Map<Long, CompletableFuture<RequestResult>> pending = new HashMap<>();
         boolean finished;
+        // core가 CLOSED를 냈다. 종료 알림은 이때 한 번만 나간다.
+        private boolean closed;
+        // 읽기나 쓰기가 실패했거나 상대가 끊었다. 더 읽을 것이 없다.
+        private boolean transportGone;
+        private boolean outputShutdown;
+        // 연결을 끊게 한 첫 입출력 예외. 종료 알림에 싣는다.
+        private @Nullable IOException ioFailure;
         // 엔드포인트의 가상 시계는 0에서 시작한다. startedAt은 그 0에 해당하는 주입 시계 값이고, advancedTo까지 advance했다.
         private final long startedAt;
         private long advancedTo;
@@ -360,12 +442,13 @@ public final class ConnectionDriver implements AutoCloseable {
             try {
                 receiveAvailable();
             } catch (IOException e) {
-                endpoint.disconnect();
+                transportFailed(e);
             }
             advanceClock();
             runCommands();
             if (closeRequested) {
                 endpoint.disconnect();
+                finished = true;
             }
             settle();
         }
@@ -415,10 +498,34 @@ public final class ConnectionDriver implements AutoCloseable {
                     endpoint.receiveMessage(inbound.messageKind(), inbound.data());
                     break;
                 case END:
-                    endpoint.disconnect();
+                    transportFailed(new EOFException("상대가 연결을 끊었다"));
                     break;
                 default:
                     break;
+            }
+        }
+
+        /** 통로가 끊겼다. 연결이 아직 끝나지 않았다면 CLOSE 없이 끊긴 것으로 core에 알린다. */
+        private void transportFailed(IOException cause) {
+            try {
+                // 같은 읽기에 CLOSE 교환과 EOF가 함께 와 있을 수 있다. 앞선 입력이 낸 CLOSED를 먼저 내보내야 이 오류가 종료 뒤의 것으로 구분된다.
+                dispatchEvents();
+            } finally {
+                // 내보내다 실행기 거부로 던져도 입출력 예외 기록과 끊김 통지는 빠뜨리지 않는다. abort 경로의 종료 알림에도 예외가 실려야 한다.
+                recordTransportFailure(cause);
+                if (!closed) {
+                    endpoint.disconnect();
+                }
+            }
+        }
+
+        private void recordTransportFailure(IOException cause) {
+            transportGone = true;
+            if (closed) {
+                // CLOSED 뒤에 상대가 끊기를 기다리던 읽기가 끝났다. 정상 종료다.
+                finished = true;
+            } else if (ioFailure == null) {
+                ioFailure = cause;
             }
         }
 
@@ -430,7 +537,10 @@ public final class ConnectionDriver implements AutoCloseable {
             }
         }
 
-        /** 이벤트를 내보내고 쌓인 메시지를 쓴다. 쓰다 실패하면 끊김으로 보고 그 결과 이벤트까지 내보낸다. */
+        /**
+         * 이벤트를 내보내고 쌓인 메시지를 쓴다. 쓰다 실패하면 끊김으로 보고 그 결과 이벤트까지 내보낸다. 연결이 끝났으면 보내는 쪽만 닫고 상대가 끊을
+         * 때까지 읽는다.
+         */
         void settle() {
             dispatchEvents();
             if (!write()) {
@@ -438,14 +548,24 @@ public final class ConnectionDriver implements AutoCloseable {
                 dispatchEvents();
                 write();
                 finished = true;
+            } else if (closed && !finished && !outputShutdown) {
+                outputShutdown = true;
+                passage.shutdownOutput();
             }
         }
 
-        /** 오류로 멈출 때 연결을 끊고 core가 내는 결과를 내보낸다. 이것마저 실패하면 {@link #failPending}이 남은 Future를 끝낸다. */
-        void abort() {
-            endpoint.disconnect();
-            dispatchEvents();
-            write();
+        /**
+         * 오류로 멈출 때 연결을 끊고 core가 내는 결과를 내보낸다. 이것마저 실패하면 {@link #failPending}이 남은 Future를 끝낸다. 내보내다 난
+         * 예외는 멈추게 한 오류에 덧붙인다.
+         */
+        void abort(Throwable original) {
+            try {
+                endpoint.disconnect();
+                dispatchEvents();
+                write();
+            } catch (RuntimeException e) {
+                original.addSuppressed(e);
+            }
         }
 
         private boolean write() {
@@ -455,6 +575,7 @@ public final class ConnectionDriver implements AutoCloseable {
                 }
                 return true;
             } catch (IOException e) {
+                recordTransportFailure(e);
                 return false;
             }
         }
@@ -462,28 +583,46 @@ public final class ConnectionDriver implements AutoCloseable {
         private void dispatchEvents() {
             RuntimeException deliveryFailure = null;
             for (Event event : endpoint.drainEvents()) {
-                switch (event.kind()) {
-                    case RESULT:
-                        complete(event);
-                        break;
-                    case REQUEST_RECEIVED:
-                        // 같은 묶음의 다른 이벤트(결과, 종료)를 잃지 않도록 실패를 모았다가 다 내보낸 뒤 던진다.
-                        try {
-                            deliver(event);
-                        } catch (RuntimeException e) {
-                            deliveryFailure = e;
-                        }
-                        break;
-                    case CLOSED:
-                        finished = true;
-                        break;
-                    default:
-                        break;
+                // 같은 묶음의 다른 이벤트(결과, 종료)를 잃지 않도록 넘기다 난 실패를 모았다가 다 내보낸 뒤 던진다.
+                try {
+                    dispatch(event);
+                } catch (RuntimeException e) {
+                    deliveryFailure = e;
                 }
             }
             if (deliveryFailure != null) {
                 throw deliveryFailure;
             }
+        }
+
+        private void dispatch(Event event) {
+            switch (event.kind()) {
+                case RESULT:
+                    complete(event);
+                    break;
+                case REQUEST_RECEIVED:
+                    deliver(event);
+                    break;
+                case AUTHENTICATED:
+                    notifyAuthenticated(event);
+                    break;
+                case CLOSED:
+                    // 알림이 실패해도 한 번만 나가도록 먼저 표시한다.
+                    closed = true;
+                    if (transportGone || isDisconnection(event)) {
+                        finished = true;
+                    }
+                    notifyClosed(event);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        private boolean isDisconnection(Event event) {
+            return event.closeReason()
+                    .map(r -> r.kind() == CloseReason.Kind.DISCONNECTED)
+                    .orElse(true);
         }
 
         private void complete(Event event) {
@@ -504,6 +643,27 @@ public final class ConnectionDriver implements AutoCloseable {
             IncomingRequest request =
                     new IncomingRequest(ConnectionDriver.this, event.streamId(), event.type(), event.body());
             executor.execute(() -> target.handle(request));
+        }
+
+        private void notifyAuthenticated(Event event) {
+            Executor executor = handlerExecutor;
+            ConnectionListener target = listener;
+            if (executor == null || target == null) {
+                return;
+            }
+            OptionalLong lifetime = event.credentialLifetime();
+            executor.execute(() -> target.onAuthenticated(lifetime));
+        }
+
+        private void notifyClosed(Event event) {
+            Executor executor = handlerExecutor;
+            ConnectionListener target = listener;
+            if (executor == null || target == null) {
+                return;
+            }
+            ConnectionClosed notice = new ConnectionClosed(
+                    event.closeReason().get(), ioFailure, event.cause().orElse(null));
+            executor.execute(() -> target.onClosed(notice));
         }
 
         // 최후 수단. core가 낸 결과로 끝나지 않고 남은 Future만 예외로 끝낸다. 정상 종료와 abort 뒤에는 비어 있다.
