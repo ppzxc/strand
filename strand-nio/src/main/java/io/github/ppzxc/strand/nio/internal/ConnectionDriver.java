@@ -507,6 +507,8 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /** 통로가 끊겼다. 연결이 아직 끝나지 않았다면 CLOSE 없이 끊긴 것으로 core에 알린다. */
         private void transportFailed(IOException cause) {
+            // 같은 읽기에 CLOSE 교환과 EOF가 함께 와 있을 수 있다. 앞선 입력이 낸 CLOSED를 먼저 내보내야 이 오류가 종료 뒤의 것으로 구분된다.
+            dispatchEvents();
             recordTransportFailure(cause);
             if (!closed) {
                 endpoint.disconnect();
