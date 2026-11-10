@@ -51,6 +51,7 @@ public final class InMemoryPassage implements Passage {
     private boolean woken;
     private boolean closed;
     private boolean manualTime;
+    private boolean muted;
     private boolean parked;
     private long lastAwaitTimeoutMs = Long.MIN_VALUE;
     private long activity;
@@ -89,7 +90,9 @@ public final class InMemoryPassage implements Passage {
     @Override
     public Inbound await(long timeoutMs) throws IOException {
         synchronized (lock) {
-            lastAwaitTimeoutMs = timeoutMs;
+            if (timeoutMs != 0) {
+                lastAwaitTimeoutMs = timeoutMs;
+            }
             activity++;
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(timeoutMs, 0));
             while (inbox.isEmpty() && !woken) {
@@ -97,7 +100,9 @@ public final class InMemoryPassage implements Passage {
                     throw new IOException("닫힌 통로");
                 }
                 try {
-                    if (manualTime) {
+                    if (manualTime && timeoutMs == 0) {
+                        return Inbound.none();
+                    } else if (manualTime) {
                         // 시간 제한은 실제 시간으로 흐르지 않는다. 테스트가 시계를 올리고 wakeup으로 깨운다.
                         parked = true;
                         lock.wait();
@@ -131,6 +136,9 @@ public final class InMemoryPassage implements Passage {
         synchronized (lock) {
             if (closed) {
                 throw new IOException("닫힌 통로");
+            }
+            if (muted) {
+                return;
             }
         }
         if (message.kind() == OutboundMessage.Kind.BINARY) {
@@ -186,8 +194,15 @@ public final class InMemoryPassage implements Passage {
         return this;
     }
 
+    /** 이 통로로 쓰는 것을 상대에게 보내지 않고 버린다(쓰기는 성공한 것처럼 돌아온다). 말 없는 상대를 만든다. */
+    public void mute() {
+        synchronized (lock) {
+            muted = true;
+        }
+    }
+
     /**
-     * 가장 최근 {@link #await}가 받은 시간 제한(밀리초). 음수면 상한 없는 기다림이다. 아직 기다린 적이 없으면 {@link Long#MIN_VALUE}다.
+     * 가장 최근 {@link #await}가 받은 시간 제한(밀리초). 0은 기다리지 않고 읽을 것만 가져오는 호출이라 세지 않는다. 음수면 상한 없는 기다림이다. 아직 기다린 적이 없으면 {@link Long#MIN_VALUE}다.
      *
      * @return 최근 시간 제한
      */

@@ -227,6 +227,34 @@ public final class ConnectionDriver implements AutoCloseable {
         return future;
     }
 
+    /**
+     * PING을 보낸다. AUTH 관문 전이면 core가 미뤘다가 통과 뒤에 보낸다. 어느 스레드에서든 부를 수 있다.
+     *
+     * @param payload 정확히 8바이트
+     * @return PING 명령이 처리되면 끝나는 Future. payload가 8바이트가 아니거나 연결이 끝났으면 예외로 끝난다
+     */
+    public CompletableFuture<Void> ping(byte[] payload) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        byte[] copy = payload.clone();
+        submit(new Command() {
+            @Override
+            public void execute(Loop loop) {
+                try {
+                    loop.endpoint.ping(copy);
+                    future.complete(null);
+                } catch (RuntimeException e) {
+                    future.completeExceptionally(e);
+                }
+            }
+
+            @Override
+            public void abandon(Throwable reason) {
+                future.completeExceptionally(reason);
+            }
+        });
+        return future;
+    }
+
     /** 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 남은 Future는 core가 내는 결과로 끝난다. 여러 번 불러도 된다. */
     @Override
     public void close() {
@@ -303,7 +331,7 @@ public final class ConnectionDriver implements AutoCloseable {
         /** 읽기, 받기, 명령 처리, 이벤트 배출, 쓰기를 한 번 돈다. */
         void step() {
             try {
-                receive(passage.await(waitLimit()));
+                receiveAvailable();
             } catch (IOException e) {
                 endpoint.disconnect();
             }
@@ -313,6 +341,20 @@ public final class ConnectionDriver implements AutoCloseable {
                 endpoint.disconnect();
             }
             settle();
+        }
+
+        /**
+         * 기다렸다가, 지금 읽을 수 있는 것을 모두 받는다. 시계를 보내기 전에 도착해 있던 ACK가 확인 대기 초과로 오판되지 않게 하려는 것이다.
+         */
+        private void receiveAvailable() throws IOException {
+            Inbound inbound = passage.await(waitLimit());
+            while (inbound.kind() != Inbound.Kind.NONE) {
+                receive(inbound);
+                if (inbound.kind() == Inbound.Kind.END) {
+                    return;
+                }
+                inbound = passage.await(0);
+            }
         }
 
         /** 기다림의 상한. core가 알려 준 다음 기한까지만이고, 기한이 없으면 상한이 없다. */
