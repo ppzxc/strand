@@ -54,6 +54,7 @@ final class Peer implements AutoCloseable {
     private final CompletableFuture<OptionalLong> authenticated = new CompletableFuture<>();
     private final CompletableFuture<ConnectionClosed> closed = new CompletableFuture<>();
     private final List<ConnectionClosed> closedNotices = new CopyOnWriteArrayList<>();
+    private final List<CompletableFuture<Void>> resultsLogged = new CopyOnWriteArrayList<>();
     private final List<String> log = Collections.synchronizedList(new ArrayList<>());
     private final ControlledPassage controlled;
 
@@ -180,7 +181,19 @@ final class Peer implements AutoCloseable {
 
     /** 이 요청 결과가 끝나는 순간을 {@link #log()}에 적게 한다. 결과가 나오기 전에, 즉 요청을 낸 직후에 걸어야 순서를 놓치지 않는다. */
     CompletableFuture<Void> logResult(CompletableFuture<?> result) {
-        return result.thenRun(() -> log.add(RESULT));
+        CompletableFuture<Void> logged = result.thenRun(() -> log.add(RESULT));
+        resultsLogged.add(logged);
+        return logged;
+    }
+
+    /**
+     * {@link #logResult}로 맡긴 결과가 모두 {@link #log()}에 적히길 기다린다. 결과를 적는 동작은 결과 Future를 끝낸 스레드에서 도므로, 결과를
+     * 받았다고 곧바로 적혀 있는 것은 아니다. 기록을 읽기 전에 부른다.
+     */
+    void awaitResultsLogged() throws Exception {
+        for (CompletableFuture<Void> logged : resultsLogged) {
+            logged.get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        }
     }
 
     /** 지금까지 받은 종료 알림. 연결당 정확히 한 번이어야 한다. */

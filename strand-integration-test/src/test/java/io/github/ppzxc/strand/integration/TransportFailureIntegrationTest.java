@@ -14,7 +14,6 @@ import io.github.ppzxc.strand.nio.internal.RequestResult;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,6 +42,7 @@ class TransportFailureIntegrationTest {
             serverSide.stop();
             RequestResult result = await(handle);
             ConnectionClosed closed = client.awaitClosed();
+            client.awaitResultsLogged();
             client.stop();
 
             assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
@@ -66,14 +66,14 @@ class TransportFailureIntegrationTest {
                 Peer client = Peer.connect(silentServer.getLocalPort(), null)) {
             Socket accepted = silentServer.accept();
             RequestHandle handle = client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
-            CompletableFuture<Void> resultLogged = client.logResult(handle.result());
+            client.logResult(handle.result());
 
             accepted.close();
             RequestResult result = await(handle);
             client.awaitClosed();
             // 결과를 적는 동작은 결과 Future를 끝낸 스레드에서, 종료 알림은 핸들러 실행기에서 돈다. 둘의 순서는 정해져 있지 않으므로
             // 둘 다 적힌 뒤에 순서와 무관하게 본다.
-            resultLogged.get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            client.awaitResultsLogged();
             client.stop();
 
             assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);

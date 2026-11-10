@@ -142,6 +142,7 @@ class MultiClientIntegrationTest {
                 serverSides.get(i).awaitClosed();
             }
             for (Peer peer : clients) {
+                peer.awaitResultsLogged();
                 peer.stop();
             }
             for (Peer peer : serverSides) {
