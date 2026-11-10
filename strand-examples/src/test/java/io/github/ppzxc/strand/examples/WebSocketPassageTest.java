@@ -172,4 +172,71 @@ class WebSocketPassageTest {
         assertThat(socket.aborted).isTrue();
         assertThatThrownBy(() -> passage.await(0)).isInstanceOf(IOException.class);
     }
+
+    @Test
+    void aMessageGrowingPastTheLimitAcrossFragmentsIsAnErrorAndAbortsTheSocket() {
+        WebSocketPassage limited = new WebSocketPassage(10);
+        limited.listener().onOpen(socket);
+
+        limited.listener().onBinary(socket, buffer(1, 2, 3, 4, 5, 6), false);
+        limited.listener().onBinary(socket, buffer(7, 8, 9, 10, 11), false);
+
+        assertThat(socket.aborted).isTrue();
+        assertThatThrownBy(() -> limited.await(0)).isInstanceOf(IOException.class).hasMessageContaining("10");
+    }
+
+    @Test
+    void aSingleMessageOverTheLimitIsAnError() {
+        WebSocketPassage limited = new WebSocketPassage(4);
+        limited.listener().onOpen(socket);
+
+        limited.listener().onBinary(socket, buffer(1, 2, 3, 4, 5), true);
+
+        assertThat(socket.aborted).isTrue();
+        assertThatThrownBy(() -> limited.await(0)).isInstanceOf(IOException.class);
+    }
+
+    @Test
+    void aTextMessageIsLimitedByItsUtf8Bytes() {
+        WebSocketPassage limited = new WebSocketPassage(5);
+        limited.listener().onOpen(socket);
+
+        limited.listener().onText(socket, "한글", true);
+
+        assertThat(socket.aborted).isTrue();
+        assertThatThrownBy(() -> limited.await(0)).isInstanceOf(IOException.class);
+    }
+
+    @Test
+    void aMessageExactlyAtTheLimitIsDelivered() throws Exception {
+        WebSocketPassage limited = new WebSocketPassage(4);
+        limited.listener().onOpen(socket);
+
+        limited.listener().onBinary(socket, buffer(1, 2, 3, 4), true);
+
+        assertThat(limited.await(0).data()).containsExactly(1, 2, 3, 4);
+        assertThat(socket.aborted).isFalse();
+    }
+
+    @Test
+    void fragmentsThatKeepArrivingAfterTheLimitWasHitAreIgnored() throws Exception {
+        WebSocketPassage limited = new WebSocketPassage(4);
+        limited.listener().onOpen(socket);
+        limited.listener().onBinary(socket, buffer(1, 2, 3, 4, 5), false);
+
+        limited.listener().onBinary(socket, buffer(6), true);
+
+        assertThatThrownBy(() -> limited.await(0)).isInstanceOf(IOException.class);
+        assertThat(limited.await(0).kind()).as("넘친 메시지의 나머지 조각이 메시지로 올라오지 않는다").isEqualTo(Inbound.Kind.NONE);
+    }
+
+    @Test
+    void aFailedCloseWhenShuttingDownTheOutputAbortsTheSocket() {
+        listener.onOpen(socket);
+        socket.failSends = true;
+
+        passage.shutdownOutput();
+
+        assertThat(socket.aborted).isTrue();
+    }
 }
