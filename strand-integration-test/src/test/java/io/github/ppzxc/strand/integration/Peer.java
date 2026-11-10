@@ -179,8 +179,8 @@ final class Peer implements AutoCloseable {
     }
 
     /** 이 요청 결과가 끝나는 순간을 {@link #log()}에 적게 한다. 결과가 나오기 전에, 즉 요청을 낸 직후에 걸어야 순서를 놓치지 않는다. */
-    void logResult(CompletableFuture<?> result) {
-        result.thenRun(() -> log.add(RESULT));
+    CompletableFuture<Void> logResult(CompletableFuture<?> result) {
+        return result.thenRun(() -> log.add(RESULT));
     }
 
     /** 지금까지 받은 종료 알림. 연결당 정확히 한 번이어야 한다. */
