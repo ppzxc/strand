@@ -48,6 +48,9 @@ final class FrameKind {
             this.status = frame[Protocol.STATUS_AT] & 0xFF;
             this.streamId = Bytes.readLong(frame, Protocol.STREAM_ID_AT);
             this.extensions = Bytes.readUnsignedShort(frame, Protocol.EXTENSIONS_LENGTH_AT);
+            assertThat(Protocol.HEADER_SIZE + extensions)
+                    .as("extensions_length가 프레임 안에 있어야 한다")
+                    .isLessThanOrEqualTo(frame.length);
             this.payload = Arrays.copyOfRange(frame, Protocol.HEADER_SIZE + extensions, frame.length);
         }
 
@@ -431,8 +434,14 @@ final class FrameKind {
         List<byte[]> result = new ArrayList<>();
         int at = 0;
         while (at + Protocol.LENGTH_SIZE <= output.length) {
-            int size = (int) (Protocol.LENGTH_SIZE + Bytes.readUnsignedInt(output, at));
-            assertThat(at + size).as("보낸 바이트가 프레임 경계에서 끝나야 한다").isLessThanOrEqualTo(output.length);
+            long length = Bytes.readUnsignedInt(output, at);
+            assertThat(length)
+                    .as("프레임 length는 %d 이상이어야 한다", Protocol.MIN_FRAME_LENGTH)
+                    .isGreaterThanOrEqualTo(Protocol.MIN_FRAME_LENGTH);
+            assertThat(at + Protocol.LENGTH_SIZE + length)
+                    .as("보낸 바이트가 프레임 경계에서 끝나야 한다")
+                    .isLessThanOrEqualTo(output.length);
+            int size = (int) (Protocol.LENGTH_SIZE + length);
             result.add(Arrays.copyOfRange(output, at, at + size));
             at += size;
         }

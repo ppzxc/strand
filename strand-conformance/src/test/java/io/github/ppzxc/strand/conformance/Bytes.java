@@ -13,9 +13,12 @@ final class Bytes {
         return hex.replaceAll("\\s", "");
     }
 
-    /** 공백을 지운 hex를 바이트로. */
+    /** 공백을 지운 hex를 바이트로. 자릿수가 홀수이면 거부한다. */
     static byte[] fromHex(String hex) {
         String clean = compactHex(hex);
+        if (clean.length() % 2 != 0) {
+            throw new IllegalArgumentException("hex 자릿수가 홀수다: " + clean.length());
+        }
         byte[] out = new byte[clean.length() / 2];
         for (int i = 0; i < out.length; i++) {
             out[i] = (byte) Integer.parseInt(clean.substring(2 * i, 2 * i + 2), 16);

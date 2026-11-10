@@ -119,4 +119,20 @@ class FrameKindTest {
 
         assertThat(FrameKind.describe(bytes, false, true)).containsExactly("type=0x0010 flags=- stream_id=0 payload=");
     }
+
+    @Test
+    void malformedSentBytesFailAsReadableAssertions() {
+        // length가 최솟값(16) 미만: 헤더를 읽을 수 없다.
+        byte[] tooShort = Bytes.fromHex("00000004" + "00000000");
+        // length가 2^31 이상: int로 담을 수 없다.
+        byte[] tooLong = Bytes.fromHex("80000000" + "0010" + "00" + "00" + "0000000000000000" + "00000000");
+        // extensions_length가 프레임 밖까지 간다.
+        byte[] extensionsOutOfFrame =
+                Bytes.fromHex("00000010" + "0010" + "00" + "00" + "0000000000000000" + "00ff" + "0000");
+
+        assertThatThrownBy(() -> FrameKind.describe(tooShort, false, true)).isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> FrameKind.describe(tooLong, false, true)).isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> FrameKind.describe(extensionsOutOfFrame, false, true))
+                .isInstanceOf(AssertionError.class);
+    }
 }
