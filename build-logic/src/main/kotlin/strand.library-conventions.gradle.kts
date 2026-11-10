@@ -105,7 +105,7 @@ tasks.jacocoTestCoverageVerification {
 
 val verifyDependencies = tasks.register<VerifyDependencyAllowlist>("verifyDependencies") {
   group = "verification"
-  description = "런타임 의존성 0, 컴파일 의존성은 JSpecify만 허용하는지 검사한다."
+  description = "외부 런타임 의존성 0, 컴파일 의존성은 JSpecify만 허용하는지 검사한다(같은 저장소의 strand-core 프로젝트는 예외)."
   fun resolved(configurationName: String): Provider<Set<String>> {
     val result = configurations.getByName(configurationName).incoming.resolutionResult
     return result.rootComponent.map { root ->
@@ -117,6 +117,9 @@ val verifyDependencies = tasks.register<VerifyDependencyAllowlist>("verifyDepend
   compileComponents.set(resolved("compileClasspath"))
   val jspecify = catalog.library("jspecify").get()
   allowedCompile.add("${jspecify.module.group}:${jspecify.module.name}:${jspecify.versionConstraint.requiredVersion}")
+  // 전송 모듈(strand-nio)은 core에만 의존하고 core와 함께 배포한다. 같은 저장소의 core 프로젝트만 허용한다.
+  allowedRuntime.add("project ':strand-core'")
+  allowedCompile.add("project ':strand-core'")
   passedMarker.set(layout.buildDirectory.file("verifyDependencies/ok"))
 }
 
