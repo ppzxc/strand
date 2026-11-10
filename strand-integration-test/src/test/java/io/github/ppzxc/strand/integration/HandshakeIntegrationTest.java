@@ -3,7 +3,7 @@ package io.github.ppzxc.strand.integration;
 import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.ppzxc.strand.core.internal.Event;
+import io.github.ppzxc.strand.nio.internal.IncomingRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -20,14 +20,15 @@ class HandshakeIntegrationTest {
     @Test
     @DisplayName("TCP 연결을 열고 바로 낸 요청이 핸드셰이크 뒤 서버에 도달한다 (규격 3.1~3.3)")
     void requestSentBeforeHandshakeReachesServer() throws Exception {
-        try (TestServer server = TestServer.start();
-                TestClient client = TestClient.connect(server.port())) {
-            Connection serverConnection = server.awaitConnection();
+        try (TcpServer server = TcpServer.start();
+                Peer client = Peer.connect(server.port(), null)) {
+            Peer serverSide = server.awaitPeer();
             client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
 
-            Event received = serverConnection.awaitEvent(Event.Kind.REQUEST_RECEIVED);
+            IncomingRequest received = serverSide.awaitRequest();
 
             assertThat(received.type()).isEqualTo(APPLICATION_TYPE);
+            assertThat(received.body()).isEqualTo(Fixtures.payload("hello"));
         }
     }
 }
