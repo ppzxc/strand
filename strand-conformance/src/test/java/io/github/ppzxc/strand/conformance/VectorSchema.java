@@ -31,22 +31,28 @@ final class VectorSchema {
 
     // ---- 필드 값 규칙 ----
 
-    private static final FieldCheck U16 = FieldCheck.range(0, FieldCheck.U16_MAX);
-    private static final FieldCheck U32 = FieldCheck.range(0, FieldCheck.U32_MAX);
+    private static final long U8_MAX = 255L;
+    private static final long U16_MAX = 65535L;
+    private static final long U32_MAX = 4294967295L;
+    private static final BigInteger U64_MAX = BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE);
+    private static final BigInteger STREAM_ID_MAX = BigInteger.ONE.shiftLeft(63).subtract(BigInteger.ONE);
+
+    private static final FieldCheck U16 = FieldCheck.range(0, U16_MAX);
+    private static final FieldCheck U32 = FieldCheck.range(0, U32_MAX);
     /** 1 이상의 u32. 0이 아닌 스트림 ID와 시간(ms)에 쓴다. */
-    private static final FieldCheck POSITIVE_U32 = FieldCheck.range(1, FieldCheck.U32_MAX);
+    private static final FieldCheck POSITIVE_U32 = FieldCheck.range(1, U32_MAX);
     /** 애플리케이션 프레임·요청의 type. 0~255는 제어 프레임용으로 예약돼 있다. */
-    static final FieldCheck APP_TYPE = FieldCheck.range(Protocol.FIRST_APPLICATION_TYPE, FieldCheck.U16_MAX);
+    static final FieldCheck APP_TYPE = FieldCheck.range(Protocol.FIRST_APPLICATION_TYPE, U16_MAX);
     /** 2.5.1절의 이름이거나, 이름 목록 다음부터 255까지의 예약 정수. */
-    private static final FieldCheck STATUS = FieldCheck.named(Protocol.STATUS_NAMES, FieldCheck.U8_MAX);
+    private static final FieldCheck STATUS = FieldCheck.named(Protocol.STATUS_NAMES, U8_MAX);
     /** 2.5.2절의 이름이거나, 이름 목록 다음부터 u32 끝까지의 예약 정수. */
-    private static final FieldCheck ERROR_CODE = FieldCheck.named(Protocol.ERROR_CODE_NAMES, FieldCheck.U32_MAX);
+    private static final FieldCheck ERROR_CODE = FieldCheck.named(Protocol.ERROR_CODE_NAMES, U32_MAX);
     /** 스트림 번호. 0 이상 2^63-1 이하의 10진수 문자열(번호는 JSON 수로 쓰지 않는다). */
-    private static final FieldCheck STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, FieldCheck.STREAM_ID_MAX);
+    private static final FieldCheck STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, STREAM_ID_MAX);
     /** CLOSE의 last_stream_id. 0 이상 2^64-1 이하의 10진수 문자열(형태가 잘못된 CLOSE를 위해 번호 범위 밖 값도 쓴다). */
-    private static final FieldCheck LAST_STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, FieldCheck.U64_MAX);
+    private static final FieldCheck LAST_STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, U64_MAX);
     /** 1 이상 2^63-1 이하의 10진수 문자열. RESET의 stream_id와 next_stream_id에 쓴다(홀짝은 role과 함께 보는 검사라 {@link #setup}이 따로 본다). */
-    private static final FieldCheck POSITIVE_STREAM_ID = FieldCheck.decimal(BigInteger.ONE, FieldCheck.STREAM_ID_MAX);
+    private static final FieldCheck POSITIVE_STREAM_ID = FieldCheck.decimal(BigInteger.ONE, STREAM_ID_MAX);
     /** 제어 프레임의 stream_id처럼 값이 0으로 고정된 필드. 문자열 {@code "0"}이다. */
     private static final FieldCheck ZERO_STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, BigInteger.ZERO);
     /** WebSocket Close의 상태 코드. 규격 1.2절이 정한 {@code 1000 Normal Closure}만 모델링한다. */

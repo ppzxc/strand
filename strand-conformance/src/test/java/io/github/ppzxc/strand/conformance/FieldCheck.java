@@ -8,12 +8,6 @@ import java.util.List;
 @FunctionalInterface
 interface FieldCheck {
 
-    long U8_MAX = 255L;
-    long U16_MAX = 65535L;
-    long U32_MAX = 4294967295L;
-    BigInteger U64_MAX = BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE);
-    BigInteger STREAM_ID_MAX = BigInteger.ONE.shiftLeft(63).subtract(BigInteger.ONE);
-
     /** 객체 검증이 값을 보지 않는다. 호출한 쪽이 객체 검증 앞이나 뒤에 따로 검증한다. */
     FieldCheck DEFERRED = (c, path, element) -> {};
 
