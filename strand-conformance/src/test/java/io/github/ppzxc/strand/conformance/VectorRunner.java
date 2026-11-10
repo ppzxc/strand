@@ -28,7 +28,10 @@ import java.util.Set;
  */
 final class VectorRunner {
 
-    /** 러너가 지원하는 setup 키. 형태 검사의 setup 키 목록에서 나온다. */
+    /**
+     * 러너가 지원하는 setup 키. 형태 검사의 setup 키 목록에서 나오므로 스키마가 허용하는 키는 모두 지원으로 센다. 이 검사가 스키마와의
+     * 어긋남을 잡아 주지는 않는다. 스키마에 키를 더하면 {@link #configOf}가 그 키를 읽게 함께 고쳐야 한다.
+     */
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(VectorSchema.setupKeys());
 
     private final boolean client;
@@ -75,7 +78,7 @@ final class VectorRunner {
         }
     }
 
-    /** 실행하지 못하는 부분이 있으면 벡터를 건너뛴다. 한 단계도 실행하기 전에 판정한다. */
+    /** 실행하지 못하는 부분이 있으면 벡터를 실패시킨다(건너뛰지 않는다). 한 단계도 실행하기 전에 판정한다. */
     private static void requireSupported(ConformanceVector vector, JsonObject setup) {
         for (String key : setup.keySet()) {
             requireSupportedPart(SUPPORTED_SETUP.contains(key), vector, "setup." + key);

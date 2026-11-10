@@ -191,7 +191,10 @@ final class StepKind {
         return SHAPES_BY_NAME;
     }
 
-    /** 이 단계의 종류. 정의에 없는 종류는 오류다(적재기를 거친 벡터에는 없다). */
+    /**
+     * 이 단계의 종류. 적재기를 거친 벡터에는 정의에 없는 종류가 없으므로, 없으면 {@link IllegalArgumentException}을 던진다. 이름만으로
+     * 모르는 종류를 물어야 하면 {@link #named}를 쓴다.
+     */
     static StepKind of(JsonObject step) {
         String name = step.get(TAG).getAsString();
         StepKind kind = REGISTRY.get(name);
@@ -201,7 +204,7 @@ final class StepKind {
         return kind;
     }
 
-    /** 이 종류를 정의에서 찾는다. 모르는 이름이면 null. */
+    /** 이 종류를 정의에서 찾는다. 던지지 않고 모르는 이름이면 null을 돌려준다(적재기 앞에서 지원 검사를 하는 러너가 쓴다). */
     static StepKind named(String name) {
         return REGISTRY.get(name);
     }
@@ -210,7 +213,10 @@ final class StepKind {
         return name;
     }
 
-    /** 러너가 이 종류를 실행할 수 있는가. */
+    /**
+     * 러너가 이 종류를 실행할 수 있는가. 지금 정의된 종류는 모두 실행 방법이 있어 늘 true다. 실행 방법 없이 형태만 정의하는 종류를 두면
+     * 이 값이 false가 되고, 러너의 지원 검사가 그 종류를 가진 벡터를 실행 전에 실패시킨다. 지원 여부를 정의에 두라는 #249의 요구로 남겨 둔다.
+     */
     boolean isSupported() {
         return execution != null;
     }
