@@ -157,26 +157,9 @@ final class VectorSchema {
     static final String FRAME_TAG = "type";
     private static final String FRAME_LABEL = "프레임 type";
 
-    // ---- 이벤트: 이름별 필드 ----
+    // ---- 이벤트: 이름별 필드는 EventKind가 정의한다 ----
 
-    private static final String EVENT_TAG = "event";
-    private static final String EVENT_LABEL = "event";
-
-    private static final Shape EVENT_BASE = Shape.EMPTY.require(EVENT_TAG, FieldCheck.DEFERRED);
-
-    private static final Map<String, Shape> EVENTS_BY_NAME = new HashMap<>();
-
-    static {
-        EVENTS_BY_NAME.put(
-                "request_received", EVENT_BASE.require("stream_id", STREAM_ID).require("type", APP_TYPE));
-        EVENTS_BY_NAME.put(
-                "result",
-                EVENT_BASE
-                        .allow("stream_id", STREAM_ID)
-                        .require("status", STATUS)
-                        .require("certainty", FieldCheck.oneOf(CERTAINTIES)));
-        EVENTS_BY_NAME.put("closed", EVENT_BASE);
-    }
+    private static final String EVENT_LABEL = EventKind.TAG;
 
     private VectorSchema() {}
 
@@ -299,8 +282,9 @@ final class VectorSchema {
         JsonArray array = c.array(path, element);
         for (int i = 0; i < array.size(); i++) {
             String eventPath = Check.item(path, i);
-            JsonObject event = c.objectNamedBy(eventPath, array.get(i), EVENT_TAG, EVENT_LABEL, EVENTS_BY_NAME);
-            if ("result".equals(event.get(EVENT_TAG).getAsString())) {
+            JsonObject event =
+                    c.objectNamedBy(eventPath, array.get(i), EventKind.TAG, EVENT_LABEL, EventKind.shapesByName());
+            if ("result".equals(event.get(EventKind.TAG).getAsString())) {
                 localResult(c, eventPath, event);
             }
         }

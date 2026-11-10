@@ -1,7 +1,6 @@
 package io.github.ppzxc.strand.conformance;
 
 import static io.github.ppzxc.strand.conformance.Protocol.errorCode;
-import static io.github.ppzxc.strand.conformance.Protocol.nameOfStatus;
 import static io.github.ppzxc.strand.conformance.Protocol.statusCode;
 import static io.github.ppzxc.strand.conformance.Protocol.streamId;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,11 +20,9 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
-import java.util.function.Function;
 
 /**
  * 벡터 하나를 엔드포인트에 실행한다. `setup`으로 엔드포인트를 만들고 단계마다 입력을 넣어, 보낸 바이트를 프레임으로 풀어 `send`와,
@@ -39,8 +36,6 @@ final class VectorRunner {
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(VectorSchema.setupKeys());
     /** 실행할 수 있는 단계. 지원 여부와 실행이 이 표 하나에서 정해진다. */
     private static final Map<String, BiConsumer<VectorRunner, JsonObject>> STEPS = new LinkedHashMap<>();
-    /** 비교할 수 있는 이벤트. 지원 여부와 기대 표기가 이 표 하나에서 정해진다. */
-    private static final Map<String, Function<JsonObject, String>> EVENTS = new LinkedHashMap<>();
 
     static {
         STEPS.put(
@@ -82,18 +77,6 @@ final class VectorRunner {
                         Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
         STEPS.put("disconnect", (runner, step) -> runner.endpoint.disconnect());
         STEPS.put("close", (runner, step) -> runner.endpoint.close(errorCode(step.get("error_code"))));
-
-        EVENTS.put(
-                "result",
-                event -> "result stream_id="
-                        + (event.has("stream_id") ? streamId(event.get("stream_id")) : "-") + " status="
-                        + nameOfStatus(event.get("status")) + " certainty="
-                        + event.get("certainty").getAsString());
-        EVENTS.put(
-                "request_received",
-                event -> "request_received stream_id=" + streamId(event.get("stream_id")) + " type="
-                        + event.get("type").getAsInt());
-        EVENTS.put("closed", event -> "closed");
     }
 
     private final boolean client;
@@ -166,7 +149,10 @@ final class VectorRunner {
             }
             for (JsonElement event : step.getAsJsonArray("events")) {
                 requireSupportedPart(
-                        EVENTS.containsKey(event.getAsJsonObject().get("event").getAsString()), vector, "이벤트 " + event);
+                        EventKind.isSupported(
+                                event.getAsJsonObject().get("event").getAsString()),
+                        vector,
+                        "이벤트 " + event);
             }
         }
     }
@@ -311,31 +297,18 @@ final class VectorRunner {
         List<String> result = new ArrayList<>();
         for (JsonElement element : step.getAsJsonArray("events")) {
             JsonObject event = element.getAsJsonObject();
-            result.add(EVENTS.get(event.get("event").getAsString()).apply(event));
+            result.add(EventKind.expected(event));
         }
         return result;
-    }
-
-    private static String certaintyName(Event event) {
-        return event.certainty().orElseThrow(AssertionError::new).name().toLowerCase(Locale.ROOT);
     }
 
     private static List<String> describe(List<Event> events) {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
-            if (event.kind() == Event.Kind.AUTHENTICATED) {
-                // 벡터 형식에 없는 이벤트다(6.2절). 클라이언트의 credential_lifetime 통지는 core 테스트가 본다.
-                continue;
-            }
-            if (event.kind() == Event.Kind.RESULT) {
-                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). core는 번호 0으로 알린다.
-                String id = event.streamId() == 0 ? "-" : String.valueOf(event.streamId());
-                result.add("result stream_id=" + id + " status=" + nameOfStatus(event.status()) + " certainty="
-                        + certaintyName(event));
-            } else if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
-                result.add("request_received stream_id=" + event.streamId() + " type=" + event.type());
-            } else {
-                result.add(event.kind().name().toLowerCase(Locale.ROOT));
+            String text = EventKind.actual(event);
+            // 벡터 형식에 없는 이벤트(AUTHENTICATED, 6.2절)는 그리지 않는다. credential_lifetime 통지는 core 테스트가 본다.
+            if (text != null) {
+                result.add(text);
             }
         }
         return result;
