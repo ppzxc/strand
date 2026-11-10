@@ -30,6 +30,7 @@ final class VectorRunner {
 
     /** 러너가 지원하는 setup 키. 형태 검사의 setup 키 목록에서 나온다. */
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(VectorSchema.setupKeys());
+
     private final boolean client;
     private final boolean webSocket;
     private final Endpoint endpoint;

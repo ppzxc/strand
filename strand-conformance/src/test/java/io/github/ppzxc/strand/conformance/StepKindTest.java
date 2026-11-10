@@ -22,7 +22,14 @@ class StepKindTest {
     void shapesAreDerivedFromTheDefinitions() {
         assertThat(StepKind.shapesByName().keySet())
                 .containsExactlyInAnyOrder(
-                        "recv", "recv_message", "ping", "request", "respond", "cancel", "close", "advance",
+                        "recv",
+                        "recv_message",
+                        "ping",
+                        "request",
+                        "respond",
+                        "cancel",
+                        "close",
+                        "advance",
                         "disconnect");
         assertThat(StepKind.shapesByName().get("advance").names())
                 .containsExactlyInAnyOrder("kind", "send", "events", "ms");

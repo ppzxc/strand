@@ -234,7 +234,8 @@ final class StepKind {
 
     /** 지원 종류여도 러너가 실행하지 못하는 단계 내용(예: request의 확장). 없으면 null. */
     String unsupportedPart(JsonObject step) {
-        boolean hasExtensions = step.has("extensions") && step.getAsJsonArray("extensions").size() > 0;
+        boolean hasExtensions =
+                step.has("extensions") && step.getAsJsonArray("extensions").size() > 0;
         return this == REQUEST && hasExtensions ? "request.extensions" : null;
     }
 

@@ -24,7 +24,8 @@ final class InboundFrames {
         if (inbound == StepKind.Inbound.STREAM) {
             return stream.feed(hexOf(step));
         }
-        if (inbound == StepKind.Inbound.MESSAGE && step.get("opcode").getAsString().equals("binary")) {
+        if (inbound == StepKind.Inbound.MESSAGE
+                && step.get("opcode").getAsString().equals("binary")) {
             return new InboundFrames().feed(hexOf(step));
         }
         return new ArrayList<>();
