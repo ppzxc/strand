@@ -241,4 +241,84 @@ class TcpPassageTest {
         passage.close();
         peer.close();
     }
+
+    @Test
+    void aReadBufferSmallerThanOneIsRejected() throws Exception {
+        TcpLoopback link = TcpLoopback.open();
+
+        assertThatThrownBy(() -> TcpPassage.of(link.client, 0)).isInstanceOf(IllegalArgumentException.class);
+        link.client.close();
+        link.accepted.close();
+    }
+
+    @Test
+    void onceTheEndWasSeenEveryLaterAwaitReportsItAgain() throws Exception {
+        TcpLoopback link = TcpLoopback.open();
+        Passage passage = TcpPassage.of(link.client);
+        link.accepted.close();
+
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        Inbound seen = Inbound.none();
+        while (seen.kind() != Inbound.Kind.END && System.nanoTime() < limit) {
+            seen = passage.await(100);
+        }
+
+        assertThat(seen.kind()).isEqualTo(Inbound.Kind.END);
+        assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.END);
+        assertThat(passage.await(-1).kind()).isEqualTo(Inbound.Kind.END);
+        passage.close();
+    }
+
+    @Test
+    void anEndSeenWhileAWriteIsBlockedDoesNotStopTheWriteAndIsReportedAfterwards() throws Exception {
+        List<OutboundMessage> messages = largeRequestMessages();
+        TcpLoopback link = TcpLoopback.open(SMALL_SOCKET_BUFFER);
+        Passage writer = TcpPassage.of(link.client);
+        link.accepted.shutdownOutput();
+        CompletableFuture<Void> writing = inBackground(() -> {
+            for (OutboundMessage message : messages) {
+                writer.write(message);
+            }
+        });
+
+        // 상대는 보내는 쪽만 닫았을 뿐 계속 읽는다. 쓰기는 EOF를 만나도 끝까지 가야 한다.
+        ByteBuffer sink = ByteBuffer.allocate(8192);
+        int total = totalBytes(messages);
+        int received = 0;
+        while (received < total) {
+            sink.clear();
+            int count = link.accepted.read(sink);
+            assertThat(count).isPositive();
+            received += count;
+        }
+
+        within(writing);
+        assertThat(writer.await(0).kind()).isEqualTo(Inbound.Kind.END);
+        writer.close();
+        link.accepted.close();
+    }
+
+    @Test
+    void closingWhileAwaitingEndsTheAwaitWithAnIoError() throws Exception {
+        TcpLoopback link = TcpLoopback.open();
+        Passage passage = TcpPassage.of(link.client);
+        CompletableFuture<Inbound> awaiting = new CompletableFuture<>();
+        Thread thread = new Thread(
+                () -> {
+                    try {
+                        awaiting.complete(passage.await(-1));
+                    } catch (IOException e) {
+                        awaiting.completeExceptionally(e);
+                    }
+                },
+                "tcp-passage-await");
+        thread.setDaemon(true);
+        thread.start();
+
+        passage.close();
+        passage.close();
+
+        assertThatThrownBy(() -> within(awaiting)).hasCauseInstanceOf(IOException.class);
+        link.accepted.close();
+    }
 }
