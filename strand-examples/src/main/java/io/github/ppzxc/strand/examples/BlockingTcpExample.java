@@ -4,6 +4,7 @@ import io.github.ppzxc.strand.core.StrandVersion;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.nio.internal.ConnectionClosed;
 import io.github.ppzxc.strand.nio.internal.ConnectionDriver;
+import io.github.ppzxc.strand.nio.internal.RequestHandle;
 import io.github.ppzxc.strand.nio.internal.RequestResult;
 import io.github.ppzxc.strand.nio.internal.TcpPassage;
 import java.net.InetSocketAddress;
@@ -37,10 +38,11 @@ public final class BlockingTcpExample {
                 .listener(ExampleSupport.printing("클라이언트", closed))
                 .start()) {
             // AUTH 관문을 지나기 전의 요청은 core가 미뤘다가 AUTH(ACK) 뒤에 보낸다(규격 3.3절).
-            RequestResult result = driver.request(
-                            ExampleSupport.DEMO_REQUEST_TYPE, "hello".getBytes(StandardCharsets.UTF_8))
-                    .result()
-                    .get(ExampleSupport.TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            RequestHandle handle =
+                    driver.request(ExampleSupport.DEMO_REQUEST_TYPE, "hello".getBytes(StandardCharsets.UTF_8));
+            // PING은 연결이 살아 있는지 확인한다. 보냈다는 것(명령 처리)까지만 기다린다.
+            driver.ping(new byte[] {1, 2, 3, 4, 5, 6, 7, 8}).get(ExampleSupport.TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            RequestResult result = handle.result().get(ExampleSupport.TIMEOUT_SECONDS, TimeUnit.SECONDS);
             ExampleSupport.handleResult(result);
             driver.closeConnection();
             closed.get(ExampleSupport.TIMEOUT_SECONDS, TimeUnit.SECONDS);

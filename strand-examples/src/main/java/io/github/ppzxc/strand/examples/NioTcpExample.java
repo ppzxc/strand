@@ -45,6 +45,8 @@ public final class NioTcpExample {
                         }
                         driver.closeConnection();
                     });
+            // PING도 기다리지 않는다. 결과가 오는 대로 위 단계와 나란히 돈다.
+            driver.ping(new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
             // 호출한 스레드는 여기서 끝을 기다릴 뿐이다. 위 단계는 결과가 오는 대로 돈다.
             closed.get(ExampleSupport.TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return done.get(ExampleSupport.TIMEOUT_SECONDS, TimeUnit.SECONDS);
