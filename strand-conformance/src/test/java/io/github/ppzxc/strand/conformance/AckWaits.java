@@ -159,9 +159,11 @@ final class AckWaits {
         List<Ack> acks = new ArrayList<>();
         for (InboundFrames.Frame frame : InboundFrames.receivedBy(step, stream)) {
             int type = frame.type;
-            if (type == Protocol.TYPE_AUTH) {
+            if (AuthGate.isAuthAck(frame)) {
+                acks.add(new Ack(Protocol.TYPE_AUTH, null));
+            } else if (AuthGate.isAuthRequest(frame)) {
                 // ACK가 없는 AUTH는 서버의 AUTH 대기를 끝낸다.
-                acks.add(new Ack(AuthGate.isAuthRequest(frame) ? AUTH_REQUEST : Protocol.TYPE_AUTH, null));
+                acks.add(new Ack(AUTH_REQUEST, null));
             } else if (frame.hasAckFlag() && (type == Protocol.TYPE_HELLO || type == Protocol.TYPE_PING)) {
                 acks.add(new Ack(type, frame.pingSizedPayload()));
             }
