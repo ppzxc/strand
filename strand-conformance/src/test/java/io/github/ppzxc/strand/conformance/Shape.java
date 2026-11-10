@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.conformance;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -44,6 +45,13 @@ final class Shape {
             throw new IllegalArgumentException("선언되지 않은 필드: " + name);
         }
         return kind;
+    }
+
+    /** 선언된 모든 필드 이름(필수와 선택). */
+    Set<String> names() {
+        Set<String> all = new LinkedHashSet<>(required.keySet());
+        all.addAll(optional.keySet());
+        return Collections.unmodifiableSet(all);
     }
 
     Set<String> requiredNames() {
