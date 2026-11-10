@@ -107,7 +107,10 @@ final class FrameKind {
                     .allow("stream_id", VectorSchema.ZERO_STREAM_ID),
             frame -> controlHead(VectorSchema.hasFlag(frame, "ACK"))
                     .with("payload", frame.get("payload").getAsString()),
-            null,
+            frame -> control(
+                    Protocol.TYPE_PING,
+                    VectorSchema.hasFlag(frame, "ACK"),
+                    Bytes.fromHex(frame.get("payload").getAsString())),
             (wire, client) -> wire.head().with("payload", Bytes.toHex(wire.payload)));
 
     private static final FrameKind AUTH_KIND = new FrameKind(
@@ -141,7 +144,7 @@ final class FrameKind {
             },
             frame -> {
                 if (VectorSchema.hasFlag(frame, "ACK")) {
-                    return control(Protocol.TYPE_AUTH, true, new byte[0]);
+                    return control(Protocol.TYPE_AUTH, true, authAckPayload(frame));
                 }
                 byte[] name = frame.get("mechanism").getAsString().getBytes(StandardCharsets.US_ASCII);
                 byte[] credentials = Bytes.fromHex(
@@ -176,7 +179,14 @@ final class FrameKind {
             frame -> controlHead(false)
                     .with("error_code", Protocol.nameOfError(frame.get("error_code")))
                     .with("last_stream_id", frame.get("last_stream_id").getAsString()),
-            null,
+            frame -> {
+                ByteArrayOutputStream payload = new ByteArrayOutputStream();
+                writeInt(payload, Protocol.errorCode(frame.get("error_code")));
+                writeLong(
+                        payload,
+                        Long.parseUnsignedLong(frame.get("last_stream_id").getAsString()));
+                return control(Protocol.TYPE_CLOSE, false, payload.toByteArray());
+            },
             (wire, client) -> wire.payload.length < Protocol.CLOSE_PAYLOAD_SIZE
                     ? null
                     : wire.head()
@@ -193,7 +203,13 @@ final class FrameKind {
                     .with("flags", flagsText(0))
                     .with("stream_id", String.valueOf(Protocol.streamId(frame.get("stream_id"))))
                     .with("error_code", Protocol.nameOfError(frame.get("error_code"))),
-            null,
+            frame -> {
+                ByteArrayOutputStream payload = new ByteArrayOutputStream();
+                writeInt(payload, Protocol.errorCode(frame.get("error_code")));
+                return Bytes.concat(
+                        header(Protocol.TYPE_RESET, 0, 0, Protocol.streamId(frame.get("stream_id")), payload.size()),
+                        payload.toByteArray());
+            },
             (wire, client) -> wire.payload.length != Protocol.RESET_PAYLOAD_SIZE
                     ? null
                     : wire.head()
@@ -228,7 +244,19 @@ final class FrameKind {
                 return fields.with(
                         "payload", frame.has("payload") ? frame.get("payload").getAsString() : "");
             },
-            null,
+            frame -> {
+                byte[] payload = Bytes.fromHex(
+                        frame.has("payload") ? frame.get("payload").getAsString() : "");
+                int status = frame.has("status") ? Protocol.statusCode(frame.get("status")) : 0;
+                return Bytes.concat(
+                        header(
+                                frame.get("type").getAsInt(),
+                                0,
+                                status,
+                                Protocol.streamId(frame.get("stream_id")),
+                                payload.length),
+                        payload);
+            },
             (wire, client) -> {
                 Fields fields = new Fields().with("type", String.valueOf(wire.type));
                 fields.putAll(wire.head());
@@ -453,6 +481,17 @@ final class FrameKind {
         for (Map.Entry<Integer, String> param : Protocol.HELLO_PARAM_NAMES.entrySet()) {
             writeShort(payload, param.getKey());
             writeInt(payload, params.get(param.getValue()));
+        }
+        return payload.toByteArray();
+    }
+
+    private static byte[] authAckPayload(JsonObject frame) {
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        if (frame.has("params") && frame.getAsJsonObject("params").has("credential_lifetime")) {
+            writeShort(payload, Protocol.AUTH_PARAM_CREDENTIAL_LIFETIME);
+            writeInt(
+                    payload,
+                    frame.getAsJsonObject("params").get("credential_lifetime").getAsLong());
         }
         return payload.toByteArray();
     }
