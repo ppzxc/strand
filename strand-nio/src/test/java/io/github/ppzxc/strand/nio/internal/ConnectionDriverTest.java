@@ -302,11 +302,11 @@ class ConnectionDriverTest {
         ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
         RequestHandle handle = client.request(APPLICATION_TYPE, bytes("late"));
         client.close();
-        await(handle.result());
+        RequestResult ended = await(handle.result());
 
         handle.cancel();
 
-        assertThat(handle.result()).isDone();
+        assertThat(await(handle.result())).isSameAs(ended);
     }
 
     @Test
