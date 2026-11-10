@@ -11,6 +11,10 @@ dependencies {
   api(project(":strand-core"))
   testFixturesApi(project(":strand-core"))
   testFixturesCompileOnly(libsCatalog.library("jspecify"))
+  // Passage 계약 테스트(PassageContract)를 다른 통로 구현이 상속해 쓰게 fixtures로 낸다.
+  testFixturesApi(platform(libsCatalog.library("junit-bom")))
+  testFixturesApi(libsCatalog.library("junit-jupiter"))
+  testFixturesApi(libsCatalog.library("assertj-core"))
 }
 
 // 공개 API가 모두 internal 패키지라 japicmp가 비교할 대상이 없고, 아직 배포한 적 없어 기준선 jar도 없다.

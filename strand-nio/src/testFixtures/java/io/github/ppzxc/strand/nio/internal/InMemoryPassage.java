@@ -55,6 +55,7 @@ public final class InMemoryPassage implements Passage {
     private boolean parked;
     private long lastAwaitTimeoutMs = Long.MIN_VALUE;
     private long activity;
+    private long awaitCalls;
     private InMemoryPassage peer;
 
     private InMemoryPassage(boolean messages) {
@@ -90,6 +91,7 @@ public final class InMemoryPassage implements Passage {
     @Override
     public Inbound await(long timeoutMs) throws IOException {
         synchronized (lock) {
+            awaitCalls++;
             if (timeoutMs != 0) {
                 lastAwaitTimeoutMs = timeoutMs;
             }
@@ -192,6 +194,17 @@ public final class InMemoryPassage implements Passage {
             manualTime = true;
         }
         return this;
+    }
+
+    /**
+     * {@link #await}를 부른 횟수(시간 제한 0 포함). 시계가 가지 않는데 늘면 드라이버가 되풀이해 깨어나는 것이다.
+     *
+     * @return 부른 횟수
+     */
+    public long awaitCalls() {
+        synchronized (lock) {
+            return awaitCalls;
+        }
     }
 
     /** 이 통로로 쓰는 것을 상대에게 보내지 않고 버린다(쓰기는 성공한 것처럼 돌아온다). 말 없는 상대를 만든다. */
