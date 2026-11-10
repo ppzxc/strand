@@ -172,6 +172,7 @@ class ConnectionNotificationTest {
     }
 
     private static final int STATUS_UNAVAILABLE = 14;
+    private static final int STATUS_CANCELLED = 1;
     private static final int UNAUTHENTICATED = 7;
 
     /** 서버가 요청을 받고도 응답하지 않는 연결 한 쌍을 맺는다. 클라이언트가 낸 요청 하나가 서버에 닿은 뒤에 돌아온다. */
@@ -180,6 +181,7 @@ class ConnectionNotificationTest {
         final Recorder clientSide = new Recorder();
         final Recorder serverSide = new Recorder();
         final ConnectionDriver client;
+        final RequestHandle pendingHandle;
         final CompletableFuture<RequestResult> pending;
 
         Held() throws Exception {
@@ -190,7 +192,8 @@ class ConnectionNotificationTest {
             client = start(ConnectionDriver.client(EndpointConfig.defaults(), link.first())
                     .executor(handlers)
                     .listener(clientSide));
-            pending = client.request(APPLICATION_TYPE, bytes("held")).result();
+            pendingHandle = client.request(APPLICATION_TYPE, bytes("held"));
+            pending = pendingHandle.result();
             await(received);
         }
     }
@@ -236,6 +239,20 @@ class ConnectionNotificationTest {
         assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
         assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
         assertThat(held.pending).isNotDone();
+    }
+
+    @Test
+    void cancellingWhileClosingEndsWithTheCoreCancelledResult() throws Exception {
+        Held held = new Held();
+        held.client.closeConnection();
+        RequestHandle late = held.client.request(APPLICATION_TYPE, bytes("too-late"));
+        await(late.result());
+
+        held.pendingHandle.cancel();
+
+        RequestResult result = await(held.pending);
+        assertThat(result.status()).isEqualTo(STATUS_CANCELLED);
+        assertThat(result.certainty()).isNotEqualTo(Certainty.RESPONSE);
     }
 
     @Test
