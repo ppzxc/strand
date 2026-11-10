@@ -7,6 +7,7 @@ import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -18,13 +19,17 @@ import org.jspecify.annotations.Nullable;
  * 연결 하나를 돌리는 전송 모듈의 연결 드라이버. {@link Endpoint} 하나를 소유하고, 전용 전송 스레드 하나만 이를 부른다. 다른 스레드의 호출({@link
  * #request}, {@link #respond}, {@link #close})은 명령으로 큐에 넣고 전송 스레드를 깨운다. {@code Endpoint}를 잠금으로 감싸지 않는다.
  *
- * <p>전송 스레드가 한 번 도는 순서는 읽기, {@code receive}/{@code receiveMessage}, 명령 처리, 이벤트 배출, 메시지 꺼내기, 쓰기다. 시계 진행은
- * 읽기와 명령 처리 사이에 들어간다(아직 없다). 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
+ * <p>전송 스레드가 한 번 도는 순서는 읽기, {@code receive}/{@code receiveMessage}, 시계 진행({@code advance}), 명령 처리, 이벤트 배출, 메시지
+ * 꺼내기, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을 잡는다. 읽기는 core의
+ * {@code nextDeadline}까지만 기다리고 기한이 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
  *
  * <p>{@code Authenticator}는 core가 {@code receive} 안에서 동기로 부르므로 전송 스레드에서 돈다. 블로킹하지 않는 {@code Authenticator}만
  * 지원한다. 요청 Future는 전송 스레드에서 완료되므로, 그 위에 건 동기 콜백도 블로킹하면 안 된다.
  */
 public final class ConnectionDriver implements AutoCloseable {
+
+    /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
+    private static final int MAX_RECEIVES_PER_STEP = 64;
 
     private enum Role {
         CLIENT,
@@ -62,7 +67,7 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         /**
-         * 단조 시계(밀리초)를 주입한다. 시계 진행은 다음 티켓이 끼운다. 정하지 않으면 {@link System#nanoTime()}이다.
+         * 단조 시계(밀리초)를 주입한다. 전송 스레드가 매번 흐른 시간을 재서 엔드포인트의 {@code advance}를 부른다. 정하지 않으면 {@link System#nanoTime()}이다.
          *
          * @param monotonicMillis 단조 시계
          * @return 이 빌더
@@ -96,8 +101,6 @@ public final class ConnectionDriver implements AutoCloseable {
     private final Passage passage;
     private final @Nullable Executor handlerExecutor;
     private final @Nullable RequestHandler handler;
-    // 시계 진행은 다음 티켓(#236)이 전송 스레드에서 쓴다. 지금은 주입 지점만 둔다.
-    @SuppressWarnings("UnusedVariable")
     private final LongSupplier clock;
 
     private final Queue<Command> commands = new ConcurrentLinkedQueue<>();
@@ -153,6 +156,27 @@ public final class ConnectionDriver implements AutoCloseable {
      *     끝난다
      */
     public RequestHandle request(int type, byte[] body) {
+        return submitRequest(type, body, 0);
+    }
+
+    /**
+     * 기한을 두고 요청을 낸다. 기한은 요청을 낸 시점(전송 스레드가 시계를 맞춘 뒤)부터 센다. 기한이 지나면 Future가
+     * {@code DEADLINE_EXCEEDED}로 끝난다. 쓰기 전이면 처리 안 됨, 쓰기를 시작했으면 결과 모름이다.
+     *
+     * @param type 애플리케이션 {@code type}(256 이상)
+     * @param body 요청 본문
+     * @param deadlineMs 기한(밀리초, 1 이상)
+     * @return 요청 핸들
+     * @throws IllegalArgumentException {@code deadlineMs}가 1보다 작을 때
+     */
+    public RequestHandle request(int type, byte[] body, long deadlineMs) {
+        if (deadlineMs < 1) {
+            throw new IllegalArgumentException("deadlineMs는 1 이상이어야 한다: " + deadlineMs);
+        }
+        return submitRequest(type, body, deadlineMs);
+    }
+
+    private RequestHandle submitRequest(int type, byte[] body, long deadlineMs) {
         CompletableFuture<RequestResult> future = new CompletableFuture<>();
         byte[] copy = body.clone();
         TicketBox box = new TicketBox();
@@ -160,7 +184,9 @@ public final class ConnectionDriver implements AutoCloseable {
             @Override
             public void execute(Loop loop) {
                 try {
-                    long ticket = loop.endpoint.request(type, copy);
+                    long ticket = deadlineMs > 0
+                            ? loop.endpoint.request(type, copy, deadlineMs)
+                            : loop.endpoint.request(type, copy);
                     box.ticket = ticket;
                     loop.pending.put(ticket, future);
                 } catch (RuntimeException e) {
@@ -213,6 +239,35 @@ public final class ConnectionDriver implements AutoCloseable {
             public void execute(Loop loop) {
                 try {
                     loop.endpoint.respond(streamId, status, copy);
+                    future.complete(null);
+                } catch (RuntimeException e) {
+                    future.completeExceptionally(e);
+                }
+            }
+
+            @Override
+            public void abandon(Throwable reason) {
+                future.completeExceptionally(reason);
+            }
+        });
+        return future;
+    }
+
+    /**
+     * PING을 보낸다. AUTH 관문 전이면 core가 미뤘다가 통과 뒤에 보낸다. 어느 스레드에서든 부를 수 있다.
+     *
+     * @param payload 정확히 8바이트
+     * @return PING 명령이 처리되면 끝나는 Future. payload가 8바이트가 아니거나 전송 스레드가 이미 끝났으면 예외로 끝난다. 연결이
+     *     닫히는 중이라 core가 보내지 않는 PING은 조용히 버려지고 Future는 정상으로 끝난다
+     */
+    public CompletableFuture<Void> ping(byte[] payload) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        byte[] copy = payload.clone();
+        submit(new Command() {
+            @Override
+            public void execute(Loop loop) {
+                try {
+                    loop.endpoint.ping(copy);
                     future.complete(null);
                 } catch (RuntimeException e) {
                     future.completeExceptionally(e);
@@ -290,23 +345,65 @@ public final class ConnectionDriver implements AutoCloseable {
         final Endpoint endpoint;
         final Map<Long, CompletableFuture<RequestResult>> pending = new HashMap<>();
         boolean finished;
+        // 엔드포인트의 가상 시계는 0에서 시작한다. startedAt은 그 0에 해당하는 주입 시계 값이고, advancedTo까지 advance했다.
+        private final long startedAt;
+        private long advancedTo;
 
         Loop(Endpoint endpoint) {
             this.endpoint = endpoint;
+            this.startedAt = clock.getAsLong();
+            this.advancedTo = startedAt;
         }
 
-        /** 읽기, 받기, 명령 처리, 이벤트 배출, 쓰기를 한 번 돈다. */
+        /** 읽기, 받기, 시계 진행({@code advance}), 명령 처리, 이벤트 배출, 쓰기를 한 번 돈다. */
         void step() {
             try {
-                receive(passage.await(-1));
+                receiveAvailable();
             } catch (IOException e) {
                 endpoint.disconnect();
             }
+            advanceClock();
             runCommands();
             if (closeRequested) {
                 endpoint.disconnect();
             }
             settle();
+        }
+
+        /**
+         * 기다렸다가, 지금 읽을 수 있는 것을 최대 {@link #MAX_RECEIVES_PER_STEP}개까지 받는다. 같은 읽기에 도착해 있던 ACK가 시계를 보내기 전에
+         * 받아지므로 확인 대기 초과로 오판되지 않는데, 이는 그 입력이 한 스텝 상한 이내일 때만 보장한다. 상한에 걸리면 남은 입력은 다음 스텝에서
+         * 읽히므로 그 사이 시계가 기한을 넘으면 오판할 수 있다. 상대가 계속 보내도 시계와 명령 처리가 굶지 않게 하려는 설계상 절충이다.
+         */
+        private void receiveAvailable() throws IOException {
+            Inbound inbound = passage.await(waitLimit());
+            int received = 0;
+            while (inbound.kind() != Inbound.Kind.NONE) {
+                receive(inbound);
+                received++;
+                if (inbound.kind() == Inbound.Kind.END || received >= MAX_RECEIVES_PER_STEP) {
+                    return;
+                }
+                inbound = passage.await(0);
+            }
+        }
+
+        /** 기다림의 상한. core가 알려 준 다음 기한까지만이고, 기한이 없으면 상한이 없다. */
+        private long waitLimit() {
+            OptionalLong next = endpoint.nextDeadline();
+            if (!next.isPresent()) {
+                return -1;
+            }
+            return Math.max(0, next.getAsLong() - (clock.getAsLong() - startedAt));
+        }
+
+        /** 주입 시계로 흐른 시간만큼 엔드포인트의 시계를 보낸다. */
+        private void advanceClock() {
+            long now = clock.getAsLong();
+            if (now > advancedTo) {
+                endpoint.advance(now - advancedTo);
+                advancedTo = now;
+            }
         }
 
         private void receive(Inbound inbound) {
