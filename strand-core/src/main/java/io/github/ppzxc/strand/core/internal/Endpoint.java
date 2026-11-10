@@ -366,12 +366,13 @@ public final class Endpoint {
             return ledger.queue(type, payload, deadlineAt);
         }
         if (!phase.isActive()) {
-            failLocally();
-            return ledger.issueTicket();
+            long ticket = ledger.issueTicket();
+            failLocally(ticket);
+            return ticket;
         }
         // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
         long ticket = ledger.nextTicket();
-        if (refuseLocally(ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
+        if (refuseLocally(ticket, ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
                 == OwnRequestLedger.Admission.OVERSIZE) {
             throw oversizeFrame("요청");
         }
@@ -382,15 +383,15 @@ public final class Endpoint {
      * 장부가 번호를 주지 않은 요청(프레임 크기 초과는 제외)을 로컬에서 실패시킨다. 번호 소진이면 연결도 닫는다(규격 2.2.5절). 프레임이 너무 크면
      * 아무것도 하지 않고 돌려준다.
      */
-    private OwnRequestLedger.Admission refuseLocally(OwnRequestLedger.Admission admission) {
+    private OwnRequestLedger.Admission refuseLocally(long ticket, OwnRequestLedger.Admission admission) {
         switch (admission) {
             case CLOSING:
             case STREAM_LIMIT:
-                failLocally();
+                failLocally(ticket);
                 break;
             case EXHAUSTED:
                 // 프레임 없이 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
-                failLocally();
+                failLocally(ticket);
                 close(ErrorCode.NO_ERROR);
                 break;
             default:
@@ -488,7 +489,7 @@ public final class Endpoint {
         if (outcome.resetToSend) {
             send(Frames.reset(outcome.streamId, ErrorCode.CANCEL));
         }
-        events.add(Event.result(outcome.streamId, outcome.status, outcome.certainty));
+        events.add(Event.result(outcome.ticket, outcome.streamId, outcome.status, outcome.certainty, outcome.body));
     }
 
     /**
@@ -724,7 +725,7 @@ public final class Endpoint {
             return;
         }
         if (type >= FrameType.FIRST_APPLICATION) {
-            handleApplication(bytes, off, type, extensionsLength, streamId);
+            handleApplication(bytes, off, size, type, extensionsLength, streamId);
             return;
         }
         boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
@@ -791,7 +792,7 @@ public final class Endpoint {
      * 애플리케이션 프레임. 확장 영역 형식 위반은 요청인지 응답인지, type을 아는지와 상관없이 연결 오류다(규격 2.4.1절). 내 번호 공간의
      * 프레임은 응답이고 상대 공간의 프레임은 새 요청이다(규격 4.2절).
      */
-    private void handleApplication(byte[] bytes, int off, int type, int extensionsLength, long streamId) {
+    private void handleApplication(byte[] bytes, int off, int size, int type, int extensionsLength, long streamId) {
         // 연결 오류 집합은 검사 순서가 없다(규격 5.1절 3번). 확장 영역 형식, 상대 ACK 전의 프레임(3.3절), 잘못된 stream_id.
         // 불변식: dispatch와 같이 끝난 연결에서는 불리지 않으므로 phase.admit은 던지지 않는다.
         Extensions extensionsResult = extensionsLength > MAX_EXTENSIONS_LENGTH
@@ -802,9 +803,9 @@ public final class Endpoint {
                 || isInvalidStreamId(streamId)) {
             connectionError();
         } else if (isOwnSpace(streamId)) {
-            handleResponse(bytes, off, streamId);
+            handleResponse(bytes, off, size, extensionsLength, streamId);
         } else {
-            handleRequest(type, extensionsResult, streamId);
+            handleRequest(type, extensionsResult, streamId, bytes, off, size, extensionsLength);
         }
     }
 
@@ -812,7 +813,14 @@ public final class Endpoint {
      * 상대의 새 요청(규격 5.1절 5번). (가) 거절, (나) 모르는 type, (다) 확장 값 오류 순서로 보고, 모두 지나면 애플리케이션에 넘긴다.
      * 거절한 요청과 오류로 답한 요청은 대기 스트림에 넣지 않지만 번호는 쓰인 것으로 센다(규격 4.5절, 5.1절).
      */
-    private void handleRequest(int type, Extensions extensionsResult, long streamId) {
+    private void handleRequest(
+            int type,
+            Extensions extensionsResult,
+            long streamId,
+            byte[] bytes,
+            int off,
+            int size,
+            int extensionsLength) {
         if (streamId <= highestPeerStreamId) {
             // 번호 역행: 재사용한 번호, 건너뛰고 나중에 온 번호, 대기 중인 스트림의 번호 모두 연결 오류다(규격 4.2.1절).
             connectionError();
@@ -832,7 +840,7 @@ public final class Endpoint {
         } else {
             // 대기 중인 요청은 항상 REQUEST_RECEIVED 이벤트와 함께 생긴다. refuseUnhandedRequests가 이 짝에 기댄다.
             peerPendingStreams.put(streamId, type);
-            events.add(Event.requestReceived(streamId, type));
+            events.add(Event.requestReceived(streamId, type, bodyOf(bytes, off, size, extensionsLength)));
         }
     }
 
@@ -870,10 +878,19 @@ public final class Endpoint {
         return valuesValid ? Extensions.VALID : Extensions.INVALID_VALUE;
     }
 
+    /** 애플리케이션 프레임의 본문(확장 영역 뒤)을 복사한다. 호출자의 배열은 이 호출이 돌아온 뒤 읽지 않는다. */
+    private static byte[] bodyOf(byte[] bytes, int off, int size, int extensionsLength) {
+        int from = off + Frames.HEADER_SIZE + extensionsLength;
+        return Arrays.copyOfRange(bytes, from, off + size);
+    }
+
     /** 내 요청의 응답. 대기 중인 요청이면 결과를 애플리케이션에 넘긴다. 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). */
-    private void handleResponse(byte[] bytes, int off, long streamId) {
-        OwnRequestLedger.Outcome outcome =
-                ledger.onResponse(streamId, Frames.typeOf(bytes, off), Frames.statusOf(bytes, off));
+    private void handleResponse(byte[] bytes, int off, int size, int extensionsLength, long streamId) {
+        OwnRequestLedger.Outcome outcome = ledger.onResponse(
+                streamId,
+                Frames.typeOf(bytes, off),
+                Frames.statusOf(bytes, off),
+                bodyOf(bytes, off, size, extensionsLength));
         if (outcome == null) {
             // 대기 중이 아닌 스트림의 프레임은 조용히 버린다(규격 4.3절).
             return;
@@ -1000,12 +1017,13 @@ public final class Endpoint {
         phase.authGatePassed();
         while (true) {
             DeferredPing ping = deferredPings.peekFirst();
+            long ticket = ledger.firstQueuedTicket();
             OwnRequestLedger.Admission admission =
                     ledger.openQueued(ping == null ? Long.MAX_VALUE : ping.beforeTicket, peerMaxFrameSize);
             if (admission != OwnRequestLedger.Admission.NONE) {
                 // 크기를 넘는 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고 로컬에서 실패시킨다.
-                if (refuseLocally(admission) == OwnRequestLedger.Admission.OVERSIZE) {
-                    failLocally();
+                if (refuseLocally(ticket, admission) == OwnRequestLedger.Admission.OVERSIZE) {
+                    failLocally(ticket);
                 }
             } else if (ping == null) {
                 return;
@@ -1210,8 +1228,8 @@ public final class Endpoint {
     }
 
     /** 스트림을 열기 전에 요청이 로컬에서 실패했다. 스트림 번호 없는 UNAVAILABLE 결과를 넘긴다. */
-    private void failLocally() {
-        events.add(Event.localUnavailable());
+    private void failLocally(long ticket) {
+        events.add(Event.localUnavailable(ticket));
     }
 
     /**
