@@ -21,7 +21,8 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * 연결 하나를 돌리는 전송 모듈의 연결 드라이버. {@link Endpoint} 하나를 소유하고, 전용 전송 스레드 하나만 이를 부른다. 다른 스레드의 호출({@link
- * #request}, {@link #respond}, {@link #close})은 명령으로 큐에 넣고 전송 스레드를 깨운다. {@code Endpoint}를 잠금으로 감싸지 않는다.
+ * #request}, {@link RequestHandle#cancel() cancel}, {@link #respond}, {@link #ping}, {@link #closeConnection}, {@link #abortClosing},
+ * {@link #close})은 명령으로 큐에 넣고 전송 스레드를 깨운다. {@code Endpoint}를 잠금으로 감싸지 않는다.
  *
  * <p>전송 스레드가 한 번 도는 순서는 읽기, {@code receive}/{@code receiveMessage}, 시계 진행({@code advance}), 명령 처리, 이벤트 배출, 메시지
  * 꺼내기, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을 잡는다. 읽기는 core의
@@ -34,7 +35,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>끝내는 방법은 셋이다. {@link #closeConnection}은 연결 종료(CLOSE)를 보내고 대기 중인 스트림이 끝나길 기다리고, {@link #abortClosing}은
  * 종료 중인 연결에서 기다림을 그만두고, {@link #close}는 즉시 끊는다. 연결이 끝나면 core가 낸 결과로 남은 Future가 모두 끝나고, 종료 알림이 핸들러
- * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다.
+ * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 시간 제한 없이 읽는다. 이때 core의 {@code nextDeadline}이
+ * 비어 있으므로, 상대가 끊지 않으면 전송 스레드는 끝나지 않고 남는다. 그런 연결은 {@link #close}를 불러 정리한다.
  *
  * <p><b>알려진 한계.</b> 통로 쓰기가 막히면(상대가 읽지 않아 소켓 버퍼가 찬 경우) 전송 스레드가 그 쓰기에서 돌아오지 못한다. 그동안 시계가 가지 않아 확인
  * 대기, 요청 기한, 유휴 PING이 동작하지 않고, 풀린 뒤에 흐른 시간이 한꺼번에 {@code advance}된다. 이 상태에서 빠져나가는 유일한 길은 {@link
@@ -221,8 +223,9 @@ public final class ConnectionDriver implements AutoCloseable {
      *
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param body 요청 본문
-     * @return 요청 핸들. {@link RequestHandle#result()}가 결과(status, 결과 확정성, 응답 본문)가 오면 끝나고, 보낼 수 없는 요청이면 예외로
-     *     끝난다
+     * @return 요청 핸들. {@link RequestHandle#result()}가 결과(status, 결과 확정성, 응답 본문)가 오면 끝난다. 실패하는 방식은 둘이다.
+     *     연결이 종료 중일 때 낸 요청은 core의 로컬 {@code UNAVAILABLE}(처리 안 됨) 결과로 끝나고, 전송 스레드가 이미 끝난 뒤에 낸 요청은
+     *     {@link IllegalStateException}으로 끝난다
      */
     public RequestHandle request(int type, byte[] body) {
         return submitRequest(type, body, 0);
@@ -576,7 +579,7 @@ public final class ConnectionDriver implements AutoCloseable {
         private void recordTransportFailure(IOException cause) {
             transportGone = true;
             if (closed) {
-                // CLOSED 뒤에 상대가 끊기를 기다리던 읽기가 끝났다. 정상 종료다.
+                // CLOSED 뒤에 상대가 끊기를 기다리던 읽기가 끝났다. 연결 종료(CLOSE)로 끝난 연결의 마무리다.
                 finished = true;
             } else if (ioFailure == null && !closeRequested) {
                 // 스스로 끊은 연결이 닫힌 통로에서 낸 입출력 예외는 연결을 끊게 한 원인이 아니다.
@@ -730,7 +733,7 @@ public final class ConnectionDriver implements AutoCloseable {
             executor.execute(() -> target.onClosed(notice));
         }
 
-        // 최후 수단. core가 낸 결과로 끝나지 않고 남은 Future만 예외로 끝낸다. 정상 종료와 abort 뒤에는 비어 있다.
+        // 최후 수단. core가 낸 결과로 끝나지 않고 남은 Future만 예외로 끝낸다. 연결 종료(CLOSE)와 abort 뒤에는 비어 있다.
         void failPending() {
             for (CompletableFuture<RequestResult> future : pending.values()) {
                 future.completeExceptionally(new IllegalStateException("연결이 끝났다"));
