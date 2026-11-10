@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -33,6 +34,9 @@ public final class WebSocketPassage implements Passage {
     private static final int NORMAL_CLOSURE = 1000;
     private static final long CONNECT_TIMEOUT_SECONDS = 5;
 
+    /** 메시지 크기의 기본 상한(바이트). 규격의 최대 프레임 크기 상한(1 MiB)에 헤더를 더하고도 남는 값이다. */
+    public static final int DEFAULT_MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
+
     /** 큐에 쌓는 것은 {@link Inbound}(깨움은 {@link Inbound#none()}) 또는 {@link Throwable}이다. */
     private final LinkedBlockingQueue<Object> queue = new LinkedBlockingQueue<>();
 
@@ -40,12 +44,22 @@ public final class WebSocketPassage implements Passage {
     private final ByteArrayOutputStream pendingBinary = new ByteArrayOutputStream();
     private final StringBuilder pendingText = new StringBuilder();
     private final WebSocket.Listener listener = new Receiver();
+    private final int maxMessageBytes;
     private volatile WebSocket socket;
     private volatile boolean closed;
     private boolean ended;
 
     /** 열린 소켓은 {@link #listener()}의 {@code onOpen}으로 들어온다. 직접 열려면 {@link #connect}를 쓴다. */
-    WebSocketPassage() {}
+    WebSocketPassage() {
+        this(DEFAULT_MAX_MESSAGE_BYTES);
+    }
+
+    WebSocketPassage(int maxMessageBytes) {
+        if (maxMessageBytes < 1) {
+            throw new IllegalArgumentException("maxMessageBytes는 1 이상이어야 한다: " + maxMessageBytes);
+        }
+        this.maxMessageBytes = maxMessageBytes;
+    }
 
     /**
      * 서버에 WebSocket으로 연결하고 하위 프로토콜 {@code strand}(규격 1.2.1절)를 제시해 맺어진 통로를 돌려준다.
@@ -55,13 +69,26 @@ public final class WebSocketPassage implements Passage {
      * @throws IOException 연결하지 못했거나 서버가 하위 프로토콜 {@code strand}를 고르지 않았을 때
      */
     public static WebSocketPassage connect(URI uri) throws IOException {
-        WebSocketPassage passage = new WebSocketPassage();
+        return connect(uri, DEFAULT_MAX_MESSAGE_BYTES);
+    }
+
+    /**
+     * {@link #connect(URI)}와 같고 받는 메시지 하나의 크기 상한을 정한다. 조각을 모은 크기가 상한을 넘으면 소켓을 끊고 다음 {@link #await}가 {@link
+     * IOException}을 던진다.
+     *
+     * @param uri {@code ws://} 또는 {@code wss://} 주소
+     * @param maxMessageBytes 메시지 하나의 최대 바이트(1 이상)
+     * @return 맺어진 통로
+     * @throws IOException 연결하지 못했거나 서버가 하위 프로토콜 {@code strand}를 고르지 않았을 때
+     */
+    public static WebSocketPassage connect(URI uri, int maxMessageBytes) throws IOException {
+        WebSocketPassage passage = new WebSocketPassage(maxMessageBytes);
+        CompletableFuture<WebSocket> connecting = HttpClient.newHttpClient()
+                .newWebSocketBuilder()
+                .subprotocols("strand")
+                .buildAsync(uri, passage.listener);
         try {
-            WebSocket opened = HttpClient.newHttpClient()
-                    .newWebSocketBuilder()
-                    .subprotocols("strand")
-                    .buildAsync(uri, passage.listener)
-                    .get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            WebSocket opened = connecting.get(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             passage.socket = opened;
             // JDK는 서버가 하위 프로토콜을 고르지 않은 경우도 거부하지 않는다. strand 서버가 아니면 더 진행하지 않는다.
             if (!"strand".equals(opened.getSubprotocol())) {
@@ -72,9 +99,12 @@ public final class WebSocketPassage implements Passage {
         } catch (ExecutionException e) {
             throw new IOException("WebSocket 연결 실패", e.getCause());
         } catch (TimeoutException e) {
+            // 더 기다리지 않으니 연결 시도를 그만둔다.
+            connecting.cancel(true);
             throw new IOException("WebSocket 연결 시간 초과", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            connecting.cancel(true);
             throw new IOException("WebSocket 연결 중 인터럽트", e);
         }
     }
@@ -110,6 +140,9 @@ public final class WebSocketPassage implements Passage {
         }
         if (item == null) {
             return Inbound.none();
+        }
+        if (item instanceof IOException) {
+            throw (IOException) item;
         }
         if (item instanceof Throwable) {
             throw new IOException("WebSocket 오류", (Throwable) item);
@@ -157,12 +190,19 @@ public final class WebSocketPassage implements Passage {
         }
     }
 
-    /** 아직 Close를 보내지 않았다면 정상 종료 Close를 보낸다. 상대의 Close 응답을 읽는 것은 {@link #await}가 한다. */
+    /**
+     * 아직 Close를 보내지 않았다면 정상 종료 Close를 보낸다. 상대의 Close 응답을 읽는 것은 {@link #await}가 한다. Close를 보내지 못하면 정상 종료를
+     * 할 수 없으므로 소켓을 끊는다.
+     */
     @Override
     public void shutdownOutput() {
         WebSocket open = socket;
         if (open != null && !open.isOutputClosed()) {
-            open.sendClose(NORMAL_CLOSURE, "");
+            open.sendClose(NORMAL_CLOSURE, "").whenComplete((sent, failure) -> {
+                if (failure != null) {
+                    open.abort();
+                }
+            });
         }
     }
 
@@ -182,14 +222,32 @@ public final class WebSocketPassage implements Passage {
     /** JDK가 부르는 콜백. 호출은 순서대로 오고 겹치지 않는다. */
     private final class Receiver implements WebSocket.Listener {
 
+        private boolean overflowed;
+
         @Override
         public void onOpen(WebSocket webSocket) {
             socket = webSocket;
             webSocket.request(1);
         }
 
+        /** 메시지가 상한을 넘었다. 쌓은 것을 버리고, 다음 {@link #await}가 오류를 던지게 한 뒤 소켓을 끊는다. 이후 조각은 무시한다. */
+        private void overflow(WebSocket webSocket) {
+            overflowed = true;
+            pendingBinary.reset();
+            pendingText.setLength(0);
+            queue.add(new IOException("메시지가 상한 " + maxMessageBytes + "바이트를 넘었다"));
+            webSocket.abort();
+        }
+
         @Override
         public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
+            if (overflowed) {
+                return null;
+            }
+            if ((long) pendingBinary.size() + data.remaining() > maxMessageBytes) {
+                overflow(webSocket);
+                return null;
+            }
             // JDK가 콜백 뒤에 버퍼를 다시 쓰므로 복사한다.
             byte[] part = new byte[data.remaining()];
             data.get(part);
@@ -206,9 +264,16 @@ public final class WebSocketPassage implements Passage {
 
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            if (overflowed) {
+                return null;
+            }
             pendingText.append(data);
+            byte[] message = pendingText.toString().getBytes(StandardCharsets.UTF_8);
+            if (message.length > maxMessageBytes) {
+                overflow(webSocket);
+                return null;
+            }
             if (last) {
-                byte[] message = pendingText.toString().getBytes(StandardCharsets.UTF_8);
                 pendingText.setLength(0);
                 queue.add(Inbound.message(WebSocketMessageKind.TEXT, message));
             } else {
