@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 /**
  * {@link Passage#await}와 {@link Passage#wakeup}이 지켜야 하는 계약. 통로 구현의 테스트가 이 클래스를 상속해 {@link #create}만 채운다. 읽을 것이
  * 있을 때의 동작은 통로마다 읽을 것을 만드는 방법이 달라 여기서 다루지 않는다.
+ * (TODO #239: NIO 통로가 이 계약을 상속할 때, 읽을 것이 있을 때 {@code await(0)}이 그것을 돌려주는지도 보강한다.)
  */
 public abstract class PassageContract {
 

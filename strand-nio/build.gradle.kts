@@ -27,3 +27,11 @@ tasks.named("japicmp") {
 tasks.named<JavaCompile>("compileTestFixturesJava") {
   options.errorprone.nullaway { disable() }
 }
+
+// test fixtures는 발행하지 않는다. java-test-fixtures가 java 컴포넌트에 붙이는 변형을 빼지 않으면 POM과 Gradle module metadata에 fixtures의
+// 의존(junit, assertj)이 optional로 새어 나간다.
+(components["java"] as AdhocComponentWithVariants).apply {
+  withVariantsFromConfiguration(configurations["testFixturesApiElements"]) { skip() }
+  withVariantsFromConfiguration(configurations["testFixturesRuntimeElements"]) { skip() }
+  withVariantsFromConfiguration(configurations["testFixturesSourcesElements"]) { skip() }
+}

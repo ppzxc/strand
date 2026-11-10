@@ -371,8 +371,9 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         /**
-         * 기다렸다가, 지금 읽을 수 있는 것을 최대 {@link #MAX_RECEIVES_PER_STEP}개까지 받는다. 시계를 보내기 전에 도착해 있던 ACK가 확인 대기
-         * 초과로 오판되지 않게 하면서, 상대가 계속 보내도 시계와 명령 처리가 굶지 않게 하는 상한이다. 남은 것은 다음 스텝의 기다림이 바로 돌려준다.
+         * 기다렸다가, 지금 읽을 수 있는 것을 최대 {@link #MAX_RECEIVES_PER_STEP}개까지 받는다. 같은 읽기에 도착해 있던 ACK가 시계를 보내기 전에
+         * 받아지므로 확인 대기 초과로 오판되지 않는데, 이는 그 입력이 한 스텝 상한 이내일 때만 보장한다. 상한에 걸리면 남은 입력은 다음 스텝에서
+         * 읽히므로 그 사이 시계가 기한을 넘으면 오판할 수 있다. 상대가 계속 보내도 시계와 명령 처리가 굶지 않게 하려는 설계상 절충이다.
          */
         private void receiveAvailable() throws IOException {
             Inbound inbound = passage.await(waitLimit());
