@@ -179,8 +179,8 @@ final class FrameKind {
                     .with("last_stream_id", frame.get("last_stream_id").getAsString()),
             frame -> {
                 ByteArrayOutputStream payload = new ByteArrayOutputStream();
-                writeInt(payload, Protocol.errorCode(frame.get("error_code")));
-                writeLong(
+                Bytes.writeInt(payload, Protocol.errorCode(frame.get("error_code")));
+                Bytes.writeLong(
                         payload,
                         Long.parseUnsignedLong(frame.get("last_stream_id").getAsString()));
                 return control(Protocol.TYPE_CLOSE, false, payload.toByteArray());
@@ -203,7 +203,7 @@ final class FrameKind {
                     .with("error_code", Protocol.nameOfError(frame.get("error_code"))),
             frame -> {
                 ByteArrayOutputStream payload = new ByteArrayOutputStream();
-                writeInt(payload, Protocol.errorCode(frame.get("error_code")));
+                Bytes.writeInt(payload, Protocol.errorCode(frame.get("error_code")));
                 return Bytes.concat(
                         header(Protocol.TYPE_RESET, 0, 0, Protocol.streamId(frame.get("stream_id")), payload.size()),
                         payload.toByteArray());
@@ -218,7 +218,7 @@ final class FrameKind {
             WEBSOCKET_CLOSE,
             null,
             FRAME_BASE.require("code", VectorSchema.WEBSOCKET_CLOSE_CODE),
-            frame -> new Fields().with("code", String.valueOf(frame.get("code").getAsInt())),
+            frame -> webSocketCloseFields(frame.get("code").getAsInt()),
             null,
             (wire, client) -> null);
 
@@ -276,11 +276,15 @@ final class FrameKind {
     /** 이름 있는 프레임의 이름에서 형태로. */
     private static final Map<String, Shape> SHAPES_BY_NAME;
 
+    private static final Map<String, FrameKind> KINDS_BY_NAME;
+
     static {
         List<FrameKind> decoding = new ArrayList<>();
         Map<String, Shape> shapes = new LinkedHashMap<>();
+        Map<String, FrameKind> kinds = new LinkedHashMap<>();
         for (FrameKind kind : NAMED) {
             shapes.put(kind.name, kind.shape);
+            kinds.put(kind.name, kind);
             if (kind.onWire != null) {
                 decoding.add(kind);
             }
@@ -288,6 +292,7 @@ final class FrameKind {
         decoding.add(APPLICATION_KIND);
         DECODING = Collections.unmodifiableList(decoding);
         SHAPES_BY_NAME = Collections.unmodifiableMap(shapes);
+        KINDS_BY_NAME = Collections.unmodifiableMap(kinds);
     }
 
     private final String name;
@@ -346,12 +351,7 @@ final class FrameKind {
     }
 
     private static FrameKind byName(String name) {
-        for (FrameKind kind : NAMED) {
-            if (kind.name.equals(name)) {
-                return kind;
-            }
-        }
-        return null;
+        return KINDS_BY_NAME.get(name);
     }
 
     private static FrameKind of(JsonObject frame) {
@@ -385,10 +385,11 @@ final class FrameKind {
 
     /** 엔드포인트가 낸 WebSocket Close 메시지의 표기. 기대 항목과 같은 정의에서 나온다. */
     static String webSocketClose(int code) {
-        JsonObject frame = new JsonObject();
-        frame.addProperty("type", WEBSOCKET_CLOSE);
-        frame.addProperty("code", code);
-        return expected(frame);
+        return format(WEBSOCKET_CLOSE, webSocketCloseFields(code));
+    }
+
+    private static Fields webSocketCloseFields(int code) {
+        return new Fields().with("code", String.valueOf(code));
     }
 
     // ---- 실제 바이트: 디코딩과 렌더링 ----
@@ -504,8 +505,8 @@ final class FrameKind {
         Map<String, Long> params = Protocol.helloParams(frame.getAsJsonObject("params"));
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
         for (Map.Entry<Integer, String> param : Protocol.HELLO_PARAM_NAMES.entrySet()) {
-            writeShort(payload, param.getKey());
-            writeInt(payload, params.get(param.getValue()));
+            Bytes.writeShort(payload, param.getKey());
+            Bytes.writeInt(payload, params.get(param.getValue()));
         }
         return payload.toByteArray();
     }
@@ -513,8 +514,8 @@ final class FrameKind {
     private static byte[] authAckPayload(JsonObject frame) {
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
         if (frame.has("params") && frame.getAsJsonObject("params").has("credential_lifetime")) {
-            writeShort(payload, Protocol.AUTH_PARAM_CREDENTIAL_LIFETIME);
-            writeInt(
+            Bytes.writeShort(payload, Protocol.AUTH_PARAM_CREDENTIAL_LIFETIME);
+            Bytes.writeInt(
                     payload,
                     frame.getAsJsonObject("params").get("credential_lifetime").getAsLong());
         }
@@ -529,29 +530,13 @@ final class FrameKind {
     /** 확장 영역이 없는 프레임의 헤더 20바이트(규격 2.1절). {@code length}는 header 뒤 payload 크기로 채운다. */
     private static byte[] header(int type, int flags, int status, long streamId, int payloadSize) {
         ByteArrayOutputStream header = new ByteArrayOutputStream();
-        writeInt(header, Protocol.HEADER_SIZE - Protocol.LENGTH_SIZE + payloadSize);
-        writeShort(header, type);
+        Bytes.writeInt(header, Protocol.HEADER_SIZE - Protocol.LENGTH_SIZE + payloadSize);
+        Bytes.writeShort(header, type);
         header.write(flags);
         header.write(status);
-        writeLong(header, streamId);
-        writeShort(header, 0);
-        writeShort(header, 0);
+        Bytes.writeLong(header, streamId);
+        Bytes.writeShort(header, 0);
+        Bytes.writeShort(header, 0);
         return header.toByteArray();
-    }
-
-    private static void writeShort(ByteArrayOutputStream out, int value) {
-        out.write(value >>> 8);
-        out.write(value);
-    }
-
-    private static void writeInt(ByteArrayOutputStream out, long value) {
-        for (int shift = 24; shift >= 0; shift -= 8) {
-            out.write((int) (value >>> shift));
-        }
-    }
-
-    private static void writeLong(ByteArrayOutputStream out, long value) {
-        writeInt(out, value >>> 32);
-        writeInt(out, value);
     }
 }

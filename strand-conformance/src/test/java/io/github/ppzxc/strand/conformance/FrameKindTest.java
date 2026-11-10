@@ -81,6 +81,31 @@ class FrameKindTest {
     }
 
     @Test
+    void theServerRoleSkipsStatusOnEvenStreamsAndShowsItOnOddOnes() {
+        JsonObject own = json("{\"type\":256,\"stream_id\":\"2\",\"payload\":\"\"}");
+        JsonObject peers = json("{\"type\":256,\"stream_id\":\"1\",\"status\":\"OK\",\"payload\":\"\"}");
+
+        assertThat(FrameKind.describe(FrameKind.encode(own), false, false)).containsExactly(FrameKind.expected(own));
+        assertThat(FrameKind.describe(FrameKind.encode(peers), false, false))
+                .containsExactly(FrameKind.expected(peers));
+    }
+
+    @Test
+    void renderingKeepsTheDocumentedFormatForFixedFrames() {
+        assertThat(FrameKind.expected(
+                        json("{\"type\":\"AUTH\",\"flags\":[\"ACK\"],\"params\":{\"credential_lifetime\":9}}")))
+                .isEqualTo("AUTH flags=ACK stream_id=0 params=credential_lifetime=9");
+        assertThat(FrameKind.expected(
+                        json("{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"5\"}")))
+                .isEqualTo("CLOSE flags=- stream_id=0 error_code=NO_ERROR last_stream_id=5");
+        // 확장 영역과 ACK 밖의 flags는 실제 바이트에서만 나타난다.
+        byte[] withExtensions =
+                Bytes.fromHex("00000012" + "0002" + "02" + "00" + "0000000000000000" + "0002" + "0000" + "abcd" + "");
+        assertThat(FrameKind.describe(withExtensions, false, true))
+                .containsExactly("PING flags=0x02 stream_id=0 extensions=2 payload=");
+    }
+
+    @Test
     void aWebSocketCloseHasNoBytesAndRendersFromItsCode() {
         JsonObject close = json(SAMPLES.get("WEBSOCKET_CLOSE")[0]);
 
