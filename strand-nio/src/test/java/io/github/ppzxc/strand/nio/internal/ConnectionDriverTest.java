@@ -461,15 +461,56 @@ class ConnectionDriverTest {
         assertThat(await(clientOwn).status()).isEqualTo(STATUS_UNAVAILABLE);
     }
 
+    /**
+     * 전송 스레드가 명령을 처리했는지 통로로 관찰한다. 명령은 깨움({@code wakeup})으로 읽기가 끝난 뒤 처리되고, 그 처리가 끝나야 다음 {@code await}가
+     * 시작되므로, 아무것도 없이 깨어난 뒤 다시 시작한 {@code await}는 그 사이에 명령 처리가 끝났다는 뜻이다.
+     */
+    private static final class ObservedPassage implements Passage {
+        private final Passage delegate;
+        final CountDownLatch commandsHandled = new CountDownLatch(1);
+        private boolean wokeWithoutInput;
+
+        ObservedPassage(Passage delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public Inbound await(long timeoutMs) throws IOException {
+            if (wokeWithoutInput) {
+                commandsHandled.countDown();
+            }
+            Inbound inbound = delegate.await(timeoutMs);
+            wokeWithoutInput |= inbound.kind() == Inbound.Kind.NONE;
+            return inbound;
+        }
+
+        @Override
+        public void write(OutboundMessage message) throws IOException {
+            delegate.write(message);
+        }
+
+        @Override
+        public void wakeup() {
+            delegate.wakeup();
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
+        }
+    }
+
     @Test
     void anInputTheEndpointRejectsEndsTheConnectionAndPendingRequestsGetTheCoreResult() throws Exception {
         // 서버는 메시지 통로 설정인데 통로는 바이트 스트림이라 receive가 IllegalStateException을 던진다.
         InMemoryPassage.Pair link = InMemoryPassage.streams();
+        ObservedPassage serverSide = new ObservedPassage(link.second());
         ConnectionDriver server =
-                start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), link.second()));
-        // 상대를 띄우기 전에 낸 요청이어야 서버가 오류로 멈추기 전에 명령이 닿는다.
+                start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), serverSide));
         CompletableFuture<RequestResult> pending =
                 server.request(APPLICATION_TYPE, bytes("never-sent")).result();
+        // 서버가 그 요청 명령을 처리한 뒤에 상대를 띄운다. 그래야 서버가 오류로 멈춰도 명령이 큐에 남아 abandon되지 않는다.
+        assertThat(serverSide.commandsHandled.await(5, TimeUnit.SECONDS)).isTrue();
         client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
 
         RequestResult result = await(pending);
