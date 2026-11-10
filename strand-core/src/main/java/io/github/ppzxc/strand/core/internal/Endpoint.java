@@ -21,6 +21,9 @@ import org.jspecify.annotations.Nullable;
  */
 public final class Endpoint {
 
+    /** 프레임 헤더 크기(규격 2.1절). 전송 모듈이 바이트 수를 셀 때 쓰도록 {@code Frames}의 값을 그대로 노출한다. */
+    public static final int FRAME_HEADER_SIZE = Frames.HEADER_SIZE;
+
     private static final int PREFACE_PREFIX_LENGTH = 6;
     private static final byte[] NO_BYTES = new byte[0];
     /** 경계에 걸친 단위를 모으는 버퍼의 처음 크기. */

@@ -217,7 +217,7 @@ public final class WebSocketPassage implements Passage {
     }
 
     /**
-     * 아직 Close를 보내지 않았다면 정상 종료 Close를 보낸다. 상대의 Close 응답을 읽는 것은 {@link #await}가 한다. Close를 보내지 못하면 정상 종료를
+     * 아직 Close를 보내지 않았다면 NORMAL_CLOSURE Close를 보낸다. 상대의 Close 응답을 읽는 것은 {@link #await}가 한다. Close를 보내지 못하면 Close 교환을
      * 할 수 없으므로 소켓을 끊는다.
      */
     @Override

@@ -425,9 +425,10 @@ class ConnectionDriverClockTest {
         flooding.flood(ping, FLOOD_SIZE);
 
         assertThat(handle.result().get(5, TimeUnit.SECONDS).status()).isEqualTo(STATUS_DEADLINE_EXCEEDED);
+        // get()이 깨어나는 것과 thenRun 콜백이 도는 것은 순서가 정해져 있지 않다. 콜백이 끝난 뒤에 기록을 읽는다.
+        recorded.get(5, TimeUnit.SECONDS);
         // 기한이 처리된 시점에 쌓인 입력이 아직 남아 있어야 한다(받기만 하다 굶지 않았다).
         assertThat(leftWhenEnded.get()).isPositive();
-        assertThat(recorded).isCompleted();
         // 남은 것도 다음 스텝들에서 이어 받는다.
         assertThat(flooding.drained.await(5, TimeUnit.SECONDS)).isTrue();
     }
