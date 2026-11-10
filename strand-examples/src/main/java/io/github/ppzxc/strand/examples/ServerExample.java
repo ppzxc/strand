@@ -51,12 +51,8 @@ public final class ServerExample {
         }
 
         int port() {
-            return ((InetSocketAddress) listeningAddress()).getPort();
-        }
-
-        private java.net.SocketAddress listeningAddress() {
             try {
-                return listening.getLocalAddress();
+                return ((InetSocketAddress) listening.getLocalAddress()).getPort();
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
