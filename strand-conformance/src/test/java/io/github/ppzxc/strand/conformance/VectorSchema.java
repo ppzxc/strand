@@ -44,11 +44,11 @@ final class VectorSchema {
     /** 애플리케이션 프레임·요청의 type. 0~255는 제어 프레임용으로 예약돼 있다. */
     static final FieldCheck APP_TYPE = FieldCheck.range(Protocol.FIRST_APPLICATION_TYPE, U16_MAX);
     /** 2.5.1절의 이름이거나, 이름 목록 다음부터 255까지의 예약 정수. */
-    private static final FieldCheck STATUS = FieldCheck.named(Protocol.STATUS_NAMES, U8_MAX);
+    static final FieldCheck STATUS = FieldCheck.named(Protocol.STATUS_NAMES, U8_MAX);
     /** 2.5.2절의 이름이거나, 이름 목록 다음부터 u32 끝까지의 예약 정수. */
     private static final FieldCheck ERROR_CODE = FieldCheck.named(Protocol.ERROR_CODE_NAMES, U32_MAX);
     /** 스트림 번호. 0 이상 2^63-1 이하의 10진수 문자열(번호는 JSON 수로 쓰지 않는다). */
-    private static final FieldCheck STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, STREAM_ID_MAX);
+    static final FieldCheck STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, STREAM_ID_MAX);
     /** CLOSE의 last_stream_id. 0 이상 2^64-1 이하의 10진수 문자열(형태가 잘못된 CLOSE를 위해 번호 범위 밖 값도 쓴다). */
     private static final FieldCheck LAST_STREAM_ID = FieldCheck.decimal(BigInteger.ZERO, U64_MAX);
     /** 1 이상 2^63-1 이하의 10진수 문자열. RESET의 stream_id와 next_stream_id에 쓴다(홀짝은 role과 함께 보는 검사라 {@link #setup}이 따로 본다). */
@@ -202,26 +202,9 @@ final class VectorSchema {
                 "RESET", FRAME_BASE.require("stream_id", POSITIVE_STREAM_ID).require("error_code", ERROR_CODE));
     }
 
-    // ---- 이벤트: 이름별 필드 ----
+    // ---- 이벤트: 이름별 필드는 EventKind가 정의한다 ----
 
-    private static final String EVENT_TAG = "event";
     private static final String EVENT_LABEL = "event";
-
-    private static final Shape EVENT_BASE = Shape.EMPTY.require(EVENT_TAG, FieldCheck.DEFERRED);
-
-    private static final Map<String, Shape> EVENTS_BY_NAME = new HashMap<>();
-
-    static {
-        EVENTS_BY_NAME.put(
-                "request_received", EVENT_BASE.require("stream_id", STREAM_ID).require("type", APP_TYPE));
-        EVENTS_BY_NAME.put(
-                "result",
-                EVENT_BASE
-                        .allow("stream_id", STREAM_ID)
-                        .require("status", STATUS)
-                        .require("certainty", FieldCheck.oneOf(CERTAINTIES)));
-        EVENTS_BY_NAME.put("closed", EVENT_BASE);
-    }
 
     private VectorSchema() {}
 
@@ -344,8 +327,9 @@ final class VectorSchema {
         JsonArray array = c.array(path, element);
         for (int i = 0; i < array.size(); i++) {
             String eventPath = Check.item(path, i);
-            JsonObject event = c.objectNamedBy(eventPath, array.get(i), EVENT_TAG, EVENT_LABEL, EVENTS_BY_NAME);
-            if ("result".equals(event.get(EVENT_TAG).getAsString())) {
+            JsonObject event =
+                    c.objectNamedBy(eventPath, array.get(i), EventKind.TAG, EVENT_LABEL, EventKind.shapesByName());
+            if ("result".equals(event.get(EventKind.TAG).getAsString())) {
                 localResult(c, eventPath, event);
             }
         }

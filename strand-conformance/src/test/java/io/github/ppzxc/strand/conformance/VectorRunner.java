@@ -17,7 +17,6 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -40,8 +39,6 @@ final class VectorRunner {
     private static final Map<String, BiConsumer<VectorRunner, JsonObject>> STEPS = new LinkedHashMap<>();
     /** 비교할 수 있는 이름 있는 프레임(숫자 type 프레임 제외). 지원 여부와 기대 표기가 이 표 하나에서 정해진다. */
     private static final Map<String, Function<JsonObject, String>> NAMED_FRAMES = new LinkedHashMap<>();
-    /** 비교할 수 있는 이벤트. 지원 여부와 기대 표기가 이 표 하나에서 정해진다. */
-    private static final Map<String, Function<JsonObject, String>> EVENTS = new LinkedHashMap<>();
 
     static {
         STEPS.put(
@@ -120,18 +117,6 @@ final class VectorRunner {
                 "RESET",
                 frame -> "RESET flags=- stream_id=" + streamId(frame.get("stream_id")) + " error_code="
                         + nameOfError(frame.get("error_code")));
-
-        EVENTS.put(
-                "result",
-                event -> "result stream_id="
-                        + (event.has("stream_id") ? streamId(event.get("stream_id")) : "-") + " status="
-                        + nameOfStatus(event.get("status")) + " certainty="
-                        + event.get("certainty").getAsString());
-        EVENTS.put(
-                "request_received",
-                event -> "request_received stream_id=" + streamId(event.get("stream_id")) + " type="
-                        + event.get("type").getAsInt());
-        EVENTS.put("closed", event -> "closed");
     }
 
     private final boolean client;
@@ -213,7 +198,10 @@ final class VectorRunner {
             }
             for (JsonElement event : step.getAsJsonArray("events")) {
                 requireSupportedPart(
-                        EVENTS.containsKey(event.getAsJsonObject().get("event").getAsString()), vector, "이벤트 " + event);
+                        EventKind.isSupported(
+                                event.getAsJsonObject().get("event").getAsString()),
+                        vector,
+                        "이벤트 " + event);
             }
         }
     }
@@ -233,7 +221,7 @@ final class VectorRunner {
     }
 
     /** 벡터의 스트림 번호(10진수 문자열, 벡터 형식 5절)를 정수로. 2^53을 넘는 값도 정확하다. 문자열이 아니면 거부한다. */
-    private static long streamId(JsonElement element) {
+    static long streamId(JsonElement element) {
         assertThat(element.getAsJsonPrimitive().isString())
                 .as("스트림 번호는 문자열이다: %s", element)
                 .isTrue();
@@ -403,31 +391,18 @@ final class VectorRunner {
         List<String> result = new ArrayList<>();
         for (JsonElement element : step.getAsJsonArray("events")) {
             JsonObject event = element.getAsJsonObject();
-            result.add(EVENTS.get(event.get("event").getAsString()).apply(event));
+            result.add(EventKind.expected(event));
         }
         return result;
-    }
-
-    private static String certaintyName(Event event) {
-        return event.certainty().orElseThrow(AssertionError::new).name().toLowerCase(Locale.ROOT);
     }
 
     private static List<String> describe(List<Event> events) {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
-            if (event.kind() == Event.Kind.AUTHENTICATED) {
-                // 벡터 형식에 없는 이벤트다(6.2절). 클라이언트의 credential_lifetime 통지는 core 테스트가 본다.
-                continue;
-            }
-            if (event.kind() == Event.Kind.RESULT) {
-                // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). core는 번호 0으로 알린다.
-                String id = event.streamId() == 0 ? "-" : String.valueOf(event.streamId());
-                result.add("result stream_id=" + id + " status=" + nameOfStatus(event.status()) + " certainty="
-                        + certaintyName(event));
-            } else if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
-                result.add("request_received stream_id=" + event.streamId() + " type=" + event.type());
-            } else {
-                result.add(event.kind().name().toLowerCase(Locale.ROOT));
+            String text = EventKind.actual(event);
+            // 벡터 형식에 없는 이벤트(AUTHENTICATED, 6.2절)는 그리지 않는다. credential_lifetime 통지는 core 테스트가 본다.
+            if (text != null) {
+                result.add(text);
             }
         }
         return result;
@@ -591,11 +566,11 @@ final class VectorRunner {
                 : element.getAsInt();
     }
 
-    private static String nameOfStatus(JsonElement element) {
+    static String nameOfStatus(JsonElement element) {
         return element.getAsJsonPrimitive().isString() ? element.getAsString() : nameOfStatus(element.getAsInt());
     }
 
-    private static String nameOfStatus(int status) {
+    static String nameOfStatus(int status) {
         return status < Protocol.STATUS_NAMES.size() ? Protocol.STATUS_NAMES.get(status) : String.valueOf(status);
     }
 }
