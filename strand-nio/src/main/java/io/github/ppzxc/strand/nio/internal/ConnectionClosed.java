@@ -34,6 +34,9 @@ public final class ConnectionClosed {
      * 연결을 끊은 입출력 예외. 상대가 CLOSE 없이 끊었으면 {@link java.io.EOFException}, 읽기·쓰기가 실패했으면 그 예외다. 입출력 때문에 끝나지
      * 않았으면(CLOSE 교환, 내가 끊음) 비어 있다.
      *
+     * <p>CLOSED를 낸 뒤에 생긴 입출력 오류는 담지 않는다. CLOSED 알림을 만든 뒤 마지막 쓰기가 실패하거나 상대가 끊기를 기다리는 읽기가 실패해도
+     * 이 알림은 그대로이고 새 알림도 나가지 않는다.
+     *
      * @return 입출력 예외
      */
     public Optional<IOException> ioException() {
