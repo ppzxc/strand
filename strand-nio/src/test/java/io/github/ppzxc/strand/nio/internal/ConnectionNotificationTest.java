@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -53,7 +54,11 @@ class ConnectionNotificationTest {
     private static final class Recorder implements ConnectionListener {
         final CompletableFuture<OptionalLong> authenticated = new CompletableFuture<>();
         final CompletableFuture<ConnectionClosed> closed = new CompletableFuture<>();
-        final List<ConnectionClosed> allClosed = new ArrayList<>();
+        private final List<ConnectionClosed> allClosed = new ArrayList<>();
+
+        synchronized List<ConnectionClosed> closedNotices() {
+            return new ArrayList<>(allClosed);
+        }
 
         @Override
         public synchronized void onAuthenticated(OptionalLong credentialLifetime) {
@@ -180,16 +185,25 @@ class ConnectionNotificationTest {
         final InMemoryPassage.Pair link = InMemoryPassage.streams();
         final Recorder clientSide = new Recorder();
         final Recorder serverSide = new Recorder();
+        final ProbePassage clientPassage = new ProbePassage(link.first());
+        final ProbePassage serverPassage = new ProbePassage(link.second());
         final ConnectionDriver client;
         final RequestHandle pendingHandle;
         final CompletableFuture<RequestResult> pending;
 
+        /** 양쪽 전송 스레드가 끝나고 알림이 모두 돌 때까지 기다린다. */
+        void awaitEnded() throws InterruptedException {
+            awaitLatch(clientPassage.closed);
+            awaitLatch(serverPassage.closed);
+            drainNotifications();
+        }
+
         Held() throws Exception {
             CompletableFuture<IncomingRequest> received = new CompletableFuture<>();
-            start(ConnectionDriver.server(EndpointConfig.defaults(), link.second())
+            start(ConnectionDriver.server(EndpointConfig.defaults(), serverPassage)
                     .handler(handlers, received::complete)
                     .listener(serverSide));
-            client = start(ConnectionDriver.client(EndpointConfig.defaults(), link.first())
+            client = start(ConnectionDriver.client(EndpointConfig.defaults(), clientPassage)
                     .executor(handlers)
                     .listener(clientSide));
             pendingHandle = client.request(APPLICATION_TYPE, bytes("held"));
@@ -207,10 +221,13 @@ class ConnectionNotificationTest {
 
         RequestResult result = await(held.pending);
         assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
-        assertThat(result.certainty()).isNotEqualTo(Certainty.RESPONSE);
+        assertThat(result.certainty()).isEqualTo(Certainty.UNKNOWN);
         ConnectionClosed closed = await(held.clientSide.closed);
         assertThat(closed.reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
         assertThat(closed.reason().sender()).hasValue(CloseReason.Sender.LOCAL);
+        held.awaitEnded();
+        assertThat(held.clientSide.closedNotices()).hasSize(1);
+        assertThat(held.serverSide.closedNotices()).hasSize(1);
     }
 
     @Test
@@ -225,7 +242,8 @@ class ConnectionNotificationTest {
         ConnectionClosed closed = await(held.clientSide.closed);
         assertThat(closed.reason().kind()).isEqualTo(CloseReason.Kind.DISCONNECTED);
         assertThat(closed.ioException()).isEmpty();
-        assertThat(held.clientSide.allClosed).hasSize(1);
+        held.awaitEnded();
+        assertThat(held.clientSide.closedNotices()).hasSize(1);
     }
 
     @Test
@@ -252,7 +270,7 @@ class ConnectionNotificationTest {
 
         RequestResult result = await(held.pending);
         assertThat(result.status()).isEqualTo(STATUS_CANCELLED);
-        assertThat(result.certainty()).isNotEqualTo(Certainty.RESPONSE);
+        assertThat(result.certainty()).isEqualTo(Certainty.UNKNOWN);
     }
 
     @Test
@@ -403,6 +421,212 @@ class ConnectionNotificationTest {
         assertThat(await(own).status()).isEqualTo(STATUS_UNAVAILABLE);
         assertThat(await(serverSide.closed).reason().kind()).isEqualTo(CloseReason.Kind.DISCONNECTED);
         server.close();
-        assertThat(serverSide.allClosed).hasSize(1);
+        drainNotifications();
+        assertThat(serverSide.closedNotices()).hasSize(1);
+    }
+
+    /**
+     * 통로를 감싸 드라이버가 부른 것을 관찰하고 고장을 주입한다. {@code close}는 전송 스레드가 끝날 때 한 번 불리므로, {@link #closed}로 전송
+     * 스레드가 끝났음을 결정적으로 기다릴 수 있다.
+     */
+    private static final class ProbePassage implements Passage {
+        private final Passage delegate;
+        final CountDownLatch shutdownCalled = new CountDownLatch(1);
+        final CountDownLatch readResumedAfterShutdown = new CountDownLatch(1);
+        final CountDownLatch closed = new CountDownLatch(1);
+        volatile boolean failWrites;
+        volatile boolean holdShutdown;
+        volatile boolean failReadsAfterShutdown;
+        private volatile boolean shutdownDone;
+
+        ProbePassage(Passage delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public Inbound await(long timeoutMs) throws IOException {
+            if (shutdownDone) {
+                readResumedAfterShutdown.countDown();
+                if (failReadsAfterShutdown) {
+                    throw new IOException("CLOSED 뒤 읽기 실패");
+                }
+            }
+            return delegate.await(timeoutMs);
+        }
+
+        @Override
+        public void write(OutboundMessage message) throws IOException {
+            if (failWrites) {
+                throw new IOException("쓰기 실패");
+            }
+            delegate.write(message);
+        }
+
+        @Override
+        public void wakeup() {
+            delegate.wakeup();
+        }
+
+        @Override
+        public void shutdownOutput() {
+            shutdownDone = true;
+            shutdownCalled.countDown();
+            if (!holdShutdown) {
+                delegate.shutdownOutput();
+            }
+        }
+
+        /** 붙들어 둔 {@link #shutdownOutput}을 이제 통로에 전한다(상대가 이제 끊는다). */
+        void releaseShutdown() {
+            delegate.shutdownOutput();
+        }
+
+        @Override
+        public void close() {
+            closed.countDown();
+            delegate.close();
+        }
+    }
+
+    /** 이미 내보낸 알림을 실행기가 다 돌릴 때까지 기다린다. 전송 스레드가 끝난 뒤에 불러야 더 들어오는 알림이 없다. */
+    private void drainNotifications() throws InterruptedException {
+        handlers.shutdown();
+        assertThat(handlers.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+    }
+
+    private static void awaitBothEnded(Exchanged link) throws InterruptedException {
+        awaitLatch(link.client.closed);
+        awaitLatch(link.server.closed);
+    }
+
+    private static void awaitLatch(CountDownLatch latch) throws InterruptedException {
+        assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
+    }
+
+    /** CLOSE를 교환한 한 쌍. 클라이언트 쪽 통로만 관찰하고, 서버 쪽은 상대 역할로 {@code serverPassage}를 감싼다. */
+    private final class Exchanged {
+        final ProbePassage client;
+        final ProbePassage server;
+        final Recorder clientSide = new Recorder();
+        final Recorder serverSide = new Recorder();
+        final ConnectionDriver clientDriver;
+
+        Exchanged() {
+            InMemoryPassage.Pair link = InMemoryPassage.streams();
+            client = new ProbePassage(link.first());
+            server = new ProbePassage(link.second());
+            start(ConnectionDriver.server(EndpointConfig.defaults(), server)
+                    .executor(handlers)
+                    .listener(serverSide));
+            clientDriver = start(ConnectionDriver.client(EndpointConfig.defaults(), client)
+                    .executor(handlers)
+                    .listener(clientSide));
+        }
+    }
+
+    @Test
+    void afterTheCloseExchangeBothSidesCloseOnlyTheirOutputAndEndOnceThePeerHangsUp() throws Exception {
+        Exchanged link = new Exchanged();
+        await(link.clientSide.authenticated);
+
+        link.clientDriver.closeConnection();
+
+        awaitLatch(link.client.shutdownCalled);
+        awaitLatch(link.server.shutdownCalled);
+        awaitLatch(link.client.closed);
+        awaitLatch(link.server.closed);
+        awaitBothEnded(link);
+        drainNotifications();
+        assertThat(link.clientSide.closedNotices()).hasSize(1);
+        assertThat(link.serverSide.closedNotices()).hasSize(1);
+        assertThat(link.clientSide.closedNotices().get(0).ioException()).isEmpty();
+        assertThat(link.serverSide.closedNotices().get(0).ioException()).isEmpty();
+        assertThat(link.clientSide.closedNotices().get(0).reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
+    }
+
+    @Test
+    void afterClosedTheDriverKeepsReadingUntilThePeerHangsUp() throws Exception {
+        Exchanged link = new Exchanged();
+        await(link.clientSide.authenticated);
+        link.server.holdShutdown = true; // 서버는 보내는 쪽을 닫지 않는다. 클라이언트는 끊김을 받지 못한다.
+
+        link.clientDriver.closeConnection();
+
+        awaitLatch(link.client.shutdownCalled);
+        awaitLatch(link.client.readResumedAfterShutdown);
+        assertThat(link.client.closed.getCount()).isEqualTo(1);
+
+        link.server.releaseShutdown();
+
+        awaitLatch(link.client.closed);
+        awaitBothEnded(link);
+        drainNotifications();
+        assertThat(link.clientSide.closedNotices()).hasSize(1);
+        assertThat(link.clientSide.closedNotices().get(0).ioException()).isEmpty();
+    }
+
+    @Test
+    void aReadFailureAfterClosedIsNotANewNotice() throws Exception {
+        Exchanged link = new Exchanged();
+        await(link.clientSide.authenticated);
+        link.server.holdShutdown = true;
+        link.client.failReadsAfterShutdown = true;
+
+        link.clientDriver.closeConnection();
+
+        awaitLatch(link.client.closed);
+        awaitBothEnded(link);
+        drainNotifications();
+        assertThat(link.clientSide.closedNotices()).hasSize(1);
+        assertThat(link.clientSide.closedNotices().get(0).ioException()).isEmpty();
+        assertThat(link.clientSide.closedNotices().get(0).reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
+    }
+
+    @Test
+    void aWriteFailureRightAfterClosedIsNeitherInTheNoticeNorANewOne() throws Exception {
+        Exchanged link = new Exchanged();
+        await(link.clientSide.authenticated);
+        // 서버는 CLOSE를 받아 답하며 CLOSED를 내는 같은 차례에 쓰기가 실패한다. CLOSED 알림이 먼저 나간다.
+        link.server.failWrites = true;
+
+        link.clientDriver.closeConnection();
+
+        awaitLatch(link.server.closed);
+        awaitBothEnded(link);
+        drainNotifications();
+        assertThat(link.serverSide.closedNotices()).hasSize(1);
+        assertThat(link.serverSide.closedNotices().get(0).ioException()).isEmpty();
+        assertThat(link.serverSide.closedNotices().get(0).reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
+    }
+
+    @Test
+    void theNoticeIsSentOnceWhenThePeerHangsUpWithoutClose() throws Exception {
+        Exchanged link = new Exchanged();
+        await(link.clientSide.authenticated);
+
+        link.server.close();
+
+        awaitLatch(link.client.closed);
+        awaitBothEnded(link);
+        drainNotifications();
+        assertThat(link.clientSide.closedNotices()).hasSize(1);
+        assertThat(link.clientSide.closedNotices().get(0).ioException()).get().isInstanceOf(java.io.EOFException.class);
+    }
+
+    @Test
+    void theNoticeIsSentOnceWhenAReadFailureRacesTheClose() throws Exception {
+        Exchanged link = new Exchanged();
+        await(link.clientSide.authenticated);
+        link.client.failReadsAfterShutdown = true;
+        link.server.holdShutdown = true;
+
+        // 서버가 끊김(EOF)과 CLOSE를 거의 동시에 보내도(상대 close와 내 closeConnection이 겹침) 알림은 한 번이다.
+        link.clientDriver.closeConnection();
+        link.server.releaseShutdown();
+
+        awaitLatch(link.client.closed);
+        awaitBothEnded(link);
+        drainNotifications();
+        assertThat(link.clientSide.closedNotices()).hasSize(1);
     }
 }
