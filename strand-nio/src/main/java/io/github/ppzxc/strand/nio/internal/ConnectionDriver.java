@@ -25,8 +25,14 @@ import org.jspecify.annotations.Nullable;
  * <p>전송 스레드가 한 번 도는 순서는 읽기, {@code receive}/{@code receiveMessage}, 명령 처리, 이벤트 배출, 메시지 꺼내기, 쓰기다. 시계 진행은
  * 읽기와 명령 처리 사이에 들어간다(아직 없다). 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
  *
- * <p>{@code Authenticator}는 core가 {@code receive} 안에서 동기로 부르므로 전송 스레드에서 돈다. 블로킹하지 않는 {@code Authenticator}만
- * 지원한다. 요청 Future는 전송 스레드에서 완료되므로, 그 위에 건 동기 콜백도 블로킹하면 안 된다.
+ * <p><b>{@code Authenticator}는 전송 스레드에서 불리며 블로킹하면 안 된다.</b> core가 {@code receive} 안에서 동기로 부르므로 {@code
+ * EndpointConfig.authenticator}에 넣은 구현은 전송 스레드에서 돈다. 블로킹하는 인증(원격 조회 등)을 넣으면 그 연결 전체가 멈추므로, 블로킹하지
+ * 않는 {@code Authenticator}만 지원한다. "전송 스레드는 블로킹하는 사용자 코드를 부르지 않는다"의 유일한 예외다. 요청 Future는 전송 스레드에서
+ * 완료되므로, 그 위에 건 동기 콜백도 블로킹하면 안 된다.
+ *
+ * <p>끝내는 방법은 셋이다. {@link #closeConnection}은 연결 종료(CLOSE)를 보내고 대기 중인 스트림이 끝나길 기다리고, {@link #abortClosing}은
+ * 종료 중인 연결에서 기다림을 그만두고, {@link #close}는 즉시 끊는다. 연결이 끝나면 core가 낸 결과로 남은 Future가 모두 끝나고, 종료 알림이 핸들러
+ * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다.
  */
 public final class ConnectionDriver implements AutoCloseable {
 
@@ -489,7 +495,9 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         private boolean isDisconnection(Event event) {
-            return event.closeReason().map(r -> r.kind() == CloseReason.Kind.DISCONNECTED).orElse(true);
+            return event.closeReason()
+                    .map(r -> r.kind() == CloseReason.Kind.DISCONNECTED)
+                    .orElse(true);
         }
 
         private void complete(Event event) {
