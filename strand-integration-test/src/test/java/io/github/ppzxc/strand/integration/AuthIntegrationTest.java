@@ -4,7 +4,7 @@ import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.ppzxc.strand.core.internal.Event;
+import io.github.ppzxc.strand.nio.internal.RequestResult;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -14,6 +14,7 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -42,7 +43,7 @@ class AuthIntegrationTest {
     @DisplayName("클라이언트의 요청은 AUTH(ACK)를 받은 뒤에야 서버에 도달한다 (규격 3.3)")
     void clientRequestReachesTheServerOnlyAfterAuthAck() throws Exception {
         try (ServerSocket listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
-            try (TestClient client = TestClient.connect(listener.getLocalPort());
+            try (Peer client = Peer.connect(listener.getLocalPort(), null);
                     Socket raw = listener.accept()) {
                 client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
                 DataInputStream in = new DataInputStream(raw.getInputStream());
@@ -64,12 +65,11 @@ class AuthIntegrationTest {
                 assertThatThrownBy(() -> in.readByte()).isInstanceOf(SocketTimeoutException.class);
 
                 out.write(frame(AUTH, ACK, new byte[0]));
-                raw.setSoTimeout((int) Connection.TIMEOUT_MS);
+                raw.setSoTimeout((int) Fixtures.TIMEOUT_MS);
                 byte[] request = readFrame(in);
                 assertThat(typeOf(request)).isEqualTo(APPLICATION_TYPE);
                 assertThat(ByteBuffer.wrap(request, 8, 8).getLong()).isEqualTo(1L);
-                assertThat(client.connection().awaitAuthenticated().credentialLifetime())
-                        .isEmpty();
+                assertThat(client.awaitAuthenticated()).isEmpty();
             }
         }
     }
@@ -81,14 +81,14 @@ class AuthIntegrationTest {
     @Test
     @DisplayName("서버가 먼저 내는 요청은 AUTH를 통과시킨 뒤에야 클라이언트에 도달한다 (규격 3.3)")
     void serverInitiatedRequestReachesTheClientOnlyAfterAuth() throws Exception {
-        try (TestServer server = TestServer.start();
+        try (TcpServer server = TcpServer.start();
                 Socket raw = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             DataInputStream in = new DataInputStream(raw.getInputStream());
             OutputStream out = raw.getOutputStream();
             out.write(PREFACE);
             out.write(frame(HELLO, 0, new byte[0]));
-            Connection serverConnection = server.awaitConnection();
-            serverConnection.withEndpoint(e -> e.request(APPLICATION_TYPE, Fixtures.payload("from-server")));
+            Peer serverSide = server.awaitPeer();
+            serverSide.request(APPLICATION_TYPE, Fixtures.payload("from-server"));
 
             byte[] serverHello = readFrame(in);
             byte[] helloAck = readFrame(in);
@@ -101,14 +101,14 @@ class AuthIntegrationTest {
             assertThatThrownBy(() -> in.readByte()).isInstanceOf(SocketTimeoutException.class);
 
             out.write(frame(AUTH, 0, anonymousAuthPayload()));
-            raw.setSoTimeout((int) Connection.TIMEOUT_MS);
+            raw.setSoTimeout((int) Fixtures.TIMEOUT_MS);
             byte[] authAck = readFrame(in);
             byte[] request = readFrame(in);
             assertThat(typeOf(authAck)).isEqualTo(AUTH);
             assertThat(flagsOf(authAck)).isEqualTo(ACK);
             assertThat(typeOf(request)).isEqualTo(APPLICATION_TYPE);
             assertThat(ByteBuffer.wrap(request, 8, 8).getLong()).isEqualTo(2L);
-            assertThat(Fixtures.kinds(serverConnection.events())).doesNotContain(Event.Kind.CLOSED);
+            assertThat(serverSide.closedNotices()).isEmpty();
         }
     }
 
@@ -116,12 +116,13 @@ class AuthIntegrationTest {
     @Test
     @DisplayName("ANONYMOUS로 수립한 연결에서 클라이언트가 AUTH 통과를 알게 되고 요청이 오간다 (규격 3.3.1)")
     void anonymousEstablishmentCompletesBetweenRealEndpoints() throws Exception {
-        try (TestServer server = TestServer.startResponding(type -> Fixtures.STATUS_OK);
-                TestClient client = TestClient.connect(server.port())) {
-            client.connection().awaitAuthenticated();
-            client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
+        try (TcpServer server = TcpServer.start(type -> Fixtures.STATUS_OK);
+                Peer client = Peer.connect(server.port(), null)) {
+            client.awaitAuthenticated();
 
-            Event result = client.awaitEvent(Event.Kind.RESULT);
+            RequestResult result = client.request(APPLICATION_TYPE, Fixtures.payload("hello"))
+                    .result()
+                    .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
             assertThat(result.status()).isEqualTo(Fixtures.STATUS_OK);
         }

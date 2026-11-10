@@ -14,6 +14,7 @@ import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
@@ -34,10 +35,16 @@ import org.jspecify.annotations.Nullable;
  * <p>끝내는 방법은 셋이다. {@link #closeConnection}은 연결 종료(CLOSE)를 보내고 대기 중인 스트림이 끝나길 기다리고, {@link #abortClosing}은
  * 종료 중인 연결에서 기다림을 그만두고, {@link #close}는 즉시 끊는다. 연결이 끝나면 core가 낸 결과로 남은 Future가 모두 끝나고, 종료 알림이 핸들러
  * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다.
+ *
+ * <p><b>알려진 한계.</b> 통로 쓰기가 막히면(상대가 읽지 않아 소켓 버퍼가 찬 경우) 전송 스레드가 그 쓰기에서 돌아오지 못한다. 그동안 시계가 가지 않아 확인
+ * 대기, 요청 기한, 유휴 PING이 동작하지 않고, 풀린 뒤에 흐른 시간이 한꺼번에 {@code advance}된다. 이 상태에서 빠져나가는 유일한 길은 {@link
+ * #close()}(즉시 끊기)다. 통로 구현이 쌓는 읽기 입력의 한계는 {@link TcpPassage}를 본다.
  */
 public final class ConnectionDriver implements AutoCloseable {
 
     private static final int NO_ERROR = 0;
+    /** 프레임 헤더 크기(규격 2.1절). 이보다 짧은 바이너리 메시지는 8바이트 연결 서문이라 프레임으로 세지 않는다. */
+    private static final int FRAME_HEADER_BYTES = 20;
     /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
 
@@ -163,6 +170,10 @@ public final class ConnectionDriver implements AutoCloseable {
     private final Thread thread;
     private volatile boolean closeRequested;
     private volatile boolean stopped;
+    // 관찰 지점. 전송 스레드만 늘리고 다른 스레드는 읽기만 한다.
+    private final AtomicLong receivedBytes = new AtomicLong();
+    private final AtomicLong writtenBytes = new AtomicLong();
+    private final AtomicLong writtenFrames = new AtomicLong();
 
     private ConnectionDriver(
             Role role,
@@ -357,7 +368,45 @@ public final class ConnectionDriver implements AutoCloseable {
         return future;
     }
 
-    /** 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 남은 Future는 core가 내는 결과로 끝난다. 여러 번 불러도 된다. */
+    /** 이 연결의 전송 스레드. 테스트가 이 연결의 스레드만 들여다보려는 용도다. */
+    Thread transportThread() {
+        return thread;
+    }
+
+    /**
+     * 지금까지 {@code Endpoint}가 처리를 끝낸 받은 바이트 수(메시지 통로면 받은 메시지 내용의 합). 처리를 끝낸 뒤에 늘므로, 이 값이 어떤 입력을
+     * 포함하면 그 입력의 결과 이벤트가 나오기 전이라도 이미 처리된 것이다. 어느 스레드에서든 읽을 수 있다.
+     *
+     * @return 받은 바이트 수
+     */
+    public long receivedBytes() {
+        return receivedBytes.get();
+    }
+
+    /**
+     * 지금까지 통로에 다 쓴 바이트 수(연결 서문 포함). 어느 스레드에서든 읽을 수 있다.
+     *
+     * @return 보낸 바이트 수
+     */
+    public long writtenBytes() {
+        return writtenBytes.get();
+    }
+
+    /**
+     * 지금까지 통로에 다 쓴 프레임 수. 8바이트 연결 서문은 프레임이 아니라서 세지 않는다. 어느 스레드에서든 읽을 수 있다.
+     *
+     * @return 보낸 프레임 수
+     */
+    public long writtenFrames() {
+        return writtenFrames.get();
+    }
+
+    /**
+     * 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 통로를 닫으므로 상대가 읽지 않아 쓰기가 막혀 있어도 끝난다. 남은 Future는 core가 내는 결과로 끝난다.
+     * 즉시 끊기라서 이미 큐에 넣은 출력은 보장하지 않는다. 아직 처리되지 않은 {@link #request}, {@link #respond}, {@link #ping}은 전송 스레드가 통로
+     * 닫힘을 보기 전에 처리되지 못할 수 있고, 그 요청은 core가 내는 결과나 예외로 끝난다. 출력을 다 내보내고 끝내려면 {@link #closeConnection()}을 쓴다.
+     * 여러 번 불러도 된다.
+     */
     @Override
     public void close() {
         closeRequested = true;
@@ -365,6 +414,8 @@ public final class ConnectionDriver implements AutoCloseable {
         if (Thread.currentThread() == thread) {
             return;
         }
+        // 상대가 읽지 않아 쓰기에서 막혀 있으면 깨움만으로는 전송 스레드가 돌아오지 않는다. 통로를 닫아 막힌 입출력을 끝낸다.
+        passage.close();
         try {
             thread.join();
         } catch (InterruptedException e) {
@@ -493,9 +544,11 @@ public final class ConnectionDriver implements AutoCloseable {
             switch (inbound.kind()) {
                 case BYTES:
                     endpoint.receive(inbound.data());
+                    receivedBytes.addAndGet(inbound.data().length);
                     break;
                 case MESSAGE:
                     endpoint.receiveMessage(inbound.messageKind(), inbound.data());
+                    receivedBytes.addAndGet(inbound.data().length);
                     break;
                 case END:
                     transportFailed(new EOFException("상대가 연결을 끊었다"));
@@ -513,7 +566,8 @@ public final class ConnectionDriver implements AutoCloseable {
             } finally {
                 // 내보내다 실행기 거부로 던져도 입출력 예외 기록과 끊김 통지는 빠뜨리지 않는다. abort 경로의 종료 알림에도 예외가 실려야 한다.
                 recordTransportFailure(cause);
-                if (!closed) {
+                // 스스로 끊는 중이면 이미 낸 명령을 처리한 뒤 한 번에 끊는다. 통로를 먼저 닫았다고 명령보다 앞서 끊으면 안 된다.
+                if (!closed && !closeRequested) {
                     endpoint.disconnect();
                 }
             }
@@ -524,7 +578,8 @@ public final class ConnectionDriver implements AutoCloseable {
             if (closed) {
                 // CLOSED 뒤에 상대가 끊기를 기다리던 읽기가 끝났다. 정상 종료다.
                 finished = true;
-            } else if (ioFailure == null) {
+            } else if (ioFailure == null && !closeRequested) {
+                // 스스로 끊은 연결이 닫힌 통로에서 낸 입출력 예외는 연결을 끊게 한 원인이 아니다.
                 ioFailure = cause;
             }
         }
@@ -544,10 +599,13 @@ public final class ConnectionDriver implements AutoCloseable {
         void settle() {
             dispatchEvents();
             if (!write()) {
-                endpoint.disconnect();
-                dispatchEvents();
-                write();
-                finished = true;
+                // 스스로 끊는 중이면 통로를 먼저 닫아서 난 실패다. 낸 명령을 처리한 뒤 step이 끊는다.
+                if (!closeRequested) {
+                    endpoint.disconnect();
+                    dispatchEvents();
+                    write();
+                    finished = true;
+                }
             } else if (closed && !finished && !outputShutdown) {
                 outputShutdown = true;
                 passage.shutdownOutput();
@@ -572,6 +630,12 @@ public final class ConnectionDriver implements AutoCloseable {
             try {
                 for (OutboundMessage message : endpoint.drainMessages()) {
                     passage.write(message);
+                    if (message.kind() == OutboundMessage.Kind.BINARY) {
+                        writtenBytes.addAndGet(message.length());
+                        if (message.length() >= FRAME_HEADER_BYTES) {
+                            writtenFrames.incrementAndGet();
+                        }
+                    }
                 }
                 return true;
             } catch (IOException e) {

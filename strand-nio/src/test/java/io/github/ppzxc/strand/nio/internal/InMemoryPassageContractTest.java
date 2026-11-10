@@ -7,17 +7,35 @@ class InMemoryPassageContractTest {
 
     @Nested
     class RealTime extends PassageContract {
+        private InMemoryPassage peer;
+
         @Override
         protected Passage create() {
-            return InMemoryPassage.streams().first();
+            InMemoryPassage.Pair pair = InMemoryPassage.streams();
+            peer = pair.second();
+            return pair.first();
+        }
+
+        @Override
+        protected Passage peer() {
+            return peer;
         }
     }
 
     @Nested
     class ManualTime extends PassageContract {
+        private InMemoryPassage peer;
+
         @Override
         protected Passage create() {
-            return InMemoryPassage.streams().first().manualTime();
+            InMemoryPassage.Pair pair = InMemoryPassage.streams();
+            peer = pair.second();
+            return pair.first().manualTime();
+        }
+
+        @Override
+        protected Passage peer() {
+            return peer;
         }
 
         @Override
