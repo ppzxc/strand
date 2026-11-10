@@ -322,6 +322,8 @@ class TcpPassageTest {
                 "tcp-passage-await");
         thread.setDaemon(true);
         thread.start();
+        // 선택기에서 실제로 기다리기 시작한 뒤에 닫는다. 그래야 닫힘이 기다림을 깨우는지를 본다.
+        StackWatch.awaitFrame(thread, StackWatch::inSelector);
 
         passage.close();
         passage.close();

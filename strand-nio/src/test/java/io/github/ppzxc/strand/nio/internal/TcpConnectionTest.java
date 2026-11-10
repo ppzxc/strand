@@ -218,6 +218,8 @@ class TcpConnectionTest {
                 handles.add(client.request(APPLICATION_TYPE, new byte[60_000]));
             }
 
+            // 클라이언트의 쓰기가 소켓 버퍼가 차서 실제로 막힌 뒤에 끊는다.
+            StackWatch.awaitFrameInAnyThread(StackWatch::inWriteWait);
             CompletableFuture<Void> closing = CompletableFuture.runAsync(client::close);
             closing.get(5, TimeUnit.SECONDS);
 
