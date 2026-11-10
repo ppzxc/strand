@@ -240,7 +240,7 @@ class ConnectionPhaseTest {
     static Stream<Arguments> closeTransitions() {
         Phase closing = Phase.CLOSING;
         Phase closed = Phase.CLOSED;
-        // 사건, 열림 단계에서 시작한 연결의 다음 단계, 닫을 때가 되는가, 정상 종료인가
+        // 사건, 열림 단계에서 시작한 연결의 다음 단계, 닫을 때가 되는가, 연결 종료(CLOSE)로 끝났는가
         return Stream.of(
                 Arguments.of(CloseEvent.CLOSE_SENT_NO_ERROR, closing, false, true),
                 Arguments.of(CloseEvent.CLOSE_SENT_ERROR, closing, true, false),
@@ -348,7 +348,7 @@ class ConnectionPhaseTest {
         assertThat(subject.endsNormally()).isFalse();
     }
 
-    /** 대기 중인 스트림 0개 도달과 중단은 종료 중일 때만 닫을 때로 만들고, 정상 종료로 남는다. */
+    /** 대기 중인 스트림 0개 도달과 중단은 종료 중일 때만 닫을 때로 만들고, 연결 종료(CLOSE)로 남는다. */
     @Test
     void closingEndsNormallyWhenNoStreamsRemainOrIsAborted() {
         ConnectionPhase subject = closing(Phase.OPEN);
@@ -358,7 +358,7 @@ class ConnectionPhaseTest {
         assertThat(subject.endsNormally()).isTrue();
     }
 
-    /** 오류나 끊김이 종료 중인 연결의 끝을 정상 종료에서 비정상으로 바꾼다(WebSocket Close를 덧붙이지 않는다). */
+    /** 오류나 끊김이 종료 중인 연결의 끝을 연결 종료(CLOSE)에서 오류 종료로 바꾼다(WebSocket Close를 덧붙이지 않는다). */
     @ParameterizedTest
     @EnumSource(
             value = CloseEvent.class,
@@ -371,7 +371,7 @@ class ConnectionPhaseTest {
         assertThat(subject.endsNormally()).isFalse();
     }
 
-    /** 오류로 끝나기로 한 연결은 뒤늦은 NO_ERROR CLOSE로 정상 종료가 되지 않는다. */
+    /** 오류로 끝나기로 한 연결은 뒤늦은 NO_ERROR CLOSE로 연결 종료(CLOSE)가 되지 않는다. */
     @Test
     void errorEndStaysErrorEnd() {
         ConnectionPhase subject = server(Phase.OPEN);
@@ -420,7 +420,7 @@ class ConnectionPhaseTest {
         }
     }
 
-    /** 기다릴 스트림이 없어진 정상 종료도 끊기면 정상 종료가 아니다. */
+    /** 기다릴 스트림이 없어진 연결 종료(CLOSE)도 끊기면 연결 종료(CLOSE)로 끝난 것이 아니다. */
     @Test
     void disconnectAfterDrainedIsNotANormalEnd() {
         ConnectionPhase subject = closing(Phase.OPEN);
@@ -430,7 +430,7 @@ class ConnectionPhaseTest {
         assertThat(subject.shouldCloseTransport()).isTrue();
     }
 
-    /** 끊긴 뒤에 CLOSE나 연결 오류가 겹치면 이전처럼 CLOSE 교환으로 넘어가되 정상 종료가 아니다. */
+    /** 끊긴 뒤에 CLOSE나 연결 오류가 겹치면 이전처럼 CLOSE 교환으로 넘어가되 연결 종료(CLOSE)로 끝난 것이 아니다. */
     @ParameterizedTest
     @EnumSource(
             value = CloseEvent.class,
@@ -462,7 +462,7 @@ class ConnectionPhaseTest {
         assertThat(failed.phase()).isEqualTo(Phase.CLOSING);
     }
 
-    /** 대기 중인 스트림 0개 도달은 끊긴 연결(CLOSE 교환 없음)을 정상 종료로 바꾸지 않는다. */
+    /** 대기 중인 스트림 0개 도달은 끊긴 연결(CLOSE 교환 없음)을 연결 종료(CLOSE)로 바꾸지 않는다. */
     @Test
     void pendingStreamsZeroDoesNotMakeADisconnectNormal() {
         ConnectionPhase disconnected = server(Phase.OPEN);
