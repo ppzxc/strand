@@ -11,6 +11,10 @@ dependencies {
   api(project(":strand-core"))
   testFixturesApi(project(":strand-core"))
   testFixturesCompileOnly(libsCatalog.library("jspecify"))
+  // Passage 계약 테스트(PassageContract)를 다른 통로 구현이 상속해 쓰게 fixtures로 낸다.
+  testFixturesApi(platform(libsCatalog.library("junit-bom")))
+  testFixturesApi(libsCatalog.library("junit-jupiter"))
+  testFixturesApi(libsCatalog.library("assertj-core"))
 }
 
 // 공개 API가 모두 internal 패키지라 japicmp가 비교할 대상이 없고, 아직 배포한 적 없어 기준선 jar도 없다.
@@ -22,4 +26,12 @@ tasks.named("japicmp") {
 // test fixtures는 test 코드처럼 NullAway 대상이 아니다.
 tasks.named<JavaCompile>("compileTestFixturesJava") {
   options.errorprone.nullaway { disable() }
+}
+
+// test fixtures는 발행하지 않는다. java-test-fixtures가 java 컴포넌트에 붙이는 변형을 빼지 않으면 POM과 Gradle module metadata에 fixtures의
+// 의존(junit, assertj)이 optional로 새어 나간다.
+(components["java"] as AdhocComponentWithVariants).apply {
+  withVariantsFromConfiguration(configurations["testFixturesApiElements"]) { skip() }
+  withVariantsFromConfiguration(configurations["testFixturesRuntimeElements"]) { skip() }
+  withVariantsFromConfiguration(configurations["testFixturesSourcesElements"]) { skip() }
 }

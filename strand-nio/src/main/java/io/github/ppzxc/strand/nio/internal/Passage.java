@@ -16,7 +16,11 @@ public interface Passage {
      * 읽을 것이 생기거나 {@link #wakeup}이 불리거나 시간이 다 될 때까지 기다린다. 기다리기 전에 불린 {@code wakeup}도 다음 기다림을 바로 끝낸다
      * ({@code Selector.wakeup()}과 같다).
      *
-     * @param timeoutMs 기다리는 상한(밀리초). 음수면 상한이 없다
+     * <p>시간 제한의 계약이다. {@code timeoutMs}가 0이면 기다리지 않고 지금 읽을 수 있는 것만 돌려준다(논블로킹 폴, 읽을 것이 없으면 바로
+     * {@link Inbound#none()}). 음수면 읽을 것이나 {@code wakeup}이 올 때까지 상한 없이 기다린다. 양수면 그 밀리초까지만 기다린다. 구현은
+     * {@code PassageContract}(test fixtures)를 상속한 테스트로 이를 확인한다.
+     *
+     * @param timeoutMs 기다리는 상한(밀리초). 0은 기다리지 않고 폴, 음수는 상한 없음, 양수는 그 밀리초까지
      * @return 읽은 것. 읽을 것이 없이 깨어났으면 {@link Inbound#none()}
      * @throws IOException 입출력 오류. 드라이버는 연결이 끊긴 것으로 본다
      */
