@@ -32,6 +32,7 @@ public final class Event {
     private final long credentialLifetime;
     private final @Nullable Certainty certainty;
     private final @Nullable Throwable cause;
+    private final @Nullable CloseReason closeReason;
 
     private Event(Kind kind, long streamId, int status, int type) {
         this(kind, streamId, status, type, NO_CREDENTIAL_LIFETIME, null, null);
@@ -45,6 +46,19 @@ public final class Event {
             long credentialLifetime,
             @Nullable Certainty certainty,
             @Nullable Throwable cause) {
+        this(kind, streamId, status, type, credentialLifetime, certainty, cause, null);
+    }
+
+    private Event(
+            Kind kind,
+            long streamId,
+            int status,
+            int type,
+            long credentialLifetime,
+            @Nullable Certainty certainty,
+            @Nullable Throwable cause,
+            @Nullable CloseReason closeReason) {
+        this.closeReason = closeReason;
         this.certainty = certainty;
         this.cause = cause;
         this.kind = kind;
@@ -65,8 +79,8 @@ public final class Event {
                 null);
     }
 
-    static Event closed(@Nullable Throwable cause) {
-        return new Event(Kind.CLOSED, 0, 0, 0, NO_CREDENTIAL_LIFETIME, null, cause);
+    static Event closed(@Nullable Throwable cause, CloseReason closeReason) {
+        return new Event(Kind.CLOSED, 0, 0, 0, NO_CREDENTIAL_LIFETIME, null, cause, closeReason);
     }
 
     static Event result(long streamId, int status, Certainty certainty) {
@@ -127,6 +141,16 @@ public final class Event {
      */
     public Optional<Throwable> cause() {
         return Optional.ofNullable(cause);
+    }
+
+    /**
+     * {@link Kind#CLOSED}의 종료 원인: 연결 종료(CLOSE)로 끝났는지, 오류 CLOSE로 끝났는지, CLOSE 없이 끊겼는지와 error_code, CLOSE를 보낸 쪽.
+     * 다른 종류의 이벤트면 비어 있다. {@link #cause()}와 별개이며 둘 다 올 수 있다.
+     *
+     * @return 종료 원인
+     */
+    public Optional<CloseReason> closeReason() {
+        return Optional.ofNullable(closeReason);
     }
 
     /**
