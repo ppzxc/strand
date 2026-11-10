@@ -172,6 +172,13 @@ class MultiClientIntegrationTest {
                     assertThat(serverSides.get(i).drainRequests())
                             .as("서버 쪽 연결 %d의 받은 요청", i)
                             .hasSize(2);
+                    // 결과 두 개가 종료 알림보다 먼저고, 서버는 요청 둘을 받은 뒤에 종료 알림을 받는다.
+                    assertThat(clients.get(i).log())
+                            .as("클라이언트 %d의 기록", i)
+                            .containsExactly(Peer.RESULT, Peer.RESULT, Peer.CLOSED);
+                    assertThat(serverSides.get(i).log())
+                            .as("서버 쪽 연결 %d의 기록", i)
+                            .containsExactly(Peer.REQUEST_RECEIVED, Peer.REQUEST_RECEIVED, Peer.CLOSED);
                 }
             }
         } finally {
