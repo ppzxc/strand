@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -40,14 +41,32 @@ final class VectorSchema {
     static final Shape EXTENSION_ENTRY =
             Shape.EMPTY.require("tag", FieldKind.U16).require("value", FieldKind.HEX);
 
-    static final Shape HELLO_PARAMS = Shape.EMPTY
-            .allow("max_frame_size", FieldKind.U32)
-            .allow("max_concurrent_streams", FieldKind.U32)
-            .allow("capabilities", FieldKind.U32);
+    /** HELLO 파라미터 이름은 모두 u32다. 이름 목록은 {@link Protocol#HELLO_DEFAULTS}에서 나온다. */
+    static final Shape HELLO_PARAMS = helloShape();
 
-    static final Shape SETUP_CONFIG = Shape.EMPTY
-            .allow("ack_timeout_ms", FieldKind.POSITIVE_U32)
-            .allow("auth_timeout_ms", FieldKind.POSITIVE_U32);
+    private static Shape helloShape() {
+        Shape shape = Shape.EMPTY;
+        for (String name : Protocol.HELLO_DEFAULTS.keySet()) {
+            shape = shape.allow(name, FieldKind.U32);
+        }
+        return shape;
+    }
+
+    /** config 키는 모두 1 이상의 시간(ms)이다. 키 목록은 {@link Protocol#CONFIG_DEFAULTS}에서 나온다. */
+    static final Shape SETUP_CONFIG = configShape();
+
+    private static Shape configShape() {
+        Shape shape = Shape.EMPTY;
+        for (String key : Protocol.CONFIG_DEFAULTS.keySet()) {
+            shape = shape.allow(key, FieldKind.POSITIVE_U32);
+        }
+        return shape;
+    }
+
+    /** {@code setup}이 허용하는 키. 러너의 지원 검사가 이 목록을 쓴다. */
+    static List<String> setupKeys() {
+        return new ArrayList<>(SETUP.names());
+    }
 
     static final Shape AUTH_SETUP =
             Shape.EMPTY.allow("mechanism", FieldKind.MECHANISM).allow("credentials", FieldKind.HEX);

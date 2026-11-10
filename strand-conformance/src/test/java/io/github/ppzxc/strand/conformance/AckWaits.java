@@ -26,31 +26,15 @@ import java.util.function.Predicate;
  */
 final class AckWaits {
 
-    private static final int HELLO = 0x0001;
-    private static final int PING = 0x0002;
-    private static final int AUTH = 0x0005;
     /** 받은 `AUTH`(ACK 아님)와 그것을 기다리는 서버의 AUTH 대기를 나타내는 값. 프레임 `type`(16비트)에 없는 값이다. */
     private static final int AUTH_REQUEST = 0x10005;
 
-    private static final int ACK_FLAG = 0x01;
-    /** 연결 서문의 식별자 6바이트. 뒤의 2바이트는 예약이라 값을 보지 않는다(규격 3.1절). */
-    private static final String PREFACE_PREFIX_HEX = "c0de53545230";
-
-    private static final int PREFACE_HEX_LENGTH = 16;
-    private static final int LENGTH_HEX = 8;
-    private static final int PING_PAYLOAD_HEX = 16;
-    /** 프레임 `length`의 최솟값 16(규격 2.2.1절). 이보다 짧으면 헤더를 읽을 수 없는 깨진 바이트다. */
-    private static final int MIN_FRAME_LENGTH = 16;
-    /** 헤더 20바이트 가운데 `extensions_length`가 있는 hex 위치(바이트 16~17, 규격 2.1절). */
-    private static final int EXTENSIONS_LENGTH_AT = 32;
-
-    private static final int HEADER_HEX = 40;
-    private static final long DEFAULT_ACK_TIMEOUT_MS = 5000;
-    private static final long DEFAULT_AUTH_TIMEOUT_MS = 10000;
+    private static final int PREFACE_HEX_LENGTH = Protocol.PREFACE_HEX.length();
+    private static final int PING_PAYLOAD_HEX = Protocol.PING_PAYLOAD_SIZE * 2;
 
     private AckWaits() {}
 
-    /** 구조를 해석해 대기 구간별로 센 경과 시간 중 그 대기의 한도(`ack_timeout_ms`는 5000, `auth_timeout_ms`는 10000이 기본)에 정확히 닿는 것이 있는가. */
+    /** 구조를 해석해 대기 구간별로 센 경과 시간 중 그 대기의 한도(`ack_timeout_ms`·`auth_timeout_ms`의 기본값은 {@link Protocol}에 있다)에 정확히 닿는 것이 있는가. */
     static boolean reachesLimitExactly(JsonObject vector) {
         for (Sample sample : samples(vector)) {
             if (sample.elapsed == sample.limit) {
@@ -71,7 +55,7 @@ final class AckWaits {
         boolean server = isServerSide(vector);
         return anyStep(vector, step -> {
             for (Wait wait : startedBy(step, server)) {
-                if (wait.type == AUTH || wait.type == AUTH_REQUEST) {
+                if (wait.type == Protocol.TYPE_AUTH || wait.type == AUTH_REQUEST) {
                     return true;
                 }
             }
@@ -117,7 +101,7 @@ final class AckWaits {
         for (int i = 0; i < count; i++) {
             JsonObject step = vector.getAsJsonArray("steps").get(i).getAsJsonObject();
             for (Ack ack : acknowledgedBy(step, stream)) {
-                received |= ack.type == AUTH;
+                received |= ack.type == Protocol.TYPE_AUTH;
             }
             result[i] = received;
             if (endsConnection(step)) {
@@ -159,8 +143,8 @@ final class AckWaits {
 
     private static List<Sample> samples(JsonObject vector) {
         JsonObject setup = vector.getAsJsonObject("setup");
-        long ackLimit = limitOf(setup, "ack_timeout_ms", DEFAULT_ACK_TIMEOUT_MS);
-        long authLimit = limitOf(setup, "auth_timeout_ms", DEFAULT_AUTH_TIMEOUT_MS);
+        long ackLimit = Protocol.configLimit(setup, Protocol.ACK_TIMEOUT_MS);
+        long authLimit = Protocol.configLimit(setup, Protocol.AUTH_TIMEOUT_MS);
         boolean server = isServerSide(vector);
         List<Wait> running = new ArrayList<>();
         List<Sample> result = new ArrayList<>();
@@ -195,12 +179,6 @@ final class AckWaits {
             }
         }
         return result;
-    }
-
-    private static long limitOf(JsonObject setup, String name, long fallback) {
-        return setup.has("config") && setup.getAsJsonObject("config").has(name)
-                ? setup.getAsJsonObject("config").get(name).getAsLong()
-                : fallback;
     }
 
     /** 이 단계 뒤에 연결이 끝나는가: 상대가 끊었거나(disconnect) 연결이 닫혔음이 애플리케이션에 전달됐다(closed 이벤트). */
@@ -250,11 +228,11 @@ final class AckWaits {
                 continue;
             }
             if (type.equals("HELLO")) {
-                waits.add(new Wait(HELLO, null));
+                waits.add(new Wait(Protocol.TYPE_HELLO, null));
             } else if (type.equals("PING")) {
-                waits.add(new Wait(PING, pingPayload(step, f)));
+                waits.add(new Wait(Protocol.TYPE_PING, pingPayload(step, f)));
             } else if (type.equals("AUTH")) {
-                waits.add(new Wait(AUTH, null));
+                waits.add(new Wait(Protocol.TYPE_AUTH, null));
             }
         }
         return waits;
@@ -334,7 +312,9 @@ final class AckWaits {
             if (wait.type != type) {
                 return false;
             }
-            return type != PING || wait.payload == null || (payload != null && payload.equals(wait.payload));
+            return type != Protocol.TYPE_PING
+                    || wait.payload == null
+                    || (payload != null && payload.equals(wait.payload));
         }
     }
 
@@ -353,14 +333,14 @@ final class AckWaits {
             if (!prefaceChecked && !skipPreface()) {
                 return acks;
             }
-            while (!broken && buffer.length() >= LENGTH_HEX) {
-                long length = Long.parseLong(buffer.substring(0, LENGTH_HEX), 16);
-                if (length < MIN_FRAME_LENGTH) {
+            while (!broken && buffer.length() >= Protocol.LENGTH_HEX) {
+                long length = Long.parseLong(buffer.substring(0, Protocol.LENGTH_HEX), 16);
+                if (length < Protocol.MIN_FRAME_LENGTH) {
                     broken = true;
                     break;
                 }
                 // length는 최대 2^32 - 1이라 long에서 넘치지 않는다. 프레임이 다 오지 않았으면 다음 바이트를 기다린다.
-                long frameHex = (4 + length) * 2;
+                long frameHex = (Protocol.LENGTH_SIZE + length) * 2;
                 if (buffer.length() < frameHex) {
                     break;
                 }
@@ -373,8 +353,8 @@ final class AckWaits {
 
         /** 흐름 맨 앞이 연결 서문이면 8바이트를 건너뛴다. 서문인지 알 만큼 바이트가 모였으면 true. */
         private boolean skipPreface() {
-            int compared = Math.min(buffer.length(), PREFACE_PREFIX_HEX.length());
-            if (!buffer.substring(0, compared).equals(PREFACE_PREFIX_HEX.substring(0, compared))) {
+            int compared = Math.min(buffer.length(), Protocol.PREFACE_PREFIX_HEX.length());
+            if (!buffer.substring(0, compared).equals(Protocol.PREFACE_PREFIX_HEX.substring(0, compared))) {
                 prefaceChecked = true;
                 return true;
             }
@@ -387,22 +367,24 @@ final class AckWaits {
         }
 
         private static void collectAck(String frame, List<Ack> acks) {
-            int type = Integer.parseInt(frame.substring(LENGTH_HEX, LENGTH_HEX + 4), 16);
-            int flags = Integer.parseInt(frame.substring(LENGTH_HEX + 4, LENGTH_HEX + 6), 16);
-            boolean ack = (flags & ACK_FLAG) != 0;
-            if (type == AUTH) {
+            int type = Integer.parseInt(frame.substring(Protocol.TYPE_HEX_AT, Protocol.TYPE_HEX_AT + 4), 16);
+            int flags = Integer.parseInt(frame.substring(Protocol.FLAGS_HEX_AT, Protocol.FLAGS_HEX_AT + 2), 16);
+            boolean ack = (flags & Protocol.ACK_FLAG) != 0;
+            if (type == Protocol.TYPE_AUTH) {
                 // ACK가 없는 AUTH는 서버의 AUTH 대기를 끝낸다.
-                acks.add(new Ack(ack ? AUTH : AUTH_REQUEST, null));
-            } else if (ack && (type == HELLO || type == PING)) {
+                acks.add(new Ack(ack ? Protocol.TYPE_AUTH : AUTH_REQUEST, null));
+            } else if (ack && (type == Protocol.TYPE_HELLO || type == Protocol.TYPE_PING)) {
                 acks.add(new Ack(type, payloadOf(frame)));
             }
         }
 
         /** 헤더 20바이트와 확장 영역 뒤의 payload. 정확히 8바이트가 아니면 null이다(PING 말고는 payload를 맞춰 보지 않는다). */
         private static String payloadOf(String frame) {
-            int extensionsHex =
-                    Integer.parseInt(frame.substring(EXTENSIONS_LENGTH_AT, EXTENSIONS_LENGTH_AT + 4), 16) * 2;
-            int from = HEADER_HEX + extensionsHex;
+            int extensionsHex = Integer.parseInt(
+                            frame.substring(Protocol.EXTENSIONS_LENGTH_HEX_AT, Protocol.EXTENSIONS_LENGTH_HEX_AT + 4),
+                            16)
+                    * 2;
+            int from = Protocol.HEADER_HEX + extensionsHex;
             return frame.length() - from == PING_PAYLOAD_HEX ? frame.substring(from) : null;
         }
     }

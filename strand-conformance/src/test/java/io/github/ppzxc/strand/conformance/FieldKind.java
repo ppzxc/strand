@@ -2,8 +2,6 @@ package io.github.ppzxc.strand.conformance;
 
 import com.google.gson.JsonElement;
 import java.math.BigInteger;
-import java.util.Arrays;
-import java.util.List;
 
 /** 필드 값의 종류. 종류마다 값을 검증하는 규칙을 하나씩 가진다. */
 enum FieldKind {
@@ -49,21 +47,21 @@ enum FieldKind {
     APP_TYPE {
         @Override
         void check(Check c, String path, JsonElement element) {
-            c.range(path, element, FIRST_APP_TYPE, U16_MAX);
+            c.range(path, element, Protocol.FIRST_APPLICATION_TYPE, U16_MAX);
         }
     },
     /** 2.5.1절의 이름이거나, 이름 목록 다음부터 255까지의 예약 정수. */
     STATUS {
         @Override
         void check(Check c, String path, JsonElement element) {
-            c.named(path, element, STATUS_NAMES, U8_MAX);
+            c.named(path, element, Protocol.STATUS_NAMES, U8_MAX);
         }
     },
     /** 2.5.2절의 이름이거나, 이름 목록 다음부터 u32 끝까지의 예약 정수. */
     ERROR_CODE {
         @Override
         void check(Check c, String path, JsonElement element) {
-            c.named(path, element, ERROR_CODE_NAMES, U32_MAX);
+            c.named(path, element, Protocol.ERROR_CODE_NAMES, U32_MAX);
         }
     },
     EXTENSIONS {
@@ -104,7 +102,7 @@ enum FieldKind {
     WEBSOCKET_CLOSE_CODE {
         @Override
         void check(Check c, String path, JsonElement element) {
-            c.range(path, element, 1000, 1000);
+            c.range(path, element, Protocol.NORMAL_CLOSURE, Protocol.NORMAL_CLOSURE);
         }
     },
     /** HELLO·PING의 flags(ACK). */
@@ -245,40 +243,8 @@ enum FieldKind {
     static final long U8_MAX = 255L;
     static final long U16_MAX = 65535L;
     static final long U32_MAX = 4294967295L;
-    static final long FIRST_APP_TYPE = 256L;
     static final BigInteger U64_MAX = BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE);
     static final BigInteger STREAM_ID_MAX = BigInteger.ONE.shiftLeft(63).subtract(BigInteger.ONE);
-
-    /** 2.5.1절 status 이름, 코드 값 순서. 목록 크기가 곧 첫 예약 정수 값이다. */
-    static final List<String> STATUS_NAMES = Arrays.asList(
-            "OK",
-            "CANCELLED",
-            "UNKNOWN",
-            "INVALID_ARGUMENT",
-            "DEADLINE_EXCEEDED",
-            "NOT_FOUND",
-            "ALREADY_EXISTS",
-            "PERMISSION_DENIED",
-            "RESOURCE_EXHAUSTED",
-            "FAILED_PRECONDITION",
-            "ABORTED",
-            "OUT_OF_RANGE",
-            "UNIMPLEMENTED",
-            "INTERNAL",
-            "UNAVAILABLE",
-            "DATA_LOSS",
-            "UNAUTHENTICATED");
-
-    /** 2.5.2절 error_code 이름, 코드 값 순서. 목록 크기가 곧 첫 예약 정수 값이다. */
-    static final List<String> ERROR_CODE_NAMES = Arrays.asList(
-            "NO_ERROR",
-            "PROTOCOL_ERROR",
-            "INTERNAL_ERROR",
-            "REFUSED",
-            "CANCEL",
-            "EXCESSIVE_USE",
-            "UNRESPONSIVE",
-            "UNAUTHENTICATED");
 
     abstract void check(Check c, String path, JsonElement element);
 }
