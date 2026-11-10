@@ -136,7 +136,10 @@ public final class ConnectionDriver implements AutoCloseable {
         }
     }
 
-    /** 전송 스레드가 실행하는 명령. 전송 스레드가 끝난 뒤에 들어온 명령은 {@link #abandon}으로 끝낸다. */
+    /**
+     * 전송 스레드가 실행하는 명령. 전송 스레드가 끝나기 전에 큐에 들어간 명령은 끊긴 엔드포인트에서 {@link #execute}로 처리하고, 전송 스레드가
+     * 끝난 뒤에 들어온 명령만 {@link #abandon}으로 끝낸다.
+     */
     private interface Command {
         void execute(Loop loop);
 
@@ -224,8 +227,8 @@ public final class ConnectionDriver implements AutoCloseable {
      * @param type 애플리케이션 {@code type}(256 이상)
      * @param body 요청 본문
      * @return 요청 핸들. {@link RequestHandle#result()}가 결과(status, 결과 확정성, 응답 본문)가 오면 끝난다. 실패하는 방식은 둘이다.
-     *     연결이 종료 중일 때 낸 요청은 core의 로컬 {@code UNAVAILABLE}(처리 안 됨) 결과로 끝나고, 전송 스레드가 이미 끝난 뒤에 낸 요청은
-     *     {@link IllegalStateException}으로 끝난다
+     *     연결이 종료 중이거나 연결이 끝나기 전에 큐에 들어간 요청은 core의 로컬 {@code UNAVAILABLE}(처리 안 됨) 결과로 끝나고, 전송
+     *     스레드가 이미 끝난 뒤에 낸 요청은 {@link IllegalStateException}으로 끝난다
      */
     public RequestHandle request(int type, byte[] body) {
         return submitRequest(type, body, 0);
@@ -426,6 +429,10 @@ public final class ConnectionDriver implements AutoCloseable {
         }
     }
 
+    /**
+     * 큐에 넣은 뒤 {@code stopped}를 본다. 전송 스레드는 큐를 소진한 뒤 {@code stopped}를 올리고 다시 한 번 비우므로, 명령은 소진되거나
+     * (소진 뒤에 들어왔다면) 이 두 번째 비움이나 여기서의 비움으로 끝난다. 어느 쪽에도 안 걸리는 틈은 없다.
+     */
     private void submit(Command command) {
         commands.add(command);
         passage.wakeup();
@@ -465,6 +472,8 @@ public final class ConnectionDriver implements AutoCloseable {
             loop.abort(e);
             throw e;
         } finally {
+            // stopped를 올리기 전에, 연결이 끝나기 전에 큐에 들어간 명령을 이미 끊긴 엔드포인트로 흘려 core가 내는 결과로 끝낸다.
+            loop.drainCommands();
             loop.failPending();
         }
     }
@@ -584,6 +593,31 @@ public final class ConnectionDriver implements AutoCloseable {
             } else if (ioFailure == null && !closeRequested) {
                 // 스스로 끊은 연결이 닫힌 통로에서 낸 입출력 예외는 연결을 끊게 한 원인이 아니다.
                 ioFailure = cause;
+            }
+        }
+
+        /**
+         * 연결이 끝난 뒤, 전송 스레드가 끝나기 전에 큐에 남은 명령을 이미 끊긴 엔드포인트에 흘린다. 요청은 core의 로컬 {@code UNAVAILABLE}
+         * (처리 안 됨)로 끝나고, 엔드포인트가 던지는 예외는 그 명령의 결과가 된다. 이 뒤에 들어온 명령은 {@link #stopped}가 오른 뒤
+         * {@link #abandonRemainingCommands}가 예외로 끝낸다. 이미 오류로 멈추는 중이면 원래 오류를 가리지 않도록 내보내다 난 예외는 삼킨다
+         * (남은 Future는 {@link #failPending}이 끝낸다).
+         */
+        void drainCommands() {
+            try {
+                while (!commands.isEmpty()) {
+                    Command command = commands.poll();
+                    while (command != null) {
+                        try {
+                            command.execute(this);
+                        } catch (RuntimeException e) {
+                            command.abandon(e);
+                        }
+                        command = commands.poll();
+                    }
+                    dispatchEvents();
+                }
+            } catch (RuntimeException e) {
+                // 실행기 거부 등. 남은 Future는 failPending이 끝낸다.
             }
         }
 
