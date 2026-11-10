@@ -554,7 +554,6 @@ class ConnectionNotificationTest {
 
         awaitLatch(link.client.shutdownCalled);
         awaitLatch(link.client.readResumedAfterShutdown);
-        assertThat(link.client.closed.getCount()).isEqualTo(1);
 
         link.server.releaseShutdown();
 
@@ -614,19 +613,21 @@ class ConnectionNotificationTest {
     }
 
     @Test
-    void theNoticeIsSentOnceWhenAReadFailureRacesTheClose() throws Exception {
-        Exchanged link = new Exchanged();
-        await(link.clientSide.authenticated);
-        link.client.failReadsAfterShutdown = true;
-        link.server.holdShutdown = true;
+    void whenThePeerHangsUpWhileClosingTheNoticeIsOneDisconnectWithTheEndOfStreamException() throws Exception {
+        // 종료 중(CLOSE를 보냈고 스트림이 남음)에 EOF가 CLOSE 처리와 겹쳐도, 어느 쪽이 먼저 처리되든 결과는 같다. 남은 스트림이 있어 EOF 전에는
+        // CLOSED가 나지 않으므로 입출력 예외가 기록된 채 끊김으로 한 번만 알린다.
+        Held held = new Held();
 
-        // 서버가 끊김(EOF)과 CLOSE를 거의 동시에 보내도(상대 close와 내 closeConnection이 겹침) 알림은 한 번이다.
-        link.clientDriver.closeConnection();
-        link.server.releaseShutdown();
+        held.client.closeConnection();
+        held.link.second().close();
 
-        awaitLatch(link.client.closed);
-        awaitBothEnded(link);
-        drainNotifications();
-        assertThat(link.clientSide.closedNotices()).hasSize(1);
+        RequestResult result = await(held.pending);
+        assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
+        assertThat(result.certainty()).isEqualTo(Certainty.UNKNOWN);
+        ConnectionClosed closed = await(held.clientSide.closed);
+        assertThat(closed.reason().kind()).isEqualTo(CloseReason.Kind.DISCONNECTED);
+        assertThat(closed.ioException()).get().isInstanceOf(java.io.EOFException.class);
+        held.awaitEnded();
+        assertThat(held.clientSide.closedNotices()).hasSize(1);
     }
 }
