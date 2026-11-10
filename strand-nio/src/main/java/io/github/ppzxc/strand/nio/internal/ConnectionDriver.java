@@ -28,6 +28,9 @@ import org.jspecify.annotations.Nullable;
  */
 public final class ConnectionDriver implements AutoCloseable {
 
+    /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
+    private static final int MAX_RECEIVES_PER_STEP = 64;
+
     private enum Role {
         CLIENT,
         SERVER
@@ -254,7 +257,8 @@ public final class ConnectionDriver implements AutoCloseable {
      * PING을 보낸다. AUTH 관문 전이면 core가 미뤘다가 통과 뒤에 보낸다. 어느 스레드에서든 부를 수 있다.
      *
      * @param payload 정확히 8바이트
-     * @return PING 명령이 처리되면 끝나는 Future. payload가 8바이트가 아니거나 연결이 끝났으면 예외로 끝난다
+     * @return PING 명령이 처리되면 끝나는 Future. payload가 8바이트가 아니거나 전송 스레드가 이미 끝났으면 예외로 끝난다. 연결이
+     *     닫히는 중이라 core가 보내지 않는 PING은 조용히 버려지고 Future는 정상으로 끝난다
      */
     public CompletableFuture<Void> ping(byte[] payload) {
         CompletableFuture<Void> future = new CompletableFuture<>();
@@ -351,7 +355,7 @@ public final class ConnectionDriver implements AutoCloseable {
             this.advancedTo = startedAt;
         }
 
-        /** 읽기, 받기, 명령 처리, 이벤트 배출, 쓰기를 한 번 돈다. */
+        /** 읽기, 받기, 시계 진행({@code advance}), 명령 처리, 이벤트 배출, 쓰기를 한 번 돈다. */
         void step() {
             try {
                 receiveAvailable();
@@ -367,13 +371,16 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         /**
-         * 기다렸다가, 지금 읽을 수 있는 것을 모두 받는다. 시계를 보내기 전에 도착해 있던 ACK가 확인 대기 초과로 오판되지 않게 하려는 것이다.
+         * 기다렸다가, 지금 읽을 수 있는 것을 최대 {@link #MAX_RECEIVES_PER_STEP}개까지 받는다. 시계를 보내기 전에 도착해 있던 ACK가 확인 대기
+         * 초과로 오판되지 않게 하면서, 상대가 계속 보내도 시계와 명령 처리가 굶지 않게 하는 상한이다. 남은 것은 다음 스텝의 기다림이 바로 돌려준다.
          */
         private void receiveAvailable() throws IOException {
             Inbound inbound = passage.await(waitLimit());
+            int received = 0;
             while (inbound.kind() != Inbound.Kind.NONE) {
                 receive(inbound);
-                if (inbound.kind() == Inbound.Kind.END) {
+                received++;
+                if (inbound.kind() == Inbound.Kind.END || received >= MAX_RECEIVES_PER_STEP) {
                     return;
                 }
                 inbound = passage.await(0);

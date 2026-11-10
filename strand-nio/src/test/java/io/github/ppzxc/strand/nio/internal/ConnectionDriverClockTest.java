@@ -431,4 +431,17 @@ class ConnectionDriverClockTest {
         // 남은 것도 다음 스텝들에서 이어 받는다.
         assertThat(flooding.drained.await(5, TimeUnit.SECONDS)).isTrue();
     }
+
+    @Test
+    void aPingAfterTheTransportThreadEndedFailsItsFuture() {
+        InMemoryPassage.Pair link = InMemoryPassage.messages();
+        Side client = new Side(link.first());
+        startClient(client, config());
+        client.driver.close();
+
+        assertThat(client.driver.ping(new byte[8]))
+                .failsWithin(5, TimeUnit.SECONDS)
+                .withThrowableThat()
+                .withCauseInstanceOf(IllegalStateException.class);
+    }
 }
