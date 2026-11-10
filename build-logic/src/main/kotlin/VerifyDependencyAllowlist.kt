@@ -12,7 +12,7 @@ import org.gradle.api.tasks.TaskAction
 /**
  * 배포 라이브러리의 의존성 0 규칙을 검사한다.
  *
- * - runtimeClasspath: 해석된 컴포넌트가 하나도 없어야 한다.
+ * - runtimeClasspath: [allowedRuntime]에 있는 컴포넌트 외에는 없어야 한다.
  * - compileClasspath: [allowedCompile]에 있는 좌표(`group:name:version`)만 허용한다.
  *
  * 입력은 해석 결과 문자열 집합이라 configuration cache와 호환된다.
@@ -30,6 +30,9 @@ abstract class VerifyDependencyAllowlist : DefaultTask() {
   abstract val compileComponents: SetProperty<String>
 
   @get:Input
+  abstract val allowedRuntime: SetProperty<String>
+
+  @get:Input
   abstract val allowedCompile: SetProperty<String>
 
   @get:OutputFile
@@ -38,9 +41,9 @@ abstract class VerifyDependencyAllowlist : DefaultTask() {
   @TaskAction
   fun verify() {
     val problems = mutableListOf<String>()
-    val runtime = runtimeComponents.get()
+    val runtime = runtimeComponents.get() - allowedRuntime.get()
     if (runtime.isNotEmpty()) {
-      problems += "runtimeClasspath는 비어 있어야 한다. 발견: ${runtime.sorted()}"
+      problems += "runtimeClasspath에는 ${allowedRuntime.get().sorted()}만 허용된다. 허용 외: ${runtime.sorted()}"
     }
     val unexpected = compileComponents.get() - allowedCompile.get()
     if (unexpected.isNotEmpty()) {
