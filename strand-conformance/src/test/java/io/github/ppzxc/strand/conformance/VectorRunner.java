@@ -1,7 +1,11 @@
 package io.github.ppzxc.strand.conformance;
 
+import static io.github.ppzxc.strand.conformance.Protocol.errorCode;
+import static io.github.ppzxc.strand.conformance.Protocol.statusCode;
+import static io.github.ppzxc.strand.conformance.Protocol.streamId;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.github.ppzxc.strand.core.internal.AuthDecision;
@@ -11,7 +15,6 @@ import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -20,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
-import java.util.function.Function;
 
 /**
  * 벡터 하나를 엔드포인트에 실행한다. `setup`으로 엔드포인트를 만들고 단계마다 입력을 넣어, 보낸 바이트를 프레임으로 풀어 `send`와,
@@ -30,15 +32,10 @@ import java.util.function.Function;
  */
 final class VectorRunner {
 
-    /** 연결 수립에 쓰는 상대 HELLO에 대한 ACK(페이로드 없음). */
-    private static final String ACK_HELLO_HEX = controlHeader(Protocol.TYPE_HELLO, Protocol.ACK_FLAG, 0);
-
     /** 러너가 지원하는 setup 키. 형태 검사의 setup 키 목록에서 나온다. */
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(VectorSchema.setupKeys());
     /** 실행할 수 있는 단계. 지원 여부와 실행이 이 표 하나에서 정해진다. */
     private static final Map<String, BiConsumer<VectorRunner, JsonObject>> STEPS = new LinkedHashMap<>();
-    /** 비교할 수 있는 이름 있는 프레임(숫자 type 프레임 제외). 지원 여부와 기대 표기가 이 표 하나에서 정해진다. */
-    private static final Map<String, Function<JsonObject, String>> NAMED_FRAMES = new LinkedHashMap<>();
 
     static {
         STEPS.put(
@@ -80,43 +77,6 @@ final class VectorRunner {
                         Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
         STEPS.put("disconnect", (runner, step) -> runner.endpoint.disconnect());
         STEPS.put("close", (runner, step) -> runner.endpoint.close(errorCode(step.get("error_code"))));
-
-        NAMED_FRAMES.put("PREFACE", frame -> "PREFACE");
-        NAMED_FRAMES.put("HELLO", frame -> {
-            boolean ack = VectorSchema.hasFlag(frame, "ACK");
-            return "HELLO flags=" + (ack ? "ACK" : "-") + " stream_id=0 params="
-                    + (ack ? "-" : paramsText(helloParams(frame.getAsJsonObject("params"))));
-        });
-        NAMED_FRAMES.put(
-                "PING",
-                frame -> "PING flags=" + (VectorSchema.hasFlag(frame, "ACK") ? "ACK" : "-") + " stream_id=0 payload="
-                        + frame.get("payload").getAsString());
-        NAMED_FRAMES.put("AUTH", frame -> {
-            if (VectorSchema.hasFlag(frame, "ACK")) {
-                return "AUTH flags=ACK stream_id=0 params="
-                        + (frame.has("params")
-                                        && frame.getAsJsonObject("params").has("credential_lifetime")
-                                ? "credential_lifetime="
-                                        + frame.getAsJsonObject("params")
-                                                .get("credential_lifetime")
-                                                .getAsLong()
-                                : "-");
-            }
-            return "AUTH flags=- stream_id=0 mechanism="
-                    + frame.get("mechanism").getAsString() + " credentials="
-                    + (frame.has("credentials") ? frame.get("credentials").getAsString() : "");
-        });
-        NAMED_FRAMES.put(
-                "CLOSE",
-                frame -> "CLOSE flags=- stream_id=0 error_code=" + nameOfError(frame.get("error_code"))
-                        + " last_stream_id=" + frame.get("last_stream_id").getAsString());
-        NAMED_FRAMES.put(
-                "WEBSOCKET_CLOSE",
-                frame -> "WEBSOCKET_CLOSE code=" + frame.get("code").getAsInt());
-        NAMED_FRAMES.put(
-                "RESET",
-                frame -> "RESET flags=- stream_id=" + streamId(frame.get("stream_id")) + " error_code="
-                        + nameOfError(frame.get("error_code")));
     }
 
     private final boolean client;
@@ -184,17 +144,8 @@ final class VectorRunner {
                     "request.extensions");
             for (JsonElement element : step.getAsJsonArray("send")) {
                 JsonObject frame = element.getAsJsonObject();
-                String type = VectorSchema.frameType(frame);
-                requireSupportedPart(
-                        type != null ? NAMED_FRAMES.containsKey(type) : isSupportedApplicationFrame(frame),
-                        vector,
-                        "프레임 " + frame.get("type"));
-                requireSupportedPart(
-                        !frame.has("flags")
-                                || frame.getAsJsonArray("flags").size() == 0
-                                || VectorSchema.hasFlag(frame, "ACK"),
-                        vector,
-                        "프레임 flags");
+                requireSupportedPart(FrameKind.isSupported(frame), vector, "프레임 " + frame.get("type"));
+                requireSupportedPart(FrameKind.hasSupportedFlags(frame), vector, "프레임 flags");
             }
             for (JsonElement event : step.getAsJsonArray("events")) {
                 requireSupportedPart(
@@ -206,26 +157,12 @@ final class VectorRunner {
         }
     }
 
-    /** 숫자 type의 애플리케이션 프레임 가운데 아직 비교할 수 있는 것: status·확장 영역을 쓰지 않은 프레임. */
-    private static boolean isSupportedApplicationFrame(JsonObject frame) {
-        return (!frame.has("extensions") || frame.getAsJsonArray("extensions").size() == 0)
-                && frame.get("type").getAsInt() >= Protocol.FIRST_APPLICATION_TYPE;
-    }
-
     private static void requireSupportedPart(boolean supported, ConformanceVector vector, String what) {
         assertThat(supported).as("러너 미지원: %s (%s)", what, vector.id()).isTrue();
     }
 
     private static boolean isWebSocket(JsonObject setup) {
         return setup.has("transport") && setup.get("transport").getAsString().equals("websocket");
-    }
-
-    /** 벡터의 스트림 번호(10진수 문자열, 벡터 형식 5절)를 정수로. 2^53을 넘는 값도 정확하다. 문자열이 아니면 거부한다. */
-    static long streamId(JsonElement element) {
-        assertThat(element.getAsJsonPrimitive().isString())
-                .as("스트림 번호는 문자열이다: %s", element)
-                .isTrue();
-        return Long.parseLong(element.getAsString());
     }
 
     /** {@code setup.auth}의 메커니즘. 생략하면 {@code ANONYMOUS}다(벡터 형식 5절). */
@@ -244,7 +181,7 @@ final class VectorRunner {
 
     private static EndpointConfig configOf(
             JsonObject setup, boolean webSocket, String authMechanism, String authCredentialsHex) {
-        Map<String, Long> hello = helloParams(setup.getAsJsonObject("local_hello"));
+        Map<String, Long> hello = Protocol.helloParams(setup.getAsJsonObject("local_hello"));
         long ackTimeout = Protocol.configLimit(setup, Protocol.ACK_TIMEOUT_MS);
         long authTimeout = Protocol.configLimit(setup, Protocol.AUTH_TIMEOUT_MS);
         EndpointConfig config = EndpointConfig.defaults()
@@ -282,35 +219,41 @@ final class VectorRunner {
      * {@code setup.auth}에서 정했고 없으면 {@code ANONYMOUS}와 빈 자격 증명이다.
      */
     private void establish(List<OutboundMessage> opening, JsonObject peerHello, String mechanism, String credentials) {
+        JsonObject peerHelloFrame = control("HELLO", false);
+        if (peerHello != null) {
+            peerHelloFrame.add("params", peerHello);
+        }
+        JsonObject helloAck = control("HELLO", true);
+        JsonObject authAck = control("AUTH", true);
+        JsonObject auth = control("AUTH", false);
+        auth.addProperty("mechanism", mechanism);
+        auth.addProperty("credentials", credentials);
+
         List<OutboundMessage> hello = opening;
         if (!client) {
-            deliver(Bytes.fromHex(Protocol.PREFACE_HEX));
+            deliver(FrameKind.encode(control("PREFACE", false)));
             hello = endpoint.drainMessages();
         }
         assertThat(describeMessages(hello, client)).as("수립: 연결을 연 뒤의 출력").hasSize(client ? 2 : 1);
-        deliver(encodeHello(helloParams(peerHello)));
+        deliver(FrameKind.encode(peerHelloFrame));
         List<String> afterPeerHello = describeMessages(endpoint.drainMessages(), false);
         if (client) {
             // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 보낸다(규격 3.3절 4번).
             assertThat(afterPeerHello)
                     .as("수립: 상대 HELLO에 대한 ACK와 AUTH")
-                    .containsExactly(
-                            "HELLO flags=ACK stream_id=0 params=-",
-                            "AUTH flags=- stream_id=0 mechanism=" + mechanism + " credentials=" + credentials);
+                    .containsExactly(FrameKind.expected(helloAck), FrameKind.expected(auth));
         } else {
-            assertThat(afterPeerHello)
-                    .as("수립: 상대 HELLO에 대한 ACK")
-                    .containsExactly("HELLO flags=ACK stream_id=0 params=-");
+            assertThat(afterPeerHello).as("수립: 상대 HELLO에 대한 ACK").containsExactly(FrameKind.expected(helloAck));
         }
-        deliver(Bytes.fromHex(ACK_HELLO_HEX));
+        deliver(FrameKind.encode(helloAck));
         assertThat(endpoint.drainMessages()).as("수립: ACK 뒤의 출력").isEmpty();
         if (client) {
-            deliver(Bytes.fromHex(controlHeader(Protocol.TYPE_AUTH, Protocol.ACK_FLAG, 0)));
+            deliver(FrameKind.encode(authAck));
         } else {
-            deliver(encodeAuth(mechanism, credentials));
+            deliver(FrameKind.encode(auth));
             assertThat(describeMessages(endpoint.drainMessages(), false))
                     .as("수립: AUTH에 대한 AUTH(ACK)")
-                    .containsExactly("AUTH flags=ACK stream_id=0 params=-");
+                    .containsExactly(FrameKind.expected(authAck));
         }
         assertThat(endpoint.drainMessages()).as("수립: AUTH 관문 통과 뒤의 출력").isEmpty();
         assertThat(describe(endpoint.drainEvents())).as("수립: 이벤트").isEmpty();
@@ -325,64 +268,27 @@ final class VectorRunner {
         }
     }
 
+    /** 수립 스크립트에 쓰는 기대 프레임 항목. 프레임 인코딩과 렌더링은 {@link FrameKind}가 한다. */
+    private static JsonObject control(String type, boolean ack) {
+        JsonObject frame = new JsonObject();
+        frame.addProperty("type", type);
+        if (ack) {
+            JsonArray flags = new JsonArray();
+            flags.add("ACK");
+            frame.add("flags", flags);
+        }
+        return frame;
+    }
+
     private void apply(JsonObject step) {
         STEPS.get(step.get("kind").getAsString()).accept(this, step);
-    }
-
-    /** 필드 이름에서 값으로, 빠진 값은 규격 기본값으로 채운다. 객체가 없으면 모두 기본값이다. */
-    private static Map<String, Long> helloParams(JsonObject given) {
-        Map<String, Long> params = new LinkedHashMap<>(Protocol.HELLO_DEFAULTS);
-        if (given != null) {
-            for (String name : given.keySet()) {
-                params.put(name, given.get(name).getAsLong());
-            }
-        }
-        return params;
-    }
-
-    /**
-     * 확장 영역이 없고 {@code status}와 {@code stream_id}가 0인 제어 프레임의 헤더 hex(20바이트, 규격 2.1절). {@code length}는 header 뒤 payload
-     * 크기로 채운다.
-     */
-    private static String controlHeader(int type, int flags, int payloadSize) {
-        return String.format(
-                "%08x%04x%02x%02x%016x%04x%04x",
-                Protocol.HEADER_SIZE - Protocol.LENGTH_SIZE + payloadSize, type, flags, 0, 0L, 0, 0);
-    }
-
-    private static byte[] encodeHello(Map<String, Long> params) {
-        ByteArrayOutputStream payload = new ByteArrayOutputStream();
-        for (Map.Entry<Integer, String> param : Protocol.HELLO_PARAM_NAMES.entrySet()) {
-            long value = params.get(param.getValue());
-            payload.write(0);
-            payload.write(param.getKey());
-            for (int shift = 24; shift >= 0; shift -= 8) {
-                payload.write((int) (value >>> shift));
-            }
-        }
-        byte[] body = payload.toByteArray();
-        return Bytes.concat(Bytes.fromHex(controlHeader(Protocol.TYPE_HELLO, 0, body.length)), body);
-    }
-
-    private static byte[] encodeAuth(String mechanism, String credentialsHex) {
-        byte[] name = mechanism.getBytes(StandardCharsets.US_ASCII);
-        byte[] body = Bytes.concat(Bytes.concat(new byte[] {(byte) name.length}, name), Bytes.fromHex(credentialsHex));
-        return Bytes.concat(Bytes.fromHex(controlHeader(Protocol.TYPE_AUTH, 0, body.length)), body);
     }
 
     private static List<String> expectedFrames(JsonObject step) {
         List<String> result = new ArrayList<>();
         for (JsonElement element : step.getAsJsonArray("send")) {
             JsonObject frame = element.getAsJsonObject();
-            String type = VectorSchema.frameType(frame);
-            if (type == null) {
-                result.add("APP type=" + frame.get("type").getAsInt() + " flags=- stream_id="
-                        + streamId(frame.get("stream_id"))
-                        + (frame.has("status") ? " status=" + nameOfStatus(frame.get("status")) : "") + " payload="
-                        + (frame.has("payload") ? frame.get("payload").getAsString() : ""));
-            } else {
-                result.add(NAMED_FRAMES.get(type).apply(frame));
-            }
+            result.add(FrameKind.expected(frame));
         }
         return result;
     }
@@ -425,11 +331,11 @@ final class VectorRunner {
             boolean withPreface = startsWithPreface && first;
             first = false;
             if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE) {
-                result.addAll(describe(stream.toByteArray(), startsWithPreface && result.isEmpty()));
+                result.addAll(FrameKind.describe(stream.toByteArray(), startsWithPreface && result.isEmpty(), client));
                 stream.reset();
-                result.add("WEBSOCKET_CLOSE code=" + message.webSocketCloseCode());
+                result.add(FrameKind.webSocketClose(message.webSocketCloseCode()));
             } else if (webSocket) {
-                List<String> frames = describe(message.bytes(), withPreface);
+                List<String> frames = FrameKind.describe(message.bytes(), withPreface, client);
                 assertThat(frames).as("WebSocket 메시지마다 프레임이 하나").hasSize(1);
                 result.addAll(frames);
             } else {
@@ -437,140 +343,7 @@ final class VectorRunner {
                 stream.write(bytes, 0, bytes.length);
             }
         }
-        result.addAll(describe(stream.toByteArray(), startsWithPreface && result.isEmpty()));
+        result.addAll(FrameKind.describe(stream.toByteArray(), startsWithPreface && result.isEmpty(), client));
         return result;
-    }
-
-    /** 엔드포인트가 보낸 바이트를 프레임으로 풀어 벡터의 `send`와 같은 표기로 바꾼다. 잘린 프레임은 실패시킨다. */
-    private List<String> describe(byte[] output, boolean startsWithPreface) {
-        List<String> result = new ArrayList<>();
-        byte[] rest = output;
-        byte[] preface = Bytes.fromHex(Protocol.PREFACE_HEX);
-        if (startsWithPreface
-                && rest.length >= preface.length
-                && Arrays.equals(Arrays.copyOf(rest, preface.length), preface)) {
-            result.add("PREFACE");
-            rest = Arrays.copyOfRange(rest, preface.length, rest.length);
-        }
-        for (byte[] frame : frames(rest)) {
-            int type = ((frame[Protocol.TYPE_AT] & 0xFF) << 8) | (frame[Protocol.TYPE_AT + 1] & 0xFF);
-            int flags = frame[Protocol.FLAGS_AT] & 0xFF;
-            long streamId = Bytes.readLong(frame, Protocol.STREAM_ID_AT);
-            int extensions = ((frame[Protocol.EXTENSIONS_LENGTH_AT] & 0xFF) << 8)
-                    | (frame[Protocol.EXTENSIONS_LENGTH_AT + 1] & 0xFF);
-            byte[] payload = Arrays.copyOfRange(frame, Protocol.HEADER_SIZE + extensions, frame.length);
-            String head = " flags=" + flagsText(flags) + " stream_id=" + Long.toUnsignedString(streamId);
-            String ext = extensions == 0 ? "" : " extensions=" + extensions;
-            if (type == Protocol.TYPE_HELLO) {
-                result.add("HELLO" + head + ext + " params=" + (payload.length == 0 ? "-" : paramsText(payload)));
-            } else if (type == Protocol.TYPE_PING) {
-                result.add("PING" + head + ext + " payload=" + Bytes.toHex(payload));
-            } else if (type == Protocol.TYPE_CLOSE && payload.length >= Protocol.CLOSE_PAYLOAD_SIZE) {
-                result.add("CLOSE" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0))
-                        + " last_stream_id=" + Long.toUnsignedString(Bytes.readLong(payload, 4)));
-            } else if (type == Protocol.TYPE_AUTH && (flags & Protocol.ACK_FLAG) == 0 && payload.length >= 1) {
-                int nameLength = payload[0] & 0xFF;
-                result.add("AUTH" + head + ext + " mechanism="
-                        + new String(payload, 1, nameLength, StandardCharsets.US_ASCII) + " credentials="
-                        + Bytes.toHex(Arrays.copyOfRange(payload, 1 + nameLength, payload.length)));
-            } else if (type == Protocol.TYPE_AUTH && (flags & Protocol.ACK_FLAG) != 0) {
-                result.add("AUTH" + head + ext + " params=" + authParamsText(payload));
-            } else if (type == Protocol.TYPE_RESET && payload.length == Protocol.RESET_PAYLOAD_SIZE) {
-                result.add(
-                        "RESET" + head + ext + " error_code=" + nameOfError((int) Bytes.readUnsignedInt(payload, 0)));
-            } else if (type >= Protocol.FIRST_APPLICATION_TYPE) {
-                // 자기 번호 공간(클라이언트는 홀수, 서버는 짝수)의 프레임은 요청이라 status를 비교하지 않는다.
-                boolean ownSpace = (streamId & 1) == (client ? 1 : 0);
-                String status = ownSpace ? "" : " status=" + nameOfStatus(frame[Protocol.STATUS_AT] & 0xFF);
-                result.add("APP type=" + type + head + ext + status + " payload=" + Bytes.toHex(payload));
-            } else {
-                result.add(String.format("type=0x%04x", type) + head + ext + " payload=" + Bytes.toHex(payload));
-            }
-        }
-        return result;
-    }
-
-    private static String flagsText(int flags) {
-        if (flags == 0) {
-            return "-";
-        }
-        return flags == Protocol.ACK_FLAG ? "ACK" : String.format("0x%02x", flags);
-    }
-
-    /** AUTH(ACK) payload의 항목. {@code credential_lifetime}만 이름이 있고 빈 payload는 {@code -}다. */
-    private static String authParamsText(byte[] payload) {
-        if (payload.length == 0) {
-            return "-";
-        }
-        StringBuilder text = new StringBuilder();
-        for (int at = 0; at + Protocol.PARAM_ENTRY_SIZE <= payload.length; at += Protocol.PARAM_ENTRY_SIZE) {
-            int id = ((payload[at] & 0xFF) << 8) | (payload[at + 1] & 0xFF);
-            text.append(text.length() == 0 ? "" : ",")
-                    .append(
-                            id == Protocol.AUTH_PARAM_CREDENTIAL_LIFETIME
-                                    ? "credential_lifetime"
-                                    : String.format("0x%04x", id))
-                    .append('=')
-                    .append(Bytes.readUnsignedInt(payload, at + 2));
-        }
-        return text.toString();
-    }
-
-    private static String paramsText(Map<String, Long> params) {
-        return params.toString();
-    }
-
-    private static String paramsText(byte[] payload) {
-        Map<String, Long> filled = new LinkedHashMap<>(Protocol.HELLO_DEFAULTS);
-        for (int at = 0; at + Protocol.PARAM_ENTRY_SIZE <= payload.length; at += Protocol.PARAM_ENTRY_SIZE) {
-            int id = ((payload[at] & 0xFF) << 8) | (payload[at + 1] & 0xFF);
-            String name = Protocol.HELLO_PARAM_NAMES.containsKey(id)
-                    ? Protocol.HELLO_PARAM_NAMES.get(id)
-                    : String.format("0x%04x", id);
-            filled.put(name, Bytes.readUnsignedInt(payload, at + 2));
-        }
-        return paramsText(filled);
-    }
-
-    private static List<byte[]> frames(byte[] output) {
-        List<byte[]> result = new ArrayList<>();
-        int at = 0;
-        while (at + Protocol.LENGTH_SIZE <= output.length) {
-            int size = (int) (Protocol.LENGTH_SIZE + Bytes.readUnsignedInt(output, at));
-            assertThat(at + size).as("보낸 바이트가 프레임 경계에서 끝나야 한다").isLessThanOrEqualTo(output.length);
-            result.add(Arrays.copyOfRange(output, at, at + size));
-            at += size;
-        }
-        assertThat(at).as("보낸 바이트에 남는 조각이 없어야 한다").isEqualTo(output.length);
-        return result;
-    }
-
-    /** error_code 이름(예약 값은 정수)을 값으로. */
-    private static int errorCode(JsonElement element) {
-        return element.getAsJsonPrimitive().isString()
-                ? Protocol.ERROR_CODE_NAMES.indexOf(element.getAsString())
-                : element.getAsInt();
-    }
-
-    private static String nameOfError(JsonElement element) {
-        return nameOfError(errorCode(element));
-    }
-
-    private static String nameOfError(int code) {
-        return code < Protocol.ERROR_CODE_NAMES.size() ? Protocol.ERROR_CODE_NAMES.get(code) : String.valueOf(code);
-    }
-
-    private static int statusCode(JsonElement element) {
-        return element.getAsJsonPrimitive().isString()
-                ? Protocol.STATUS_NAMES.indexOf(element.getAsString())
-                : element.getAsInt();
-    }
-
-    static String nameOfStatus(JsonElement element) {
-        return element.getAsJsonPrimitive().isString() ? element.getAsString() : nameOfStatus(element.getAsInt());
-    }
-
-    static String nameOfStatus(int status) {
-        return status < Protocol.STATUS_NAMES.size() ? Protocol.STATUS_NAMES.get(status) : String.valueOf(status);
     }
 }

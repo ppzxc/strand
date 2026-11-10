@@ -28,13 +28,13 @@ final class EventKind {
                     .require("status", VectorSchema.STATUS)
                     .require("certainty", FieldCheck.oneOf(VectorSchema.CERTAINTIES)),
             event -> result(
-                    event.has("stream_id") ? String.valueOf(VectorRunner.streamId(event.get("stream_id"))) : null,
-                    VectorRunner.nameOfStatus(event.get("status")),
+                    event.has("stream_id") ? String.valueOf(Protocol.streamId(event.get("stream_id"))) : null,
+                    Protocol.nameOfStatus(event.get("status")),
                     event.get("certainty").getAsString()),
             // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). core는 번호 0으로 알린다.
             event -> result(
                     event.streamId() == 0 ? null : String.valueOf(event.streamId()),
-                    VectorRunner.nameOfStatus(event.status()),
+                    Protocol.nameOfStatus(event.status()),
                     event.certainty().orElseThrow(AssertionError::new).name().toLowerCase(Locale.ROOT)));
 
     private static final EventKind REQUEST_RECEIVED = new EventKind(
@@ -42,8 +42,7 @@ final class EventKind {
             Event.Kind.REQUEST_RECEIVED,
             BASE.require("stream_id", VectorSchema.STREAM_ID).require("type", VectorSchema.APP_TYPE),
             event -> requestReceived(
-                    VectorRunner.streamId(event.get("stream_id")),
-                    event.get("type").getAsInt()),
+                    Protocol.streamId(event.get("stream_id")), event.get("type").getAsInt()),
             event -> requestReceived(event.streamId(), event.type()));
 
     private static final EventKind CLOSED =

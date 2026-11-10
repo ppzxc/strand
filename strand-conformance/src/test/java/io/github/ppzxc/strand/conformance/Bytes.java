@@ -1,5 +1,6 @@
 package io.github.ppzxc.strand.conformance;
 
+import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
 
 /** 러너가 쓰는 바이트 도구: hex 변환, 빅 엔디언 정수 읽기, 이어 붙이기. */
@@ -30,6 +31,11 @@ final class Bytes {
         return sb.toString();
     }
 
+    /** 2바이트 부호 없는 빅 엔디언 정수. */
+    static int readUnsignedShort(byte[] bytes, int at) {
+        return ((bytes[at] & 0xFF) << 8) | (bytes[at + 1] & 0xFF);
+    }
+
     /** 4바이트 부호 없는 빅 엔디언 정수. */
     static long readUnsignedInt(byte[] bytes, int at) {
         return ((long) (bytes[at] & 0xFF) << 24)
@@ -47,5 +53,21 @@ final class Bytes {
         byte[] out = Arrays.copyOf(a, a.length + b.length);
         System.arraycopy(b, 0, out, a.length, b.length);
         return out;
+    }
+
+    static void writeShort(ByteArrayOutputStream out, int value) {
+        out.write(value >>> 8);
+        out.write(value);
+    }
+
+    static void writeInt(ByteArrayOutputStream out, long value) {
+        for (int shift = 24; shift >= 0; shift -= 8) {
+            out.write((int) (value >>> shift));
+        }
+    }
+
+    static void writeLong(ByteArrayOutputStream out, long value) {
+        writeInt(out, value >>> 32);
+        writeInt(out, value);
     }
 }

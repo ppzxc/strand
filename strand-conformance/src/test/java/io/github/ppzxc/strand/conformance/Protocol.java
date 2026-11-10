@@ -1,5 +1,8 @@
 package io.github.ppzxc.strand.conformance;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.Arrays;
 import java.util.Collections;
@@ -149,4 +152,54 @@ final class Protocol {
             "EXCESSIVE_USE",
             "UNRESPONSIVE",
             "UNAUTHENTICATED");
+
+    // ---- 벡터 값 읽기: 이름·번호·스트림 번호 ----
+
+    /** 필드 이름에서 값으로, 빠진 값은 규격 기본값으로 채운다. 객체가 없으면 모두 기본값이다. */
+    static Map<String, Long> helloParams(JsonObject given) {
+        Map<String, Long> params = new LinkedHashMap<>(HELLO_DEFAULTS);
+        if (given != null) {
+            for (String name : given.keySet()) {
+                params.put(name, given.get(name).getAsLong());
+            }
+        }
+        return params;
+    }
+
+    /** 벡터의 스트림 번호(10진수 문자열, 벡터 형식 5절)를 정수로. 2^53을 넘는 값도 정확하다. 문자열이 아니면 거부한다. */
+    static long streamId(JsonElement element) {
+        assertThat(element.getAsJsonPrimitive().isString())
+                .as("스트림 번호는 문자열이다: %s", element)
+                .isTrue();
+        return Long.parseLong(element.getAsString());
+    }
+
+    /** error_code 이름(예약 값은 정수)을 값으로. */
+    static int errorCode(JsonElement element) {
+        return element.getAsJsonPrimitive().isString()
+                ? ERROR_CODE_NAMES.indexOf(element.getAsString())
+                : element.getAsInt();
+    }
+
+    static String nameOfError(JsonElement element) {
+        return nameOfError(errorCode(element));
+    }
+
+    static String nameOfError(int code) {
+        return code < ERROR_CODE_NAMES.size() ? ERROR_CODE_NAMES.get(code) : String.valueOf(code);
+    }
+
+    static int statusCode(JsonElement element) {
+        return element.getAsJsonPrimitive().isString()
+                ? STATUS_NAMES.indexOf(element.getAsString())
+                : element.getAsInt();
+    }
+
+    static String nameOfStatus(JsonElement element) {
+        return element.getAsJsonPrimitive().isString() ? element.getAsString() : nameOfStatus(element.getAsInt());
+    }
+
+    static String nameOfStatus(int status) {
+        return status < STATUS_NAMES.size() ? STATUS_NAMES.get(status) : String.valueOf(status);
+    }
 }
