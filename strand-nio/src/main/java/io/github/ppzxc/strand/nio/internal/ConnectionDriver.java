@@ -392,7 +392,10 @@ public final class ConnectionDriver implements AutoCloseable {
         return writtenFrames.get();
     }
 
-    /** 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 남은 Future는 core가 내는 결과로 끝난다. 여러 번 불러도 된다. */
+    /**
+     * 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 통로를 닫으므로 상대가 읽지 않아 쓰기가 막혀 있어도 끝난다. 남은 Future는 core가 내는 결과로 끝난다.
+     * 여러 번 불러도 된다.
+     */
     @Override
     public void close() {
         closeRequested = true;
@@ -400,6 +403,8 @@ public final class ConnectionDriver implements AutoCloseable {
         if (Thread.currentThread() == thread) {
             return;
         }
+        // 상대가 읽지 않아 쓰기에서 막혀 있으면 깨움만으로는 전송 스레드가 돌아오지 않는다. 통로를 닫아 막힌 입출력을 끝낸다.
+        passage.close();
         try {
             thread.join();
         } catch (InterruptedException e) {
@@ -550,7 +555,8 @@ public final class ConnectionDriver implements AutoCloseable {
             } finally {
                 // 내보내다 실행기 거부로 던져도 입출력 예외 기록과 끊김 통지는 빠뜨리지 않는다. abort 경로의 종료 알림에도 예외가 실려야 한다.
                 recordTransportFailure(cause);
-                if (!closed) {
+                // 스스로 끊는 중이면 이미 낸 명령을 처리한 뒤 한 번에 끊는다. 통로를 먼저 닫았다고 명령보다 앞서 끊으면 안 된다.
+                if (!closed && !closeRequested) {
                     endpoint.disconnect();
                 }
             }
@@ -561,7 +567,8 @@ public final class ConnectionDriver implements AutoCloseable {
             if (closed) {
                 // CLOSED 뒤에 상대가 끊기를 기다리던 읽기가 끝났다. 정상 종료다.
                 finished = true;
-            } else if (ioFailure == null) {
+            } else if (ioFailure == null && !closeRequested) {
+                // 스스로 끊은 연결이 닫힌 통로에서 낸 입출력 예외는 연결을 끊게 한 원인이 아니다.
                 ioFailure = cause;
             }
         }
@@ -581,10 +588,13 @@ public final class ConnectionDriver implements AutoCloseable {
         void settle() {
             dispatchEvents();
             if (!write()) {
-                endpoint.disconnect();
-                dispatchEvents();
-                write();
-                finished = true;
+                // 스스로 끊는 중이면 통로를 먼저 닫아서 난 실패다. 낸 명령을 처리한 뒤 step이 끊는다.
+                if (!closeRequested) {
+                    endpoint.disconnect();
+                    dispatchEvents();
+                    write();
+                    finished = true;
+                }
             } else if (closed && !finished && !outputShutdown) {
                 outputShutdown = true;
                 passage.shutdownOutput();
