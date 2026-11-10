@@ -290,9 +290,8 @@ class ConnectionDriverTest {
         handle.cancel();
 
         assertThat(await(handle.result())).isSameAs(answered);
-        assertThat(text(await(client.request(APPLICATION_TYPE, bytes("next"))
-                        .result()
-                        .thenApply(RequestResult::body))))
+        assertThat(text(await(
+                        client.request(APPLICATION_TYPE, bytes("next")).result().thenApply(RequestResult::body))))
                 .isEqualTo("re:next");
     }
 
