@@ -368,6 +368,11 @@ public final class ConnectionDriver implements AutoCloseable {
         return future;
     }
 
+    /** 이 연결의 전송 스레드. 테스트가 이 연결의 스레드만 들여다보려는 용도다. */
+    Thread transportThread() {
+        return thread;
+    }
+
     /**
      * 지금까지 {@code Endpoint}가 처리를 끝낸 받은 바이트 수(메시지 통로면 받은 메시지 내용의 합). 처리를 끝낸 뒤에 늘므로, 이 값이 어떤 입력을
      * 포함하면 그 입력의 결과 이벤트가 나오기 전이라도 이미 처리된 것이다. 어느 스레드에서든 읽을 수 있다.

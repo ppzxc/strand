@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.nio.internal;
 
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Predicate;
