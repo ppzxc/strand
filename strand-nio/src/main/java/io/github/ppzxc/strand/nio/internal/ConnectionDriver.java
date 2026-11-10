@@ -155,11 +155,14 @@ public final class ConnectionDriver implements AutoCloseable {
     public RequestHandle request(int type, byte[] body) {
         CompletableFuture<RequestResult> future = new CompletableFuture<>();
         byte[] copy = body.clone();
+        TicketBox box = new TicketBox();
         submit(new Command() {
             @Override
             public void execute(Loop loop) {
                 try {
-                    loop.pending.put(loop.endpoint.request(type, copy), future);
+                    long ticket = loop.endpoint.request(type, copy);
+                    box.ticket = ticket;
+                    loop.pending.put(ticket, future);
                 } catch (RuntimeException e) {
                     future.completeExceptionally(e);
                 }
@@ -170,7 +173,28 @@ public final class ConnectionDriver implements AutoCloseable {
                 future.completeExceptionally(reason);
             }
         });
-        return new RequestHandle(future);
+        return new RequestHandle(future, () -> cancelRequest(box));
+    }
+
+    /** 번호표는 전송 스레드에서 정해지므로 요청 명령이 채운다. 명령 큐가 FIFO라 취소 명령은 늘 요청 명령 뒤에 처리된다. */
+    private static final class TicketBox {
+        // 전송 스레드에서만 읽고 쓴다. 요청이 던져 번호표를 못 받았으면 NONE이다.
+        long ticket = NONE;
+        static final long NONE = -1L;
+    }
+
+    private void cancelRequest(TicketBox box) {
+        submit(new Command() {
+            @Override
+            public void execute(Loop loop) {
+                if (box.ticket != TicketBox.NONE) {
+                    loop.endpoint.cancelRequest(box.ticket);
+                }
+            }
+
+            @Override
+            public void abandon(Throwable reason) {}
+        });
     }
 
     /**
