@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.ppzxc.strand.core.internal.ConnectionPhase.Admission;
 import io.github.ppzxc.strand.core.internal.ConnectionPhase.ApplicationSend;
 import io.github.ppzxc.strand.core.internal.ConnectionPhase.Phase;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -207,20 +206,56 @@ class ConnectionPhaseTest {
 
     /** 종료 쪽 사건. */
     private enum CloseEvent {
-        CLOSE_SENT_NO_ERROR(p -> p.closeSent(NO_ERROR)),
-        CLOSE_SENT_ERROR(p -> p.closeSent(ERROR)),
-        CLOSE_RECEIVED_NO_ERROR(p -> p.closeReceived(NO_ERROR)),
-        CLOSE_RECEIVED_ERROR(p -> p.closeReceived(ERROR)),
-        CONNECTION_FAILED(ConnectionPhase::connectionFailed),
-        DISCONNECTED(ConnectionPhase::transportDisconnected),
-        PENDING_STREAMS_ZERO(ConnectionPhase::pendingStreamsReachedZero),
-        TRANSPORT_CLOSED(ConnectionPhase::transportClosed);
+        CLOSE_SENT_NO_ERROR {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.closeSent(NO_ERROR);
+            }
+        },
+        CLOSE_SENT_ERROR {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.closeSent(ERROR);
+            }
+        },
+        CLOSE_RECEIVED_NO_ERROR {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.closeReceived(NO_ERROR);
+            }
+        },
+        CLOSE_RECEIVED_ERROR {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.closeReceived(ERROR);
+            }
+        },
+        CONNECTION_FAILED {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.connectionFailed();
+            }
+        },
+        DISCONNECTED {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.transportDisconnected();
+            }
+        },
+        PENDING_STREAMS_ZERO {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.pendingStreamsReachedZero();
+            }
+        },
+        TRANSPORT_CLOSED {
+            @Override
+            void apply(ConnectionPhase p) {
+                p.transportClosed();
+            }
+        };
 
-        private final Consumer<ConnectionPhase> action;
-
-        CloseEvent(Consumer<ConnectionPhase> action) {
-            this.action = action;
-        }
+        abstract void apply(ConnectionPhase p);
     }
 
     /** 수립 쪽 단계 하나에서 CLOSE를 NO_ERROR로 보낸 연결. 닫는 중이 된다. */
@@ -257,7 +292,7 @@ class ConnectionPhaseTest {
     @MethodSource("closeTransitions")
     void closeEventFromOpen(CloseEvent event, Phase next, boolean due, boolean normal) {
         ConnectionPhase subject = server(Phase.OPEN);
-        event.action.accept(subject);
+        event.apply(subject);
         assertThat(subject.phase()).isEqualTo(next);
         assertThat(subject.shouldCloseTransport()).isEqualTo(due);
         assertThat(subject.endsNormally()).isEqualTo(normal);
@@ -366,7 +401,7 @@ class ConnectionPhaseTest {
     void failureWhileClosingIsNotANormalEnd(CloseEvent event) {
         ConnectionPhase subject = closing(Phase.OPEN);
         assertThat(subject.endsNormally()).isTrue();
-        event.action.accept(subject);
+        event.apply(subject);
         assertThat(subject.shouldCloseTransport()).isTrue();
         assertThat(subject.endsNormally()).isFalse();
     }
@@ -401,7 +436,7 @@ class ConnectionPhaseTest {
     @EnumSource(CloseEvent.class)
     void endedConnectionIgnoresEveryEvent(CloseEvent event) {
         ConnectionPhase subject = ended(Phase.OPEN);
-        event.action.accept(subject);
+        event.apply(subject);
         assertThat(subject.phase()).isEqualTo(Phase.CLOSED);
         assertThat(subject.isEnded()).isTrue();
         assertThat(subject.shouldCloseTransport()).isFalse();
@@ -438,7 +473,7 @@ class ConnectionPhaseTest {
     void closeExchangeAfterDisconnectMovesToClosingAsAnError(CloseEvent event) {
         ConnectionPhase subject = server(Phase.OPEN);
         subject.transportDisconnected();
-        event.action.accept(subject);
+        event.apply(subject);
         assertThat(subject.phase()).isEqualTo(Phase.CLOSING);
         assertThat(subject.closeExchanged()).isTrue();
         assertThat(subject.endsNormally()).isFalse();
