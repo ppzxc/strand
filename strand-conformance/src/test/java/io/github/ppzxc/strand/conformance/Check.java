@@ -101,7 +101,7 @@ final class Check {
             }
         }
         for (String name : object.keySet()) {
-            shape.kindOf(name).check(this, child(path, name), object.get(name));
+            shape.checkOf(name).check(this, child(path, name), object.get(name));
         }
         return object;
     }
@@ -313,7 +313,7 @@ final class Check {
         JsonArray array = array(path, element);
         Set<BigInteger> seen = new HashSet<>();
         for (int i = 0; i < array.size(); i++) {
-            FieldKind.APP_TYPE.check(this, item(path, i), array.get(i));
+            VectorSchema.APP_TYPE.check(this, item(path, i), array.get(i));
             BigInteger value = integer(array.get(i));
             if (!seen.add(value)) {
                 throw failAt(item(path, i), "중복 값: " + value);
