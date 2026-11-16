@@ -17,12 +17,11 @@ check_pom_metadata() { # <모듈 artifactId> <pom 경로>
     grep -qF -- "$tag" "$pom" || { echo "POM에 $tag 가 없다: $pom" >&2; return 1; }
   done
 }
-
 pom_description_line() { grep -m1 -F "<description>" "$1" | sed 's/^[[:space:]]*//'; }
 
 # description이 비어 있지 않은 한 줄이어야 한다(빈 값끼리 같다고 통과하거나 비교가 흐려지는 것을 막는다).
 check_pom_description() { # <pom 경로>
-  [ -n "$(pom_description_line "$1" | sed -n 's:.*<description>\(..*\)</description>.*:\1:p')" ] \
+  [ -n "$(pom_description_line "$1" | sed -n 's:.*<description>[[:space:]]*\([^[:space:]].*\)</description>.*:\1:p')" ] \
     || { echo "POM description이 비어 있거나 한 줄이 아니다: $1" >&2; return 1; }
 }
 
@@ -66,7 +65,8 @@ echo "nio POM 메타데이터, core와 다른 description, 의존(strand-core) �
 
 # nio POM이 어긋나면 검사가 실패하는지 변조한 사본으로 확인한다.
 pomdir="$(mktemp -d)"
-trap 'rm -rf "$pomdir"' EXIT
+tmp="$(mktemp)"
+trap 'rm -rf "$pomdir"; rm -f "$tmp"' EXIT
 expect_nio_pom_rejected() { # <사유> <변조한 nio pom> <기대하는 거부 메시지 조각>
   local err
   if err="$(check_nio_pom "$2" "$core_pom" 2>&1)"; then
@@ -99,8 +99,6 @@ fi
 echo "틀린 기대 버전에서 하네스가 버전 불일치로 실패 확인"
 
 # Maven 3.9.x와 3.10의 출처 기록 형식을 모두 인정하고, 다른 저장소나 빈 기록은 거부하는지 확인한다.
-tmp="$(mktemp)"
-trap 'rm -rf "$pomdir"; rm -f "$tmp"' EXIT
 check_origin() { # <기대: ok|no> <기록 내용>
   printf '%s\n' "$2" > "$tmp"
   if recorded_from_input "$tmp"; then got=ok; else got=no; fi
