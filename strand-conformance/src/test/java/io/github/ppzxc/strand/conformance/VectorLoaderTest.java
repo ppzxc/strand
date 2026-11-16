@@ -1034,7 +1034,7 @@ class VectorLoaderTest {
             assertThat(twin).as("sample.json의 같은 id 벡터: " + example.id()).isNotNull();
             assertThat(twin.description()).isEqualTo(example.description());
             assertThat(twin.spec()).isEqualTo(example.spec());
-            assertThat(twin.setup()).isEqualTo(example.setup());
+            assertThat(withoutHexSpaces(twin.setup())).isEqualTo(withoutHexSpaces(example.setup()));
             assertThat(twin.steps().stream()
                             .map(VectorLoaderTest::withoutHexSpaces)
                             .collect(Collectors.toList()))
@@ -1056,8 +1056,8 @@ class VectorLoaderTest {
     }
 
     /** 단계 JSON의 복사본에서 모든 깊이의 hex 값에서 공백을 지운다. */
-    private static JsonObject withoutHexSpaces(JsonObject step) {
-        JsonObject copy = step.deepCopy();
+    private static JsonObject withoutHexSpaces(JsonObject json) {
+        JsonObject copy = json.deepCopy();
         stripHexSpaces(copy);
         return copy;
     }
