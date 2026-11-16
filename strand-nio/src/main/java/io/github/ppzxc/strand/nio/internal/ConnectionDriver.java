@@ -499,15 +499,16 @@ public final class ConnectionDriver implements AutoCloseable {
     }
 
     /**
-     * 쓰기 대기열이 통로가 받아 주는 만큼만 나가고 남아 쓰기 가능을 기다리는 상태가 될 때까지 기다린다. 시험이 시간 간격을 추측하지 않고 쓰기 막힘을
+     * 쓰기 대기열이 통로가 받아 주는 만큼만 나가고 남아 쓰기 가능을 기다리는 상태(또는 그 상태가 풀린 것)가 될 때까지 기다린다. 시험이 시간 간격을 추측하지 않고 쓰기 막힘을
      * 관측하게 하는 패키지 범위 관측점이다. 그 상태는 대기열이 다 나가거나 버려지거나 입출력 오류가 나면 풀린다.
      *
+     * @param blocked 기다릴 상태. true면 막힘, false면 풀림
      * @return 제한 시간 안에 그 상태이면 true, 아니면 false
      */
-    boolean awaitWriteBlocked(long timeout, TimeUnit unit) throws InterruptedException {
+    boolean awaitWriteBlocked(boolean blocked, long timeout, TimeUnit unit) throws InterruptedException {
         long deadline = System.nanoTime() + unit.toNanos(timeout);
         synchronized (writeBlockedLock) {
-            while (!writeBlocked) {
+            while (writeBlocked != blocked) {
                 long remaining = deadline - System.nanoTime();
                 if (remaining <= 0) {
                     return false;

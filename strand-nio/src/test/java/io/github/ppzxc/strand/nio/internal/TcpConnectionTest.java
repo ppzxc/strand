@@ -196,7 +196,7 @@ class TcpConnectionTest {
 
     /** 드라이버가 쓰기 불가로 쓰기 가능을 기다리는 상태가 됐다는 신호를 기다린다. 5초 안에 오지 않으면 실패한다. */
     private static void awaitWritesBlocked(ConnectionDriver driver) throws InterruptedException {
-        assertThat(driver.awaitWriteBlocked(5, TimeUnit.SECONDS))
+        assertThat(driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS))
                 .as("쓰기가 5초 안에 소켓 버퍼에 막히지 않았다")
                 .isTrue();
     }

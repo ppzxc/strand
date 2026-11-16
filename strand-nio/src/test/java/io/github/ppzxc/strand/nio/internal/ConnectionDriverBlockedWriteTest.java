@@ -286,13 +286,13 @@ class ConnectionDriverBlockedWriteTest {
     void writeBlockedSignalArrivesWhenAMessageCannotBeWrittenToTheEnd() throws Exception {
         Side[] sides = connected();
         Side client = sides[0];
-        assertThat(client.driver.awaitWriteBlocked(50, TimeUnit.MILLISECONDS)).isFalse();
+        assertThat(client.driver.awaitWriteBlocked(false, 5, TimeUnit.SECONDS)).isTrue();
         client.passage.writeCapacity(10);
 
         client.driver.ping(new byte[8]).join();
 
         // PING 프레임은 28바이트라 10바이트만 받으면 나머지는 쓰기 가능을 기다린다.
-        assertThat(client.driver.awaitWriteBlocked(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(client.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)).isTrue();
     }
 
     @Test
@@ -302,12 +302,12 @@ class ConnectionDriverBlockedWriteTest {
         Side server = sides[1];
         client.passage.writeCapacity(10);
         client.driver.ping(new byte[8]).join();
-        assertThat(client.driver.awaitWriteBlocked(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(client.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)).isTrue();
 
         client.passage.addWriteCapacity(PLENTY);
         settle(client, server);
 
-        assertThat(client.driver.awaitWriteBlocked(50, TimeUnit.MILLISECONDS)).isFalse();
+        assertThat(client.driver.awaitWriteBlocked(false, 5, TimeUnit.SECONDS)).isTrue();
     }
 
     @Test
@@ -316,10 +316,10 @@ class ConnectionDriverBlockedWriteTest {
         Side client = sides[0];
         client.passage.writeCapacity(10);
         client.driver.ping(new byte[8]).join();
-        assertThat(client.driver.awaitWriteBlocked(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(client.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)).isTrue();
 
         client.driver.close();
 
-        assertThat(client.driver.awaitWriteBlocked(50, TimeUnit.MILLISECONDS)).isFalse();
+        assertThat(client.driver.awaitWriteBlocked(false, 5, TimeUnit.SECONDS)).isTrue();
     }
 }
