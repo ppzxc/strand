@@ -58,12 +58,12 @@ import org.jspecify.annotations.Nullable;
  * 나가고(꺼내는 순간 확인 대기가 시작된다), 상대가 계속 읽지 않으면 확인 대기 초과로 끊긴다. 새 타이머나 새 종료 원인은 없다.
  *
  * <p>상한은 협상 값에서 셈한다. (상대가 알린 {@code max_concurrent_streams} + 내가 알린 {@code max_concurrent_streams}) × 상대가 알린
- * {@code max_frame_size}에 제어 프레임을 위한 프레임 하나를 더한 값으로, 규칙을 지키며 흐름 제어 한도 안에서 주고받는 상대의 정상 범위보다 작지 않다.
+ * {@code max_frame_size}에 제어 프레임을 위한 프레임 하나를 더한 값(상대가 정하는 값이라 절대 한도 64MiB로 막는다)으로, 규칙을 지키며 흐름 제어 한도 안에서 주고받는 상대의 정상 범위보다 작지 않다(절대 한도에 걸리지 않는 설정에서).
  * 이 범위 밖의 출력(이미 취소한 요청의 프레임과 RESET, 애플리케이션이 따로 낸 PING 등)이 겹쳐 상한을 넘으면, 읽는 상대라도 대기열이 내려갈 때까지 읽기가
  * 잠시 멈춘다. 상한은 한 스텝에서 받은 입력이 만든 출력만큼 넘을 수 있다. 그 양은 한 스텝에서 받는 입력의 양({@value #MAX_RECEIVES_PER_STEP}번의
  * 읽기)으로 막히며, 바이트 스트림 통로에서는 읽기 한 번이 여러 프레임이다.
  *
- * <p><b>읽기 멈춤의 한계.</b> 읽기를 멈추면 그동안 상대의 EOF, CLOSE, ACK도 읽지 않는다. 기한이 없는 연결에서는 읽지 않는 상대가 연결을 끊게 하지 못한다.
+ * <p><b>읽기 멈춤의 한계.</b> 읽기를 멈추면 그동안 상대의 EOF, CLOSE, ACK도 읽지 않는다. 시계는 계속 가므로 멈춘 사이 확인 대기가 지날 수 있다. 기한이 없는 연결에서는 읽지 않는 상대가 연결을 끊게 하지 못한다.
  * 유휴 PING 간격이 0인 설정과 종료 중인 연결이 그렇다. 이때는 요청 기한과 애플리케이션의 {@link #close}에 맡긴다.
  */
 public final class ConnectionDriver implements AutoCloseable {
@@ -73,6 +73,18 @@ public final class ConnectionDriver implements AutoCloseable {
     private static final int FRAME_HEADER_BYTES = Endpoint.FRAME_HEADER_SIZE;
     /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
+    /** 쓰기 대기열 상한의 절대 한도. 상대가 HELLO로 알린 큰 값이 상한을 사실상 없애지 못하게 한다. */
+    static final long MAX_WRITE_QUEUE_BYTES = 64L * 1024 * 1024;
+
+    /**
+     * 쓰기 대기열 상한(바이트). 규칙을 지키는 상대와의 정상 흐름 제어 범위다. 내 요청(상대가 알린 동시 스트림 × 상대가 알린 최대 프레임)과 상대 요청에
+     * 대한 응답(내가 알린 동시 스트림 × 상대가 알린 최대 프레임), 거기에 제어 프레임 몇 개를 위한 프레임 하나를 더한다. 상대가 알린 값은 상대가 정하므로
+     * 절대 한도 {@link #MAX_WRITE_QUEUE_BYTES}로 막는다.
+     */
+    static long writeQueueLimit(long peerMaxFrameSize, long peerMaxConcurrentStreams, long ownMaxConcurrentStreams) {
+        long range = (peerMaxConcurrentStreams + ownMaxConcurrentStreams) * peerMaxFrameSize + peerMaxFrameSize;
+        return Math.min(range, MAX_WRITE_QUEUE_BYTES);
+    }
 
     private enum Role {
         CLIENT,
@@ -592,8 +604,10 @@ public final class ConnectionDriver implements AutoCloseable {
          * 정상 범위보다 작아질 수 없다.
          */
         private long writeQueueLimit() {
-            long frame = endpoint.peerMaxFrameSize();
-            return (endpoint.peerMaxConcurrentStreams() + endpoint.ownMaxConcurrentStreams()) * frame + frame;
+            return ConnectionDriver.writeQueueLimit(
+                    endpoint.peerMaxFrameSize(),
+                    endpoint.peerMaxConcurrentStreams(),
+                    endpoint.ownMaxConcurrentStreams());
         }
 
         /** 기다림의 상한. core가 알려 준 다음 기한까지만이고, 기한이 없으면 상한이 없다. */

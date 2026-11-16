@@ -378,6 +378,25 @@ class ConnectionDriverReadPauseTest {
     }
 
     @Test
+    void theLimitIsTheFlowControlRangePlusOneFrame() {
+        // (상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임 + 프레임 하나.
+        assertThat(ConnectionDriver.writeQueueLimit(65_536, 100, 100)).isEqualTo(200L * 65_536 + 65_536);
+        assertThat(ConnectionDriver.writeQueueLimit(16_384, 2, 2)).isEqualTo(5L * 16_384);
+        // 동시 스트림이 0이어도 제어 프레임을 위한 프레임 하나는 남는다.
+        assertThat(ConnectionDriver.writeQueueLimit(16_384, 0, 0)).isEqualTo(16_384);
+    }
+
+    @Test
+    void aPeerCannotRaiseTheLimitWithoutBoundByAdvertisingHugeValues() {
+        long hugeStreams = 4_294_967_295L;
+        long hugeFrame = 1_048_576L;
+        assertThat(ConnectionDriver.writeQueueLimit(hugeFrame, hugeStreams, hugeStreams))
+                .isEqualTo(ConnectionDriver.MAX_WRITE_QUEUE_BYTES);
+        assertThat(ConnectionDriver.writeQueueLimit(hugeFrame, hugeStreams, 0))
+                .isEqualTo(ConnectionDriver.MAX_WRITE_QUEUE_BYTES);
+    }
+
+    @Test
     void theTransportThreadDoesNotWakeUpEmptyWhileReadingIsPaused() {
         Side[] sides = connected(config(2), config(2), request -> {});
         Side client = sides[0];
@@ -393,11 +412,7 @@ class ConnectionDriverReadPauseTest {
         assertThat(client.driver.receivedBytes()).isLessThan((long) pings * PING_FRAME);
         // 읽을 것이 남아 있어도 읽기를 멈춘 동안은 쓰기 가능, 깨움, 기한으로만 깨어난다.
         long calls = client.passage.awaitCalls();
-        try {
-            Thread.sleep(200);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        settle(client, server);
         assertThat(client.passage.awaitCalls()).isEqualTo(calls);
     }
 }
