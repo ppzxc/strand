@@ -8,6 +8,9 @@ import org.jspecify.annotations.Nullable;
 /** 엔드포인트의 설정: 보내는 HELLO의 파라미터(규격 3.2.1절)와 확인 대기 시간. 값을 바꾼 복사본을 돌려주는 불변 객체다. */
 public final class EndpointConfig {
 
+    /** 규격이 허용하는 가장 작은 {@code max_frame_size}(규격 3.2.1절). 이 하한의 유일한 정의다. */
+    public static final long MAX_FRAME_SIZE_LOWER_LIMIT = 16_384L;
+
     private static final long MAX_U32 = 0xFFFF_FFFFL;
     /** 시각 계산(현재 + 기한)이 넘치지 않도록 막는 시간 값의 상한. */
     private static final long MAX_TIMEOUT_MS = Long.MAX_VALUE / 2;
@@ -105,12 +108,13 @@ public final class EndpointConfig {
      *
      * @param value 바이트 수
      * @return 새 설정
-     * @throws IllegalArgumentException 16384 미만이거나 1048576 초과일 때
+     * @throws IllegalArgumentException {@value #MAX_FRAME_SIZE_LOWER_LIMIT} 미만이거나 1048576 초과일 때
      */
     public EndpointConfig maxFrameSize(long value) {
         ConfigDraft draft = draft();
-        if (value < HelloParams.MAX_FRAME_SIZE_LOWER_LIMIT || value > HelloParams.MAX_FRAME_SIZE_UPPER_LIMIT) {
-            throw new IllegalArgumentException("maxFrameSize는 16384 이상 1048576 이하여야 한다: " + value);
+        if (value < MAX_FRAME_SIZE_LOWER_LIMIT || value > HelloParams.MAX_FRAME_SIZE_UPPER_LIMIT) {
+            throw new IllegalArgumentException("maxFrameSize는 " + MAX_FRAME_SIZE_LOWER_LIMIT + " 이상 "
+                    + HelloParams.MAX_FRAME_SIZE_UPPER_LIMIT + " 이하여야 한다: " + value);
         }
         draft.maxFrameSize = value;
         return new EndpointConfig(draft);
