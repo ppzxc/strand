@@ -212,7 +212,7 @@ class TcpConnectionTest {
     }
 
     /**
-     * 서로 소켓 버퍼를 넘는 요청을 동시에 많이 보내도 두 끝이 교착하지 않는다. 쓰기가 막힌 끝도 읽기를 멈추지 않아 상대의 쓰기가 풀리기 때문이다.
+     * 서로 소켓 버퍼를 넘는 요청을 동시에 많이 보내도 두 끝이 교착하지 않는다. 쓰기가 막힌 끝도 쓰기 대기열이 읽기 멈춤 상한 아래인 동안은 읽기를 멈추지 않아 상대의 쓰기가 풀리기 때문이다. 요청 수와 크기가 흐름 제어 범위 안이라는 것에 기댄 시험이다.
      */
     @Test
     void bothEndsSendingLargeRequestsAtOnceDoNotDeadlock() throws Exception {

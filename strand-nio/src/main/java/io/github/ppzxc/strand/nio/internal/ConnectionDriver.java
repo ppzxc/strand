@@ -55,8 +55,28 @@ import org.jspecify.annotations.Nullable;
  * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김, CLOSED 뒤 마무리 상한) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버린다. 즉시 끊기는 통로를
  * 먼저 닫으므로 더 쓰지 않고, 그 밖의 경우는 마치기 전에 통로가 받아 주는 만큼 한 번 쓴다.
  *
- * <p><b>알려진 한계.</b> 쓰기 대기열의 크기에는 아직 상한이 없다. 상대가 읽지 않으면서 PING 같은 응답이 필요한 프레임을 계속 보내면 대기열이 늘 수
- * 있다. 이 경우를 막는 읽기 멈춤은 아직 없다.
+ * <p><b>쓰기 대기열 상한과 읽기 멈춤.</b> 상대가 읽지 않으면서 PING이나 요청을 계속 보내면(ACK PING, {@code RESET(REFUSED)}, 응답한 뒤 다시 열리는
+ * 상대 요청의 응답) 쓰기 대기열이 끝없이 커질 수 있다. 대기열의 남은 바이트가 상한을 넘으면 드라이버는 읽기를 멈추고, 시계 진행, 명령 처리, 쓰기는
+ * 계속한다. 읽기를 멈춘 동안에는 쓰기 가능, 깨움, 기한으로만 깨어난다. 대기열이 상한 이하로 내려가면 다시 읽는다. 받는 것이 없으니 core의 유휴 PING이
+ * 나가고(꺼내는 순간 확인 대기가 시작된다), 상대가 계속 읽지 않으면 확인 대기 초과로 끊긴다. 새 타이머나 새 종료 원인은 없다.
+ *
+ * <p><b>상한.</b> 협상 값에서 셈한다. (상대가 알린 {@code max_concurrent_streams} + 내가 알린 {@code max_concurrent_streams}) × 상대가 알린
+ * {@code max_frame_size}에 제어 프레임을 위한 프레임 하나를 더한 값이다. 절대 한도에 걸리지 않는 설정에서는 규칙을 지키며 흐름 제어 한도 안에서 주고받는
+ * 상대의 정상 범위보다 작지 않다.
+ *
+ * <p><b>절대 한도.</b> 위 값은 상대가 알린 값에 달려 있어 상대가 크게 알리면 상한이 사실상 없어진다. 그래서 절대 한도로 막는다. 기본은 64MiB이고
+ * {@link Builder#maxWriteQueueBytes}로 바꾼다. 절대 한도가 정상 범위에 프레임 하나를 더한 값보다 작으면 그 범위를 꽉 채워 주고받는 두 끝도 읽기 멈춤에 걸릴 수 있으므로, 그런
+ * 설정에서는 한도를 올린다. 절대 한도가 작아도 상한은 상대가 알린 최대 프레임 하나보다 작아지지 않는다.
+ *
+ * <p><b>범위 밖 출력과 넘침.</b> 정상 범위 밖의 출력(이미 취소한 요청의 프레임과 RESET, 애플리케이션이 따로 낸 PING 등)이 겹쳐 상한을 넘으면, 읽는
+ * 상대라도 대기열이 내려갈 때까지 읽기가 멈춘다. 두 끝이 동시에 그러면 서로 기다리므로, 유휴 PING 확인 대기로 끊기거나 기한이 없으면 풀리지 않는다. 읽기
+ * 멈춤 판단은 스텝이 시작될 때 한 번 하므로, 상한은 한 스텝에서 받은 입력이 만든 출력만큼 넘을 수 있다. 그 양은 한 스텝에서 받는 입력의 양, 곧 통로의 읽기 한
+ * 번의 크기 × {@value #MAX_RECEIVES_PER_STEP}번에 비례해 막힌다(입력 프레임 하나가 만드는 출력이 입력보다 조금 클 수 있다). 바이트 스트림 통로에서는 읽기 한 번이 여러 프레임이다.
+ *
+ * <p><b>읽기 멈춤의 한계.</b> 읽기를 멈추면 그동안 상대의 EOF, CLOSE, ACK도 읽지 않는다. 시계는 계속 가므로 멈춘 사이 확인 대기가 지날 수 있고, 읽기는 하지만 대기열을 비우는 데 확인 대기보다 오래 걸리는 느린 상대도 끊길 수 있다. 기한이
+ * 없는 연결에서는 읽지 않는 상대가 연결을 끊게 하지 못한다. 유휴 PING 간격이 0인 설정이 그렇다. 이때는 요청 기한과 애플리케이션의 {@link #close}에
+ * 맡긴다. 종료 중인 연결도 유휴 PING 간격이 0이면 같고, CLOSED 뒤에는 마무리 시간 상한이 끝낸다. 읽기를 멈춘 동안에도 통로가 닫혔거나 쓰기가 실패하면
+ * (쓰기 실패는 쓰는 단계에서 드러난다) 연결은 끊긴 것으로 처리된다.
  */
 public final class ConnectionDriver implements AutoCloseable {
 
@@ -65,6 +85,22 @@ public final class ConnectionDriver implements AutoCloseable {
     private static final int FRAME_HEADER_BYTES = Endpoint.FRAME_HEADER_SIZE;
     /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
+    /** 규격이 허용하는 가장 작은 {@code max_frame_size}(규격 3.2.1절). */
+    private static final long MIN_FRAME_SIZE = 16_384L;
+    /** 쓰기 대기열 상한의 기본 절대 한도. 상대가 HELLO로 알린 큰 값이 상한을 사실상 없애지 못하게 한다. */
+    static final long DEFAULT_MAX_WRITE_QUEUE_BYTES = 64L * 1024 * 1024;
+
+    /**
+     * 쓰기 대기열 상한(바이트). 규칙을 지키는 상대와의 정상 흐름 제어 범위다. 내 요청(상대가 알린 동시 스트림 × 상대가 알린 최대 프레임)과 상대 요청에
+     * 대한 응답(내가 알린 동시 스트림 × 상대가 알린 최대 프레임), 거기에 제어 프레임 몇 개를 위한 프레임 하나를 더한다. 상대가 알린 값은 상대가 정하므로
+     * 절대 한도(기본 {@link #DEFAULT_MAX_WRITE_QUEUE_BYTES}, {@link Builder#maxWriteQueueBytes}로 바꾼다)로 막는다.
+     */
+    static long writeQueueLimit(
+            long peerMaxFrameSize, long peerMaxConcurrentStreams, long ownMaxConcurrentStreams, long absoluteLimit) {
+        long range = (peerMaxConcurrentStreams + ownMaxConcurrentStreams) * peerMaxFrameSize + peerMaxFrameSize;
+        return Math.max(peerMaxFrameSize, Math.min(range, absoluteLimit));
+    }
+
     /** CLOSED 뒤 마무리 시간 상한의 기본값(밀리초). */
     private static final long DEFAULT_CLOSED_FINISH_LIMIT_MS = 5000;
 
@@ -82,6 +118,7 @@ public final class ConnectionDriver implements AutoCloseable {
         private @Nullable RequestHandler handler;
         private @Nullable ConnectionListener listener;
         private LongSupplier clock = () -> System.nanoTime() / 1_000_000L;
+        private long maxWriteQueueBytes = DEFAULT_MAX_WRITE_QUEUE_BYTES;
         private long closedFinishLimitMs = DEFAULT_CLOSED_FINISH_LIMIT_MS;
 
         private Builder(Role role, EndpointConfig config, Passage passage) {
@@ -140,6 +177,23 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         /**
+         * 쓰기 대기열 상한의 절대 한도(바이트)를 정한다. 상한은 협상 값에서 셈하지만 상대가 알린 큰 값이 상한을 없애지 못하게 이 한도로 막는다. 정상 흐름
+         * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임에 프레임 하나를 더한 값이 기본값 {@value #DEFAULT_MAX_WRITE_QUEUE_BYTES}을
+         * 넘는 설정에서는, 그 범위를 꽉 채워 주고받는 두 끝이 읽기 멈춤에 걸리지 않도록 이 값을 그 값 이상으로 올린다. 정하지 않으면 기본값이다.
+         *
+         * @param bytes 절대 한도. 규격이 허용하는 가장 작은 {@code max_frame_size}(16384) 이상이어야 한다. 상한은 이 값이 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다
+         * @return 이 빌더
+         * @throws IllegalArgumentException {@code bytes}가 16384보다 작을 때
+         */
+        public Builder maxWriteQueueBytes(long bytes) {
+            if (bytes < MIN_FRAME_SIZE) {
+                throw new IllegalArgumentException("maxWriteQueueBytes는 " + MIN_FRAME_SIZE + " 이상이어야 한다: " + bytes);
+            }
+            this.maxWriteQueueBytes = bytes;
+            return this;
+        }
+
+        /**
          * 연결이 CLOSE로 끝난 뒤(core가 CLOSED를 낸 뒤)의 마무리(남은 쓰기 비우기, 상대가 끊을 때까지 읽기)에 거는 시간 상한을 정한다. 상한은 core가
          * CLOSED를 낸 스텝에서 그 이벤트를 내보낸 시점(주입 시계)부터 세고, 지나면 통로를 닫고 전송 스레드를 끝낸다. 이미 종료 알림이 나갔으므로 새 알림을 내지 않는다. 정하지
          * 않으면 5초다. core의 {@code EndpointConfig}가 아니라 전송 모듈의 설정이다.
@@ -166,7 +220,15 @@ public final class ConnectionDriver implements AutoCloseable {
                 throw new IllegalStateException("리스너를 받으려면 실행기가 있어야 한다");
             }
             ConnectionDriver driver = new ConnectionDriver(
-                    role, config, passage, handlerExecutor, handler, listener, clock, closedFinishLimitMs);
+                    role,
+                    config,
+                    passage,
+                    handlerExecutor,
+                    handler,
+                    listener,
+                    clock,
+                    maxWriteQueueBytes,
+                    closedFinishLimitMs);
             driver.thread.start();
             return driver;
         }
@@ -206,6 +268,7 @@ public final class ConnectionDriver implements AutoCloseable {
     private final @Nullable RequestHandler handler;
     private final @Nullable ConnectionListener listener;
     private final LongSupplier clock;
+    private final long maxWriteQueueBytes;
     private final long closedFinishLimitMs;
 
     private final Queue<Command> commands = new ConcurrentLinkedQueue<>();
@@ -225,6 +288,7 @@ public final class ConnectionDriver implements AutoCloseable {
             @Nullable RequestHandler handler,
             @Nullable ConnectionListener listener,
             LongSupplier clock,
+            long maxWriteQueueBytes,
             long closedFinishLimitMs) {
         this.role = role;
         this.config = config;
@@ -233,6 +297,7 @@ public final class ConnectionDriver implements AutoCloseable {
         this.handler = handler;
         this.listener = listener;
         this.clock = clock;
+        this.maxWriteQueueBytes = maxWriteQueueBytes;
         this.closedFinishLimitMs = closedFinishLimitMs;
         this.thread = new Thread(this::run, "strand-nio-transport");
         this.thread.setDaemon(true);
@@ -549,6 +614,8 @@ public final class ConnectionDriver implements AutoCloseable {
         // core 쓰기 대기열에서 꺼냈지만 아직 다 쓰지 못한 메시지. 맨 앞 메시지는 writeOffset바이트까지 통로가 받았다.
         private final ArrayDeque<OutboundMessage> writeQueue = new ArrayDeque<>();
         private int writeOffset;
+        // writeQueue에 남은 바이트 수(맨 앞 메시지는 이미 쓴 만큼 뺀다). 읽기 멈춤 판단에 쓴다.
+        private long queuedBytes;
         // 연결을 끊게 한 첫 입출력 예외. 종료 알림에 싣는다.
         private @Nullable IOException ioFailure;
         // 엔드포인트의 가상 시계는 0에서 시작한다. startedAt은 그 0에 해당하는 주입 시계 값이고, advancedTo까지 advance했다.
@@ -583,7 +650,8 @@ public final class ConnectionDriver implements AutoCloseable {
          * 읽히므로 그 사이 시계가 기한을 넘으면 오판할 수 있다. 상대가 계속 보내도 시계와 명령 처리가 굶지 않게 하려는 설계상 절충이다.
          */
         private void receiveAvailable() throws IOException {
-            Inbound inbound = passage.await(waitLimit(), true, !writeQueue.isEmpty());
+            // 쓰기 대기열이 상한을 넘으면 읽기를 멈춘다. 이때는 쓰기 가능, 깨움, 기한으로만 깨어나므로 읽을 것이 남아 있어도 빈 깨어남이 없다.
+            Inbound inbound = passage.await(waitLimit(), !readPaused(), !writeQueue.isEmpty());
             int received = 0;
             while (inbound.kind() != Inbound.Kind.NONE) {
                 receive(inbound);
@@ -593,6 +661,18 @@ public final class ConnectionDriver implements AutoCloseable {
                 }
                 inbound = passage.await(0);
             }
+        }
+
+        /** 쓰기 대기열이 상한을 넘어 읽기를 멈춰야 하는가. 상한 아래로 내려가면 다시 읽는다. */
+        private boolean readPaused() {
+            // 상한이 늘 프레임 하나 이상이라 빈 대기열은 어차피 상한을 넘지 않는다. 그 불변식이 깨져도 멈춘 채 쓰기 가능을 기다리다 아무것도 깨우지 못하는 일이 없게 하는 방어다.
+            return !writeQueue.isEmpty()
+                    && queuedBytes
+                            > writeQueueLimit(
+                                    endpoint.peerMaxFrameSize(),
+                                    endpoint.peerMaxConcurrentStreams(),
+                                    endpoint.ownMaxConcurrentStreams(),
+                                    maxWriteQueueBytes);
         }
 
         /**
@@ -746,7 +826,10 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /** core 쓰기 대기열에서 메시지를 모두 꺼내 드라이버의 쓰기 대기열 뒤에 붙인다. 꺼낸 시점이 core가 보는 "전송 계층에 넘김"이다. */
         private void takeOutput() {
-            writeQueue.addAll(endpoint.drainMessages());
+            for (OutboundMessage message : endpoint.drainMessages()) {
+                writeQueue.add(message);
+                queuedBytes += message.length();
+            }
         }
 
         /**
@@ -762,6 +845,7 @@ public final class ConnectionDriver implements AutoCloseable {
                     // 내용이 없는 메시지(WebSocket 닫기)는 호출 한 번으로 끝난다.
                     int accepted = passage.write(head, writeOffset);
                     writeOffset += accepted;
+                    queuedBytes -= accepted;
                     if (writeOffset < length) {
                         return true;
                     }
@@ -780,6 +864,7 @@ public final class ConnectionDriver implements AutoCloseable {
                 recordTransportFailure(e);
                 writeQueue.clear();
                 writeOffset = 0;
+                queuedBytes = 0;
                 return false;
             }
         }

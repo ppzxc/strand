@@ -326,6 +326,34 @@ public final class Endpoint {
     }
 
     /**
+     * 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면(상대 HELLO를 받기 전 포함) 기본값이다. 이 값은 엔드포인트가 보낼 프레임의 크기 검사에 쓰는 값과 같다. 전송 계층이 쓰기 대기열의 정상 흐름 제어 범위를 셈할
+     * 때 쓴다.
+     *
+     * @return 상대가 알린 최대 프레임 크기(바이트)
+     */
+    public long peerMaxFrameSize() {
+        return peerMaxFrameSize;
+    }
+
+    /**
+     * 상대가 HELLO로 알린 {@code max_concurrent_streams}. 내가 낼 수 있는 동시 요청의 한도다. 알리기 전에는 기본값이다(규격 3.2.1절).
+     *
+     * @return 상대가 알린 동시 스트림 한도
+     */
+    public long peerMaxConcurrentStreams() {
+        return ledger.peerMaxConcurrentStreams();
+    }
+
+    /**
+     * 내가 HELLO로 알린 {@code max_concurrent_streams}. 상대가 동시에 열 수 있는 요청의 한도다.
+     *
+     * @return 내가 알린 동시 스트림 한도
+     */
+    public long ownMaxConcurrentStreams() {
+        return config.maxConcurrentStreams();
+    }
+
+    /**
      * 시계를 다음으로 진행해야 하는 가장 이른 가상 시각(마지막 {@link #advance(long)}까지 흐른 시각부터 센 절대 시각)을 돌려준다. 대상은 요청 기한,
      * 확인 대기(HELLO, AUTH, PING), 서버의 AUTH 대기, 유휴 PING이다. 이 시각까지 {@code advance}하면 그 기한이 처리된다. 기한은 정각이 지나야
      * 처리되므로 기한 다음 밀리초를 돌려준다. 아무 기한도 없거나 연결이 끝났으면 비어 있다.
