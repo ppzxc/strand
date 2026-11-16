@@ -52,8 +52,16 @@ import org.jspecify.annotations.Nullable;
  * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버린다. 즉시 끊기는 통로를
  * 먼저 닫으므로 더 쓰지 않고, 그 밖의 경우는 마치기 전에 통로가 받아 주는 만큼 한 번 쓴다.
  *
- * <p><b>알려진 한계.</b> 쓰기 대기열의 크기에는 아직 상한이 없다. 상대가 읽지 않으면서 PING 같은 응답이 필요한 프레임을 계속 보내면 대기열이 늘 수
- * 있다. 이 경우를 막는 읽기 멈춤은 아직 없다.
+ * <p><b>쓰기 대기열 상한과 읽기 멈춤.</b> 상대가 읽지 않으면서 PING이나 요청을 계속 보내면(ACK PING, {@code RESET(REFUSED)}, 응답한 뒤 다시 열리는
+ * 상대 요청의 응답) 쓰기 대기열이 끝없이 커질 수 있다. 대기열의 남은 바이트가 상한을 넘으면 드라이버는 읽기를 멈추고, 시계 진행, 명령 처리, 쓰기는
+ * 계속한다. 읽기를 멈춘 동안에는 쓰기 가능, 깨움, 기한으로만 깨어난다. 대기열이 상한 이하로 내려가면 다시 읽는다. 받는 것이 없으니 core의 유휴 PING이
+ * 나가고(꺼내는 순간 확인 대기가 시작된다), 상대가 계속 읽지 않으면 확인 대기 초과로 끊긴다. 새 타이머나 새 종료 원인은 없다. 상한은 협상 값에서
+ * 셈한다. (상대가 알린 {@code max_concurrent_streams} + 내가 알린 {@code max_concurrent_streams}) × 상대가 알린 {@code max_frame_size}에
+ * 제어 프레임을 위한 프레임 하나를 더한 값이라, 규칙을 지키는 상대와의 정상 흐름 제어 범위보다 작지 않다. 한 스텝에서 받은 입력이 만든 출력(최대
+ * {@value #MAX_RECEIVES_PER_STEP}개 입력의 응답)만큼은 상한을 넘을 수 있다.
+ *
+ * <p><b>유휴 PING을 끈 설정의 한계.</b> 유휴 PING 간격이 0이면 읽기 멈춤만으로는 연결이 끊기지 않는다. 읽지 않는 상대는 요청 기한과 애플리케이션의
+ * {@link #close}에 맡긴다.
  */
 public final class ConnectionDriver implements AutoCloseable {
 
@@ -521,6 +529,8 @@ public final class ConnectionDriver implements AutoCloseable {
         // core 쓰기 대기열에서 꺼냈지만 아직 다 쓰지 못한 메시지. 맨 앞 메시지는 writeOffset바이트까지 통로가 받았다.
         private final ArrayDeque<OutboundMessage> writeQueue = new ArrayDeque<>();
         private int writeOffset;
+        // writeQueue에 남은 바이트 수(맨 앞 메시지는 이미 쓴 만큼 뺀다). 읽기 멈춤 판단에 쓴다.
+        private long queuedBytes;
         // 연결을 끊게 한 첫 입출력 예외. 종료 알림에 싣는다.
         private @Nullable IOException ioFailure;
         // 엔드포인트의 가상 시계는 0에서 시작한다. startedAt은 그 0에 해당하는 주입 시계 값이고, advancedTo까지 advance했다.
@@ -555,7 +565,8 @@ public final class ConnectionDriver implements AutoCloseable {
          * 읽히므로 그 사이 시계가 기한을 넘으면 오판할 수 있다. 상대가 계속 보내도 시계와 명령 처리가 굶지 않게 하려는 설계상 절충이다.
          */
         private void receiveAvailable() throws IOException {
-            Inbound inbound = passage.await(waitLimit(), true, !writeQueue.isEmpty());
+            // 쓰기 대기열이 상한을 넘으면 읽기를 멈춘다. 이때는 쓰기 가능, 깨움, 기한으로만 깨어나므로 읽을 것이 남아 있어도 빈 깨어남이 없다.
+            Inbound inbound = passage.await(waitLimit(), !readPaused(), !writeQueue.isEmpty());
             int received = 0;
             while (inbound.kind() != Inbound.Kind.NONE) {
                 receive(inbound);
@@ -565,6 +576,21 @@ public final class ConnectionDriver implements AutoCloseable {
                 }
                 inbound = passage.await(0);
             }
+        }
+
+        /** 쓰기 대기열이 상한을 넘어 읽기를 멈춰야 하는가. 상한 아래로 내려가면 다시 읽는다. */
+        private boolean readPaused() {
+            return queuedBytes > writeQueueLimit();
+        }
+
+        /**
+         * 쓰기 대기열 상한(바이트). 규칙을 지키는 상대와의 정상 흐름 제어 범위다. 내 요청(상대가 알린 동시 스트림 × 상대가 알린 최대 프레임)과 상대 요청에
+         * 대한 응답(내가 알린 동시 스트림 × 상대가 알린 최대 프레임), 거기에 제어 프레임 몇 개를 위한 프레임 하나를 더한다. 협상 값에서 셈하므로
+         * 정상 범위보다 작아질 수 없다.
+         */
+        private long writeQueueLimit() {
+            long frame = endpoint.peerMaxFrameSize();
+            return (endpoint.peerMaxConcurrentStreams() + endpoint.ownMaxConcurrentStreams()) * frame + frame;
         }
 
         /** 기다림의 상한. core가 알려 준 다음 기한까지만이고, 기한이 없으면 상한이 없다. */
@@ -698,7 +724,10 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /** core 쓰기 대기열에서 메시지를 모두 꺼내 드라이버의 쓰기 대기열 뒤에 붙인다. 꺼낸 시점이 core가 보는 "전송 계층에 넘김"이다. */
         private void takeOutput() {
-            writeQueue.addAll(endpoint.drainMessages());
+            for (OutboundMessage message : endpoint.drainMessages()) {
+                writeQueue.add(message);
+                queuedBytes += message.length();
+            }
         }
 
         /**
@@ -714,6 +743,7 @@ public final class ConnectionDriver implements AutoCloseable {
                     // 내용이 없는 메시지(WebSocket 닫기)는 호출 한 번으로 끝난다.
                     int accepted = passage.write(head, writeOffset);
                     writeOffset += accepted;
+                    queuedBytes -= accepted;
                     if (writeOffset < length) {
                         return true;
                     }
@@ -732,6 +762,7 @@ public final class ConnectionDriver implements AutoCloseable {
                 recordTransportFailure(e);
                 writeQueue.clear();
                 writeOffset = 0;
+                queuedBytes = 0;
                 return false;
             }
         }
