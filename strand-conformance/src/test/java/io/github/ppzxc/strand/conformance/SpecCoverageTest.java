@@ -138,7 +138,7 @@ class SpecCoverageTest {
                 inSection++;
             }
         }
-        assertThat(inSection).as("5.1절 표의 검사 순서·반응 앵커").isGreaterThanOrEqualTo(6);
+        assertThat(inSection).as("5.1절 표의 검사 순서·반응 앵커(행 1~6, 행 5는 반응 4개와 순서)").isEqualTo(12);
     }
 
     private static void assertRequirement(
