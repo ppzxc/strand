@@ -1,0 +1,626 @@
+{
+  "format": 2,
+  "vectors": [
+    {
+      "id": "reset-payload-empty-closes",
+      "description": "RESET의 payload가 정확히 4바이트가 아니면(0바이트) 연결 오류다. 대기 중이 아닌 스트림을 가리켜도 조용히 버리지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "4.4",
+        "5.1"
+      ],
+      "requirements": [
+        "req-reset-payload-length-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000040000000000000000000100000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-payload-three-bytes-closes",
+      "description": "RESET의 payload가 정확히 4바이트가 아니면(3바이트) 연결 오류다. 대기 중이 아닌 스트림을 가리켜도 조용히 버리지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "4.4",
+        "5.1"
+      ],
+      "requirements": [
+        "req-reset-payload-length-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001300040000000000000000000100000000010203",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-payload-five-bytes-closes",
+      "description": "RESET의 payload가 정확히 4바이트가 아니면(5바이트) 연결 오류다. 대기 중이 아닌 스트림을 가리켜도 조용히 버리지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "4.4",
+        "5.1"
+      ],
+      "requirements": [
+        "req-reset-payload-length-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000015000400000000000000000001000000000102030405",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ping-nonzero-stream-id-closes",
+      "description": "PING의 stream_id가 0이 아니면 연결 오류다. ACK 여부와 관계없이 PING에 답하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "2.2.5",
+        "5.1"
+      ],
+      "requirements": [
+        "req-stream-control-id-nonzero-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000018000200000000000000000001000000000102030405060708",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ack-ping-nonzero-stream-id-closes",
+      "description": "PING의 stream_id가 0이 아니면 연결 오류다. ACK 여부와 관계없이 PING에 답하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "2.2.5",
+        "5.1"
+      ],
+      "requirements": [
+        "req-stream-control-id-nonzero-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000018000201000000000000000001000000000102030405060708",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ping-length-fifteen-closes",
+      "description": "연결을 수립한 뒤 받은 평상시 프레임의 length가 최솟값 16보다 작으면(15) 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "2.2.1",
+        "5.1"
+      ],
+      "requirements": [
+        "req-frame-length-range-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000f00020000000000000000000000000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ping-length-zero-closes",
+      "description": "연결을 수립한 뒤 받은 평상시 프레임의 length가 최솟값 16보다 작으면(0) 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "2.2.1",
+        "5.1"
+      ],
+      "requirements": [
+        "req-frame-length-range-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000000020000000000000000000000000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "request-length-fifteen-closes",
+      "description": "연결을 수립한 뒤 받은 평상시 프레임의 length가 최솟값 16보다 작으면(15) 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "2.2.1",
+        "5.1"
+      ],
+      "requirements": [
+        "req-frame-length-range-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000f01010000000000000000000100000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ping-undefined-flag-bits-are-ignored",
+      "description": "ACK가 없는 PING에 정의되지 않은 flags 비트(0x82)가 켜져 있어도 오류가 아니다. 그 비트는 무시하고 ACK PING으로 답한다",
+      "spec": [
+        "2.2.3",
+        "3.4"
+      ],
+      "requirements": [
+        "req-flags-undefined-ignore-recv"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "00000018000282000000000000000000000000000102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "flags": [
+                "ACK"
+              ],
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "ack-ping-undefined-flag-bits-are-ignored",
+      "description": "기다리던 ACK PING에 정의되지 않은 flags 비트가 함께 켜져 있어도(0xFF) ACK로 받아들인다. 확인 대기가 취소되어 시계가 더 지나도 CLOSE를 보내지 않는다",
+      "spec": [
+        "2.2.3",
+        "3.3",
+        "3.4"
+      ],
+      "requirements": [
+        "req-flags-undefined-ignore-recv"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true,
+        "config": {
+          "ack_timeout_ms": 1000
+        }
+      },
+      "steps": [
+        {
+          "kind": "ping",
+          "payload": "0102030405060708",
+          "send": [
+            {
+              "type": "PING",
+              "payload": "0102030405060708"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 999,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000180002ff000000000000000000000000000102030405060708",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 5000,
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "ack-hello-undefined-flag-bits-are-ignored",
+      "description": "상대의 ACK HELLO에 정의되지 않은 flags 비트가 함께 켜져 있어도(0x03) ACK로 받아들인다. 확인 대기가 취소되어 시계가 더 지나도 CLOSE를 보내지 않는다",
+      "spec": [
+        "2.2.3",
+        "3.2.2",
+        "3.3"
+      ],
+      "requirements": [
+        "req-flags-undefined-ignore-recv"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false,
+        "config": {
+          "ack_timeout_ms": 1000
+        }
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "c0de535452300000",
+          "send": [
+            {
+              "type": "HELLO"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000010000000000000000000000000000",
+          "send": [
+            {
+              "type": "HELLO",
+              "flags": [
+                "ACK"
+              ]
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 999,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "00000010000103000000000000000000000000000000001a0005000000000000000000000000000009414e4f4e594d4f5553",
+          "send": [
+            {
+              "type": "AUTH",
+              "flags": [
+                "ACK"
+              ]
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "advance",
+          "ms": 10000,
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "auth-undefined-flag-bits-are-ignored",
+      "description": "서버가 받은 AUTH에 정의되지 않은 flags 비트(0x02)가 켜져 있어도 오류가 아니다. 그 비트는 무시하고 AUTH(ACK)로 답한다",
+      "spec": [
+        "2.2.3",
+        "3.3.1"
+      ],
+      "requirements": [
+        "req-flags-undefined-ignore-recv"
+      ],
+      "setup": {
+        "role": "server",
+        "established": false
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "c0de535452300000",
+          "send": [
+            {
+              "type": "HELLO"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000010000000000000000000000000000",
+          "send": [
+            {
+              "type": "HELLO",
+              "flags": [
+                "ACK"
+              ]
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000010100000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001a0005020000000000000000000000000009414e4f4e594d4f5553",
+          "send": [
+            {
+              "type": "AUTH",
+              "flags": [
+                "ACK"
+              ]
+            }
+          ],
+          "events": []
+        }
+      ]
+    },
+    {
+      "id": "own-close-ends-queued-request-without-stream-id",
+      "description": "AUTH 관문이 열리기 전이라 번호를 받지 못하고 미뤄진 요청은 내가 CLOSE를 보내면 그 즉시 stream_id 없는 UNAVAILABLE(처리 안 됨)로 끝난다. 관문이 열려도 그 요청의 프레임은 나가지 않는다",
+      "spec": [
+        "3.5",
+        "4.4"
+      ],
+      "requirements": [
+        "req-close-queued-requests-unavailable-send"
+      ],
+      "setup": {
+        "role": "client",
+        "established": false
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000010000000000000000000000000000",
+          "send": [
+            {
+              "type": "PREFACE"
+            },
+            {
+              "type": "HELLO"
+            },
+            {
+              "type": "HELLO",
+              "flags": [
+                "ACK"
+              ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000010100000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "close",
+          "error_code": "NO_ERROR",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "NO_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "received-close-ends-queued-request-without-stream-id",
+      "description": "AUTH 관문이 열리기 전이라 번호를 받지 못하고 미뤄진 요청은 상대의 CLOSE를 받으면 그 즉시 stream_id 없는 UNAVAILABLE(처리 안 됨)로 끝난다",
+      "spec": [
+        "3.5",
+        "4.4"
+      ],
+      "requirements": [
+        "req-close-queued-requests-unavailable-recv"
+      ],
+      "setup": {
+        "role": "client",
+        "established": false
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000010000000000000000000000000000",
+          "send": [
+            {
+              "type": "PREFACE"
+            },
+            {
+              "type": "HELLO"
+            },
+            {
+              "type": "HELLO",
+              "flags": [
+                "ACK"
+              ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001000010100000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001c00030000000000000000000000000000000000000000000000000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
