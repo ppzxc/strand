@@ -32,6 +32,10 @@ final class FrameKind {
             put(name, value);
             return this;
         }
+
+        Fields withIf(boolean condition, String name, String value) {
+            return condition ? with(name, value) : this;
+        }
     }
 
     /** 디코딩한 프레임 하나. */
@@ -40,6 +44,9 @@ final class FrameKind {
         final int flags;
         final int status;
         final int reserved;
+        /** 기대 항목이 reason을 적었는가. 아니면 reason을 그리지 않아 비교하지 않는다. */
+        boolean withReason;
+
         final long streamId;
         final int extensions;
         final byte[] payload;
@@ -205,7 +212,8 @@ final class FrameKind {
                     : wire.head()
                             .with("error_code", Protocol.nameOfError((int) Bytes.readUnsignedInt(wire.payload, 0)))
                             .with("last_stream_id", Long.toUnsignedString(Bytes.readLong(wire.payload, 4)))
-                            .with(
+                            .withIf(
+                                    wire.withReason,
                                     "reason",
                                     Bytes.toHex(Arrays.copyOfRange(
                                             wire.payload, Protocol.CLOSE_PAYLOAD_SIZE, wire.payload.length))));
@@ -416,6 +424,15 @@ final class FrameKind {
      * 이 쪽 역할로, 애플리케이션 프레임의 status 비교 여부를 정한다.
      */
     static List<String> describe(byte[] output, boolean startsWithPreface, boolean client) {
+        return describe(output, startsWithPreface, client, index -> false, 0);
+    }
+
+    /**
+     * 같은 일을 하되, {@code reasonListed}가 참인 항목 번호의 CLOSE는 reason도 그린다. 항목 번호는 {@code firstIndex}에 이 호출이
+     * 지금까지 낸 항목 수를 더한 값으로, 한 단계 {@code send}의 순서와 같다.
+     */
+    static List<String> describe(
+            byte[] output, boolean startsWithPreface, boolean client, IntPredicate reasonListed, int firstIndex) {
         List<String> result = new ArrayList<>();
         byte[] rest = output;
         byte[] preface = PREFACE_BYTES;
@@ -426,7 +443,9 @@ final class FrameKind {
             rest = Arrays.copyOfRange(rest, preface.length, rest.length);
         }
         for (byte[] frame : split(rest)) {
-            result.add(describeFrame(new Wire(frame), client));
+            Wire wire = new Wire(frame);
+            wire.withReason = reasonListed.test(firstIndex + result.size());
+            result.add(describeFrame(wire, client));
         }
         return result;
     }
@@ -470,18 +489,13 @@ final class FrameKind {
     }
 
     /**
-     * 벡터가 {@code reason}을 적지 않은 CLOSE 항목은 실제 표기에서 reason을 뺀다. 적은 항목은 바이트까지 비교한다. 규격은 AUTH 거부와
-     * 폐기에서만 reason을 비우라 하고 다른 CLOSE에는 설명을 허용하므로 쓰지 않은 reason은 기본값과 비교하지 않는다(벡터 형식 6.1절).
+     * 벡터가 {@code reason}을 적은 CLOSE 항목의 번호. 적은 항목만 바이트까지 비교하고, 적지 않은 항목의 reason은 비교하지 않는다. 규격은
+     * AUTH 거부와 폐기에서만 reason을 비우라 하고 다른 CLOSE에는 설명을 허용한다(벡터 형식 6.1절).
      */
-    static List<String> withoutUnlistedReasons(List<String> actual, JsonArray expectedSend) {
-        List<String> result = new ArrayList<>(actual);
-        for (int i = 0; i < result.size() && i < expectedSend.size(); i++) {
-            JsonObject expected = expectedSend.get(i).getAsJsonObject();
-            if ("CLOSE".equals(VectorSchema.frameType(expected)) && !expected.has("reason")) {
-                result.set(i, result.get(i).replaceFirst(" reason=[0-9a-f]*(?= |$)", ""));
-            }
-        }
-        return result;
+    static IntPredicate reasonListed(JsonArray expectedSend) {
+        return index -> index < expectedSend.size()
+                && "CLOSE".equals(VectorSchema.frameType(expectedSend.get(index).getAsJsonObject()))
+                && expectedSend.get(index).getAsJsonObject().has("reason");
     }
 
     private static List<byte[]> split(byte[] output) {

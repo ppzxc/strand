@@ -397,8 +397,11 @@ class VectorRunnerTest {
                 "0000000000000000",
                 "0000",
                 CLOSE_PAYLOAD_NO_ERROR + reasonHex);
-        return FrameKind.withoutUnlistedReasons(
-                sentOnce(true, hex), JsonParser.parseString(expectedSend).getAsJsonArray());
+        VectorRunner runner = new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()));
+        return runner.describeMessages(
+                Arrays.asList(binaryMessage(Bytes.fromHex(hex))),
+                false,
+                FrameKind.reasonListed(JsonParser.parseString(expectedSend).getAsJsonArray()));
     }
 
     private static String expectedClose(String reasonField) {
@@ -433,5 +436,25 @@ class VectorRunnerTest {
         String empty = ",\"reason\":\"\"";
         assertThat(closeWithReason("", expectedClose(empty))).isEqualTo(expectedCloseRendered(empty));
         assertThat(closeWithReason("616263", expectedClose(empty))).isNotEqualTo(expectedCloseRendered(empty));
+    }
+
+    @Test
+    void theListedReasonFollowsItsEntryEvenAfterOtherFramesAndMessages() throws ReflectiveOperationException {
+        String ping = frameHex("00000018", "0002", "00", "0000000000000000", "0000", "0102030405060708");
+        String close =
+                frameHex("0000001f", "0003", "00", "0000000000000000", "0000", CLOSE_PAYLOAD_NO_ERROR + "616263");
+        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        List<OutboundMessage> messages =
+                Arrays.asList(binaryMessage(Bytes.fromHex(ping)), binaryMessage(Bytes.fromHex(close)));
+        String expected = "[" + PING_EXPECTED + ","
+                + "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"abc\"}]";
+
+        List<String> actual = runner.describeMessages(
+                messages,
+                false,
+                FrameKind.reasonListed(JsonParser.parseString(expected).getAsJsonArray()));
+
+        assertThat(actual.get(0)).doesNotContain("reason");
+        assertThat(actual.get(1)).endsWith("reason=616263");
     }
 }
