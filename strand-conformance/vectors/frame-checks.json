@@ -274,6 +274,40 @@
       ]
     },
     {
+      "id": "request-length-zero-closes",
+      "description": "연결을 수립한 뒤 받은 평상시 프레임의 length가 최솟값 16보다 작으면(0) 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "2.2.1",
+        "5.1"
+      ],
+      "requirements": [
+        "req-frame-length-range-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000000001010000000000000000000100000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "ping-undefined-flag-bits-are-ignored",
       "description": "ACK가 없는 PING에 정의되지 않은 flags 비트(0x82)가 켜져 있어도 오류가 아니다. 그 비트는 무시하고 ACK PING으로 답한다",
       "spec": [
