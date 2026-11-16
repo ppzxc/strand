@@ -10,9 +10,11 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -118,6 +120,12 @@ class ConnectionDriverClosedFinishTest {
 
     private void settle() {
         InMemoryPassage.awaitQuiescence(clientPassage, serverPassage);
+        // 종료 알림은 핸들러 실행기(하나의 스레드)에서 불리므로, 실행기에 넘어간 알림이 모두 처리되기를 기다린다.
+        try {
+            handlers.submit(() -> {}).get(5, TimeUnit.SECONDS);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            throw new IllegalStateException("핸들러 실행기가 비지 않았다", e);
+        }
     }
 
     private void tick(long ms) {
@@ -199,6 +207,23 @@ class ConnectionDriverClosedFinishTest {
         // 이미 알린 종료 알림은 한 번뿐이고 내용도 그대로다.
         assertThat(closed).hasSize(1);
         assertThat(closed.peek().reason()).isEqualTo(reason);
+    }
+
+    @Test
+    void ifThePeersCloseIsRepliedToWhileTheWriteIsBlockedTheSameLimitEndsTheTransportThread() {
+        connected(true, 0);
+        clientPassage.writeCapacity(0);
+        server.closeConnection();
+        settle();
+        assertThat(closed).hasSize(1);
+        assertThat(client.transportThread().isAlive()).isTrue();
+
+        tick(DEFAULT_LIMIT_MS - 1);
+        assertThat(client.transportThread().isAlive()).isTrue();
+
+        tick(1);
+        assertThat(ended(client)).isTrue();
+        assertThat(closed).hasSize(1);
     }
 
     @Test
