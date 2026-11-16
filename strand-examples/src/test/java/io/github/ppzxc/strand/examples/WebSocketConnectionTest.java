@@ -81,4 +81,47 @@ class WebSocketConnectionTest {
         assertThat(within(serverClosed).reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
         assertThat(sockets[0].sentCloseCodes).as("클라이언트가 보낸 WebSocket Close").contains(1000);
     }
+
+    /**
+     * 앞선 보내기가 끝나지 않아 이어 붙은 Close가 나중에 실패해도(write는 0을 돌려준다) 정상 CLOSE 교환이 입출력 실패로 보이지 않는다. 실패는
+     * Close 교환이 끝나지 않은 연결에서만 입출력 실패 원인이 된다.
+     */
+    @Test
+    void aChainedCloseThatFailsLaterNeverMixesAnIoFailureIntoACloseExchange() throws Exception {
+        WebSocketPassage clientPassage = new WebSocketPassage();
+        WebSocketPassage serverPassage = new WebSocketPassage();
+        FakeWebSocket[] sockets = FakeWebSocket.link(clientPassage, serverPassage);
+        CompletableFuture<ConnectionClosed> clientClosed = new CompletableFuture<>();
+        server = ConnectionDriver.server(EndpointConfig.defaults().webSocket(), serverPassage)
+                .handler(handlers, request -> {})
+                .start();
+        client = ConnectionDriver.client(EndpointConfig.defaults().webSocket(), clientPassage)
+                .executor(handlers)
+                .listener(closedInto(clientClosed))
+                .start();
+        awaitUntil(() -> client.writtenFrames() >= 1);
+        sockets[0].holdSends = true;
+        long before = client.writtenFrames();
+        client.ping(new byte[8]);
+        awaitUntil(() -> client.writtenFrames() > before);
+
+        client.closeConnection();
+        sockets[0].failSends = true;
+        sockets[0].releaseSends();
+
+        ConnectionClosed closed = within(clientClosed);
+        // 실패가 CLOSE 교환보다 먼저 닿으면 입출력 실패로 끊긴 것이고, 교환이 먼저 끝났으면 입출력 실패는 원인으로 남지 않는다. 어느 쪽이든 둘이 섞이지 않는다.
+        boolean closeExchange = closed.reason().kind() == CloseReason.Kind.CLOSE;
+        assertThat(closed.ioException().isPresent()).isEqualTo(!closeExchange);
+    }
+
+    private static void awaitUntil(java.util.function.BooleanSupplier condition) throws InterruptedException {
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > limit) {
+                throw new AssertionError("5초 안에 조건이 이뤄지지 않았다");
+            }
+            Thread.sleep(5);
+        }
+    }
 }
