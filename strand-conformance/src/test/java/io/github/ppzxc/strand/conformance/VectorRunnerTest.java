@@ -360,7 +360,18 @@ class VectorRunnerTest {
     void aNonZeroStatusOnAControlFrameFails() throws ReflectiveOperationException {
         String ping = frameHex("00000018", "0002", "01", "0000000000000000", "0000", "0102030405060708");
 
-        assertThat(sentOnce(true, ping)).doesNotContain(expectedOf(PING_EXPECTED));
+        assertThat(sentOnce(true, ping)).singleElement().asString().endsWith(" sent_status=1");
+    }
+
+    @Test
+    void aNonZeroReservedOrStatusOnAnUnreadableFrameFails() throws ReflectiveOperationException {
+        String truncatedClose = frameHex("00000010", "0003", "02", "0000000000000000", "0001", "");
+
+        assertThat(sentOnce(true, truncatedClose))
+                .singleElement()
+                .asString()
+                .contains("reserved=0x0001")
+                .contains("sent_status=2");
     }
 
     @Test
@@ -368,7 +379,7 @@ class VectorRunnerTest {
         String request = frameHex("00000010", "0100", "01", "0000000000000001", "0000", "");
         String okResponse = frameHex("00000010", "0100", "00", "0000000000000002", "0000", "");
 
-        assertThat(sentOnce(true, request)).doesNotContain(expectedOf("{\"type\":256,\"stream_id\":\"1\"}"));
+        assertThat(sentOnce(true, request)).singleElement().asString().endsWith(" sent_status=1");
         // 클라이언트 쪽에서 짝수 stream_id는 응답이다. status는 기존대로 기대와 비교한다.
         assertThat(sentOnce(true, okResponse))
                 .containsExactly(expectedOf("{\"type\":256,\"stream_id\":\"2\",\"status\":\"OK\"}"));

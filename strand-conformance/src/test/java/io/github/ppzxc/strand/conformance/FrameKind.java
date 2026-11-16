@@ -433,7 +433,20 @@ final class FrameKind {
 
     /** 상대의 번호 공간(클라이언트는 짝수, 서버는 홀수)의 프레임은 응답이다. 자기 번호 공간의 프레임은 요청이다. */
     private static boolean isResponse(Wire wire, boolean client) {
-        return (wire.streamId & 1) != (client ? 1 : 0);
+        return wire.streamId != 0 && (wire.streamId & 1) != (client ? 1 : 0);
+    }
+
+    /**
+     * 비교 규칙: reserved는 모든 송신 프레임에서, status는 응답이 아닌 프레임에서 늘 0이어야 한다. 기대 표기는 이 필드를 갖지 않으므로 0이
+     * 아니면 어긋난다. 해석하지 못하는 프레임에도 적용한다.
+     */
+    private static void markNonZero(Fields fields, Wire wire, boolean response) {
+        if (wire.reserved != 0) {
+            fields.with("reserved", String.format("0x%04x", wire.reserved));
+        }
+        if (wire.status != 0 && !response) {
+            fields.with("sent_status", String.valueOf(wire.status));
+        }
     }
 
     private static byte[] reasonBytes(JsonObject close) {
@@ -445,20 +458,15 @@ final class FrameKind {
             if (kind.onWire.test(wire.type)) {
                 Fields fields = kind.decoder.apply(wire, client);
                 if (fields != null) {
-                    // 비교 규칙: reserved는 모든 송신 프레임에서, status는 응답이 아닌 프레임에서 늘 0이어야 한다.
-                    // 기대 표기는 이 필드를 갖지 않으므로 0이 아니면 어긋난다.
-                    if (wire.reserved != 0) {
-                        fields.with("reserved", String.format("0x%04x", wire.reserved));
-                    }
-                    if (wire.status != 0 && !(kind == APPLICATION_KIND && isResponse(wire, client))) {
-                        fields.with("sent_status", String.valueOf(wire.status));
-                    }
+                    markNonZero(fields, wire, kind == APPLICATION_KIND && isResponse(wire, client));
                     return format(kind.name, fields);
                 }
             }
         }
         // 어느 종류도 아닌 바이트는 type 번호 그대로 그려 비교가 실패하게 한다.
-        return format(String.format("type=0x%04x", wire.type), wire.head().with("payload", Bytes.toHex(wire.payload)));
+        Fields unknown = wire.head().with("payload", Bytes.toHex(wire.payload));
+        markNonZero(unknown, wire, false);
+        return format(String.format("type=0x%04x", wire.type), unknown);
     }
 
     /**
