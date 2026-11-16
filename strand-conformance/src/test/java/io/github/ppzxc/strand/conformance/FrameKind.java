@@ -45,13 +45,14 @@ final class FrameKind {
         final int status;
         final int reserved;
         /** 기대 항목이 reason을 적었는가. 아니면 reason을 그리지 않아 비교하지 않는다. */
-        boolean withReason;
+        final boolean withReason;
 
         final long streamId;
         final int extensions;
         final byte[] payload;
 
-        Wire(byte[] frame) {
+        Wire(byte[] frame, boolean withReason) {
+            this.withReason = withReason;
             this.type = Bytes.readUnsignedShort(frame, Protocol.TYPE_AT);
             this.flags = frame[Protocol.FLAGS_AT] & 0xFF;
             this.status = frame[Protocol.STATUS_AT] & 0xFF;
@@ -443,8 +444,7 @@ final class FrameKind {
             rest = Arrays.copyOfRange(rest, preface.length, rest.length);
         }
         for (byte[] frame : split(rest)) {
-            Wire wire = new Wire(frame);
-            wire.withReason = reasonListed.test(firstIndex + result.size());
+            Wire wire = new Wire(frame, reasonListed.test(firstIndex + result.size()));
             result.add(describeFrame(wire, client));
         }
         return result;
@@ -452,7 +452,7 @@ final class FrameKind {
 
     /** 상대의 번호 공간(클라이언트는 짝수, 서버는 홀수)의 프레임은 응답이다. 자기 번호 공간의 프레임은 요청이다. */
     private static boolean isResponse(Wire wire, boolean client) {
-        return wire.streamId != 0 && (wire.streamId & 1) != (client ? 1 : 0);
+        return (wire.streamId & 1) != (client ? 1 : 0);
     }
 
     /**

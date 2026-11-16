@@ -352,8 +352,8 @@ class VectorRunnerTest {
         String ping = frameHex("00000018", "0002", "00", "0000000000000000", "0001", "0102030405060708");
         String request = frameHex("00000010", "0100", "00", "0000000000000001", "8000", "");
 
-        assertThat(sentOnce(true, ping)).doesNotContain(expectedOf(PING_EXPECTED));
-        assertThat(sentOnce(true, request)).doesNotContain(expectedOf("{\"type\":256,\"stream_id\":\"1\"}"));
+        assertThat(sentOnce(true, ping)).singleElement().asString().endsWith(" reserved=0x0001");
+        assertThat(sentOnce(true, request)).singleElement().asString().endsWith(" reserved=0x8000");
     }
 
     @Test
