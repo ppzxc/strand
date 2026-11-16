@@ -22,7 +22,7 @@ make_repo() {
   make_repo strand-core strand-nio
   run "$repo/.github/scripts/collect-release-assets.sh" 9.9.9
   [ "$status" -eq 0 ]
-  run ls "$repo/release-assets"
+  LC_ALL=C run ls "$repo/release-assets"
   [ "$output" = "strand-core-9.9.9-cyclonedx.json
 strand-core-9.9.9-javadoc.jar
 strand-core-9.9.9-sources.jar
@@ -84,17 +84,19 @@ collect = steps["Collect and sign release assets"]["run"]
 assert "collect-release-assets.sh" in collect and "sign-artifacts.sh" in collect
 
 notes = re.search(r'--notes "([^"]*)"', steps["Create draft GitHub Release"]["run"]).group(1)
-missing = [m for m in modules if m not in notes]
+missing = [m for m in modules if not re.search(r'(?<![\w-])' + re.escape(m) + r'(?![\w-])', notes)]
 assert not missing, f"노트가 {missing}를 말하지 않는다: {notes}"
 PY
 }
 
 @test "워크플로의 SBOM 태스크·서명 단계·Release 노트가 수집 스크립트의 모듈 목록과 일치한다" {
+  python3 -c 'import yaml' 2>/dev/null || skip "python3-yaml이 없다"
   run check_workflow
   [ "$status" -eq 0 ]
 }
 
 @test "수집 스크립트에 모듈을 더하고 워크플로를 그대로 두면 위 대조가 실패한다" {
+  python3 -c 'import yaml' 2>/dev/null || skip "python3-yaml이 없다"
   repo="$BATS_TEST_TMPDIR/drift"
   mkdir -p "$repo"
   sed 's/^modules=(strand-core strand-nio)$/modules=(strand-core strand-nio strand-xyz)/' "$collect" > "$repo/collect.sh"
