@@ -589,12 +589,25 @@ public final class ConnectionDriver implements AutoCloseable {
         }
     }
 
+    private void setWriteBlocked(boolean blocked) {
+        // 바뀔 때만 잠그고 깨워, 상태가 그대로인 대부분의 쓰기에는 비용이 없다.
+        if (writeBlocked == blocked) {
+            return;
+        }
+        synchronized (writeBlockedLock) {
+            writeBlocked = blocked;
+            writeBlockedLock.notifyAll();
+        }
+    }
+
     /** 전송 스레드의 본체. */
     private void run() {
         try {
             drive(new Loop(role == Role.CLIENT ? Endpoint.client(config) : Endpoint.server(config)));
         } finally {
             stopped = true;
+            // 어떤 경로로 끝났든 스레드가 끝나면 쓰기 막힘 신호는 풀려 있다.
+            setWriteBlocked(false);
             passage.close();
             abandonRemainingCommands();
         }
@@ -904,20 +917,12 @@ public final class ConnectionDriver implements AutoCloseable {
                 setWriteBlocked(false);
                 return true;
             } catch (IOException e) {
-                recordTransportFailure(e);
-                discardQueued();
+                try {
+                    recordTransportFailure(e);
+                } finally {
+                    discardQueued();
+                }
                 return false;
-            }
-        }
-
-        private void setWriteBlocked(boolean blocked) {
-            // 바뀔 때만 잠그고 깨워, 상태가 그대로인 대부분의 쓰기에는 비용이 없다.
-            if (writeBlocked == blocked) {
-                return;
-            }
-            synchronized (writeBlockedLock) {
-                writeBlocked = blocked;
-                writeBlockedLock.notifyAll();
             }
         }
 

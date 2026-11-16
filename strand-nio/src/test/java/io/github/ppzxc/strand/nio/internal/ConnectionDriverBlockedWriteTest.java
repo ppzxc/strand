@@ -316,4 +316,21 @@ class ConnectionDriverBlockedWriteTest {
         assertThat(sides[0].driver.awaitWriteBlocked(true, 20, TimeUnit.MILLISECONDS))
                 .isFalse();
     }
+
+    @Test
+    void writeBlockedSignalClearsWhenTheBlockedWriteFailsWithAnIoError() throws Exception {
+        Side[] sides = connected();
+        Side client = sides[0];
+        client.passage.writeCapacity(10);
+        client.driver.ping(new byte[8]).join();
+        assertThat(client.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)).isTrue();
+
+        // 출력을 닫은 통로에 쓰기 가능이 오면 다음 쓰기가 입출력 오류로 끝난다.
+        client.passage.shutdownOutput();
+        client.passage.addWriteCapacity(PLENTY);
+
+        assertThat(client.driver.awaitWriteBlocked(false, 5, TimeUnit.SECONDS)).isTrue();
+        settle(client, sides[1]);
+        assertThat(client.closed).isNotEmpty();
+    }
 }
