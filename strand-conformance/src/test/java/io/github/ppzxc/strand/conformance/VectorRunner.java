@@ -69,7 +69,8 @@ final class VectorRunner {
             sent.addAll(runner.endpoint.drainMessages());
             boolean startsWithPreface = !opening.isEmpty();
             opening = new ArrayList<>();
-            assertThat(runner.describeMessages(sent, startsWithPreface))
+            assertThat(FrameKind.withoutUnlistedReasons(
+                            runner.describeMessages(sent, startsWithPreface), step.getAsJsonArray("send")))
                     .as("%d번째 단계의 send", number)
                     .isEqualTo(expectedFrames(step));
             assertThat(describe(runner.endpoint.drainEvents()))
