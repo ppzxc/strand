@@ -3,14 +3,19 @@ package io.github.ppzxc.strand.conformance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
@@ -125,25 +130,6 @@ class VectorLoaderTest {
         assertThatThrownBy(() -> VectorLoader.parse("x.json", fileWithStep(step.replace("100", "0"))))
                 .isInstanceOf(InvalidVectorException.class)
                 .hasMessageContaining("deadline_ms");
-    }
-
-    @Test
-    void loadsAppendixGExample() {
-        String json = "{\"format\":2,\"vectors\":[{\"id\":\"ping-is-acknowledged\","
-                + "\"description\":\"PING을 받으면 같은 8바이트에 ACK를 붙여 돌려준다\",\"spec\":[\"3.4\"],"
-                + "\"setup\":{\"role\":\"server\",\"established\":true},\"steps\":[{\"kind\":\"recv\","
-                + "\"hex\":\"00000014 00020000 00000000 00000000 0102030405060708\","
-                + "\"send\":[{\"type\":\"PING\",\"flags\":[\"ACK\"],\"payload\":\"0102030405060708\"}],"
-                + "\"events\":[]}]}]}";
-
-        List<ConformanceVector> vectors = VectorLoader.parse("x.json", json);
-
-        assertThat(vectors).hasSize(1);
-        ConformanceVector vector = vectors.get(0);
-        assertThat(vector.id()).isEqualTo("ping-is-acknowledged");
-        assertThat(vector.description()).contains("PING");
-        assertThat(vector.spec()).containsExactly("3.4");
-        assertThat(vector.steps()).hasSize(1);
     }
 
     @Test
@@ -1007,10 +993,8 @@ class VectorLoaderTest {
         assertThat(jsonBlocks(lf.replace("\n", "\r\n"))).containsExactly("{\"a\":1}", "[2]");
     }
 
-    /** 형식 문서의 JSON 예시가 모두 로더를 통과한다. */
-    @Test
-    void jsonExamplesInTheFormatDocumentPassTheLoader() throws IOException {
-        // 벡터 디렉터리에서 위로 올라가며 문서를 찾는다. 실행 위치와 벡터 디렉터리의 깊이에 기대지 않는다.
+    /** 벡터 디렉터리에서 위로 올라가며 형식 문서를 찾아 JSON 블록을 모은다. 실행 위치와 벡터 디렉터리의 깊이에 기대지 않는다. */
+    private static String formatDocument() throws IOException {
         Path doc = null;
         for (Path dir = VectorSuite.defaultDirectory().toAbsolutePath();
                 dir != null && doc == null;
@@ -1019,12 +1003,78 @@ class VectorLoaderTest {
             doc = Files.exists(candidate) ? candidate : null;
         }
         assertThat(doc).as("형식 문서를 찾을 수 없다").isNotNull();
-        List<String> blocks = jsonBlocks(new String(Files.readAllBytes(doc), StandardCharsets.UTF_8));
+        return new String(Files.readAllBytes(doc), StandardCharsets.UTF_8);
+    }
+
+    /** 형식 문서의 JSON 예시가 모두 로더를 통과한다. */
+    @Test
+    void jsonExamplesInTheFormatDocumentPassTheLoader() throws IOException {
+        List<String> blocks = jsonBlocks(formatDocument());
         for (int i = 0; i < blocks.size(); i++) {
             assertThat(VectorLoader.parse("doc-example-" + (i + 1) + ".json", blocks.get(i)))
                     .isNotEmpty();
         }
         assertThat(blocks).hasSizeGreaterThanOrEqualTo(4);
+    }
+
+    /** 문서 2절의 첫 예시는 sample.json의 같은 id 벡터와 같다. hex는 공백만 다를 수 있다. */
+    @Test
+    void firstFormatDocumentExampleMatchesTheSameVectorInSampleJson() throws IOException {
+        List<ConformanceVector> documented = VectorLoader.parse("doc-example-1.json", firstJsonBlockOfSection2());
+        Path sample = VectorSuite.defaultDirectory().resolve("sample.json");
+        List<ConformanceVector> shipped =
+                VectorLoader.parse("sample.json", new String(Files.readAllBytes(sample), StandardCharsets.UTF_8));
+
+        assertThat(documented).isNotEmpty();
+        for (ConformanceVector example : documented) {
+            ConformanceVector twin = shipped.stream()
+                    .filter(v -> v.id().equals(example.id()))
+                    .findFirst()
+                    .orElse(null);
+            assertThat(twin).as("sample.json의 같은 id 벡터: " + example.id()).isNotNull();
+            assertThat(twin.description()).isEqualTo(example.description());
+            assertThat(twin.spec()).isEqualTo(example.spec());
+            assertThat(withoutHexSpaces(twin.setup())).isEqualTo(withoutHexSpaces(example.setup()));
+            assertThat(twin.steps().stream()
+                            .map(VectorLoaderTest::withoutHexSpaces)
+                            .collect(Collectors.toList()))
+                    .isEqualTo(example.steps().stream()
+                            .map(VectorLoaderTest::withoutHexSpaces)
+                            .collect(Collectors.toList()));
+        }
+    }
+
+    /** 형식 문서 2절("## 2. ...")부터 다음 절 제목 전까지에서 첫 json 블록을 꺼낸다. */
+    private static String firstJsonBlockOfSection2() throws IOException {
+        String doc = formatDocument();
+        Matcher section = Pattern.compile("(?m)^## 2\\. [^\\n]*$(.*?)(?=^## |\\z)", Pattern.DOTALL)
+                .matcher(doc);
+        assertThat(section.find()).as("형식 문서 2절").isTrue();
+        List<String> blocks = jsonBlocks(section.group(1));
+        assertThat(blocks).as("2절의 json 블록").isNotEmpty();
+        return blocks.get(0);
+    }
+
+    /** 단계 JSON의 복사본에서 모든 깊이의 hex 값에서 공백을 지운다. */
+    private static JsonObject withoutHexSpaces(JsonObject json) {
+        JsonObject copy = json.deepCopy();
+        stripHexSpaces(copy);
+        return copy;
+    }
+
+    private static void stripHexSpaces(JsonElement node) {
+        if (node.isJsonObject()) {
+            for (Map.Entry<String, JsonElement> field : node.getAsJsonObject().entrySet()) {
+                if (field.getKey().equals("hex") && field.getValue().isJsonPrimitive()) {
+                    field.setValue(
+                            new JsonPrimitive(field.getValue().getAsString().replaceAll("\\s+", "")));
+                } else {
+                    stripHexSpaces(field.getValue());
+                }
+            }
+        } else if (node.isJsonArray()) {
+            node.getAsJsonArray().forEach(VectorLoaderTest::stripHexSpaces);
+        }
     }
 
     @Test
