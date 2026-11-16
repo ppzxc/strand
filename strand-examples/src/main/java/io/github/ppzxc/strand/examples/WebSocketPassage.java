@@ -158,7 +158,7 @@ public final class WebSocketPassage implements Passage {
 
     @Override
     public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
-        throwIfClosedOrFailed();
+        throwIfClosed();
         if (!waitForRead) {
             return awaitSignal(timeoutMs, waitForWrite);
         }
@@ -182,7 +182,12 @@ public final class WebSocketPassage implements Passage {
             Thread.currentThread().interrupt();
             throw new IOException("기다리는 중 인터럽트", e);
         }
-        throwIfClosedOrFailed();
+        throwIfClosed();
+        // 앞서 도착한 입력(상대의 CLOSE 등)은 보내기 실패보다 먼저 넘긴다. 읽을 것이 더 없을 때 실패를 알린다.
+        boolean idle = item == null || (item instanceof Inbound && ((Inbound) item).kind() == Inbound.Kind.NONE);
+        if (idle && queue.isEmpty()) {
+            throwIfFailed();
+        }
         if (item == null) {
             return Inbound.none();
         }
@@ -217,10 +222,18 @@ public final class WebSocketPassage implements Passage {
         return last == null || last.isDone();
     }
 
-    private void throwIfClosedOrFailed() throws IOException {
+    private void throwIfClosed() throws IOException {
         if (closed) {
             throw new IOException("닫힌 통로");
         }
+    }
+
+    private void throwIfClosedOrFailed() throws IOException {
+        throwIfClosed();
+        throwIfFailed();
+    }
+
+    private void throwIfFailed() throws IOException {
         Throwable failure = sendFailure;
         if (failure != null) {
             throw failure instanceof IOException ? (IOException) failure : new IOException("WebSocket 쓰기 실패", failure);
@@ -326,9 +339,7 @@ public final class WebSocketPassage implements Passage {
         if (!open.isOutputClosed()) {
             // Close는 앞선 보내기가 끝난 뒤에 보낸다. JDK는 보내기가 겹치면 거부한다.
             int code = message.webSocketCloseCode();
-            CompletableFuture<?> send = busy
-                    ? last.handle((sent, failure) -> null).thenCompose(ignored -> closeOnce(open, code))
-                    : open.sendClose(code, "");
+            CompletableFuture<?> send = busy ? afterPrevious(last, open, code) : open.sendClose(code, "");
             failIfAlreadyFailed(send);
             watch(send);
         }
@@ -369,7 +380,7 @@ public final class WebSocketPassage implements Passage {
             // 앞선 보내기(마지막 프레임이나 write가 이어 붙인 Close)가 끝난 뒤에 보낸다. 겹치면 JDK가 거부해 abort로 번진다.
             CompletableFuture<?> last = sending;
             CompletableFuture<?> close = last != null && !last.isDone()
-                    ? last.handle((sent, failure) -> null).thenCompose(ignored -> closeOnce(open, NORMAL_CLOSURE))
+                    ? afterPrevious(last, open, NORMAL_CLOSURE)
                     : closeOnce(open, NORMAL_CLOSURE);
             watch(close);
             close.whenComplete((sent, failure) -> {
@@ -382,6 +393,11 @@ public final class WebSocketPassage implements Passage {
 
     private static Throwable unwrapped(Throwable failure) {
         return failure instanceof CompletionException && failure.getCause() != null ? failure.getCause() : failure;
+    }
+
+    /** 앞선 보내기가 끝난 뒤(실패해도) Close를 한 번만 보낸다. JDK는 보내기가 겹치면 거부한다. */
+    private static CompletableFuture<?> afterPrevious(CompletableFuture<?> previous, WebSocket open, int code) {
+        return previous.handle((sent, failure) -> null).thenCompose(ignored -> closeOnce(open, code));
     }
 
     private static CompletableFuture<?> closeOnce(WebSocket open, int code) {
