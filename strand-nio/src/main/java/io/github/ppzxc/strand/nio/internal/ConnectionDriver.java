@@ -283,7 +283,7 @@ public final class ConnectionDriver implements AutoCloseable {
     private final AtomicLong discardedBytes = new AtomicLong();
     private final Object writeBlockedLock = new Object();
     // 쓰기 대기열이 다 나가지 못하고 쓰기 가능을 기다리는 동안 true. 전송 스레드만 바꾸고 writeBlockedLock으로 지킨다.
-    private boolean writeBlocked;
+    private volatile boolean writeBlocked;
 
     private ConnectionDriver(
             Role role,
@@ -500,7 +500,7 @@ public final class ConnectionDriver implements AutoCloseable {
 
     /**
      * 쓰기 대기열이 통로가 받아 주는 만큼만 나가고 남아 쓰기 가능을 기다리는 상태가 될 때까지 기다린다. 시험이 시간 간격을 추측하지 않고 쓰기 막힘을
-     * 관측하게 하는 패키지 범위 관측점이다. 그 상태는 대기열이 다 나가거나 입출력 오류가 나면 풀린다.
+     * 관측하게 하는 패키지 범위 관측점이다. 그 상태는 대기열이 다 나가거나 버려지거나 입출력 오류가 나면 풀린다.
      *
      * @return 제한 시간 안에 그 상태이면 true, 아니면 false
      */
@@ -911,6 +911,10 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         private void setWriteBlocked(boolean blocked) {
+            // 바뀔 때만 잠그고 깨워, 상태가 그대로인 대부분의 쓰기에는 비용이 없다.
+            if (writeBlocked == blocked) {
+                return;
+            }
             synchronized (writeBlockedLock) {
                 writeBlocked = blocked;
                 writeBlockedLock.notifyAll();
@@ -938,6 +942,7 @@ public final class ConnectionDriver implements AutoCloseable {
             writeQueue.clear();
             writeOffset = 0;
             queuedBytes = 0;
+            setWriteBlocked(false);
         }
 
         private boolean write() {
