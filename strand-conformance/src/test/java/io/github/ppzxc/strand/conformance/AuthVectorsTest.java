@@ -77,19 +77,28 @@ class AuthVectorsTest {
         assertThat(inFile).containsExactlyInAnyOrderElementsOf(REQUIRED);
     }
 
-    /** AUTH 절(3.3.x) 밖에서, AUTH 벡터가 확인하는 프레임 검사의 절: stream_id(2.2.5), CLOSE(3.5), 연결 오류(5.1). */
-    private static final List<String> AUTH_FRAME_SECTIONS = Arrays.asList("2.2.5", "3.5", "5.1");
+    /** 3.3.x 요구사항 대신 자기가 확인하는 프레임 검사의 절을 가리키는 AUTH 벡터. 벡터를 더하려면 여기에 올린다. */
+    private static final java.util.Map<String, String> FRAME_CHECK_SECTIONS = new java.util.HashMap<>();
+
+    static {
+        FRAME_CHECK_SECTIONS.put("auth/client-receives-unauthenticated-close", "3.5");
+        FRAME_CHECK_SECTIONS.put("auth/server-auth-stream-id-nonzero-closes", "2.2.5");
+    }
 
     @Test
     void everyAuthVectorPointsToTheAuthSectionsOrTheFramesItChecks() {
         RequirementIndex index = RequirementIndex.ofSpecification();
         for (String key : REQUIRED) {
-            assertThat(RawVectors.requirementsOf(vector(key)))
-                    .as(key)
-                    .anyMatch(id -> index.requirement(id) != null
-                            && (index.requirement(id).section().startsWith("3.3")
-                                    || AUTH_FRAME_SECTIONS.contains(
-                                            index.requirement(id).section())));
+            List<String> sections = new ArrayList<>();
+            for (String id : RawVectors.requirementsOf(vector(key))) {
+                assertThat(index.requirement(id)).as(key + "의 " + id).isNotNull();
+                sections.add(index.requirement(id).section());
+            }
+            if (FRAME_CHECK_SECTIONS.containsKey(key)) {
+                assertThat(sections).as(key).contains(FRAME_CHECK_SECTIONS.get(key));
+            } else {
+                assertThat(sections).as(key).anyMatch(section -> section.startsWith("3.3"));
+            }
         }
     }
 

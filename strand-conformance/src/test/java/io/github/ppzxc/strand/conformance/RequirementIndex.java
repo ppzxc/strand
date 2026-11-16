@@ -167,7 +167,16 @@ final class RequirementIndex {
     }
 
     /** 저장소의 실제 규격 문서를 읽어 만든 색인. */
-    static RequirementIndex ofSpecification() {
+    static synchronized RequirementIndex ofSpecification() {
+        if (specification == null) {
+            specification = readSpecification();
+        }
+        return specification;
+    }
+
+    private static RequirementIndex specification;
+
+    private static RequirementIndex readSpecification() {
         Path spec = VectorSuite.defaultDirectory()
                 .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
                 .normalize();

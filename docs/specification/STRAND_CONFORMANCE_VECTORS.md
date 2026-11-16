@@ -69,7 +69,7 @@
 | --- | --- | --- |
 | `id` | 예 | 같은 파일 안에서 유일한 kebab-case 이름(`[a-z0-9]+(-[a-z0-9]+)*`) |
 | `description` | 예 | 무엇을 확인하는지 적은 한 문장 이상의 설명 |
-| `requirements` | 예 | 이 벡터의 기대 결과가 단언하는 요구사항 식별자의 배열. 예: `["req-ping-ack-reply", "req-frame-reserved-zero-send"]`. 원소는 와이어 규격의 앵커 id를 `req-` 접두사까지 그대로 적는다. 비어 있으면 안 된다. 의미는 이 표 아래에 적는다 |
+| `requirements` | 예 | 이 벡터의 기대 결과가 단언하는 요구사항 식별자의 배열. 예: `["req-ping-ack-reply", "req-frame-reserved-zero-send"]`. 원소는 와이어 규격의 앵커 id를 `req-` 접두사까지 그대로 적는다. 비어 있으면 안 되고 같은 식별자를 두 번 적을 수 없다. 의미는 이 표 아래에 적는다 |
 | `setup` | 예 | 초기 상태(이 문서 4절) |
 | `steps` | 예 | 단계 목록(이 문서 5절). 하나 이상 |
 

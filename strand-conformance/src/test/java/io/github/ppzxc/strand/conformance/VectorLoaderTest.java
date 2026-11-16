@@ -330,9 +330,16 @@ class VectorLoaderTest {
                 "description",
                 "a"));
         t.add(rejected("empty steps", file(vector("a", "[\"req-a-b\"]", SETUP, "[]")), "steps", "a"));
-        for (String bad :
-                new String[] {"[]", "[3]", "[\"a-b\"]", "[\"req-\"]", "[\"req-A\"]", "[\"req-a_b\"]", "[\"req-a--b\"]"
-                }) {
+        for (String bad : new String[] {
+            "[]",
+            "[3]",
+            "[\"a-b\"]",
+            "[\"req-\"]",
+            "[\"req-A\"]",
+            "[\"req-a_b\"]",
+            "[\"req-a--b\"]",
+            "[\"req-a\",\"req-a\"]"
+        }) {
             t.add(rejected("bad requirements " + bad, file(withRequirements(bad)), "requirements", "a"));
         }
         return t.stream();

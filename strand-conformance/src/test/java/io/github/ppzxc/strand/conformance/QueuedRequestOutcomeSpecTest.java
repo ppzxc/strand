@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
@@ -131,10 +132,7 @@ class QueuedRequestOutcomeSpecTest {
     void deadlineRequirementsOfSection441AreCoveredByVectorsNotExcluded() throws IOException {
         RequirementIndex index = RequirementIndex.ofSpecification();
         UncoveredRequirements uncovered = UncoveredRequirements.load();
-        java.util.Set<String> referenced = new java.util.TreeSet<>();
-        for (com.google.gson.JsonObject vector : RawVectors.byKey().values()) {
-            referenced.addAll(RawVectors.requirementsOf(vector));
-        }
+        Set<String> referenced = RawVectors.referencedRequirements();
         // 요청 기한 벡터(deadline_ms)가 4.4.1절의 MUST를 가리키므로 이 절은 제외 목록에 없다(#191).
         // 3.4.1절의 PING 하나 제한은 SHOULD라 커버 의무가 없고 벡터가 가리키지 않는다.
         int checked = 0;

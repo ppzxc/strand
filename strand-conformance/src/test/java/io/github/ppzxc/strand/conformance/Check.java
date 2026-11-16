@@ -200,6 +200,11 @@ final class Check {
             if (!REQUIREMENT_ID.matcher(id).matches()) {
                 throw failAt(item(path, i), "요구사항 식별자가 아니다(req-로 시작하는 소문자 kebab-case): '" + id + "'");
             }
+            for (int j = 0; j < i; j++) {
+                if (array.get(j).getAsString().equals(id)) {
+                    throw failAt(item(path, i), "요구사항 식별자가 두 번 나온다: '" + id + "'");
+                }
+            }
         }
     }
 

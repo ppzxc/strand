@@ -64,6 +64,15 @@ final class RawVectors {
         return ids;
     }
 
+    /** 어떤 벡터든 하나라도 가리키는 요구사항 식별자. */
+    static java.util.SortedSet<String> referencedRequirements() {
+        java.util.SortedSet<String> result = new java.util.TreeSet<>();
+        for (JsonObject vector : byKey().values()) {
+            result.addAll(requirementsOf(vector));
+        }
+        return result;
+    }
+
     static synchronized List<Path> files() {
         return current().files;
     }
