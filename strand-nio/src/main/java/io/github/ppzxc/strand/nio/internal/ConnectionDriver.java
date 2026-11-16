@@ -52,7 +52,7 @@ import org.jspecify.annotations.Nullable;
  * {@link #close}를 따로 부를 필요가 없다. 이미 종료 알림이 나갔으므로 상한에 걸려도 새 알림을 내지 않고 {@link ConnectionClosed}도 바뀌지 않는다.
  * 전송 스레드의 기다림은 core의 {@code nextDeadline}과 이 마무리 기한 가운데 이른 쪽까지다.
  *
- * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김, CLOSED 뒤 마무리 상한) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버린다. 즉시 끊기는 통로를
+ * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김, CLOSED 뒤 마무리 상한) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버리고, 버린 바이트는 {@link #discardedBytes()}에 센다. 즉시 끊기는 통로를
  * 먼저 닫으므로 더 쓰지 않고, 그 밖의 경우는 마치기 전에 통로가 받아 주는 만큼 한 번 쓴다.
  *
  * <p><b>쓰기 대기열 상한과 읽기 멈춤.</b> 상대가 읽지 않으면서 PING이나 요청을 계속 보내면(ACK PING, {@code RESET(REFUSED)}, 응답한 뒤 다시 열리는
@@ -279,6 +279,7 @@ public final class ConnectionDriver implements AutoCloseable {
     private final AtomicLong receivedBytes = new AtomicLong();
     private final AtomicLong writtenBytes = new AtomicLong();
     private final AtomicLong writtenFrames = new AtomicLong();
+    private final AtomicLong discardedBytes = new AtomicLong();
 
     private ConnectionDriver(
             Role role,
@@ -512,6 +513,16 @@ public final class ConnectionDriver implements AutoCloseable {
     }
 
     /**
+     * 지금까지 통로에 쓰지 못하고 버린 바이트 수. 전송 스레드가 끝날 때(쓰기 실패, 즉시 끊기, 상대가 끊음, CLOSE 없는 끊김, CLOSED 뒤 마무리 상한 등 어떤 끝이든) 쓰기 대기열과 core 쓰기 대기열에 남아 있던
+     * 메시지의 남은 바이트다. 운영자가 끝난 연결이 보내지 못한 양을 알아보는 관측용이고 알림이나 종료 원인은 바꾸지 않는다. 어느 스레드에서든 읽을 수 있다.
+     *
+     * @return 버린 바이트 수
+     */
+    public long discardedBytes() {
+        return discardedBytes.get();
+    }
+
+    /**
      * 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 통로를 닫으므로 상대가 읽지 않아 쓰기가 막혀 있어도 끝난다. 쓰기 대기열에 남은 메시지는 다 쓰지 않고 버린다. 남은 Future는 core가 내는 결과로 끝난다.
      * 즉시 끊기라서 이미 큐에 넣은 출력은 보장하지 않는다. 아직 처리되지 않은 {@link #request}, {@link #respond}, {@link #ping}은 전송 스레드가 통로
      * 닫힘을 보기 전에 처리되지 못할 수 있고, 그 요청은 core가 내는 결과나 예외로 끝난다. 출력을 다 내보내고 끝내려면 {@link #closeConnection()}을 쓴다.
@@ -595,7 +606,12 @@ public final class ConnectionDriver implements AutoCloseable {
             }
             failure.addSuppressed(e);
         } finally {
-            loop.failPending();
+            try {
+                // 연결이 끝나 더 쓰지 않는다. 남은 것은 버리고 센다. 이것이 던져도 남은 Future는 끝낸다.
+                loop.discardQueued();
+            } finally {
+                loop.failPending();
+            }
         }
     }
 
@@ -682,7 +698,7 @@ public final class ConnectionDriver implements AutoCloseable {
             long limit = -1;
             OptionalLong next = endpoint.nextDeadline();
             if (next.isPresent()) {
-                limit = Math.max(0, next.getAsLong() - (clock.getAsLong() - startedAt));
+                limit = clampWait(next.getAsLong() - (clock.getAsLong() - startedAt));
             }
             long untilFinish = untilFinish();
             if (untilFinish >= 0) {
@@ -696,8 +712,15 @@ public final class ConnectionDriver implements AutoCloseable {
             if (!closed || finished) {
                 return -1;
             }
-            // 통로의 시간 제한이 int 범위로 잘리는 구현에서 바쁜 대기가 되지 않게, 한 번의 기다림은 int 범위로 자른다. 기한이 더 멀면 깨어난 뒤 다시 계산한다.
-            return Math.min(Math.max(0, closedFinishDeadline - clock.getAsLong()), Integer.MAX_VALUE);
+            return clampWait(closedFinishDeadline - clock.getAsLong());
+        }
+
+        /**
+         * 남은 시간을 0 이상 int 범위로 자른다. 통로의 시간 제한이 int 범위로 잘리는 구현에서 바쁜 대기가 되지 않게 한 번의 기다림을 int 범위로 자른다.
+         * 기한이 더 멀면 깨어난 뒤 다시 계산한다.
+         */
+        private long clampWait(long remainingMs) {
+            return Math.min(Math.max(0, remainingMs), Integer.MAX_VALUE);
         }
 
         /** 주입 시계로 흐른 시간만큼 엔드포인트의 시계를 보낸다. */
@@ -862,11 +885,19 @@ public final class ConnectionDriver implements AutoCloseable {
                 return true;
             } catch (IOException e) {
                 recordTransportFailure(e);
-                writeQueue.clear();
-                writeOffset = 0;
-                queuedBytes = 0;
+                discardQueued();
                 return false;
             }
+        }
+
+        /** 쓰기 대기열에 남은 메시지를 버리고 남은 바이트를 센다. */
+        void discardQueued() {
+            // 끊긴 엔드포인트가 마지막으로 낸 메시지(명령 소진 중 난 것)도 보내지 못한 것이다.
+            takeOutput();
+            discardedBytes.addAndGet(queuedBytes);
+            writeQueue.clear();
+            writeOffset = 0;
+            queuedBytes = 0;
         }
 
         private boolean write() {

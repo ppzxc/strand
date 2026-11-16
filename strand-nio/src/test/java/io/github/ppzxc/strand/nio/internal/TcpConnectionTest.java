@@ -194,6 +194,9 @@ class TcpConnectionTest {
         }
     }
 
+    private static final int STABLE_POLLS = 6;
+    private static final long POLL_MILLIS = 50;
+
     /** 쓴 바이트 수가 한동안 늘지 않을 때까지 기다린다. 쓰기가 소켓 버퍼에 막혀 더 나가지 않는 상태다. */
     private static void awaitWritesStopped(ConnectionDriver driver) throws InterruptedException {
         long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -202,11 +205,11 @@ class TcpConnectionTest {
         while (System.nanoTime() < limit) {
             long now = driver.writtenBytes();
             stable = now == last && now > 0 ? stable + 1 : 0;
-            if (stable >= 3) {
+            if (stable >= STABLE_POLLS) {
                 return;
             }
             last = now;
-            Thread.sleep(200);
+            Thread.sleep(POLL_MILLIS);
         }
         throw new AssertionError("쓰기가 5초 안에 멈추지 않았다");
     }

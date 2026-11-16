@@ -460,13 +460,8 @@ class ConnectionDriverReadPauseTest {
         assertThat(client.driver.receivedBytes()).isLessThan((long) pings * PING_FRAME);
         // 읽을 것이 남아 있어도 읽기를 멈춘 동안은 쓰기 가능, 깨움, 기한으로만 깨어난다.
         long calls = client.passage.awaitCalls();
+        // 되풀이해 깨어난다면 통로의 활동이 가라앉지 않아 settle이 실패한다. 고정 시간을 재지 않고 그 훅으로 본다.
         settle(client, server);
-        // 되풀이해 깨어난다면 실제 시간이 흐르는 동안 호출 수가 늘어난다.
-        try {
-            Thread.sleep(100);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
         assertThat(client.passage.awaitCalls()).isEqualTo(calls);
     }
 }

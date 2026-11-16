@@ -230,6 +230,32 @@ class ConnectionDriverClosedFinishTest {
     }
 
     @Test
+    void whatTheLimitCutsOffInTheWriteQueueIsCountedAsDiscardedBytes() {
+        connected(true, DEFAULT);
+        clientPassage.writeCapacity(0);
+        java.util.concurrent.CompletableFuture<Void> unusedPing = client.ping(new byte[8]);
+        server.closeConnection();
+        settle();
+        assertThat(client.discardedBytes()).isZero();
+
+        tick(DEFAULT_LIMIT_MS);
+
+        assertThat(ended(client)).isTrue();
+        assertThat(client.discardedBytes()).as("막혀서 쓰지 못하고 버려진 바이트").isPositive();
+    }
+
+    @Test
+    void nothingIsDiscardedWhenTheWriteQueueDrainsBeforeTheConnectionEnds() {
+        connected(true, DEFAULT);
+        client.closeConnection();
+        settle();
+
+        client.close();
+
+        assertThat(client.discardedBytes()).isZero();
+    }
+
+    @Test
     void aVeryLargeLimitDoesNotOverflowAndTheWaitStaysWithinTheIntRange() {
         connected(true, Long.MAX_VALUE);
         client.closeConnection();

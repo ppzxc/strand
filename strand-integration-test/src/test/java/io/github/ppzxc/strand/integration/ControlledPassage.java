@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.integration;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.Passage;
+import io.github.ppzxc.strand.nio.internal.PassageContract;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -63,8 +64,8 @@ final class ControlledPassage implements Passage {
                 lastRecorded = message;
             }
             if (deferWrites) {
-                // 미뤄 둔 메시지는 통로가 다 받은 것으로 돌려준다. 나중에 releaseWrites가 내보낸다.
-                if (!deferred.contains(message)) {
+                // 미뤄 둔 메시지는 통로가 다 받은 것으로 돌려준다. 나중에 releaseWrites가 내보낸다. 드라이버는 메시지를 순서대로 쓰므로 마지막에 모은 것과 같은 신원인지만 본다.
+                if (deferred.isEmpty() || deferred.get(deferred.size() - 1) != message) {
                     deferred.add(message);
                 }
                 return message.length() - offset;
@@ -132,18 +133,6 @@ final class ControlledPassage implements Passage {
         delegate.wakeup();
     }
 
-    /** 통로가 받아 주지 못하면 실패한다. 이 시험이 쓰는 통로는 쓰기 용량에 한도가 없다. */
-    private void writeFully(OutboundMessage message) throws IOException {
-        int offset = 0;
-        do {
-            int accepted = delegate.write(message, offset);
-            if (accepted == 0 && message.length() > 0) {
-                throw new IllegalStateException("통로가 미뤄 둔 쓰기를 받지 않았다");
-            }
-            offset += accepted;
-        } while (offset < message.length());
-    }
-
     /** 이 뒤의 쓰기를 통로에 내보내지 않고 모아 둔다. {@link #releaseWrites}가 모은 것을 쓴 순서대로 내보낸다. */
     void deferWrites() {
         synchronized (lock) {
@@ -157,7 +146,7 @@ final class ControlledPassage implements Passage {
             deferWrites = false;
             try {
                 for (OutboundMessage message : deferred) {
-                    writeFully(message);
+                    PassageContract.writeFully(delegate, message);
                 }
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
