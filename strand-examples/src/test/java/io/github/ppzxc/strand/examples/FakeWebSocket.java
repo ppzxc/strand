@@ -16,7 +16,7 @@ final class FakeWebSocket implements WebSocket {
     final List<Long> requests = new ArrayList<>();
     final List<byte[]> sentBinary = new ArrayList<>();
     final List<Boolean> sentBinaryLast = new ArrayList<>();
-    final List<Integer> sentCloseCodes = new ArrayList<>();
+    final List<Integer> sentCloseCodes = new java.util.concurrent.CopyOnWriteArrayList<>();
     boolean aborted;
     boolean failSends;
     // 켜면 보낸 것은 상대에게 바로 가지만 보내기 완료는 releaseSends까지 미룬다. 쓰기 막힘을 흉내 낸다.

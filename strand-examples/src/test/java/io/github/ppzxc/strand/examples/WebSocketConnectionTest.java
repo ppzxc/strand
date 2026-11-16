@@ -79,6 +79,8 @@ class WebSocketConnectionTest {
         assertThat(new String(result.body(), StandardCharsets.UTF_8)).isEqualTo("re:hi");
         assertThat(within(clientClosed).reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
         assertThat(within(serverClosed).reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
+        // 종료 알림은 전송 스레드가 WebSocket Close를 보내기 전에 나갈 수 있어 보내질 때까지 기다린다.
+        awaitUntil(() -> sockets[0].sentCloseCodes.contains(1000));
         assertThat(sockets[0].sentCloseCodes).as("클라이언트가 보낸 WebSocket Close").contains(1000);
     }
 
