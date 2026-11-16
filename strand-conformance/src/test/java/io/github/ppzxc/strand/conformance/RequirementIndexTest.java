@@ -234,4 +234,13 @@ class RequirementIndexTest {
         assertThat(index.requirement("req-end")).isNotNull();
         assertThat(index.requirement("req-pre")).isNull();
     }
+
+    @Test
+    void unnumberedHeadingEndsTheSection() {
+        RequirementIndex index = RequirementIndex.parse(
+                spec("## 2. 절", "## 부록 A. 매핑", "끝(MUST)<a id=\"req-appendix\"></a>", "다시 말(MUST)"));
+
+        assertThat(index.requirement("req-appendix")).isNull();
+        assertThat(index.keywordSections()).isEmpty();
+    }
 }

@@ -212,6 +212,10 @@ final class RequirementIndex {
             if (heading.find()) {
                 section = heading.group(1);
                 i++;
+            } else if (HEADING_ANY.matcher(line).find() && line.startsWith("##")) {
+                // 번호 없는 제목(부록 등)은 앞 절에 속하지 않는다.
+                section = null;
+                i++;
             } else if (line.startsWith("```")) {
                 i = skipFence(lines, i);
             } else if (HEADING_ANY.matcher(line).find() || line.startsWith(KEYWORD_DEFINITION)) {

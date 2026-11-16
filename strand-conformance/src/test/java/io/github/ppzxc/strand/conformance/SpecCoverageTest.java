@@ -123,7 +123,10 @@ class SpecCoverageTest {
                         SpecCoverageTest.class.getResourceAsStream("/deleted-requirement-ids.txt"),
                         StandardCharsets.UTF_8);
                 BufferedReader lines = new BufferedReader(reader)) {
-            lines.lines().filter(l -> !l.isEmpty() && !l.startsWith("#")).forEach(result::add);
+            lines.lines()
+                    .map(String::trim)
+                    .filter(l -> !l.isEmpty() && !l.startsWith("#"))
+                    .forEach(result::add);
         }
         return result;
     }
