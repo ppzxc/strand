@@ -140,6 +140,7 @@ final class RequirementIndex {
     /** `(MUST)`, `(MUST NOT, 5.1절)`, `(모두 MUST)`. 괄호 안은 키워드로 시작한다. */
     private static final Pattern PARENTHESIS = Pattern.compile("\\((모두 )?" + KEYWORD_TEXT + "(?:,[^()]*)?\\)");
 
+    private static final Pattern TOP_HEADING = Pattern.compile("^##\\s");
     private static final Pattern HEADING_ANY = Pattern.compile("^#{1,6}\\s");
     private static final Pattern ANCHOR = Pattern.compile("<a id=\"(req-[^\"]*)\"></a>");
     private static final Pattern ANCHOR_RUN = Pattern.compile("(?:<a id=\"req-[^\"]*\"></a>)+");
@@ -156,7 +157,7 @@ final class RequirementIndex {
 
     static RequirementIndex parse(String markdown) {
         RequirementIndex index = new RequirementIndex();
-        index.scan(markdown.split("\n", -1));
+        index.scan(markdown.split("\r?\n", -1));
         return index;
     }
 
@@ -212,8 +213,8 @@ final class RequirementIndex {
             if (heading.find()) {
                 section = heading.group(1);
                 i++;
-            } else if (HEADING_ANY.matcher(line).find() && line.startsWith("##")) {
-                // 번호 없는 제목(부록 등)은 앞 절에 속하지 않는다.
+            } else if (TOP_HEADING.matcher(line).find()) {
+                // 번호 없는 2단계 제목(부록 등)은 앞 절에 속하지 않는다.
                 section = null;
                 i++;
             } else if (line.startsWith("```")) {

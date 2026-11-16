@@ -243,4 +243,13 @@ class RequirementIndexTest {
         assertThat(index.requirement("req-appendix")).isNull();
         assertThat(index.keywordSections()).isEmpty();
     }
+
+    @Test
+    void deeperUnnumberedHeadingsKeepTheSectionAndCrlfIsAccepted() {
+        RequirementIndex index = RequirementIndex.parse(
+                "## 5. 절\r\n##### 비고\r\n다음은 모두 오류다(모두 MUST).\r\n\r\n- 하나<a id=\"req-one\"></a>\r\n");
+
+        assertThat(index.problems()).isEmpty();
+        assertThat(index.requirement("req-one").section()).isEqualTo("5");
+    }
 }
