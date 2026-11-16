@@ -252,4 +252,11 @@ class RequirementIndexTest {
         assertThat(index.problems()).isEmpty();
         assertThat(index.requirement("req-one").section()).isEqualTo("5");
     }
+
+    @Test
+    void uppercasePrefixAnchorIsAnInvalidAnchorNotAMissingOne() {
+        RequirementIndex index = RequirementIndex.parse(spec("## 2. 절", "하나(MUST)<a id=\"Req-foo\"></a>."));
+
+        assertThat(kinds(index)).containsExactly("INVALID_ANCHOR");
+    }
 }

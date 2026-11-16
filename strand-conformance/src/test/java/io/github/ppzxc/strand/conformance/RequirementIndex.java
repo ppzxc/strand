@@ -142,8 +142,8 @@ final class RequirementIndex {
 
     private static final Pattern TOP_HEADING = Pattern.compile("^##\\s");
     private static final Pattern HEADING_ANY = Pattern.compile("^#{1,6}\\s");
-    private static final Pattern ANCHOR = Pattern.compile("<a id=\"(req-[^\"]*)\"></a>");
-    private static final Pattern ANCHOR_RUN = Pattern.compile("(?:<a id=\"req-[^\"]*\"></a>)+");
+    private static final Pattern ANCHOR = Pattern.compile("<a id=\"((?i:req-)[^\"]*)\"></a>");
+    private static final Pattern ANCHOR_RUN = Pattern.compile("(?:<a id=\"(?i:req-)[^\"]*\"></a>)+");
     private static final Pattern LIST_MARKER = Pattern.compile("^(?:[-*]|\\d+\\.)\\s.*");
     private static final Pattern TABLE_SEPARATOR = Pattern.compile("^\\|[\\s:|-]+\\|?$");
     /** 용어 규칙을 설명하는 줄이라 규범 문장이 아니다. */
@@ -381,12 +381,12 @@ final class RequirementIndex {
     }
 
     private void add(String id, Keyword keyword, int index) {
-        if (section == null) {
-            problem(ProblemKind.ORPHAN_ANCHOR, index, "절 제목 앞의 앵커다: " + id);
-            return;
-        }
         if (!Check.REQUIREMENT_ID.matcher(id).matches()) {
             problem(ProblemKind.INVALID_ANCHOR, index, "식별자 형식이 아니다: " + id);
+            return;
+        }
+        if (section == null) {
+            problem(ProblemKind.ORPHAN_ANCHOR, index, "절 제목 앞의 앵커다: " + id);
             return;
         }
         if (requirements.containsKey(id)) {
