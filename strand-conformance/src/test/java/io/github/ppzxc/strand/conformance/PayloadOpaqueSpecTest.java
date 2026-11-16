@@ -15,9 +15,7 @@ import org.junit.jupiter.api.Test;
 /** 애플리케이션 payload가 불투명 바이트열이라는 규격 구성을 검사한다(#165). Protobuf는 비규범 부록에만 남는다. */
 class PayloadOpaqueSpecTest {
 
-    private static final Path SPEC = VectorSuite.defaultDirectory()
-            .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
-            .normalize();
+    private static final Path SPEC = RequirementIndex.specificationFile();
 
     private static final String APPENDIX_HEADING = "## 부록 A. Protobuf 매핑 (비규범)";
     private static final Pattern PROTOBUF =

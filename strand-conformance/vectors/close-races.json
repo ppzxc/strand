@@ -4,8 +4,8 @@
     {
       "id": "simultaneous-close-sends-no-second-close",
       "description": "서버 역할 구현이 CLOSE(NO_ERROR)를 보낸 뒤 상대 엔드포인트가 보낸 CLOSE(NO_ERROR)를 받아도 CLOSE로 답하지 않는다. CLOSE를 보냈거나 받은 뒤에는 CLOSE를 보내지 않는다. 서버가 연 스트림 2가 대기 중이라 연결은 열려 있다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "server",
@@ -46,8 +46,9 @@
     {
       "id": "close-received-blocks-opening-new-stream",
       "description": "CLOSE를 받은 클라이언트 역할 구현은 새 스트림을 열지 않는다. 그 뒤 애플리케이션의 새 요청은 프레임을 보내지 않고 애플리케이션에 UNAVAILABLE로 실패를 알리는데, 스트림을 열기 전의 로컬 결과라서 stream_id가 없는 result(처리 안 됨)로 단언한다. 스트림 1이 대기 중이라 연결은 열려 있다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-after-close-no-new-stream",
+        "req-close-new-request-local-unavailable"
       ],
       "setup": {
         "role": "client",
@@ -88,8 +89,9 @@
     {
       "id": "close-received-closes-after-last-pending-stream-ends",
       "description": "CLOSE(NO_ERROR)를 받은 클라이언트 역할 구현은 대기 중인 스트림이 있는 동안 연결을 열어 둔다. 마지막 대기 중인 스트림의 응답을 받아 결과를 전달한 뒤 대기 중인 스트림이 없어지면 연결을 닫고 closed 이벤트를 낸다. closed는 마지막 result 다음에 난다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-no-error-drain-then-close",
+        "req-close-closed-after-last-result"
       ],
       "setup": {
         "role": "client",
@@ -134,8 +136,9 @@
     {
       "id": "close-sent-closes-after-last-pending-stream-ends",
       "description": "CLOSE(NO_ERROR)를 보낸 서버 역할 구현은 자기가 연 스트림 2가 대기 중인 동안 연결을 열어 둔다. 그 응답을 받아 결과를 전달한 뒤 대기 중인 스트림이 없어지면 연결을 닫고 closed 이벤트를 낸다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-no-error-drain-then-close",
+        "req-close-closed-after-last-result"
       ],
       "setup": {
         "role": "server",
@@ -186,8 +189,8 @@
     {
       "id": "close-closes-only-after-streams-of-both-directions-end",
       "description": "종료 중인 연결은 내가 연 스트림과 상대가 연 스트림을 모두 대기 중인 스트림으로 센다. 클라이언트 역할 구현은 자기 요청 1의 응답을 받아도 서버가 연 스트림 2가 대기 중이면 닫지 않고, 그 응답을 보낸 뒤에야 closed 이벤트를 낸다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-no-error-drain-then-close"
       ],
       "setup": {
         "role": "client",
@@ -258,8 +261,9 @@
     {
       "id": "close-received-with-error-code-is-not-answered-and-closes",
       "description": "서버 역할 구현이 비-NO_ERROR CLOSE(INTERNAL_ERROR)를 받으면 아무것도 보내지 않고 연결을 닫고 closed 이벤트를 낸다. 대기 중인 요청 1이 아직 응답되지 않았어도 기다리지 않는다. 상대가 연 스트림은 내 요청이 아니므로 result 이벤트는 없다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-error-close-immediate",
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "server",
@@ -293,8 +297,9 @@
     {
       "id": "close-received-with-error-code-and-no-pending-streams-closes",
       "description": "서버 역할 구현이 대기 중인 스트림이 없을 때 비-NO_ERROR CLOSE(EXCESSIVE_USE)를 받아도 아무것도 보내지 않고 연결을 닫고 closed 이벤트를 낸다. CLOSE로 답하지 않는다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-error-close-immediate",
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "server",
@@ -315,9 +320,10 @@
     },
     {
       "id": "error-close-sent-closes-immediately-with-pending-stream",
-      "description": "서버 역할 구현이 애플리케이션 지시로 비-NO_ERROR CLOSE(INTERNAL_ERROR)를 보내면 보낸 직후 전송 계층을 닫고 closed 이벤트를 낸다. 요청 1이 아직 응답되지 않았어도 기다리지 않는다. 대기 중인 스트림을 마저 끝낸 뒤 닫는 규칙은 NO_ERROR에만 적용한다",
-      "spec": [
-        "3.5"
+      "description": "서버 역할 구현이 애플리케이션 지시로 비-NO_ERROR CLOSE(INTERNAL_ERROR)를 보내면 보낸 직후 전송 계층을 닫고 closed 이벤트를 낸다. 요청 1이 아직 응답되지 않았어도 기다리지 않는다. 대기 중인 스트림을 마저 끝낸 뒤 닫는 규칙은 NO_ERROR에만 적용한다. 보내는 CLOSE의 last_stream_id는 받은 요청 가운데 가장 큰 1이다",
+      "requirements": [
+        "req-close-error-close-immediate",
+        "req-close-last-stream-id-equals-highest"
       ],
       "setup": {
         "role": "server",
@@ -357,9 +363,10 @@
     {
       "id": "error-close-received-fails-pending-request-with-unavailable",
       "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 비-NO_ERROR CLOSE(INTERNAL_ERROR)를 받으면 아무것도 보내지 않고 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 정확히 한 번 받고, 그 뒤에 closed 이벤트가 난다. 이 결과는 요청이 처리됐는지를 알려 주지 않으므로 다시 보내도 되는지는 4.6절이 정한다",
-      "spec": [
-        "3.5",
-        "4.6"
+      "requirements": [
+        "req-close-error-close-immediate",
+        "req-close-end-pending-unavailable",
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "client",
@@ -398,8 +405,9 @@
     {
       "id": "error-close-sent-fails-pending-request-with-unavailable",
       "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 비-NO_ERROR CLOSE(INTERNAL_ERROR)를 보내면 보낸 직후 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 정확히 한 번 받고, 그 뒤에 closed 이벤트가 난다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-error-close-immediate",
+        "req-close-end-pending-unavailable"
       ],
       "setup": {
         "role": "client",
@@ -444,8 +452,10 @@
     {
       "id": "error-close-received-after-own-no-error-close-closes-client",
       "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 CLOSE(NO_ERROR)를 보낸 뒤 비-NO_ERROR CLOSE(INTERNAL_ERROR)를 받으면, 대기 중인 스트림이 남아 있어도 기다리지 않고 닫는다. 종료 중에 받은 오류 CLOSE도 즉시 닫는다. 아무것도 더 보내지 않는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 한 번 받고, 그 뒤에 closed 이벤트가 난다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-error-close-immediate",
+        "req-close-end-pending-unavailable",
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "client",
@@ -496,8 +506,9 @@
     {
       "id": "error-close-received-after-own-no-error-close-closes-server",
       "description": "서버 역할 구현이 받은 요청 1을 대기시킨 채 CLOSE(NO_ERROR)를 보낸 뒤 비-NO_ERROR CLOSE(INTERNAL_ERROR)를 받으면, 대기 중인 스트림이 남아 있어도 기다리지 않고 닫는다. 아무것도 더 보내지 않고 closed 이벤트만 난다. 대기 중인 스트림은 상대가 연 요청이라 내 요청이 아니므로 result 이벤트는 없다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-error-close-immediate",
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "server",
@@ -543,8 +554,8 @@
     {
       "id": "close-sent-with-no-pending-streams-closes-immediately",
       "description": "대기 중인 스트림이 처음부터 없는 클라이언트 역할 구현이 애플리케이션 지시로 CLOSE(NO_ERROR)를 보내면, 기다릴 스트림이 없으므로 보낸 직후 전송 계층을 닫고 closed 이벤트를 낸다. 대기 중인 내 요청이 없어 result 이벤트는 없다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-no-error-drain-then-close"
       ],
       "setup": {
         "role": "client",
@@ -572,8 +583,9 @@
     {
       "id": "close-received-no-error-with-no-pending-streams-closes-immediately",
       "description": "대기 중인 스트림이 처음부터 없는 서버 역할 구현이 CLOSE(NO_ERROR)를 받으면 기다릴 스트림이 없으므로 아무것도 보내지 않고 곧바로 전송 계층을 닫고 closed 이벤트를 낸다. CLOSE로 답하지 않는다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-no-error-drain-then-close",
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "server",
@@ -595,8 +607,9 @@
     {
       "id": "disconnect-fails-pending-request-with-unavailable",
       "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 상대 엔드포인트가 CLOSE 없이 전송 계층을 끊으면(disconnect) 아무것도 보내지 않는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 정확히 한 번 받고, 그 뒤에 closed 이벤트가 난다. CLOSE로 끝나는 경우와 같은 규칙이다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-end-pending-unavailable",
+        "req-close-end-closed-event"
       ],
       "setup": {
         "role": "client",
@@ -634,8 +647,8 @@
     {
       "id": "disconnect-without-pending-request-only-closes",
       "description": "서버 역할 구현이 대기 중인 스트림이 없을 때 상대 엔드포인트가 CLOSE 없이 전송 계층을 끊으면(disconnect) 아무것도 보내지 않고 closed 이벤트만 난다. 넘길 result가 없다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-end-closed-event"
       ],
       "setup": {
         "role": "server",
@@ -656,8 +669,8 @@
     {
       "id": "disconnect-after-closed-emits-nothing",
       "description": "대기 중인 스트림이 없는 클라이언트 역할 구현이 비-NO_ERROR CLOSE(PROTOCOL_ERROR)를 받으면 아무것도 보내지 않고 닫고 closed 이벤트를 낸다. 이미 닫힌 뒤 전송 계층 끊김(disconnect)이 감지되어도 closed를 다시 내지 않고 아무것도 보내지 않는다. closed는 연결당 정확히 한 번이다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-closed-once"
       ],
       "setup": {
         "role": "client",
@@ -684,10 +697,11 @@
     {
       "id": "length-error-after-own-no-error-close-closes-without-resend",
       "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 CLOSE(NO_ERROR)를 보낸 뒤, length가 15인(16 미만) 프레임을 받으면 5.1절 3번 연결 오류다. 이미 CLOSE를 보냈으므로 두 번째 CLOSE(PROTOCOL_ERROR)는 보내지 않고 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 정확히 한 번 받고, 그 뒤에 closed 이벤트가 난다",
-      "spec": [
-        "2.2.1",
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-frame-length-range-error",
+        "req-check-connection-error-silent-close",
+        "req-close-after-close-no-close",
+        "req-close-end-pending-unavailable"
       ],
       "setup": {
         "role": "client",
@@ -738,10 +752,11 @@
     {
       "id": "extension-length-error-after-own-no-error-close-closes-without-resend",
       "description": "클라이언트 역할 구현이 요청 1을 대기시킨 채 CLOSE(NO_ERROR)를 보낸 뒤, extensions_length(4)가 length-16(0)를 넘는 프레임을 받으면 5.1절 3번 연결 오류다. 이미 CLOSE를 보냈으므로 두 번째 CLOSE(PROTOCOL_ERROR)는 보내지 않고 닫는다. 대기 중인 내 요청 1은 로컬 status=UNAVAILABLE의 result를 정확히 한 번 받고, 그 뒤에 closed 이벤트가 난다",
-      "spec": [
-        "2.2.6",
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-frame-extensions-length-error",
+        "req-check-connection-error-silent-close",
+        "req-close-after-close-no-close",
+        "req-close-end-pending-unavailable"
       ],
       "setup": {
         "role": "client",
@@ -792,10 +807,9 @@
     {
       "id": "close-with-extensions-closes-silently",
       "description": "CLOSE의 extensions_length가 0이 아니면 연결 오류이지만 type이 CLOSE이므로 받은 CLOSE로 보고 CLOSE를 보내지 않고 조용히 닫는다. 다른 제어 프레임처럼 CLOSE(PROTOCOL_ERROR)를 보내지 않는다",
-      "spec": [
-        "2.4.3",
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-ext-control-nonzero-error",
+        "req-check-connection-error-silent-close"
       ],
       "setup": {
         "role": "server",
@@ -817,9 +831,9 @@
     {
       "id": "close-payload-three-bytes-closes-silently",
       "description": "CLOSE의 payload가 12바이트 미만(3바이트)이면 연결 오류이고, 받은 CLOSE로 보므로 CLOSE 없이 조용히 닫는다",
-      "spec": [
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-close-malformed-payload-length-error",
+        "req-check-connection-error-silent-close"
       ],
       "setup": {
         "role": "server",
@@ -841,9 +855,9 @@
     {
       "id": "close-payload-empty-closes-silently",
       "description": "CLOSE의 payload가 비어 있어도(0바이트) 같다. CLOSE 없이 조용히 닫는다",
-      "spec": [
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-close-malformed-payload-length-error",
+        "req-check-connection-error-silent-close"
       ],
       "setup": {
         "role": "server",
@@ -865,10 +879,9 @@
     {
       "id": "close-with-nonzero-stream-id-closes-silently",
       "description": "CLOSE의 stream_id가 0이 아니면 연결 오류이고, 받은 CLOSE로 보므로 CLOSE 없이 조용히 닫는다",
-      "spec": [
-        "2.2.5",
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-stream-control-id-nonzero-error",
+        "req-check-connection-error-silent-close"
       ],
       "setup": {
         "role": "server",
@@ -890,10 +903,9 @@
     {
       "id": "close-length-below-minimum-closes-silently",
       "description": "type이 CLOSE인 프레임의 length가 16 미만(15)이어도 받은 CLOSE로 보고 CLOSE 없이 조용히 닫는다. 예외는 없다",
-      "spec": [
-        "2.2.1",
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-frame-length-range-error",
+        "req-check-connection-error-silent-close"
       ],
       "setup": {
         "role": "server",
@@ -915,10 +927,9 @@
     {
       "id": "close-length-above-max-frame-size-closes-silently",
       "description": "type이 CLOSE인 프레임의 length가 자기가 알린 max_frame_size(16,384) − 4를 넘어도 받은 CLOSE로 보고 CLOSE 없이 조용히 닫는다",
-      "spec": [
-        "2.2.1",
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-frame-length-range-error",
+        "req-check-connection-error-silent-close"
       ],
       "setup": {
         "role": "server",
@@ -943,9 +954,10 @@
     {
       "id": "malformed-close-fails-pending-request-with-unavailable",
       "description": "형태가 잘못된 CLOSE를 받으면 CLOSE 없이 닫는다. 대기 중인 내 요청 1은 로컬 UNAVAILABLE을 정확히 한 번 받고 그 뒤 closed가 난다",
-      "spec": [
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-close-malformed-payload-length-error",
+        "req-check-connection-error-silent-close",
+        "req-close-end-pending-unavailable"
       ],
       "setup": {
         "role": "client",
@@ -984,8 +996,8 @@
     {
       "id": "request-after-close-sent-fails-locally",
       "description": "CLOSE를 보낸 뒤 애플리케이션의 새 요청은 프레임을 보내지 않고 로컬 UNAVAILABLE로 실패한다. 스트림을 열기 전의 결과라서 stream_id가 없는 result(처리 안 됨)로 단언한다. 상대 스트림 1이 대기 중이라 연결은 열려 있다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-new-request-local-unavailable"
       ],
       "setup": {
         "role": "server",
@@ -1033,8 +1045,8 @@
     {
       "id": "request-after-close-received-fails-locally-server",
       "description": "서버 역할 구현도 CLOSE를 받은 뒤의 새 요청을 프레임 없이 로컬 UNAVAILABLE로 실패시킨다. stream_id가 없는 result(처리 안 됨)로 단언한다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-new-request-local-unavailable"
       ],
       "setup": {
         "role": "server",
@@ -1076,8 +1088,8 @@
     {
       "id": "application-close-after-close-sent-sends-nothing",
       "description": "CLOSE를 보낸 뒤에는 CLOSE를 보내지 않는다. 애플리케이션이 CLOSE(NO_ERROR)를 다시 지시해도 아무것도 보내지 않는다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "server",
@@ -1119,8 +1131,8 @@
     {
       "id": "application-close-after-close-received-sends-nothing",
       "description": "CLOSE를 받은 뒤에는 CLOSE를 보내지 않는다. 애플리케이션이 CLOSE(NO_ERROR)를 지시해도 아무것도 보내지 않는다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "server",
@@ -1154,11 +1166,11 @@
       ]
     },
     {
-      "id": "reserved-close-error-code-six-closes-immediately",
-      "description": "예약 error_code(6)의 CLOSE는 INTERNAL_ERROR로 취급하므로 오류 CLOSE다. 상대가 연 스트림 1이 대기 중이어도 기다리지 않고 CLOSE로 답하지 않고 즉시 닫는다",
-      "spec": [
-        "2.5.2",
-        "3.5"
+      "id": "reserved-close-error-code-eight-closes-immediately",
+      "description": "예약 error_code(8)의 CLOSE는 INTERNAL_ERROR로 취급하므로 오류 CLOSE다. 상대가 연 스트림 1이 대기 중이어도 기다리지 않고 CLOSE로 답하지 않고 즉시 닫는다",
+      "requirements": [
+        "req-error-code-reserved-internal-recv",
+        "req-close-error-close-immediate"
       ],
       "setup": {
         "role": "server",
@@ -1179,7 +1191,7 @@
         },
         {
           "kind": "recv",
-          "hex": "0000001c00030000000000000000000000000000000000060000000000000000",
+          "hex": "0000001c00030000000000000000000000000000000000080000000000000000",
           "send": [],
           "events": [
             {
@@ -1192,9 +1204,9 @@
     {
       "id": "reserved-close-error-code-max-closes-immediately",
       "description": "예약 error_code(4294967295)의 CLOSE는 INTERNAL_ERROR로 취급하므로 오류 CLOSE다. 상대가 연 스트림 1이 대기 중이어도 기다리지 않고 CLOSE로 답하지 않고 즉시 닫는다",
-      "spec": [
-        "2.5.2",
-        "3.5"
+      "requirements": [
+        "req-error-code-reserved-internal-recv",
+        "req-close-error-close-immediate"
       ],
       "setup": {
         "role": "server",
@@ -1228,9 +1240,10 @@
     {
       "id": "connection-error-fails-pending-request-with-unavailable",
       "description": "연결 오류로 CLOSE(PROTOCOL_ERROR)를 보내고 닫을 때 대기 중인 내 요청 1은 로컬 UNAVAILABLE을 정확히 한 번 받고 그 뒤 closed가 난다",
-      "spec": [
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-ping-payload-length-error",
+        "req-check-connection-error-close",
+        "req-close-end-pending-unavailable"
       ],
       "setup": {
         "role": "client",
@@ -1275,8 +1288,9 @@
     {
       "id": "disconnect-while-closing-fails-pending-request-with-unavailable",
       "description": "CLOSE(NO_ERROR)를 받아 종료 중일 때 상대가 CLOSE 없이 전송 계층을 끊어도 대기 중인 내 요청 1은 로컬 UNAVAILABLE을 정확히 한 번 받고 그 뒤 closed가 난다. 아무것도 보내지 않는다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-end-pending-unavailable",
+        "req-close-end-closed-event"
       ],
       "setup": {
         "role": "client",
@@ -1320,8 +1334,9 @@
     {
       "id": "disconnect-leaves-peer-opened-stream-without-result",
       "description": "상대가 연 스트림은 내 요청이 아니므로 전송 계층이 끊겨도 result를 넘기지 않는다. closed만 난다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-end-pending-unavailable",
+        "req-close-end-closed-event"
       ],
       "setup": {
         "role": "server",
@@ -1354,8 +1369,9 @@
     {
       "id": "close-reason-not-utf8-is-not-validated",
       "description": "CLOSE의 reason이 UTF-8이 아니어도 검증하지 않는다. 연결 오류로 취급하지 않고 일반 CLOSE(NO_ERROR)처럼 받아 종료 중이 되며, 대기 중인 스트림 1의 응답을 보내면 닫힌다",
-      "spec": [
-        "3.5"
+      "requirements": [
+        "req-close-reason-no-validate",
+        "req-close-no-error-drain-then-close"
       ],
       "setup": {
         "role": "server",
@@ -1402,9 +1418,9 @@
     {
       "id": "close-last-stream-id-ends-crossed-request-as-not-processed",
       "description": "클라이언트 역할 구현이 요청 1과 3을 대기시킨 채 CLOSE(NO_ERROR, last_stream_id=1)를 받으면, 1보다 큰 요청 3은 받는 즉시 stream_id 3의 로컬 UNAVAILABLE(처리 안 됨) result를 정확히 한 번 받는다. 요청 1은 대기를 이어 가고, 응답을 받은 뒤에 closed가 난다",
-      "spec": [
-        "3.5",
-        "4.3"
+      "requirements": [
+        "req-close-recv-unavailable-above-last-id",
+        "req-close-no-error-drain-then-close"
       ],
       "setup": {
         "role": "client",
@@ -1467,9 +1483,11 @@
     {
       "id": "error-close-last-stream-id-ends-crossed-request-as-not-processed",
       "description": "클라이언트 역할 구현이 요청 1과 3을 대기시킨 채 CLOSE(INTERNAL_ERROR, last_stream_id=1)를 받으면 아무것도 보내지 않고 닫는다. 1보다 큰 요청 3은 CLOSE를 받는 즉시 처리 안 됨, 요청 1은 연결이 끝날 때 결과 모름이고, 그 뒤에 closed가 난다",
-      "spec": [
-        "3.5",
-        "4.3"
+      "requirements": [
+        "req-close-recv-unavailable-above-last-id",
+        "req-close-error-close-immediate",
+        "req-close-end-pending-unavailable",
+        "req-close-after-close-no-close"
       ],
       "setup": {
         "role": "client",
@@ -1525,9 +1543,9 @@
     {
       "id": "close-last-stream-id-zero-ends-every-request-as-not-processed",
       "description": "last_stream_id가 0인 CLOSE(NO_ERROR)는 어떤 요청도 받지 않았다는 뜻이다. 대기 중인 요청 1은 받는 즉시 처리 안 됨으로 끝나고, 대기 중인 스트림이 없어졌으므로 그 뒤에 closed가 난다",
-      "spec": [
-        "3.5",
-        "4.3"
+      "requirements": [
+        "req-close-recv-unavailable-above-last-id",
+        "req-close-no-error-drain-then-close"
       ],
       "setup": {
         "role": "client",
@@ -1566,9 +1584,10 @@
     {
       "id": "close-last-stream-id-in-own-number-space-is-malformed",
       "description": "클라이언트 역할 구현이 받은 CLOSE의 last_stream_id가 0이 아니면서 내 번호 공간(홀수)이 아닌 2이면 형태가 잘못된 CLOSE다. CLOSE 없이 닫고, 대기 중인 내 요청 1은 결과 모름이다",
-      "spec": [
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-close-malformed-last-id-own-space-error",
+        "req-check-connection-error-silent-close",
+        "req-close-end-pending-unavailable"
       ],
       "setup": {
         "role": "client",
@@ -1607,9 +1626,10 @@
     {
       "id": "close-last-stream-id-above-highest-sent-is-malformed",
       "description": "내가 보낸 가장 큰 요청 번호(1)보다 큰 last_stream_id(3)를 담은 CLOSE는 형태가 잘못된 CLOSE다. CLOSE 없이 닫고, 대기 중인 내 요청 1은 결과 모름이다",
-      "spec": [
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-close-malformed-last-id-above-sent-error",
+        "req-check-connection-error-silent-close",
+        "req-close-end-pending-unavailable"
       ],
       "setup": {
         "role": "client",
@@ -1648,9 +1668,9 @@
     {
       "id": "close-payload-eleven-bytes-closes-silently",
       "description": "CLOSE의 payload가 12바이트 미만(11바이트)이면 형태가 잘못된 CLOSE다. 연결 오류이고, 받은 CLOSE로 보므로 CLOSE 없이 조용히 닫는다",
-      "spec": [
-        "3.5",
-        "5.1"
+      "requirements": [
+        "req-close-malformed-payload-length-error",
+        "req-check-connection-error-silent-close"
       ],
       "setup": {
         "role": "server",
@@ -1672,9 +1692,9 @@
     {
       "id": "first-close-last-stream-id-is-the-only-one-used",
       "description": "클라이언트 역할 구현이 요청 1, 3, 5를 대기시킨 채 CLOSE(NO_ERROR, last_stream_id=3)를 받으면 요청 5가 처리 안 됨으로 끝난다. 이어서 받은 두 번째 CLOSE(last_stream_id=1)의 값은 쓰지 않으므로 요청 3은 대기를 이어 가고 아무 이벤트도 나지 않는다",
-      "spec": [
-        "3.5",
-        "4.3"
+      "requirements": [
+        "req-close-first-last-id-only",
+        "req-close-recv-unavailable-above-last-id"
       ],
       "setup": {
         "role": "client",

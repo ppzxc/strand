@@ -19,9 +19,7 @@ import org.junit.jupiter.api.Test;
 /** CLOSE의 {@code last_stream_id}와 CLOSE 뒤 새 요청 폐기를 벡터가 빠짐없이 다루는지 본다(#162). */
 class CloseLastStreamIdTest {
 
-    private static final Path SPEC = VectorSuite.defaultDirectory()
-            .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
-            .normalize();
+    private static final Path SPEC = RequirementIndex.specificationFile();
 
     /** 받는 CLOSE의 payload가 12바이트 미만인 것이 벡터의 목적인 벡터. */
     private static final Set<String> SHORT_CLOSE_VECTORS = new TreeSet<>(Arrays.asList(

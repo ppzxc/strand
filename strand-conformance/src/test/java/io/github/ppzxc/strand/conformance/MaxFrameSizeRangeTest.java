@@ -15,13 +15,9 @@ import org.junit.jupiter.api.Test;
 /** `max_frame_size`의 기본값과 허용 범위가 규격, 형식 문서, 경계 벡터에 같은 값으로 들어 있는지 본다(#164). */
 class MaxFrameSizeRangeTest {
 
-    private static final Path VECTOR_DIR = VectorSuite.defaultDirectory();
-    private static final Path SPEC = VECTOR_DIR
-            .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
-            .normalize();
-    private static final Path FORMAT = VECTOR_DIR
-            .resolve("../../docs/specification/STRAND_CONFORMANCE_VECTORS.md")
-            .normalize();
+    private static final Path SPEC = RequirementIndex.specificationFile();
+    private static final Path FORMAT =
+            RequirementIndex.repositoryRoot().resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
 
     private static final long KIB_16 = 16L * 1024;
     private static final long MIB_1 = 1024L * 1024;

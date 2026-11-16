@@ -121,10 +121,8 @@ class ResultCertaintyTest {
     /** 벡터 형식 6.2절과 규격 4.4절·4.4.1절이 어긋나지 않는다: stream_id 없는 result의 status 집합이 세 가지다. */
     @Test
     void formatDocumentSection62ListsTheQueuedRequestOutcomes() throws java.io.IOException {
-        java.nio.file.Path doc = VectorSuite.defaultDirectory()
-                .resolve("../..")
-                .normalize()
-                .resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
+        java.nio.file.Path doc =
+                RequirementIndex.repositoryRoot().resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
         String text = new String(java.nio.file.Files.readAllBytes(doc), java.nio.charset.StandardCharsets.UTF_8);
         String section = text.substring(text.indexOf("### 6.2"), text.indexOf("## 7."));
         assertThat(section)

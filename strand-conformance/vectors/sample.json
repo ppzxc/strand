@@ -4,7 +4,7 @@
     {
       "id": "ping-is-acknowledged",
       "description": "PING을 받으면 같은 8바이트에 ACK를 붙여 돌려준다",
-      "spec": ["3.4"],
+      "requirements": ["req-ping-ack-reply", "req-frame-reserved-zero-send", "req-frame-status-nonresponse-zero-send"],
       "setup": { "role": "server", "established": true },
       "steps": [
         {

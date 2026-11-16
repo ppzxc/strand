@@ -5,18 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
-import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -30,16 +25,10 @@ class NewVectorCoverageTest {
 
     private static Map<Integer, List<String>> required() throws IOException {
         Map<Integer, List<String>> result = new LinkedHashMap<>();
-        try (Reader reader = new InputStreamReader(
-                NewVectorCoverageTest.class.getResourceAsStream("/required-vectors.txt"), StandardCharsets.UTF_8)) {
-            for (String line : new BufferedReader(reader).lines().collect(Collectors.toList())) {
-                if (line.isEmpty() || line.startsWith("#")) {
-                    continue;
-                }
-                String[] parts = line.split(" ");
-                int n = Integer.parseInt(parts[0].substring("B-".length()));
-                result.computeIfAbsent(n, k -> new ArrayList<>()).add(parts[1]);
-            }
+        for (String line : UncoveredRequirements.dataLines("/required-vectors.txt")) {
+            String[] parts = line.split(" ");
+            int n = Integer.parseInt(parts[0].substring("B-".length()));
+            result.computeIfAbsent(n, k -> new ArrayList<>()).add(parts[1]);
         }
         return result;
     }
@@ -218,17 +207,6 @@ class NewVectorCoverageTest {
             JsonObject last = steps.get(steps.size() - 1).getAsJsonObject();
             assertThat(last.get("kind").getAsString()).isEqualTo("close");
             assertThat(last.getAsJsonArray("send")).isEmpty();
-        }
-    }
-
-    @Test
-    void newVectorSpecReferencesNeverUseRemovedSubsections() throws IOException {
-        for (Map.Entry<Integer, List<String>> entry : required().entrySet()) {
-            for (String key : entry.getValue()) {
-                for (JsonElement ref : vector(key).getAsJsonArray("spec")) {
-                    assertThat(ref.getAsString()).as(key).doesNotStartWith("5.1.");
-                }
-            }
         }
     }
 }

@@ -58,9 +58,9 @@ final class VectorLoader {
         JsonObject vector = check.object(Check.ROOT, element, VectorSchema.VECTOR);
         VectorSchema.crossCheck(check, vector);
 
-        List<String> spec = new ArrayList<>();
-        for (JsonElement section : vector.getAsJsonArray("spec")) {
-            spec.add(section.getAsString());
+        List<String> requirements = new ArrayList<>();
+        for (JsonElement id : vector.getAsJsonArray("requirements")) {
+            requirements.add(id.getAsString());
         }
         List<JsonObject> steps = new ArrayList<>();
         for (JsonElement step : vector.getAsJsonArray("steps")) {
@@ -69,7 +69,7 @@ final class VectorLoader {
         return new ConformanceVector(
                 vector.get("id").getAsString(),
                 vector.get("description").getAsString(),
-                spec,
+                requirements,
                 vector.getAsJsonObject("setup"),
                 steps);
     }

@@ -210,7 +210,8 @@
         "type": { "const": "CLOSE" },
         "stream_id": { "const": "0" },
         "error_code": { "$ref": "#/$defs/error_code" },
-        "last_stream_id": { "$ref": "#/$defs/last_stream_id" }
+        "last_stream_id": { "$ref": "#/$defs/last_stream_id" },
+        "reason": { "type": "string", "description": "CLOSE의 reason(UTF-8 문자열). 생략하면 비교하지 않고, 적으면 바이트까지 같아야 한다(형식 문서 6.1절)." }
       }
     },
     "frame_reset": {
@@ -416,14 +417,15 @@
     "vector": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "description", "spec", "setup", "steps"],
+      "required": ["id", "description", "requirements", "setup", "steps"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
         "description": { "type": "string", "minLength": 1 },
-        "spec": {
+        "requirements": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "pattern": "^(?:[0-9]+|[A-G])(?:\\.[0-9]+)*$" }
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^req-[a-z0-9]+(-[a-z0-9]+)*$" }
         },
         "setup": { "$ref": "#/$defs/setup" },
         "steps": {

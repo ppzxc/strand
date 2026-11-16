@@ -5,9 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -15,17 +13,13 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /** 규격 0.1.0에 맞춰 개정한 실제 벡터 디렉터리가 지킬 규칙(#97). 벡터 목록 자체는 단언하지 않는다. */
 class VectorRevisionTest {
 
-    private static final Path SPEC = VectorSuite.defaultDirectory()
-            .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
-            .normalize();
+    private static final Path SPEC = RequirementIndex.specificationFile();
 
     /** 삭제된 개념의 JSON 키 이름. 어느 깊이의 객체에도 나오면 안 된다. */
     private static final List<String> REMOVED_KEYS = Arrays.asList(
@@ -94,31 +88,12 @@ class VectorRevisionTest {
     }
 
     private static List<String> deletedIds() throws IOException {
-        try (Reader reader = new InputStreamReader(
-                VectorRevisionTest.class.getResourceAsStream("/deleted-vector-ids.txt"), StandardCharsets.UTF_8)) {
-            return new BufferedReader(reader)
-                    .lines()
-                    .filter(line -> !line.isEmpty() && !line.startsWith("#"))
-                    .collect(Collectors.toList());
-        }
-    }
-
-    /** 규격 본문의 제목에 실제로 있는 절 번호. */
-    private static List<String> specSections() throws IOException {
-        Pattern heading = Pattern.compile("^#{2,4} (\\d+(?:\\.\\d+)*)\\.?\\s");
-        List<String> sections = new ArrayList<>();
-        for (String line : Files.readAllLines(SPEC, StandardCharsets.UTF_8)) {
-            Matcher m = heading.matcher(line);
-            if (m.find()) {
-                sections.add(m.group(1));
-            }
-        }
-        return sections;
+        return UncoveredRequirements.dataLines("/deleted-vector-ids.txt");
     }
 
     @Test
     void deletedVectorIdsAreAbsentFromEveryFile() throws IOException {
-        assertThat(deletedIds()).hasSize(66);
+        assertThat(deletedIds()).hasSize(67);
         assertThat(allIds()).doesNotContainAnyElementsOf(deletedIds());
     }
 
@@ -166,17 +141,17 @@ class VectorRevisionTest {
     }
 
     @Test
-    void everySpecReferencePointsToAnExistingSection() throws IOException {
-        List<String> sections = specSections();
-        assertThat(sections).contains("5.1", "3.2.5", "2.2.5").doesNotContain("5.1.1", "5.1.2", "5.1.3");
+    void everyRequirementReferencePointsToAnExistingIdentifier() {
+        RequirementIndex index = RequirementIndex.ofSpecification();
+        assertThat(index.requirement("req-check-new-request-order")).isNotNull();
         for (Path file : RawVectors.files()) {
             for (JsonObject vector : RawVectors.vectors(file)) {
-                for (JsonElement ref : vector.getAsJsonArray("spec")) {
-                    assertThat(sections)
+                for (String id : RawVectors.requirementsOf(vector)) {
+                    assertThat(index.requirement(id))
                             .as(
-                                    "%s/%s의 spec %s",
-                                    file.getFileName(), vector.get("id").getAsString(), ref.getAsString())
-                            .contains(ref.getAsString());
+                                    "%s/%s의 requirements %s",
+                                    file.getFileName(), vector.get("id").getAsString(), id)
+                            .isNotNull();
                 }
             }
         }

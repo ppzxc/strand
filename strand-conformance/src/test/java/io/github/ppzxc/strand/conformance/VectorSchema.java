@@ -65,7 +65,7 @@ final class VectorSchema {
     static final Shape VECTOR = Shape.EMPTY
             .require("id", Check::id)
             .require("description", Check::nonEmptyText)
-            .require("spec", Check::specSections)
+            .require("requirements", Check::requirementIds)
             .require("setup", VectorSchema::setup)
             .require("steps", VectorSchema::steps);
 

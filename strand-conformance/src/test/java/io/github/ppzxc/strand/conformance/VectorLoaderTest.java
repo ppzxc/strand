@@ -1,16 +1,22 @@
 package io.github.ppzxc.strand.conformance;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
@@ -21,11 +27,11 @@ class VectorLoaderTest {
 
     private static final String SETUP = "{\"role\":\"server\",\"established\":true}";
     private static final String STEP = "{\"kind\":\"recv\",\"hex\":\"00ff\",\"send\":[],\"events\":[]}";
-    private static final String VALID_VECTOR = vector("a", "[\"3.4\"]", SETUP, "[" + STEP + "]");
+    private static final String VALID_VECTOR = vector("a", "[\"req-a-b\"]", SETUP, "[" + STEP + "]");
 
-    private static String vector(String id, String spec, String setup, String steps) {
-        return "{\"id\":\"" + id + "\",\"description\":\"d\",\"spec\":" + spec + ",\"setup\":" + setup + ",\"steps\":"
-                + steps + "}";
+    private static String vector(String id, String requirements, String setup, String steps) {
+        return "{\"id\":\"" + id + "\",\"description\":\"d\",\"requirements\":" + requirements + ",\"setup\":" + setup
+                + ",\"steps\":" + steps + "}";
     }
 
     private static String file(String... vectors) {
@@ -34,11 +40,11 @@ class VectorLoaderTest {
 
     /** 유효한 벡터 하나에 단계 하나만 바꿔 넣은 파일. */
     private static String fileWithStep(String stepFields) {
-        return file(vector("a", "[\"3.4\"]", SETUP, "[{" + stepFields + "}]"));
+        return file(vector("a", "[\"req-a-b\"]", SETUP, "[{" + stepFields + "}]"));
     }
 
     private static String fileWithSetup(String setup) {
-        return file(vector("a", "[\"3.4\"]", setup, "[" + STEP + "]"));
+        return file(vector("a", "[\"req-a-b\"]", setup, "[" + STEP + "]"));
     }
 
     private static String recvWithSend(String frame) {
@@ -127,23 +133,16 @@ class VectorLoaderTest {
                 .hasMessageContaining("deadline_ms");
     }
 
+    private static String withRequirements(String requirements) {
+        return vector("a", requirements, SETUP, "[" + STEP + "]");
+    }
+
     @Test
-    void loadsAppendixGExample() {
-        String json = "{\"format\":2,\"vectors\":[{\"id\":\"ping-is-acknowledged\","
-                + "\"description\":\"PING을 받으면 같은 8바이트에 ACK를 붙여 돌려준다\",\"spec\":[\"3.4\"],"
-                + "\"setup\":{\"role\":\"server\",\"established\":true},\"steps\":[{\"kind\":\"recv\","
-                + "\"hex\":\"00000014 00020000 00000000 00000000 0102030405060708\","
-                + "\"send\":[{\"type\":\"PING\",\"flags\":[\"ACK\"],\"payload\":\"0102030405060708\"}],"
-                + "\"events\":[]}]}]}";
-
-        List<ConformanceVector> vectors = VectorLoader.parse("x.json", json);
-
-        assertThat(vectors).hasSize(1);
-        ConformanceVector vector = vectors.get(0);
-        assertThat(vector.id()).isEqualTo("ping-is-acknowledged");
-        assertThat(vector.description()).contains("PING");
-        assertThat(vector.spec()).containsExactly("3.4");
-        assertThat(vector.steps()).hasSize(1);
+    void requirementsIsARequiredListOfRequirementIds() {
+        ConformanceVector vector = VectorLoader.parse("x.json", file(withRequirements("[\"req-a-b\",\"req-c-send\"]")))
+                .get(0);
+        assertThat(vector.requirements()).containsExactly("req-a-b", "req-c-send");
+        assertThatThrownBy(() -> vector.requirements().add("x")).isInstanceOf(UnsupportedOperationException.class);
     }
 
     @Test
@@ -156,7 +155,7 @@ class VectorLoaderTest {
                 + "{\"type\":256,\"stream_id\":\"1\"}],\"events\":[]},"
                 + "{\"kind\":\"respond\",\"stream_id\":\"1\",\"status\":\"OK\",\"send\":[],\"events\":[]}]";
 
-        assertThat(VectorLoader.parse("x.json", file(vector("a", "[\"3.4\"]", SETUP, steps))))
+        assertThat(VectorLoader.parse("x.json", file(vector("a", "[\"req-a-b\"]", SETUP, steps))))
                 .hasSize(1);
     }
 
@@ -182,7 +181,7 @@ class VectorLoaderTest {
                 + "{\"kind\":\"ping\",\"payload\":\"0102030405060708\",\"send\":[],\"events\":[]},"
                 + "{\"kind\":\"disconnect\",\"send\":[],\"events\":[{\"event\":\"closed\"}]}]";
 
-        assertThat(VectorLoader.parse("x.json", file(vector("a", "[\"2.4.2\",\"5.1\"]", setup, steps))))
+        assertThat(VectorLoader.parse("x.json", file(vector("a", "[\"req-a-b\",\"req-c-send\"]", setup, steps))))
                 .hasSize(1);
     }
 
@@ -195,7 +194,7 @@ class VectorLoaderTest {
                 + "\"events\":[{\"event\":\"result\",\"stream_id\":\"" + big
                 + "\",\"status\":\"OK\",\"certainty\":\"response\"}]}]";
 
-        ConformanceVector vector = VectorLoader.parse("x.json", file(vector("a", "[\"3.4\"]", setup, steps)))
+        ConformanceVector vector = VectorLoader.parse("x.json", file(vector("a", "[\"req-a-b\"]", setup, steps)))
                 .get(0);
 
         assertThat(vector.setup().get("next_stream_id").getAsString()).isEqualTo(big);
@@ -300,18 +299,29 @@ class VectorLoaderTest {
                 "필수 필드 누락",
                 "description",
                 "a"));
-        t.add(rejected("missing spec", file(VALID_VECTOR.replace("\"spec\":[\"3.4\"],", "")), "필수 필드 누락", "spec", "a"));
+        t.add(rejected(
+                "missing requirements",
+                file(VALID_VECTOR.replace("\"requirements\":[\"req-a-b\"],", "")),
+                "필수 필드 누락",
+                "requirements",
+                "a"));
+        t.add(rejected(
+                "leftover spec field",
+                file(VALID_VECTOR.replace("\"requirements\"", "\"spec\":[\"3.4\"],\"requirements\"")),
+                "spec",
+                "a"));
         t.add(rejected(
                 "missing setup", file(VALID_VECTOR.replace("\"setup\":" + SETUP + ",", "")), "필수 필드 누락", "setup", "a"));
         t.add(rejected(
                 "missing steps",
-                file(vector("a", "[\"3.4\"]", SETUP, "[]").replace(",\"steps\":[]", "")),
+                file(vector("a", "[\"req-a-b\"]", SETUP, "[]").replace(",\"steps\":[]", "")),
                 "필수 필드 누락",
                 "steps",
                 "a"));
         t.add(rejected("duplicate id in file", file(VALID_VECTOR, VALID_VECTOR), "id 중복", "a"));
         for (String badId : new String[] {"", "A", "a_b", "-a", "a-", "a--b", "a b", "가"}) {
-            t.add(rejected("bad id '" + badId + "'", file(vector(badId, "[\"3.4\"]", SETUP, "[" + STEP + "]")), "id"));
+            t.add(rejected(
+                    "bad id '" + badId + "'", file(vector(badId, "[\"req-a-b\"]", SETUP, "[" + STEP + "]")), "id"));
         }
         t.add(rejected("non-string id", file(VALID_VECTOR.replace("\"id\":\"a\"", "\"id\":1")), "id", "문자열"));
         t.add(rejected(
@@ -319,14 +329,19 @@ class VectorLoaderTest {
                 file(VALID_VECTOR.replace("\"description\":\"d\"", "\"description\":\"\"")),
                 "description",
                 "a"));
-        t.add(rejected("empty spec", file(vector("a", "[]", SETUP, "[" + STEP + "]")), "spec", "a"));
-        t.add(rejected(
-                "spec element not a section number",
-                file(vector("a", "[\"#12\"]", SETUP, "[" + STEP + "]")),
-                "spec",
-                "a"));
-        t.add(rejected("spec element not string", file(vector("a", "[3]", SETUP, "[" + STEP + "]")), "spec", "a"));
-        t.add(rejected("empty steps", file(vector("a", "[\"3.4\"]", SETUP, "[]")), "steps", "a"));
+        t.add(rejected("empty steps", file(vector("a", "[\"req-a-b\"]", SETUP, "[]")), "steps", "a"));
+        for (String bad : new String[] {
+            "[]",
+            "[3]",
+            "[\"a-b\"]",
+            "[\"req-\"]",
+            "[\"req-A\"]",
+            "[\"req-a_b\"]",
+            "[\"req-a--b\"]",
+            "[\"req-a\",\"req-a\"]"
+        }) {
+            t.add(rejected("bad requirements " + bad, file(withRequirements(bad)), "requirements", "a"));
+        }
         return t.stream();
     }
 
@@ -594,7 +609,7 @@ class VectorLoaderTest {
     private static String fileWithTransportAndStep(String transport, String step) {
         return file(vector(
                 "a",
-                "[\"3.4\"]",
+                "[\"req-a-b\"]",
                 "{\"role\":\"server\",\"established\":true,\"transport\":\"" + transport + "\"}",
                 "[" + step + "]"));
     }
@@ -611,6 +626,22 @@ class VectorLoaderTest {
                         "x.json",
                         recvWithSend("{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}")))
                 .hasSize(1);
+    }
+
+    @Test
+    void acceptsAnOptionalStringCloseReasonAndRejectsANonString() {
+        assertThatCode(
+                        () -> VectorLoader.parse(
+                                "x.json",
+                                recvWithSend(
+                                        "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"\"}")))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(
+                        () -> VectorLoader.parse(
+                                "x.json",
+                                recvWithSend(
+                                        "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":1}")))
+                .hasMessageContaining("reason");
     }
 
     @TestFactory
@@ -728,7 +759,7 @@ class VectorLoaderTest {
     private static String fileWithRole(String role, boolean established, String... steps) {
         return file(vector(
                 "a",
-                "[\"3.4\"]",
+                "[\"req-a-b\"]",
                 "{\"role\":\"" + role + "\",\"established\":" + established + "}",
                 "[" + String.join(",", steps) + "]"));
     }
@@ -880,7 +911,7 @@ class VectorLoaderTest {
                 "recv_message"));
         t.add(rejected(
                 "recv_message step on default transport",
-                file(vector("a", "[\"3.4\"]", SETUP, "[" + MESSAGE_STEP + "]")),
+                file(vector("a", "[\"req-a-b\"]", SETUP, "[" + MESSAGE_STEP + "]")),
                 "tcp",
                 "recv_message"));
         t.add(rejected(
@@ -1007,24 +1038,81 @@ class VectorLoaderTest {
         assertThat(jsonBlocks(lf.replace("\n", "\r\n"))).containsExactly("{\"a\":1}", "[2]");
     }
 
+    /** 형식 문서의 JSON 블록을 모은다. 위치는 규격 위치에서 구한다. */
+    private static String formatDocument() throws IOException {
+        Path doc = RequirementIndex.repositoryRoot().resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
+        return new String(Files.readAllBytes(doc), StandardCharsets.UTF_8);
+    }
+
     /** 형식 문서의 JSON 예시가 모두 로더를 통과한다. */
     @Test
     void jsonExamplesInTheFormatDocumentPassTheLoader() throws IOException {
-        // 벡터 디렉터리에서 위로 올라가며 문서를 찾는다. 실행 위치와 벡터 디렉터리의 깊이에 기대지 않는다.
-        Path doc = null;
-        for (Path dir = VectorSuite.defaultDirectory().toAbsolutePath();
-                dir != null && doc == null;
-                dir = dir.getParent()) {
-            Path candidate = dir.resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
-            doc = Files.exists(candidate) ? candidate : null;
-        }
-        assertThat(doc).as("형식 문서를 찾을 수 없다").isNotNull();
-        List<String> blocks = jsonBlocks(new String(Files.readAllBytes(doc), StandardCharsets.UTF_8));
+        List<String> blocks = jsonBlocks(formatDocument());
         for (int i = 0; i < blocks.size(); i++) {
             assertThat(VectorLoader.parse("doc-example-" + (i + 1) + ".json", blocks.get(i)))
                     .isNotEmpty();
         }
         assertThat(blocks).hasSizeGreaterThanOrEqualTo(4);
+    }
+
+    /** 문서 2절의 첫 예시는 sample.json의 같은 id 벡터와 같다. hex는 공백만 다를 수 있다. */
+    @Test
+    void firstFormatDocumentExampleMatchesTheSameVectorInSampleJson() throws IOException {
+        List<ConformanceVector> documented = VectorLoader.parse("doc-example-1.json", firstJsonBlockOfSection2());
+        Path sample = VectorSuite.defaultDirectory().resolve("sample.json");
+        List<ConformanceVector> shipped =
+                VectorLoader.parse("sample.json", new String(Files.readAllBytes(sample), StandardCharsets.UTF_8));
+
+        assertThat(documented).isNotEmpty();
+        for (ConformanceVector example : documented) {
+            ConformanceVector twin = shipped.stream()
+                    .filter(v -> v.id().equals(example.id()))
+                    .findFirst()
+                    .orElse(null);
+            assertThat(twin).as("sample.json의 같은 id 벡터: " + example.id()).isNotNull();
+            assertThat(twin.description()).isEqualTo(example.description());
+            assertThat(twin.requirements()).isEqualTo(example.requirements());
+            assertThat(withoutHexSpaces(twin.setup())).isEqualTo(withoutHexSpaces(example.setup()));
+            assertThat(twin.steps().stream()
+                            .map(VectorLoaderTest::withoutHexSpaces)
+                            .collect(Collectors.toList()))
+                    .isEqualTo(example.steps().stream()
+                            .map(VectorLoaderTest::withoutHexSpaces)
+                            .collect(Collectors.toList()));
+        }
+    }
+
+    /** 형식 문서 2절("## 2. ...")부터 다음 절 제목 전까지에서 첫 json 블록을 꺼낸다. */
+    private static String firstJsonBlockOfSection2() throws IOException {
+        String doc = formatDocument();
+        Matcher section = Pattern.compile("(?m)^## 2\\. [^\\n]*$(.*?)(?=^## |\\z)", Pattern.DOTALL)
+                .matcher(doc);
+        assertThat(section.find()).as("형식 문서 2절").isTrue();
+        List<String> blocks = jsonBlocks(section.group(1));
+        assertThat(blocks).as("2절의 json 블록").isNotEmpty();
+        return blocks.get(0);
+    }
+
+    /** 단계 JSON의 복사본에서 모든 깊이의 hex 값에서 공백을 지운다. */
+    private static JsonObject withoutHexSpaces(JsonObject json) {
+        JsonObject copy = json.deepCopy();
+        stripHexSpaces(copy);
+        return copy;
+    }
+
+    private static void stripHexSpaces(JsonElement node) {
+        if (node.isJsonObject()) {
+            for (Map.Entry<String, JsonElement> field : node.getAsJsonObject().entrySet()) {
+                if (field.getKey().equals("hex") && field.getValue().isJsonPrimitive()) {
+                    field.setValue(
+                            new JsonPrimitive(field.getValue().getAsString().replaceAll("\\s+", "")));
+                } else {
+                    stripHexSpaces(field.getValue());
+                }
+            }
+        } else if (node.isJsonArray()) {
+            node.getAsJsonArray().forEach(VectorLoaderTest::stripHexSpaces);
+        }
     }
 
     @Test
@@ -1035,7 +1123,7 @@ class VectorLoaderTest {
         vector.setup().addProperty("role", "client");
 
         assertThat(vector.setup().get("role").getAsString()).isEqualTo("server");
-        assertThatThrownBy(() -> vector.spec().add("x")).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> vector.requirements().add("x")).isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> vector.steps().add(null)).isInstanceOf(UnsupportedOperationException.class);
     }
 }

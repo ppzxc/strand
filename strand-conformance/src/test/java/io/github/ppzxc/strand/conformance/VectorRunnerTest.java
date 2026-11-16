@@ -28,7 +28,7 @@ class VectorRunnerTest {
         for (String step : steps) {
             list.add(JsonParser.parseString(step).getAsJsonObject());
         }
-        return new ConformanceVector("v", "d", Arrays.asList("3.4"), setupJson, list);
+        return new ConformanceVector("v", "d", Arrays.asList("req-ping-ack-reply"), setupJson, list);
     }
 
     private static String recv(String hex, String send, String events) {
@@ -319,5 +319,150 @@ class VectorRunnerTest {
 
         assertThat(runner.describeMessages(twoInOne, false)).hasSize(2);
         assertThat(runner.describeMessages(split, false)).hasSize(2);
+    }
+
+    // ---- 송신 프레임의 status·reserved·CLOSE reason (벡터 형식 6.1절) ----
+
+    private static final String PING_EXPECTED = "{\"type\":\"PING\",\"payload\":\"0102030405060708\"}";
+
+    /** 헤더 20바이트 + payload. reservedHex는 헤더 끝 2바이트, statusHex는 status 1바이트. */
+    private static String frameHex(
+            String length, String type, String statusHex, String streamId, String reservedHex, String payload) {
+        return length + type + "00" + statusHex + streamId + "0000" + reservedHex + payload;
+    }
+
+    private static List<String> sentOnce(boolean client, String hex) throws ReflectiveOperationException {
+        VectorRunner runner = new VectorRunner(client, false, Endpoint.client(EndpointConfig.defaults()));
+        return runner.describeMessages(Arrays.asList(binaryMessage(Bytes.fromHex(hex))), false);
+    }
+
+    private static String expectedOf(String frameJson) {
+        return FrameKind.expected(JsonParser.parseString(frameJson).getAsJsonObject());
+    }
+
+    @Test
+    void aCleanPingMatchesItsExpectedFrame() throws ReflectiveOperationException {
+        String hex = frameHex("00000018", "0002", "00", "0000000000000000", "0000", "0102030405060708");
+
+        assertThat(sentOnce(true, hex)).containsExactly(expectedOf(PING_EXPECTED));
+    }
+
+    @Test
+    void aNonZeroReservedOnAnySentFrameFails() throws ReflectiveOperationException {
+        String ping = frameHex("00000018", "0002", "00", "0000000000000000", "0001", "0102030405060708");
+        String request = frameHex("00000010", "0100", "00", "0000000000000001", "8000", "");
+
+        assertThat(sentOnce(true, ping)).singleElement().asString().endsWith(" reserved=0x0001");
+        assertThat(sentOnce(true, request)).singleElement().asString().endsWith(" reserved=0x8000");
+    }
+
+    @Test
+    void aNonZeroStatusOnAControlFrameFails() throws ReflectiveOperationException {
+        String ping = frameHex("00000018", "0002", "01", "0000000000000000", "0000", "0102030405060708");
+
+        assertThat(sentOnce(true, ping)).singleElement().asString().endsWith(" sent_status=1");
+    }
+
+    @Test
+    void aNonZeroReservedOrStatusOnAnUnreadableFrameFails() throws ReflectiveOperationException {
+        String truncatedClose = frameHex("00000010", "0003", "02", "0000000000000000", "0001", "");
+
+        assertThat(sentOnce(true, truncatedClose))
+                .singleElement()
+                .asString()
+                .contains("reserved=0x0001")
+                .contains("sent_status=2");
+    }
+
+    @Test
+    void aNonZeroStatusOnARequestFrameFailsButAResponseStatusIsStillCompared() throws ReflectiveOperationException {
+        String request = frameHex("00000010", "0100", "01", "0000000000000001", "0000", "");
+        String okResponse = frameHex("00000010", "0100", "00", "0000000000000002", "0000", "");
+
+        assertThat(sentOnce(true, request)).singleElement().asString().endsWith(" sent_status=1");
+        // 클라이언트 쪽에서 짝수 stream_id는 응답이다. status는 기존대로 기대와 비교한다.
+        assertThat(sentOnce(true, okResponse))
+                .containsExactly(expectedOf("{\"type\":256,\"stream_id\":\"2\",\"status\":\"OK\"}"));
+    }
+
+    private static final String CLOSE_PAYLOAD_NO_ERROR = "00000000" + "0000000000000000";
+
+    private static List<String> closeWithReason(String reasonHex, String expectedSend)
+            throws ReflectiveOperationException {
+        int length = 16 + 12 + reasonHex.length() / 2;
+        String hex = frameHex(
+                String.format("%08x", length),
+                "0003",
+                "00",
+                "0000000000000000",
+                "0000",
+                CLOSE_PAYLOAD_NO_ERROR + reasonHex);
+        VectorRunner runner = new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()));
+        return FrameKind.comparable(
+                runner.describeMessages(Arrays.asList(binaryMessage(Bytes.fromHex(hex))), false),
+                JsonParser.parseString(expectedSend).getAsJsonArray());
+    }
+
+    private static String expectedClose(String reasonField) {
+        return "[{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"" + reasonField + "}]";
+    }
+
+    private static List<String> expectedCloseRendered(String reasonField) {
+        List<String> result = new ArrayList<>();
+        for (com.google.gson.JsonElement element :
+                JsonParser.parseString(expectedClose(reasonField)).getAsJsonArray()) {
+            result.add(FrameKind.expected(element.getAsJsonObject()));
+        }
+        return result;
+    }
+
+    @Test
+    void aCloseReasonIsNotComparedWhenTheVectorOmitsIt() throws ReflectiveOperationException {
+        assertThat(closeWithReason("616263", expectedClose(""))).isEqualTo(expectedCloseRendered(""));
+        assertThat(closeWithReason("", expectedClose(""))).isEqualTo(expectedCloseRendered(""));
+    }
+
+    @Test
+    void aCloseReasonTheVectorListsIsComparedByTheByte() throws ReflectiveOperationException {
+        String listed = ",\"reason\":\"abc\"";
+        assertThat(closeWithReason("616263", expectedClose(listed))).isEqualTo(expectedCloseRendered(listed));
+        assertThat(closeWithReason("616264", expectedClose(listed))).isNotEqualTo(expectedCloseRendered(listed));
+        assertThat(closeWithReason("", expectedClose(listed))).isNotEqualTo(expectedCloseRendered(listed));
+    }
+
+    @Test
+    void anEmptyListedCloseReasonFailsWhenTheEndpointExplained() throws ReflectiveOperationException {
+        String empty = ",\"reason\":\"\"";
+        assertThat(closeWithReason("", expectedClose(empty))).isEqualTo(expectedCloseRendered(empty));
+        assertThat(closeWithReason("616263", expectedClose(empty))).isNotEqualTo(expectedCloseRendered(empty));
+    }
+
+    @Test
+    void theListedReasonFollowsItsEntryEvenAfterOtherFramesAndMessages() throws ReflectiveOperationException {
+        String ping = frameHex("00000018", "0002", "00", "0000000000000000", "0000", "0102030405060708");
+        String close =
+                frameHex("0000001f", "0003", "00", "0000000000000000", "0000", CLOSE_PAYLOAD_NO_ERROR + "616263");
+        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        List<OutboundMessage> messages =
+                Arrays.asList(binaryMessage(Bytes.fromHex(ping)), binaryMessage(Bytes.fromHex(close)));
+        String expected = "[" + PING_EXPECTED + ","
+                + "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"abc\"}]";
+
+        List<String> actual = FrameKind.comparable(
+                runner.describeMessages(messages, false),
+                JsonParser.parseString(expected).getAsJsonArray());
+
+        assertThat(actual.get(0)).doesNotContain("reason");
+        assertThat(actual.get(1)).endsWith("reason=616263");
+    }
+
+    @Test
+    void aServerRunnerTreatsItsOwnEvenStreamAsARequestAndOddAsAResponse() throws ReflectiveOperationException {
+        String ownRequest = frameHex("00000010", "0100", "01", "0000000000000002", "0000", "");
+        String peerResponse = frameHex("00000010", "0100", "00", "0000000000000001", "0000", "");
+
+        assertThat(sentOnce(false, ownRequest)).singleElement().asString().endsWith(" sent_status=1");
+        assertThat(sentOnce(false, peerResponse))
+                .containsExactly(expectedOf("{\"type\":256,\"stream_id\":\"1\",\"status\":\"OK\"}"));
     }
 }

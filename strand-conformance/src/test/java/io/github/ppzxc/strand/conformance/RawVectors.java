@@ -15,6 +15,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedSet;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * 로더를 거치지 않고 벡터 파일을 JSON 그대로 읽는 테스트 도구. 파일 목록, 파일별 벡터, `byKey()`의 결과를 벡터 디렉터리별로 한 번만
@@ -50,6 +53,41 @@ final class RawVectors {
         if (target.put(key, vector) != null) {
             throw new IllegalStateException("벡터 키가 겹친다: " + key);
         }
+    }
+
+    /** 벡터 객체가 적은 요구사항 식별자. */
+    static List<String> requirementsOf(JsonObject vector) {
+        if (!vector.has("requirements")) {
+            throw new IllegalStateException("requirements가 없는 벡터: " + vector.get("id"));
+        }
+        List<String> ids = new ArrayList<>();
+        for (JsonElement id : vector.getAsJsonArray("requirements")) {
+            ids.add(id.getAsString());
+        }
+        return ids;
+    }
+
+    /** 벡터 키에서 그 벡터가 적은 요구사항 식별자로. */
+    static Map<String, List<String>> requirementsByKey() {
+        Map<String, List<String>> result = new TreeMap<>();
+        for (Map.Entry<String, JsonObject> vector : byKey().entrySet()) {
+            result.put(vector.getKey(), requirementsOf(vector.getValue()));
+        }
+        return result;
+    }
+
+    /** 어떤 벡터든 하나라도 가리키는 요구사항 식별자. */
+    static SortedSet<String> referencedRequirements() {
+        return referencedIn(requirementsByKey());
+    }
+
+    /** {@code byVector}의 어느 벡터든 가리키는 식별자. 합성한 대응을 검사하는 시험도 쓴다. */
+    static SortedSet<String> referencedIn(Map<String, List<String>> byVector) {
+        SortedSet<String> result = new TreeSet<>();
+        for (List<String> ids : byVector.values()) {
+            result.addAll(ids);
+        }
+        return result;
     }
 
     static synchronized List<Path> files() {

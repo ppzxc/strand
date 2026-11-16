@@ -21,9 +21,8 @@ import org.junit.jupiter.api.Test;
 /** 규격 0.2.0 마무리 검수(#167): 용어집과 1.3절의 대응, 형식 문서 예시의 형식, 남은 0.1.0 흔적. core를 실행하지 않는다. */
 class SpecFinalizationTest {
 
-    private static final Path ROOT =
-            VectorSuite.defaultDirectory().resolve("../..").normalize();
-    private static final Path SPEC = ROOT.resolve("docs/specification/STRAND_SPECIFICATION.md");
+    private static final Path ROOT = RequirementIndex.repositoryRoot();
+    private static final Path SPEC = RequirementIndex.specificationFile();
     private static final Path FORMAT = ROOT.resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
     private static final Path GLOSSARY = ROOT.resolve("GLOSSARY.md");
 

@@ -16,9 +16,8 @@ import org.junit.jupiter.api.Test;
 /** 연결 인증 관문(AUTH)과 채널 요구가 규격, 형식 문서, 스키마, 용어집에 같은 모습으로 들어 있는지 본다(#166). core를 실행하지 않는다. */
 class AuthSpecTest {
 
-    private static final Path ROOT =
-            VectorSuite.defaultDirectory().resolve("../..").normalize();
-    private static final Path SPEC = ROOT.resolve("docs/specification/STRAND_SPECIFICATION.md");
+    private static final Path ROOT = RequirementIndex.repositoryRoot();
+    private static final Path SPEC = RequirementIndex.specificationFile();
     private static final Path FORMAT = ROOT.resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
     private static final Path SCHEMA = ROOT.resolve("strand-conformance/schema/vector-format-2.schema.json");
     private static final Path GLOSSARY = ROOT.resolve("GLOSSARY.md");
