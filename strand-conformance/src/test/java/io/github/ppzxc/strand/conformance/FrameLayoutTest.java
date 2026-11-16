@@ -32,6 +32,7 @@ class FrameLayoutTest {
             "frame-checks/ping-length-zero-closes",
             "frame-checks/request-length-fifteen-closes",
             "frame-checks/request-length-zero-closes",
+            "frame-checks/ping-length-above-max-frame-size-closes",
             "hello-establishment/server-first-frame-length-below-minimum-closes-silently",
             "hello-establishment/preface-http-request-closes-silently",
             "websocket/preface-seven-bytes-closes-silently",

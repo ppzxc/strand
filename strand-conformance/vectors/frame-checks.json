@@ -105,7 +105,7 @@
     },
     {
       "id": "ping-nonzero-stream-id-closes",
-      "description": "PING의 stream_id가 0이 아니면 연결 오류다. ACK 여부와 관계없이 PING에 답하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "description": "ACK 없는 PING의 stream_id가 0이 아니면 연결 오류다. ACK 여부와 관계없이 PING에 답하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
       "spec": [
         "2.2.5",
         "5.1"
@@ -139,7 +139,7 @@
     },
     {
       "id": "ack-ping-nonzero-stream-id-closes",
-      "description": "PING의 stream_id가 0이 아니면 연결 오류다. ACK 여부와 관계없이 PING에 답하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "description": "ACK가 켜진 PING의 stream_id가 0이 아니면 연결 오류다. ACK 여부와 관계없이 PING에 답하지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
       "spec": [
         "2.2.5",
         "5.1"
@@ -308,6 +308,40 @@
       ]
     },
     {
+      "id": "ping-length-above-max-frame-size-closes",
+      "description": "연결을 수립한 뒤 받은 평상시 프레임의 length가 최댓값(알린 max_frame_size 65,536에서 4를 뺀 65,532)을 넘으면(65533) 연결 오류다. 나머지 바이트를 기다리지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "spec": [
+        "2.2.1",
+        "5.1"
+      ],
+      "requirements": [
+        "req-frame-length-range-error",
+        "req-check-connection-error-close"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000fffd00020000000000000000000000000000",
+          "send": [
+            {
+              "type": "CLOSE",
+              "error_code": "PROTOCOL_ERROR",
+              "last_stream_id": "0"
+            }
+          ],
+          "events": [
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "ping-undefined-flag-bits-are-ignored",
       "description": "ACK가 없는 PING에 정의되지 않은 flags 비트(0x82)가 켜져 있어도 오류가 아니다. 그 비트는 무시하고 ACK PING으로 답한다",
       "spec": [
@@ -438,7 +472,13 @@
         },
         {
           "kind": "recv",
-          "hex": "00000010000103000000000000000000000000000000001a0005000000000000000000000000000009414e4f4e594d4f5553",
+          "hex": "0000001000010300000000000000000000000000",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001a0005000000000000000000000000000009414e4f4e594d4f5553",
           "send": [
             {
               "type": "AUTH",
@@ -518,7 +558,7 @@
     },
     {
       "id": "own-close-ends-queued-request-without-stream-id",
-      "description": "AUTH 관문이 열리기 전이라 번호를 받지 못하고 미뤄진 요청은 내가 CLOSE를 보내면 그 즉시 stream_id 없는 UNAVAILABLE(처리 안 됨)로 끝난다. 관문이 열려도 그 요청의 프레임은 나가지 않는다",
+      "description": "AUTH 관문이 열리기 전이라 번호를 받지 못하고 미뤄진 요청은 내가 CLOSE를 보내면 그 즉시 stream_id 없는 UNAVAILABLE(처리 안 됨)로 끝난다.",
       "spec": [
         "3.5",
         "4.4"
