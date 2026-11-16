@@ -60,7 +60,10 @@ public final class WebSocketPassage implements Passage {
     // 아직 끝나지 않은 마지막 보내기. 전송 스레드만 바꾸고, 완료 콜백은 완료 여부만 본다.
     private volatile @Nullable CompletableFuture<?> sending;
     private final Object signal = new Object();
-    private volatile boolean signalled;
+    // wakeup()과 close()만 올린다. 보내기가 끝난 것은 신호가 아니라 writable()로 본다.
+    private volatile boolean wakeRequested;
+    // 보내기가 실패한 원인. 한 번 생기면 연결이 끝난 것으로 보고 await와 write가 던진다.
+    private volatile @Nullable Throwable sendFailure;
     // 앞선 보내기 때문에 write가 0을 돌려줬다. 그 보내기가 끝나면 전송 스레드를 깨운다.
     private volatile boolean blocked;
 
@@ -152,22 +155,15 @@ public final class WebSocketPassage implements Passage {
 
     @Override
     public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
-        if (closed) {
-            throw new IOException("닫힌 통로");
-        }
+        throwIfClosedOrFailed();
         if (!waitForRead) {
             return awaitSignal(timeoutMs, waitForWrite);
         }
         if (ended) {
             return Inbound.end();
         }
-        // 읽기를 기다리는 동안 쌓인 깨움 신호는 이 호출이 이미 처리한다.
-        // 값을 읽기만 하는 길이 대부분이라 잠금은 신호가 쌓였을 때만 잡는다.
-        if (signalled) {
-            synchronized (signal) {
-                signalled = false;
-            }
-        }
+        // 읽기 대기의 깨움은 큐의 none이 맡으므로 이 신호는 읽기 대기에서는 쓰이지 않는다. 쌓이지 않게 지운다.
+        wakeRequested = false;
         // 이미 쓸 수 있으면 기다리지 않고 지금 큐에 있는 것(읽을 것, 실패)만 가져간다.
         long limit = waitForWrite && writable() ? 0 : timeoutMs;
         Object item;
@@ -183,9 +179,7 @@ public final class WebSocketPassage implements Passage {
             Thread.currentThread().interrupt();
             throw new IOException("기다리는 중 인터럽트", e);
         }
-        if (closed) {
-            throw new IOException("닫힌 통로");
-        }
+        throwIfClosedOrFailed();
         if (item == null) {
             return Inbound.none();
         }
@@ -220,12 +214,22 @@ public final class WebSocketPassage implements Passage {
         return last == null || last.isDone();
     }
 
+    private void throwIfClosedOrFailed() throws IOException {
+        if (closed) {
+            throw new IOException("닫힌 통로");
+        }
+        Throwable failure = sendFailure;
+        if (failure != null) {
+            throw failure instanceof IOException ? (IOException) failure : new IOException("WebSocket 쓰기 실패", failure);
+        }
+    }
+
     /** 읽지 않고 깨움, 쓰기 가능, 시간 제한만으로 기다린다. 읽을 것은 큐에 그대로 남는다. */
     private Inbound awaitSignal(long timeoutMs, boolean waitForWrite) throws IOException {
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(timeoutMs, 0));
         synchronized (signal) {
             try {
-                while (!signalled && !closed && !(waitForWrite && writable())) {
+                while (!wakeRequested && !closed && sendFailure == null && !(waitForWrite && writable())) {
                     if (timeoutMs == 0) {
                         break;
                     }
@@ -243,48 +247,37 @@ public final class WebSocketPassage implements Passage {
                 Thread.currentThread().interrupt();
                 throw new IOException("기다리는 중 인터럽트", e);
             }
-            if (closed) {
-                throw new IOException("닫힌 통로");
-            }
-            // 보내기 실패는 읽기를 기다리지 않을 때도 알린다.
-            Object head = queue.peek();
-            if (head instanceof Throwable) {
-                queue.poll();
-                throw head instanceof IOException
-                        ? (IOException) head
-                        : new IOException("WebSocket 오류", (Throwable) head);
-            }
+            throwIfClosedOrFailed();
             if (timeoutMs != 0) {
-                signalled = false;
+                wakeRequested = false;
             }
         }
         return Inbound.none();
     }
 
-    private void signal() {
+    private void notifyWaiters() {
         synchronized (signal) {
-            signalled = true;
             signal.notifyAll();
         }
     }
 
-    /** 보내기가 끝나면 쓰기를 기다리는 쪽을 깨우고, 실패는 다음 {@link #await}가 던지게 한다. */
+    private void fail(Throwable failure) {
+        sendFailure = unwrapped(failure);
+        notifyWaiters();
+        wakeup();
+    }
+
+    /** 보내기가 끝나면 쓰기를 기다리는 쪽을 깨우고, 실패는 {@link #sendFailure}로 남겨 다음 {@link #await}가 던지게 한다. */
     private void watch(CompletableFuture<?> send) {
         sending = send;
-        if (send.isDone()) {
-            if (send.isCompletedExceptionally()) {
-                send.whenComplete((sent, failure) -> queue.add(unwrapped(failure)));
-                signal();
-            }
-            return;
-        }
         send.whenComplete((sent, failure) -> {
             if (failure != null) {
-                queue.add(unwrapped(failure));
+                fail(failure);
+                return;
             }
-            signal();
-            // 막혀서 0을 돌려준 적이 있거나 실패했을 때만 전송 스레드를 읽기 대기에서 깨운다. 잘 끝난 보내기마다 깨우면 빈 스텝이 는다.
-            if (failure != null || blocked) {
+            notifyWaiters();
+            // write가 막혀 0을 돌려준 뒤에만 전송 스레드를 읽기 대기에서 깨운다. 잘 끝난 보내기마다 깨우면 빈 스텝이 는다.
+            if (blocked) {
                 blocked = false;
                 wakeup();
             }
@@ -297,12 +290,18 @@ public final class WebSocketPassage implements Passage {
         if (open == null) {
             throw new IOException("아직 열리지 않은 통로");
         }
+        throwIfClosedOrFailed();
         CompletableFuture<?> last = sending;
         boolean busy = last != null && !last.isDone();
         if (message.kind() == OutboundMessage.Kind.BINARY) {
             if (busy) {
+                // 표시를 올린 뒤 다시 확인한다. 그 사이 끝났으면 깨울 사람이 없으므로 이 호출에서 계속 보낸다.
                 blocked = true;
-                return 0;
+                CompletableFuture<?> again = sending;
+                if (again != null && !again.isDone()) {
+                    return 0;
+                }
+                blocked = false;
             }
             CompletableFuture<?> send = open.sendBinary(ByteBuffer.wrap(message.bytes()), true);
             failIfAlreadyFailed(send);
@@ -337,7 +336,8 @@ public final class WebSocketPassage implements Passage {
 
     @Override
     public void wakeup() {
-        signal();
+        wakeRequested = true;
+        notifyWaiters();
         if (woken.compareAndSet(false, true)) {
             queue.add(Inbound.none());
         }
@@ -386,7 +386,7 @@ public final class WebSocketPassage implements Passage {
             open.abort();
         }
         queue.add(Inbound.none());
-        signal();
+        notifyWaiters();
     }
 
     /** JDK가 부르는 콜백. 호출은 순서대로 오고 겹치지 않는다. */
