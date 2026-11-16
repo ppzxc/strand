@@ -264,7 +264,7 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 | 5 | `EXCESSIVE_USE` | 상대의 과도한 사용. CLOSE 전용 |
 | 6 | `UNRESPONSIVE` | 상대가 확인 대기 안에 ACK를 보내지 않음. CLOSE 전용 |
 | 7 | `UNAUTHENTICATED` | 자격 증명을 거부하거나 폐기함. 다시 시도해도 소용없음. CLOSE 전용 |
-| 8\~ | 예약 | 받으면 `INTERNAL_ERROR`로 취급 |
+| 8\~ | 예약 | 받으면 `INTERNAL_ERROR`로 취급한다(MUST)<a id="req-error-code-reserved-internal-recv"></a> |
 
 ---
 
@@ -458,7 +458,7 @@ PING은 어느 쪽이든 보낼 수 있다.
 * **stream_id**: `0`
 * **payload**: 정확히 8바이트 (임의의 바이트열)
 
-`ACK` 플래그가 없는 PING을 받은 쪽은 같은 8바이트에 `ACK` 플래그(`flags = 0x01`)를 붙여 즉시 돌려준다(MUST)<a id="req-ping-ack-reply"></a>. ACK PING에는 답하지 않는다(MUST NOT)<a id="req-ping-ack-no-reply"></a>. 보낸 PING과 맞춰 보는 일은 로컬 몫이므로, 보낸 PING과 맞지 않는 ACK PING도 무시한다. payload 길이가 정확히 8바이트가 아니면 ACK PING이든 아니든 연결 오류다(5.1절). ACK를 기다리는 시간의 한도는 3.3절의 확인 대기 규칙을 따른다.
+`ACK` 플래그가 없는 PING을 받은 쪽은 같은 8바이트에 `ACK` 플래그(`flags = 0x01`)를 붙여 즉시 돌려준다(MUST)<a id="req-ping-ack-reply"></a>. ACK PING에는 답하지 않는다(MUST NOT)<a id="req-ping-ack-no-reply"></a>. 보낸 PING과 맞춰 보는 일은 로컬 몫이므로, 보낸 PING과 맞지 않는 ACK PING도 무시한다. payload 길이가 정확히 8바이트가 아니면 ACK PING이든 아니든 연결 오류다(MUST, 5.1절)<a id="req-ping-payload-length-error"></a>. ACK를 기다리는 시간의 한도는 3.3절의 확인 대기 규칙을 따른다.
 
 > 비규범 주석: 확인 대기 시간은 상대의 `max_frame_size` 크기 프레임 하나를 보내는 데 걸리는 시간보다 길게 잡는다. 그보다 짧으면 큰 프레임을 주고받는 중인 정상 연결을 끊는다.
 
@@ -488,12 +488,12 @@ CLOSE payload
 
 `last_stream_id`는 CLOSE를 보내는 순간의 `highest_peer_stream_id`(2.2.5절)와 같아야 한다(MUST)<a id="req-close-last-stream-id-equals-highest"></a>. 상대가 보낸 요청이 아직 없으면 0이다.
 
-`reason`은 사람이 읽으라고 넣는 설명이다. 받는 쪽은 `reason`의 UTF-8 유효성을 포함해 내용을 검증하지 않으며, 프로그램 동작이 이 값에 기대서는 안 된다.
+`reason`은 사람이 읽으라고 넣는 설명이다. 받는 쪽은 `reason`의 UTF-8 유효성을 포함해 내용을 검증하지 않으며(MUST NOT)<a id="req-close-reason-no-validate"></a>, 프로그램 동작이 이 값에 기대서는 안 된다.
 
-**형태가 잘못된 CLOSE.** 다음 중 하나에 해당하는 CLOSE다. 5.1절 3번이 연결 오류로 처리한다.
-* payload가 12바이트 미만이다.
-* `last_stream_id`가 0이 아니면서 내 번호 공간의 값이 아니다.
-* `last_stream_id`가 내가 요청 프레임을 보낸 스트림 가운데 가장 큰 `stream_id`보다 크다. 요청 프레임을 보내지 못한 번호는 세지 않으며, 보낸 요청이 없으면 0보다 큰 모든 값이 해당한다.
+**형태가 잘못된 CLOSE.** 다음 중 하나에 해당하는 CLOSE는 연결 오류다(모두 MUST, 5.1절).
+* payload가 12바이트 미만이다.<a id="req-close-malformed-payload-length-error"></a>
+* `last_stream_id`가 0이 아니면서 내 번호 공간의 값이 아니다.<a id="req-close-malformed-last-id-own-space-error"></a>
+* `last_stream_id`가 내가 요청 프레임을 보낸 스트림 가운데 가장 큰 `stream_id`보다 크다. 요청 프레임을 보내지 못한 번호는 세지 않으며, 보낸 요청이 없으면 0보다 큰 모든 값이 해당한다.<a id="req-close-malformed-last-id-above-sent-error"></a>
 
 **받은 CLOSE.** `type`이 CLOSE인 프레임은 형태가 잘못돼도 받은 CLOSE로 치고, 형태가 잘못된 CLOSE는 오류 CLOSE처럼 다룬다. 예외는 없다. 따라서 형태가 잘못된 CLOSE를 받으면 CLOSE를 보내지 않고 즉시 닫는다. 이 CLOSE의 `last_stream_id`는 쓰지 않으므로, 내 요청은 아래 "연결이 끝날 때"의 규칙을 따른다. 번호가 있고 전송 계층에 넘긴 요청은 결과 모름, 번호가 없거나 아직 넘기지 못한 요청은 처리 안 됨이다.
 
@@ -506,9 +506,9 @@ CLOSE를 보냈거나 받은 뒤 애플리케이션이 새 요청을 내면 프�
 닫는 시점은 `error_code`가 정한다. 대기 중인 스트림은 내가 연 것과 상대가 연 것을 모두 센다(4.3절).
 
 * 오류 CLOSE(`NO_ERROR`가 아닌 코드)를 보냈거나 받았으면 즉시 전송 계층을 닫는다(MUST)<a id="req-close-error-close-immediate"></a>. 대기 중인 스트림이 남아 있어도 기다리지 않는다. 연결이 종료 중일 때 받은 오류 CLOSE도 같다.
-* 그 밖에 `NO_ERROR` CLOSE를 보냈거나 받았으면 연결은 **종료 중**이 된다. 대기 중인 스트림이 없어지면(처음부터 없는 경우 포함) 전송 계층을 닫는다(MUST)<a id="req-close-no-error-drain-then-close"></a>. 종료 중 상태 자체에는 시간 제한을 두지 않으며 얼마나 기다릴지는 애플리케이션이 정한다. 종료 중에도 생존 확인(3.3절의 확인 대기, 3.4.1절의 유휴 시 PING)은 계속한다.
+* 그 밖에 `NO_ERROR` CLOSE를 보냈거나 받았으면 연결은 **종료 중**이 된다. 대기 중인 스트림이 없어지면(처음부터 없는 경우 포함) 전송 계층을 닫는다(MUST)<a id="req-close-no-error-drain-then-close"></a>. 종료 중 상태 자체에는 시간 제한을 두지 않으며 얼마나 기다릴지는 애플리케이션이 정한다. 종료 중에도 생존 확인(3.3절의 확인 대기, 3.4.1절의 유휴 시 PING)은 계속한다(MUST)<a id="req-close-closing-liveness-continue"></a>.
 
-**연결이 끝날 때.** CLOSE를 보내거나 받아 닫을 때, CLOSE 없이 닫을 때(5.1절 1번·2번, 이미 CLOSE를 보냈거나 받은 뒤의 연결 오류와 확인 대기 초과 포함), 상대가 CLOSE 없이 전송 계층을 끊었을 때(TCP EOF·RST, WebSocket close) 모두 연결이 끝난 것이다. 전송 계층이 끊기면 보낼 수 없으므로 아무것도 보내지 않는다. 연결이 끝날 때 응답도 RESET도 받지 못한 채 대기 중인 내 요청(CLOSE의 `last_stream_id`로 이미 끝난 요청은 대기 중이 아니다. 상대 한도에 걸려 스트림을 열기 전에 대기열에서 기다리는 요청 포함)마다 애플리케이션에 로컬 `status` = `UNAVAILABLE` 결과를 정확히 한 번 넘기고(MUST)<a id="req-close-end-pending-unavailable"></a>, 그 뒤에 `closed` 이벤트를 낸다. 결과 확정성은 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(WebSocket에서는 그 프레임을 담은 바이너리 메시지를 WebSocket 계층에 넘겼는지). 넘기기 전이면 처리 안 됨이고, 넘긴 뒤이면 결과 모름이다. `closed`는 연결당 정확히 한 번 낸다. 이미 닫힌 뒤에 전송 계층 끊김이 감지되어도 `closed`를 다시 내지 않고 아무것도 보내지 않는다. `NO_ERROR`로 마저 끝내고 대기 중인 스트림이 없어져 닫을 때도 `closed`는 마지막 스트림의 result(정상 응답 포함) 다음에 낸다(MUST)<a id="req-close-closed-after-last-result"></a>. 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 상대가 연 스트림은 내 요청이 아니므로 결과를 넘기지 않는다. 다시 보내도 되는지는 결과 확정성에 따라 4.6절이 정한다.
+**연결이 끝날 때.** CLOSE를 보내거나 받아 닫을 때, CLOSE 없이 닫을 때(5.1절 1번·2번, 이미 CLOSE를 보냈거나 받은 뒤의 연결 오류와 확인 대기 초과 포함), 상대가 CLOSE 없이 전송 계층을 끊었을 때(TCP EOF·RST, WebSocket close) 모두 연결이 끝난 것이다. 전송 계층이 끊기면 보낼 수 없으므로 아무것도 보내지 않는다. 연결이 끝날 때 응답도 RESET도 받지 못한 채 대기 중인 내 요청(CLOSE의 `last_stream_id`로 이미 끝난 요청은 대기 중이 아니다. 상대 한도에 걸려 스트림을 열기 전에 대기열에서 기다리는 요청 포함)마다 애플리케이션에 로컬 `status` = `UNAVAILABLE` 결과를 정확히 한 번 넘기고(MUST)<a id="req-close-end-pending-unavailable"></a>, 그 뒤에 `closed` 이벤트를 낸다(MUST)<a id="req-close-end-closed-event"></a>. 결과 확정성은 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(WebSocket에서는 그 프레임을 담은 바이너리 메시지를 WebSocket 계층에 넘겼는지). 넘기기 전이면 처리 안 됨이고, 넘긴 뒤이면 결과 모름이다. `closed`는 연결당 정확히 한 번 낸다(MUST)<a id="req-close-closed-once"></a>. 이미 닫힌 뒤에 전송 계층 끊김이 감지되어도 `closed`를 다시 내지 않고 아무것도 보내지 않는다. `NO_ERROR`로 마저 끝내고 대기 중인 스트림이 없어져 닫을 때도 `closed`는 마지막 스트림의 result(정상 응답 포함) 다음에 낸다(MUST)<a id="req-close-closed-after-last-result"></a>. 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 상대가 연 스트림은 내 요청이 아니므로 결과를 넘기지 않는다. 다시 보내도 되는지는 결과 확정성에 따라 4.6절이 정한다.
 
 ```mermaid
 sequenceDiagram
