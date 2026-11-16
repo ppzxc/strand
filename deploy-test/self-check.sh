@@ -20,6 +20,12 @@ check_pom_metadata() { # <모듈 artifactId> <pom 경로>
 
 pom_description_line() { grep -m1 -F "<description>" "$1" | sed 's/^[[:space:]]*//'; }
 
+# description이 비어 있지 않은 한 줄이어야 한다(빈 값끼리 같다고 통과하거나 비교가 흐려지는 것을 막는다).
+check_pom_description() { # <pom 경로>
+  [ -n "$(pom_description_line "$1" | sed -n 's:.*<description>\(..*\)</description>.*:\1:p')" ] \
+    || { echo "POM description이 비어 있거나 한 줄이 아니다: $1" >&2; return 1; }
+}
+
 # <dependencies> 안의 artifactId 목록(정렬).
 pom_dependency_artifacts() {
   sed -n '/<dependencies>/,/<\/dependencies>/p' "$1" | sed -n 's:.*<artifactId>\(.*\)</artifactId>.*:\1:p' | sort
@@ -30,6 +36,7 @@ pom_dependency_artifacts() {
 check_nio_pom() { # <nio pom 경로> <core pom 경로>
   local nio="$1" core="$2" deps
   check_pom_metadata strand-nio "$nio" || return 1
+  check_pom_description "$nio" || return 1
   if [ "$(pom_description_line "$nio")" = "$(pom_description_line "$core")" ]; then
     echo "nio description이 core와 같다: $(pom_description_line "$nio")" >&2
     return 1
@@ -44,6 +51,7 @@ check_nio_pom() { # <nio pom 경로> <core pom 경로>
 core_pom="$m2/strand-core/$version/strand-core-$version.pom"
 nio_pom="$m2/strand-nio/$version/strand-nio-$version.pom"
 check_pom_metadata strand-core "$core_pom" || exit 1
+check_pom_description "$core_pom" || exit 1
 echo "POM 메타데이터 확인: strand-core"
 check_nio_pom "$nio_pom" "$core_pom" || exit 1
 echo "nio POM 메타데이터, core와 다른 description, 의존(strand-core) 확인"
@@ -51,20 +59,24 @@ echo "nio POM 메타데이터, core와 다른 description, 의존(strand-core) �
 # nio POM이 어긋나면 검사가 실패하는지 변조한 사본으로 확인한다.
 pomdir="$(mktemp -d)"
 trap 'rm -rf "$pomdir"' EXIT
-expect_nio_pom_rejected() { # <사유> <변조한 nio pom>
-  if (check_nio_pom "$2" "$core_pom") 2>/dev/null; then
+expect_nio_pom_rejected() { # <사유> <변조한 nio pom> <기대하는 거부 메시지 조각>
+  local err
+  if err="$(check_nio_pom "$2" "$core_pom" 2>&1)"; then
     echo "nio POM이 $1 인데 검사가 통과했다" >&2
     exit 1
   fi
+  grep -qF -- "$3" <<<"$err" || { echo "nio POM이 $1 인데 다른 사유로 거부됐다: $err" >&2; exit 1; }
 }
 core_description="$(pom_description_line "$core_pom")"
 awk -v d="$core_description" '/<description>/ { print d; next } { print }' "$nio_pom" > "$pomdir/same-description.pom"
-expect_nio_pom_rejected "core와 같은 description" "$pomdir/same-description.pom"
+expect_nio_pom_rejected "core와 같은 description" "$pomdir/same-description.pom" "description이 core와 같다"
 sed 's:</dependencies>:<dependency><groupId>x</groupId><artifactId>extra</artifactId></dependency></dependencies>:' "$nio_pom" > "$pomdir/extra-dependency.pom"
-expect_nio_pom_rejected "strand-core 외 의존을 가짐" "$pomdir/extra-dependency.pom"
+expect_nio_pom_rejected "strand-core 외 의존을 가짐" "$pomdir/extra-dependency.pom" "의존이 strand-core"
 grep -v "<artifactId>strand-core</artifactId>" "$nio_pom" > "$pomdir/no-core.pom"
-expect_nio_pom_rejected "strand-core 의존이 없음" "$pomdir/no-core.pom"
-echo "nio POM 변조(같은 description, 추가 의존, core 의존 누락) 거부 확인"
+expect_nio_pom_rejected "strand-core 의존이 없음" "$pomdir/no-core.pom" "의존이 strand-core"
+awk '/<description>/ { print "<description></description>"; next } { print }' "$nio_pom" > "$pomdir/empty-description.pom"
+expect_nio_pom_rejected "빈 description" "$pomdir/empty-description.pom" "description이 비어"
+echo "nio POM 변조(같은 description, 빈 description, 추가 의존, core 의존 누락) 거부 확인"
 
 # 소비자 하나만 돌린다(전체 4개는 하네스 본 스텝이 이미 돌렸다). 실패 사유가 버전 불일치일 때만 의도한 실패로 본다.
 if output="$(STRAND_CONSUMERS=gradle-classpath STRAND_EXPECTED_VERSION="0.0.0-wrong" "$here/run.sh" "$version" 2>&1)"; then
