@@ -282,7 +282,7 @@ public final class ConnectionDriver implements AutoCloseable {
     private final AtomicLong writtenFrames = new AtomicLong();
     private final AtomicLong discardedBytes = new AtomicLong();
     private final Object writeBlockedLock = new Object();
-    // 쓰기 대기열이 다 나가지 못하고 쓰기 가능을 기다리는 동안 true. 전송 스레드만 바꾸고 writeBlockedLock으로 지킨다.
+    // 쓰기 대기열이 다 나가지 못하고 쓰기 가능을 기다리는 동안 true. 쓰는 스레드는 전송 스레드 하나뿐이라 바뀔 때만 writeBlockedLock을 잡고 깨우며, 기다리는 쪽은 그 잠금 안에서 읽는다.
     private volatile boolean writeBlocked;
 
     private ConnectionDriver(
@@ -904,7 +904,6 @@ public final class ConnectionDriver implements AutoCloseable {
                 setWriteBlocked(false);
                 return true;
             } catch (IOException e) {
-                setWriteBlocked(false);
                 recordTransportFailure(e);
                 discardQueued();
                 return false;
@@ -937,13 +936,14 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /** 쓰기 대기열에 남은 메시지를 버리고 남은 바이트를 센다. */
         void discardQueued() {
+            // 대기열을 버리면 막힘 신호도 푼다. 아래에서 예외가 나도 풀려 있게 먼저 한다.
+            setWriteBlocked(false);
             // 끊긴 엔드포인트가 마지막으로 낸 메시지(명령 소진 중 난 것)도 보내지 못한 것이다.
             takeOutput();
             discardedBytes.addAndGet(queuedBytes);
             writeQueue.clear();
             writeOffset = 0;
             queuedBytes = 0;
-            setWriteBlocked(false);
         }
 
         private boolean write() {

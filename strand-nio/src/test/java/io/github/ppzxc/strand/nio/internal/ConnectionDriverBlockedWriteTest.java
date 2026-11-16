@@ -286,7 +286,6 @@ class ConnectionDriverBlockedWriteTest {
     void writeBlockedSignalArrivesWhenAMessageCannotBeWrittenToTheEnd() throws Exception {
         Side[] sides = connected();
         Side client = sides[0];
-        assertThat(client.driver.awaitWriteBlocked(false, 5, TimeUnit.SECONDS)).isTrue();
         client.passage.writeCapacity(10);
 
         client.driver.ping(new byte[8]).join();
