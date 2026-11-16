@@ -443,8 +443,14 @@ class ConnectionDriverReadPauseTest {
         Side server = sides[1];
         client.passage.writeCapacity(0);
         int pings = (int) (limit(2) / PING_FRAME) * 2;
+        List<CompletableFuture<Void>> sent = new ArrayList<>();
         for (int i = 0; i < pings; i++) {
-            server.driver.ping(new byte[8]).join();
+            sent.add(server.driver.ping(new byte[8]));
+        }
+        try {
+            CompletableFuture.allOf(sent.toArray(new CompletableFuture<?>[0])).get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            throw new IllegalStateException("PING 명령이 처리되지 않았다", e);
         }
         settle(client, server);
 
@@ -453,6 +459,12 @@ class ConnectionDriverReadPauseTest {
         // 읽을 것이 남아 있어도 읽기를 멈춘 동안은 쓰기 가능, 깨움, 기한으로만 깨어난다.
         long calls = client.passage.awaitCalls();
         settle(client, server);
+        // 되풀이해 깨어난다면 실제 시간이 흐르는 동안 호출 수가 늘어난다.
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         assertThat(client.passage.awaitCalls()).isEqualTo(calls);
     }
 }
