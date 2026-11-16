@@ -1,0 +1,27 @@
+# 벡터로 확인하지 않는 MUST·MUST NOT 요구사항. 형식: `req-… 범주 사유`(한 줄에 식별자 하나).
+# 범주는 둘뿐이다. 관측불가: 엔드포인트의 입출력(바이트와 메시지)으로 볼 수 없다. 형식미지원: 규격상 볼 수 있지만 지금 벡터 형식이 입력이나 비교를 표현하지 못해 형식을 넓혀야 한다(#275).
+# 벡터가 요구사항을 가리키기 시작하면 SpecCoverageTest가 실패한다. 그때 이 줄을 지운다. SHOULD·SHOULD NOT은 올리지 않는다.
+#
+# 관측불가: 1.2.1절 WebSocket 하위 프로토콜. WebSocket 핸드셰이크의 헤더 규칙이라 바이트와 메시지로 관측할 수 없다.
+req-ws-subprotocol-client-offer 관측불가 `Sec-WebSocket-Protocol: strand`는 WebSocket 핸드셰이크 헤더라 엔드포인트의 입출력(바이트와 메시지)으로 관측할 수 없다
+req-ws-subprotocol-server-reject 관측불가 서버가 하위 프로토콜 없는 WebSocket 연결을 수락하지 않는 것은 핸드셰이크 단계의 동작이라 입출력으로 관측할 수 없다
+# 관측불가: 6.1절 채널 요구. 전송 계층 아래의 성질이다.
+req-security-channel-required 관측불가 기밀성·무결성·서버 인증을 제공하는 채널은 전송 계층 아래의 성질이라 엔드포인트의 입출력으로 관측할 수 없다
+req-security-bcp195 관측불가 TLS가 BCP 195를 따르는지는 TLS 계층의 설정이라 엔드포인트의 입출력으로 관측할 수 없다
+req-security-tls-hostname-verify 관측불가 서버 인증서 호스트 이름 검증은 TLS 핸드셰이크 안의 동작이라 입출력으로 관측할 수 없다
+req-security-tls-no-early-data 관측불가 0-RTT를 쓰지 않는 것은 TLS 핸드셰이크 안의 동작이라 입출력으로 관측할 수 없다
+req-security-tls-no-renegotiation 관측불가 TLS 사후 인증과 재협상을 쓰지 않는 것은 TLS 계층의 동작이라 입출력으로 관측할 수 없다
+req-security-tls-no-plaintext-fallback 관측불가 TLS 협상 실패 때 평문으로 바꾸지 않는 것은 전송 계층 연결의 동작이라 벡터의 입출력 모델로 관측할 수 없다
+req-security-alpn-client-offer 관측불가 ALPN 식별자 `strand` 제시는 TLS 핸드셰이크 안의 동작이라 입출력으로 관측할 수 없다
+req-security-alpn-server-reject 관측불가 ALPN을 제시하지 않은 연결의 거부는 TLS 핸드셰이크 안의 동작이라 입출력으로 관측할 수 없다
+# 형식미지원: #275 잔여. 상황을 만드는 단계나 비교 필드가 형식에 없다. 하나씩 갚을 때마다 그 줄을 지운다.
+req-hello-prehello-frame-size-min 형식미지원 상대 HELLO 전에 보내는 프레임을 16 KiB 상한으로 보는 규칙은 CLOSE reason을 입력할 수도 비교할 수도 없고 넘칠 때의 동작이 규격에 없어 확인할 수 없다(#275)
+req-auth-transient-failure-close-internal 형식미지원 인증기의 일시적 실패를 일으키는 트리거 단계가 형식에 없다(#275)
+req-auth-expiry-close-no-error 형식미지원 자격 증명 만료를 일으키는 트리거 단계가 없고 형식 문서 8.1절 4번 전제가 수명 통지를 막는다(#275)
+req-auth-revoked-close-unauthenticated 형식미지원 자격 증명 폐기를 일으키는 트리거 단계가 형식에 없다(#275)
+req-reset-cancel-finish-frame 형식미지원 요청 프레임의 쓰기를 시작한 뒤 취소하려면 쓰기가 막힌 상태를 만드는 단계가 있어야 하는데 형식에 없다(#275)
+# 형식미지원: #274에서 벡터로 쓰지 못한 항목. 규격이 로컬 처리를 정하지 않아 관측할 이벤트가 없다(#278 댓글).
+req-hello-peer-frame-size-limit 형식미지원 상대가 알린 max_frame_size를 넘는 프레임을 보내려 할 때 규격은 보내지 않는다(MUST)만 정하고 로컬 처리를 정하지 않아 관측할 이벤트가 없다. 구현은 호출 API가 IllegalArgumentException으로 거부하는 언어별 계약이다(#274)
+# 형식미지원: 앞 티켓들의 채움 중 드러난 누락. 보내지 않는 행동을 일으키는 입력이 형식에 없다.
+req-reset-close-only-code-forbidden 형식미지원 CLOSE 전용 error_code를 RESET에 싣고 싶어지는 상황을 만드는 입력이 형식에 없어, 구현이 그 코드를 쓰지 않는다는 것을 단언할 수 없다
+req-backpressure-no-refuse-after-start 형식미지원 처리를 시작한 요청을 로컬 사유(과부하 등)로 거절하고 싶어지는 상황을 만드는 입력이 형식에 없어 거절하지 않는다는 것을 단언할 수 없다

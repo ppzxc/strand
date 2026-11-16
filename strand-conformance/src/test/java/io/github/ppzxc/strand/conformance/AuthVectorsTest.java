@@ -77,14 +77,19 @@ class AuthVectorsTest {
         assertThat(inFile).containsExactlyInAnyOrderElementsOf(REQUIRED);
     }
 
+    /** AUTH 절(3.3.x) 밖에서, AUTH 벡터가 확인하는 프레임 검사의 절: stream_id(2.2.5), CLOSE(3.5), 연결 오류(5.1). */
+    private static final List<String> AUTH_FRAME_SECTIONS = Arrays.asList("2.2.5", "3.5", "5.1");
+
     @Test
     void everyAuthVectorPointsToTheAuthSectionsOrTheFramesItChecks() {
         for (String key : REQUIRED) {
-            List<String> spec = new ArrayList<>();
-            for (JsonElement ref : vector(key).getAsJsonArray("spec")) {
-                spec.add(ref.getAsString());
-            }
-            assertThat(spec).as(key).containsAnyOf("3.3", "3.3.1");
+            RequirementIndex index = RequirementIndex.ofSpecification();
+            assertThat(RawVectors.requirementsOf(vector(key)))
+                    .as(key)
+                    .anyMatch(id -> index.requirement(id) != null
+                            && (index.requirement(id).section().startsWith("3.3")
+                                    || AUTH_FRAME_SECTIONS.contains(
+                                            index.requirement(id).section())));
         }
     }
 

@@ -1,5 +1,10 @@
 package io.github.ppzxc.strand.conformance;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -159,6 +164,18 @@ final class RequirementIndex {
         RequirementIndex index = new RequirementIndex();
         index.scan(markdown.split("\r?\n", -1));
         return index;
+    }
+
+    /** 저장소의 실제 규격 문서를 읽어 만든 색인. */
+    static RequirementIndex ofSpecification() {
+        Path spec = VectorSuite.defaultDirectory()
+                .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
+                .normalize();
+        try {
+            return parse(new String(Files.readAllBytes(spec), StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /** 규범 키워드가 있는 절 번호와 그 줄 수(앵커 유무와 무관하다). */

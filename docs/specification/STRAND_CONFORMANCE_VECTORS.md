@@ -12,7 +12,7 @@
 
 이 문서에서 **러너**는 벡터를 읽어 테스트 대상 구현에 입력을 넣고 출력을 기대 결과와 비교하는 프로그램이고, **단계**는 시나리오의 한 항목이다. 두 말은 이 문서 안에서만 쓴다.
 
-절 번호 표기: "이 문서 n절"은 이 문서의 절이고, 그냥 "n.n절"은 와이어 규격(`STRAND_SPECIFICATION.md`)의 절이다. 벡터의 `spec` 필드도 와이어 규격의 절만 가리킨다.
+절 번호 표기: "이 문서 n절"은 이 문서의 절이고, 그냥 "n.n절"은 와이어 규격(`STRAND_SPECIFICATION.md`)의 절이다. 벡터의 `requirements` 필드는 절이 아니라 와이어 규격의 요구사항 식별자(앵커 id)로 가리킨다. 식별자가 놓인 절은 규격 본문에서 앵커를 찾아 알아낸다.
 
 ## 1. 모델
 
@@ -43,7 +43,7 @@
     {
       "id": "ping-is-acknowledged",
       "description": "PING을 받으면 같은 8바이트에 ACK를 붙여 돌려준다",
-      "spec": ["3.4"],
+      "requirements": ["req-ping-ack-reply", "req-frame-reserved-zero-send", "req-frame-status-nonresponse-zero-send"],
       "setup": { "role": "server", "established": true },
       "steps": [
         {
@@ -69,9 +69,16 @@
 | --- | --- | --- |
 | `id` | 예 | 같은 파일 안에서 유일한 kebab-case 이름(`[a-z0-9]+(-[a-z0-9]+)*`) |
 | `description` | 예 | 무엇을 확인하는지 적은 한 문장 이상의 설명 |
-| `spec` | 예 | 근거가 되는 규격 절 번호 문자열의 배열. 예: `["2.2.2", "5.1"]`. 가장 구체적인 하위 절 번호를 쓴다(예: `2.2`가 아니라 `2.2.2`). 비어 있으면 안 된다. 이슈 번호는 쓰지 않는다 |
+| `requirements` | 예 | 이 벡터의 기대 결과가 단언하는 요구사항 식별자의 배열. 예: `["req-ping-ack-reply", "req-frame-reserved-zero-send"]`. 원소는 와이어 규격의 앵커 id를 `req-` 접두사까지 그대로 적는다. 비어 있으면 안 된다. 의미는 이 표 아래에 적는다 |
 | `setup` | 예 | 초기 상태(이 문서 4절) |
 | `steps` | 예 | 단계 목록(이 문서 5절). 하나 이상 |
+
+`requirements`의 의미는 다음과 같다. 러너 동작에는 영향이 없는 메타데이터이며, 벡터가 무엇을 확인하는지와 규격의 어느 요구사항이 벡터로 확인되는지를 드러낸다.
+
+* 기대 결과(`send`와 `events`)가 단언하는 요구사항만 적는다. 초기 상태를 만들거나 앞 단계를 밟느라 거쳐 가기만 하는 요구사항은 적지 않는다.
+* 대문자 키워드가 SHOULD·SHOULD NOT인 요구사항은 적지 않는다. 따르지 않아도 되는 행동을 단언하면 적합한 구현이 실패하기 때문이다.
+* 보내는 쪽과 받는 쪽이 `-send`·`-recv`로 나뉜 요구사항은 벡터가 단언하는 쪽만 적는다. 쪽 표기가 벡터의 실제 역할과 맞는지는 기계로 검사하지 않는다.
+* 규격에 없는 식별자와 지운 식별자는 적을 수 없다. 규격 저장소의 검사가 이를 이름으로 짚는다.
 
 벡터 파일은 규격 영역별로 나눈다. `framing`, `handshake`, `auth`, `streams`, `backpressure`, `extensions`, `close` 같은 이름을 쓴다. 테스트 이름은 `파일명/id`다(파일명에서 `.json`은 뺀다).
 
@@ -212,7 +219,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
     {
       "id": "concurrent-streams-boundary-refuse-and-return",
       "description": "n + 1이 max_concurrent_streams와 같으면 수락하고 1 크면 REFUSED로 거절한다. 거절된 요청은 동시 스트림 수에 들지 않고, 응답을 보내면 그 자리만큼 다시 수락한다",
-      "spec": ["4.5", "5.1"],
+      "requirements": ["req-check-new-request-limit-refuse", "req-stream-ends-on-response-or-reset"],
       "setup": {
         "role": "server",
         "established": true,
@@ -269,7 +276,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
     {
       "id": "response-type-mismatch",
       "description": "응답 type이 요청 type과 다르면 아무것도 보내지 않고 애플리케이션에 INTERNAL을 넘긴다",
-      "spec": ["4.1", "5.1"],
+      "requirements": ["req-check-response-type-internal", "req-check-response-type-no-wire"],
       "setup": { "role": "client", "established": true },
       "steps": [
         {
@@ -301,7 +308,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
     {
       "id": "hello-ack-timeout",
       "description": "서버가 연결 서문을 확인한 즉시 HELLO를 보내고, 그 HELLO에 대한 ACK가 오지 않은 채 대기 시간이 지나면 CLOSE(UNRESPONSIVE)를 보내고 닫는다",
-      "spec": ["3.3"],
+      "requirements": ["req-setup-ack-timeout-close"],
       "setup": {
         "role": "server",
         "established": false,
@@ -349,7 +356,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
     {
       "id": "server-wrong-credentials-closes-unauthenticated",
       "description": "서버가 설정된 자격 증명과 다른 AUTH를 받으면 CLOSE(UNAUTHENTICATED)를 보내고 닫는다",
-      "spec": ["3.3.1"],
+      "requirements": ["req-auth-reject-close-unauthenticated", "req-auth-reject-reason-empty"],
       "setup": {
         "role": "server",
         "established": false,

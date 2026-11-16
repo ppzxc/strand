@@ -68,7 +68,12 @@ class CloseOnlyCodesTest {
         }
         assertThat(hexes).containsExactly("00000005", "00000006", "00000007");
         assertThat(internal).isEqualTo(3);
-        assertThat(v.getAsJsonArray("spec").toString()).contains("2.5.2", "4.4");
+        RequirementIndex index = RequirementIndex.ofSpecification();
+        List<String> sections = new ArrayList<>();
+        for (String id : RawVectors.requirementsOf(v)) {
+            sections.add(index.requirement(id).section());
+        }
+        assertThat(sections).containsOnly("4.4");
     }
 
     @Test

@@ -2,15 +2,12 @@ package io.github.ppzxc.strand.conformance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -21,76 +18,118 @@ import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
 /**
- * 규격과 벡터의 대응을 절 단위로 강제한다. 규범 문장(대문자 MUST, SHOULD)이 있는 절은 어떤 벡터의 {@code spec}이 가리키거나, {@code
- * uncovered-spec-sections.txt}에 사유와 함께 올라 있어야 한다. 문장 단위 대응은 보지 않는다. 절 안의 문장 하나가 빠져도 같은 절을 가리키는
- * 다른 벡터가 있으면 통과한다.
+ * 규격과 벡터의 대응을 요구사항 단위로 강제한다. MUST·MUST NOT 요구사항은 어떤 벡터의 {@code requirements}가 가리키거나, {@code
+ * uncovered-requirements.txt}에 범주와 사유를 붙여 올라 있어야 한다. SHOULD·SHOULD NOT 요구사항은 커버 의무가 없고 벡터가 가리키면 실패한다.
  */
 class SpecCoverageTest {
 
-    private static final Path SPEC = VectorSuite.defaultDirectory()
-            .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
-            .normalize();
-
-    /** 규범 문장이 있는 절 번호와 그 줄 수. */
-    private static Map<String, Integer> normativeSections() throws IOException {
-        return RequirementIndex.parse(new String(Files.readAllBytes(SPEC), StandardCharsets.UTF_8))
-                .keywordSections();
-    }
-
-    private static Set<String> referencedSections() {
+    /** 벡터가 하나라도 가리키는 요구사항 식별자. */
+    private static Set<String> referenced(Map<String, List<String>> byVector) {
         Set<String> result = new TreeSet<>();
-        for (JsonObject vector : RawVectors.byKey().values()) {
-            for (JsonElement ref : vector.getAsJsonArray("spec")) {
-                result.add(ref.getAsString());
+        for (List<String> ids : byVector.values()) {
+            result.addAll(ids);
+        }
+        return result;
+    }
+
+    /** 벡터도 제외 목록도 가리키지 않는 MUST·MUST NOT 요구사항. */
+    private static List<String> uncoveredMandatory(
+            RequirementIndex index, Map<String, List<String>> byVector, UncoveredRequirements exclusions) {
+        Set<String> referenced = referenced(byVector);
+        List<String> result = new ArrayList<>();
+        for (RequirementIndex.Requirement requirement : index.requirements()) {
+            if (requirement.keyword().mandatory()
+                    && !referenced.contains(requirement.id())
+                    && !exclusions.ids().contains(requirement.id())) {
+                result.add(requirement.id());
             }
         }
         return result;
     }
 
-    /** 절 번호에서 사유로. */
-    private static Map<String, String> exclusions() throws IOException {
-        Map<String, String> result = new TreeMap<>();
-        try (Reader reader = new InputStreamReader(
-                        SpecCoverageTest.class.getResourceAsStream("/uncovered-spec-sections.txt"),
-                        StandardCharsets.UTF_8);
-                BufferedReader lines = new BufferedReader(reader)) {
-            List<String> all = new ArrayList<>();
-            lines.lines().filter(l -> !l.isEmpty() && !l.startsWith("#")).forEach(all::add);
-            for (String line : all) {
-                String[] parts = line.split("\\s+", 2);
-                assertThat(parts).as("`절번호 사유` 형식: %s", line).hasSize(2);
-                assertThat(result.put(parts[0], parts[1]))
-                        .as("절이 두 번 올랐다: %s", parts[0])
-                        .isNull();
+    /** 제외 목록 줄의 오류: 형식·범주, 규격에 없는 식별자, MUST·MUST NOT이 아닌 식별자, 벡터가 가리키는 식별자. */
+    private static List<String> exclusionProblems(
+            RequirementIndex index, Map<String, List<String>> byVector, UncoveredRequirements exclusions) {
+        List<String> problems = new ArrayList<>(exclusions.problems());
+        Set<String> referenced = referenced(byVector);
+        for (String id : exclusions.ids()) {
+            RequirementIndex.Requirement requirement = index.requirement(id);
+            if (requirement == null) {
+                problems.add("제외 목록의 식별자가 규격에 없다: " + id);
+            } else if (!requirement.keyword().mandatory()) {
+                problems.add("제외 목록에 " + requirement.keyword() + " 요구사항이 있다: " + id);
+            }
+            if (referenced.contains(id)) {
+                problems.add("제외 목록의 식별자를 벡터가 가리킨다. 줄을 지운다: " + id);
             }
         }
-        return result;
+        return problems;
     }
 
     @Test
-    void everyNormativeSectionIsCoveredByAVectorOrExcluded() throws IOException {
-        Set<String> uncovered = new TreeSet<>(normativeSections().keySet());
-        uncovered.removeAll(referencedSections());
-        uncovered.removeAll(exclusions().keySet());
-        assertThat(uncovered)
-                .as("벡터가 가리키지 않는 규범 절. 벡터를 추가하거나 uncovered-spec-sections.txt에 사유와 함께 올린다")
+    void everyMandatoryRequirementIsCoveredByAVectorOrExcluded() throws IOException {
+        assertThat(uncoveredMandatory(index(), vectorRequirements(), UncoveredRequirements.load()))
+                .as("벡터가 가리키지 않는 MUST·MUST NOT 요구사항. 벡터를 추가하거나 uncovered-requirements.txt에 범주와 사유를 붙여 올린다")
                 .isEmpty();
     }
 
     @Test
-    void exclusionsAreNormativeSectionsNoVectorCovers() throws IOException {
-        Set<String> normative = normativeSections().keySet();
-        Set<String> referenced = referencedSections();
-        for (String section : exclusions().keySet()) {
-            assertThat(normative).as("%s절에는 규범 문장이 없다. 줄을 지운다", section).contains(section);
-            assertThat(referenced).as("%s절을 벡터가 가리킨다. 줄을 지운다", section).doesNotContain(section);
-        }
+    void exclusionsAreWellFormedMandatoryRequirementsNoVectorCovers() throws IOException {
+        assertThat(exclusionProblems(index(), vectorRequirements(), UncoveredRequirements.load()))
+                .isEmpty();
     }
 
     @Test
-    void sectionScanFindsKnownNormativeSections() throws IOException {
-        assertThat(normativeSections()).containsKeys("2.2.5", "3.3", "5.1");
-        assertThat(normativeSections()).doesNotContainKey("1");
+    void uncoveredMandatoryRequirementIsNamedInTheFailure() {
+        RequirementIndex index = RequirementIndex.parse("## 2. 절\n"
+                + "하나(MUST)<a id=\"req-cov\"></a>\n"
+                + "둘(MUST NOT)<a id=\"req-excl\"></a>\n"
+                + "셋(MUST)<a id=\"req-miss\"></a>\n"
+                + "넷(SHOULD)<a id=\"req-soft\"></a>\n");
+        Map<String, List<String>> vectors = new TreeMap<>();
+        vectors.put("f.json/a", Arrays.asList("req-cov"));
+        UncoveredRequirements exclusions = UncoveredRequirements.parse(Arrays.asList("req-excl 관측불가 사유"));
+
+        assertThat(uncoveredMandatory(index, vectors, exclusions)).containsExactly("req-miss");
+    }
+
+    @Test
+    void badExclusionLinesAreNamedInTheFailure() {
+        RequirementIndex index = RequirementIndex.parse("## 2. 절\n"
+                + "하나(MUST)<a id=\"req-cov\"></a>\n"
+                + "둘(MUST)<a id=\"req-ok\"></a>\n"
+                + "셋(SHOULD)<a id=\"req-soft\"></a>\n");
+        Map<String, List<String>> vectors = new TreeMap<>();
+        vectors.put("f.json/a", Arrays.asList("req-cov"));
+        UncoveredRequirements exclusions = UncoveredRequirements.parse(Arrays.asList(
+                "# 주석",
+                "",
+                "req-ok 관측불가 정상",
+                "req-nocategory 사유만 있고 범주 표지가 없다",
+                "req-missing-reason 형식미지원",
+                "req-ghost 관측불가 규격에 없다",
+                "req-soft 관측불가 SHOULD다",
+                "req-cov 형식미지원 벡터가 가리킨다",
+                "req-ok 관측불가 두 번 올랐다"));
+
+        assertThat(exclusionProblems(index, vectors, exclusions))
+                .hasSize(6)
+                .anyMatch(p -> p.contains("req-nocategory") && p.contains("범주"))
+                .anyMatch(p -> p.contains("req-missing-reason"))
+                .anyMatch(p -> p.contains("req-ghost") && p.contains("규격에 없다"))
+                .anyMatch(p -> p.contains("req-soft") && p.contains("SHOULD"))
+                .anyMatch(p -> p.contains("req-cov") && p.contains("벡터가 가리킨다"))
+                .anyMatch(p -> p.contains("req-ok") && p.contains("두 번"));
+    }
+
+    @Test
+    void exclusionsUseOnlyTheTwoCategories() throws IOException {
+        UncoveredRequirements exclusions = UncoveredRequirements.load();
+        assertThat(exclusions.ids()).isNotEmpty();
+        for (String id : exclusions.ids()) {
+            assertThat(exclusions.category(id)).as(id).isIn("관측불가", "형식미지원");
+            assertThat(exclusions.reason(id)).as(id).isNotBlank();
+        }
     }
 
     // ---- 규격의 앵커 ----
@@ -149,23 +188,17 @@ class SpecCoverageTest {
         assertThat(requirement.keyword()).as(id + " 키워드").isEqualTo(keyword);
     }
 
-    // ---- 벡터의 requirements (선택 필드) ----
+    // ---- 벡터의 requirements ----
 
-    private static RequirementIndex index() throws IOException {
-        return RequirementIndex.parse(new String(Files.readAllBytes(SPEC), StandardCharsets.UTF_8));
+    private static RequirementIndex index() {
+        return RequirementIndex.ofSpecification();
     }
 
     /** 벡터 키에서 그 벡터가 적은 요구사항 식별자로. 적지 않은 벡터는 빈 목록이다. */
     private static Map<String, List<String>> vectorRequirements() {
         Map<String, List<String>> result = new TreeMap<>();
         for (Map.Entry<String, JsonObject> vector : RawVectors.byKey().entrySet()) {
-            List<String> ids = new ArrayList<>();
-            if (vector.getValue().has("requirements")) {
-                for (JsonElement id : vector.getValue().getAsJsonArray("requirements")) {
-                    ids.add(id.getAsString());
-                }
-            }
-            result.put(vector.getKey(), ids);
+            result.put(vector.getKey(), RawVectors.requirementsOf(vector.getValue()));
         }
         return result;
     }
@@ -216,7 +249,10 @@ class SpecCoverageTest {
 
     /** 삭제 목록의 이름이 규격 앵커나 벡터 requirements에 다시 나온 자리. */
     private static List<String> revivedDeletedIds(
-            RequirementIndex index, Map<String, List<String>> byVector, List<String> deleted) {
+            RequirementIndex index,
+            Map<String, List<String>> byVector,
+            UncoveredRequirements exclusions,
+            List<String> deleted) {
         List<String> problems = new ArrayList<>();
         for (String id : deleted) {
             if (index.requirement(id) != null) {
@@ -226,6 +262,9 @@ class SpecCoverageTest {
                 if (vector.getValue().contains(id)) {
                     problems.add("지운 식별자를 " + vector.getKey() + "의 requirements가 가리킨다: " + id);
                 }
+            }
+            if (exclusions.ids().contains(id)) {
+                problems.add("지운 식별자가 제외 목록에 나온다: " + id);
             }
         }
         return problems;
@@ -241,7 +280,8 @@ class SpecCoverageTest {
     void deletedRequirementIdsDoNotReturn() throws IOException {
         assertThat(deletedRequirementIds())
                 .allMatch(id -> Check.REQUIREMENT_ID.matcher(id).matches());
-        assertThat(revivedDeletedIds(index(), vectorRequirements(), deletedRequirementIds()))
+        assertThat(revivedDeletedIds(
+                        index(), vectorRequirements(), UncoveredRequirements.load(), deletedRequirementIds()))
                 .isEmpty();
     }
 
@@ -275,13 +315,18 @@ class SpecCoverageTest {
     }
 
     @Test
-    void deletedNameInASpecAnchorOrVectorFails() {
+    void deletedNameInASpecAnchorVectorOrExclusionFails() {
         RequirementIndex index = RequirementIndex.parse("## 2. 절\n보낸다(MUST)<a id=\"req-old\"></a>\n");
         Map<String, List<String>> vectors = new TreeMap<>();
         vectors.put("f.json/a", Arrays.asList("req-gone"));
 
-        assertThat(revivedDeletedIds(index, vectors, Arrays.asList("req-old", "req-gone", "req-never")))
-                .hasSize(2)
+        assertThat(revivedDeletedIds(
+                        index,
+                        vectors,
+                        UncoveredRequirements.parse(Arrays.asList("req-listed 형식미지원 사유")),
+                        Arrays.asList("req-old", "req-gone", "req-never", "req-listed")))
+                .hasSize(3)
+                .anyMatch(p -> p.contains("req-listed") && p.contains("제외 목록"))
                 .anyMatch(p -> p.contains("req-old"))
                 .anyMatch(p -> p.contains("req-gone") && p.contains("f.json/a"));
     }

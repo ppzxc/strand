@@ -24,7 +24,6 @@ final class Check {
 
     private static final Pattern ID = Pattern.compile("[a-z0-9]+(-[a-z0-9]+)*");
     private static final Pattern PING_PAYLOAD = Pattern.compile("[0-9a-f]{16}");
-    private static final Pattern SPEC_SECTION = Pattern.compile("(?:[0-9]+|[A-G])(?:\\.[0-9]+)*");
 
     static final Pattern REQUIREMENT_ID = Pattern.compile("req-[a-z0-9]+(-[a-z0-9]+)*");
     private static final Pattern DECIMAL = Pattern.compile("0|[1-9][0-9]*");
@@ -187,20 +186,6 @@ final class Check {
     void nonEmptyText(String path, JsonElement element) {
         if (string(path, element).isEmpty()) {
             throw failAt(path, "비어 있으면 안 된다");
-        }
-    }
-
-    /** 근거 규격 절 번호 목록. 비어 있지 않고 모두 절 번호 형식이어야 한다. */
-    void specSections(String path, JsonElement element) {
-        JsonArray array = array(path, element);
-        if (array.isEmpty()) {
-            throw failAt(path, "비어 있으면 안 된다");
-        }
-        for (int i = 0; i < array.size(); i++) {
-            String section = string(item(path, i), array.get(i));
-            if (!SPEC_SECTION.matcher(section).matches()) {
-                throw failAt(item(path, i), "규격 절 번호가 아니다: '" + section + "'");
-            }
         }
     }
 

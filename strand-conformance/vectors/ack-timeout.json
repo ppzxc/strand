@@ -4,10 +4,6 @@
     {
       "id": "ping-ack-timeout-before-and-after-limit",
       "description": "PING을 보낸 뒤 상대의 ACK가 오지 않으면 대기 시간(1,000ms) 직전에는 아무것도 보내지 않고, 지나면 CLOSE(UNRESPONSIVE)를 보내고 닫는다",
-      "spec": [
-        "3.3",
-        "3.4"
-      ],
       "requirements": [
         "req-setup-ack-timeout-close"
       ],
@@ -57,10 +53,6 @@
     {
       "id": "client-ping-ack-timeout-before-and-after-limit",
       "description": "클라이언트 역할 구현도 보낸 PING에 ACK가 오지 않으면 대기 시간(1,000ms) 직전에는 조용하고 지나면 CLOSE(UNRESPONSIVE)를 보내고 닫는다",
-      "spec": [
-        "3.3",
-        "3.4"
-      ],
       "requirements": [
         "req-setup-ack-timeout-close"
       ],
@@ -110,10 +102,6 @@
     {
       "id": "ping-ack-timeout-is-cancelled-by-ack",
       "description": "대기 시간 직전(999ms)에 같은 payload의 ACK PING이 도착하면 시계가 더 지나도 CLOSE를 보내지 않는다",
-      "spec": [
-        "3.3",
-        "3.4"
-      ],
       "requirements": [
         "req-setup-ack-timeout-close"
       ],
@@ -159,10 +147,6 @@
     {
       "id": "ping-ack-timeout-while-closing-closes-without-close-frame",
       "description": "CLOSE(NO_ERROR)를 받아 종료 중일 때 PING의 확인 대기가 초과되면 CLOSE를 보내지 않고 닫는다. 대기 중인 내 요청 1은 로컬 UNAVAILABLE을 받고 그 뒤 closed가 난다",
-      "spec": [
-        "3.3",
-        "3.5"
-      ],
       "requirements": [
         "req-close-closing-liveness-continue",
         "req-close-after-close-no-close",
@@ -231,10 +215,6 @@
     {
       "id": "ack-timeout-fails-pending-request-with-unavailable",
       "description": "확인 대기 초과로 CLOSE(UNRESPONSIVE)를 보내고 닫을 때 대기 중인 내 요청 1은 로컬 UNAVAILABLE을 정확히 한 번 받고 그 뒤 closed가 난다",
-      "spec": [
-        "3.3",
-        "3.5"
-      ],
       "requirements": [
         "req-setup-ack-timeout-close",
         "req-close-end-pending-unavailable"

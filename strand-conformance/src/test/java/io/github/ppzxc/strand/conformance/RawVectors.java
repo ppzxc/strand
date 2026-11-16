@@ -52,6 +52,15 @@ final class RawVectors {
         }
     }
 
+    /** 벡터 객체가 적은 요구사항 식별자. */
+    static List<String> requirementsOf(JsonObject vector) {
+        List<String> ids = new java.util.ArrayList<>();
+        for (com.google.gson.JsonElement id : vector.getAsJsonArray("requirements")) {
+            ids.add(id.getAsString());
+        }
+        return ids;
+    }
+
     static synchronized List<Path> files() {
         return current().files;
     }

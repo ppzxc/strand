@@ -19,8 +19,6 @@ class QueuedRequestOutcomeSpecTest {
     private static final Path ROOT =
             VectorSuite.defaultDirectory().resolve("../..").normalize();
     private static final Path SPEC = ROOT.resolve("docs/specification/STRAND_SPECIFICATION.md");
-    private static final Path UNCOVERED =
-            ROOT.resolve("strand-conformance/src/test/resources/uncovered-spec-sections.txt");
 
     private static List<String> lines() throws IOException {
         return Files.readAllLines(SPEC, StandardCharsets.UTF_8);
@@ -130,14 +128,13 @@ class QueuedRequestOutcomeSpecTest {
     }
 
     @Test
-    void uncoveredReasonsNameTheUnobservableItems() throws IOException {
-        List<String> uncovered = Files.readAllLines(UNCOVERED, StandardCharsets.UTF_8);
-        // 요청 기한 벡터(deadline_ms)가 4.4.1절을 가리키므로 이 절은 목록에 없다(#191).
-        assertThat(uncovered.stream().filter(l -> l.startsWith("4.4.1 ")).collect(Collectors.toList()))
-                .isEmpty();
-        assertThat(uncovered.stream().filter(l -> l.startsWith("3.4.1 ")).collect(Collectors.toList()))
-                .singleElement()
-                .asString()
-                .contains("PING");
+    void exclusionListHoldsNeitherTheCoveredQueuedDeadlineNorTheShouldIdlePing() throws IOException {
+        RequirementIndex index = RequirementIndex.ofSpecification();
+        UncoveredRequirements uncovered = UncoveredRequirements.load();
+        // 요청 기한 벡터(deadline_ms)가 4.4.1절을 가리키므로 이 절의 요구사항은 목록에 없다(#191).
+        // 3.4.1절의 PING 하나 제한은 SHOULD라 커버 의무가 없어 목록에 올리지 않는다.
+        for (String id : uncovered.ids()) {
+            assertThat(index.requirement(id).section()).as(id).isNotIn("4.4.1", "3.4.1");
+        }
     }
 }

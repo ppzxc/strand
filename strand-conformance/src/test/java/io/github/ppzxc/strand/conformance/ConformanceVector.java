@@ -11,21 +11,14 @@ final class ConformanceVector {
 
     private final String id;
     private final String description;
-    private final List<String> spec;
     private final List<String> requirements;
     private final JsonObject setup;
     private final List<JsonObject> steps;
 
     ConformanceVector(
-            String id,
-            String description,
-            List<String> spec,
-            List<String> requirements,
-            JsonObject setup,
-            List<JsonObject> steps) {
+            String id, String description, List<String> requirements, JsonObject setup, List<JsonObject> steps) {
         this.id = id;
         this.description = description;
-        this.spec = frozen(spec, UnaryOperator.<String>identity());
         this.requirements = frozen(requirements, UnaryOperator.<String>identity());
         this.setup = setup.deepCopy();
         this.steps = frozen(steps, JsonObject::deepCopy);
@@ -48,12 +41,7 @@ final class ConformanceVector {
         return description;
     }
 
-    /** 근거가 되는 규격 절 번호. 비어 있지 않다. */
-    List<String> spec() {
-        return spec;
-    }
-
-    /** 단언하는 요구사항 식별자(규격 앵커 id). 선택 필드라 적지 않았으면 비어 있다. 러너 동작에는 영향이 없는 메타데이터다. */
+    /** 단언하는 요구사항 식별자(규격 앵커 id). 비어 있지 않다. 러너 동작에는 영향이 없는 메타데이터다. */
     List<String> requirements() {
         return requirements;
     }
