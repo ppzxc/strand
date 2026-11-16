@@ -615,7 +615,7 @@ RESET payload
 
 payload 길이가 정확히 4바이트가 아니면 연결 오류다(MUST, 5.1절)<a id="req-reset-payload-length-error"></a>.
 
-RESET의 `error_code`에는 CLOSE 전용 코드(2.5.2절의 5\~7)를 쓰지 않는다(MUST NOT)<a id="req-reset-close-only-code-forbidden"></a>. 받으면 그 밖의 RESET으로 다룬다.
+RESET의 `error_code`에는 CLOSE 전용 코드(2.5.2절의 5\~7)를 쓰지 않는다(MUST NOT)<a id="req-reset-close-only-code-forbidden"></a>. 받으면 그 밖의 RESET으로 다룬다(MUST)<a id="req-reset-close-only-code-recv-other"></a>.
 
 받은 RESET에는 어떤 경우에도 RESET으로 답하지 않는다(MUST NOT)<a id="req-reset-no-reply"></a>. 대기 상태인 스트림이 RESET을 받으면 끝남으로 넘어가고(4.3절), 대기 중이 아닌 스트림에 RESET이 오면 4.3절에 따라 아무것도 보내지 않고 버린다.
 
@@ -636,7 +636,7 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 #### 4.4.1 요청 기한
 
-요청한 쪽은 요청마다 로컬 기한을 둘 수 있다(MAY). 기한이 지났을 때 요청 프레임을 아직 한 바이트도 쓰지 않았다면(번호를 받지 못한 대기열 요청(1.3절)과, 번호는 받았지만 쓰기 전인 요청) `RESET` 없이 쓰지 않은 프레임을 버리고 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(처리 안 됨)를 넘기고 끝낸다(MUST)<a id="req-deadline-unwritten-local-exceeded"></a>. 쓰기를 시작했고 그 스트림이 아직 대기 중이면 `RESET(CANCEL)`을 보내고(MUST)<a id="req-deadline-written-reset-cancel"></a> 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(결과 모름)를 넘긴다. 기한의 값은 로컬 설정이다.
+요청한 쪽은 요청마다 로컬 기한을 둘 수 있다(MAY). 기한이 지났을 때 요청 프레임을 아직 한 바이트도 쓰지 않았다면(번호를 받지 못한 대기열 요청(1.3절)과, 번호는 받았지만 쓰기 전인 요청) `RESET` 없이 쓰지 않은 프레임을 버리고 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(처리 안 됨)를 넘기고 끝낸다(MUST)<a id="req-deadline-unwritten-local-exceeded"></a>. 쓰기를 시작했고 그 스트림이 아직 대기 중이면 `RESET(CANCEL)`을 보내고(MUST)<a id="req-deadline-written-reset-cancel"></a> 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(결과 모름)를 넘긴다. 기한을 두지 않은 요청에는 기한 만료를 이유로 `RESET`을 보내거나 `DEADLINE_EXCEEDED` 결과를 넘기지 않는다(MUST NOT)<a id="req-deadline-none-no-action"></a>. 기한의 값은 로컬 설정이다.
 
 ### 4.5 배압 (Backpressure)
 
