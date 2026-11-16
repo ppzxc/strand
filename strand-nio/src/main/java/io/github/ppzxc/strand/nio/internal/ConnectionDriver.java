@@ -682,7 +682,8 @@ public final class ConnectionDriver implements AutoCloseable {
             long limit = -1;
             OptionalLong next = endpoint.nextDeadline();
             if (next.isPresent()) {
-                limit = Math.max(0, next.getAsLong() - (clock.getAsLong() - startedAt));
+                // 통로의 시간 제한이 int 범위로 잘리는 구현에서 바쁜 대기가 되지 않게, 한 번의 기다림은 int 범위로 자른다. 기한이 더 멀면 깨어난 뒤 다시 계산한다.
+                limit = Math.min(Math.max(0, next.getAsLong() - (clock.getAsLong() - startedAt)), Integer.MAX_VALUE);
             }
             long untilFinish = untilFinish();
             if (untilFinish >= 0) {
@@ -696,7 +697,6 @@ public final class ConnectionDriver implements AutoCloseable {
             if (!closed || finished) {
                 return -1;
             }
-            // 통로의 시간 제한이 int 범위로 잘리는 구현에서 바쁜 대기가 되지 않게, 한 번의 기다림은 int 범위로 자른다. 기한이 더 멀면 깨어난 뒤 다시 계산한다.
             return Math.min(Math.max(0, closedFinishDeadline - clock.getAsLong()), Integer.MAX_VALUE);
         }
 

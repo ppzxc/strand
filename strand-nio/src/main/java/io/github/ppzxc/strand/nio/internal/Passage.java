@@ -29,7 +29,7 @@ public interface Passage {
      * 기다릴 때 이미 받아 줄 수 있으면 바로 끝난다.
      *
      * <p>시간 제한의 계약이다. {@code timeoutMs}가 0이면 기다리지 않고 지금 읽을 수 있는 것만 돌려준다(논블로킹 폴, 읽을 것이 없으면 바로
-     * {@link Inbound#none()}). 음수면 기다리는 대상이 오거나 {@code wakeup}이 올 때까지 상한 없이 기다린다. 양수면 그 밀리초까지만 기다린다.
+     * {@link Inbound#none()}). 음수면 기다리는 대상이 오거나 {@code wakeup}이 올 때까지 상한 없이 기다린다. 양수면 그 밀리초까지만 기다린다. 드라이버는 양수 값을 {@code Integer.MAX_VALUE} 이하로 잘라 부른다.
      * 구현은 {@code PassageContract}(test fixtures)를 상속한 테스트로 이를 확인한다.
      *
      * <p>{@code waitForRead}가 false면 이 호출은 읽지 않는다. 읽을 것이 있어도 깨어나지 않고 입력을 가져가지도 않으며, 늘 {@link Inbound#none()}을
