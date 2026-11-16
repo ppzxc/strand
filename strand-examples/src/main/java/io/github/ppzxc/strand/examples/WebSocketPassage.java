@@ -159,8 +159,10 @@ public final class WebSocketPassage implements Passage {
         Object item;
         synchronized (lock) {
             awaitReady(timeoutMs, waitForRead, waitForWrite);
-            // 깨움은 어느 기다림에서든 한 번 깨우고 사라진다. 드라이버는 깨어난 스텝마다 명령을 처리한다.
-            wakeRequested = false;
+            // 기다린 호출은 깨움을 한 번 깨우고 지운다. 폴(0)은 지우지 않아 다음 기다림을 바로 끝내게 남긴다(Selector.selectNow와 같다).
+            if (timeoutMs != 0) {
+                wakeRequested = false;
+            }
             throwIfClosed();
             item = waitForRead ? queue.poll() : removeFailure();
         }

@@ -328,4 +328,18 @@ class WebSocketPassageTest {
         assertThat(passage.await(0).kind()).as("읽기를 다시 켜면 쌓인 메시지가 먼저다").isEqualTo(Inbound.Kind.MESSAGE);
         assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.NONE);
     }
+
+    @Test
+    void aPollDoesNotConsumeAWakeupMeantForTheNextWait() throws Exception {
+        listener.onOpen(socket);
+
+        passage.wakeup();
+        assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.NONE);
+
+        long start = System.nanoTime();
+        assertThat(passage.await(10_000).kind()).isEqualTo(Inbound.Kind.NONE);
+        assertThat(java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
+                .as("기다리기 전에 불린 wakeup이 다음 기다림을 바로 끝낸다")
+                .isLessThan(5_000);
+    }
 }
