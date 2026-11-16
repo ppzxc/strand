@@ -12,7 +12,6 @@ final class HelloParams {
 
     static final long DEFAULT_MAX_FRAME_SIZE = 65_536L;
     static final long DEFAULT_MAX_CONCURRENT_STREAMS = 100L;
-    static final long MAX_FRAME_SIZE_LOWER_LIMIT = 16384L;
     static final long MAX_FRAME_SIZE_UPPER_LIMIT = 1_048_576L;
 
     private HelloParams() {}
