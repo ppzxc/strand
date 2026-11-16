@@ -156,20 +156,19 @@ public final class WebSocketPassage implements Passage {
         if (!waitForRead) {
             return awaitSignal(timeoutMs, waitForWrite);
         }
-        if (waitForWrite && timeoutMs != 0 && writable()) {
-            return Inbound.none();
-        }
         if (ended) {
             return Inbound.end();
         }
+        // 이미 쓸 수 있으면 기다리지 않고 지금 큐에 있는 것(읽을 것, 실패)만 가져간다.
+        long limit = waitForWrite && writable() ? 0 : timeoutMs;
         Object item;
         try {
-            if (timeoutMs == 0) {
+            if (limit == 0) {
                 item = queue.poll();
-            } else if (timeoutMs < 0) {
+            } else if (limit < 0) {
                 item = queue.take();
             } else {
-                item = queue.poll(timeoutMs, TimeUnit.MILLISECONDS);
+                item = queue.poll(limit, TimeUnit.MILLISECONDS);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -235,7 +234,9 @@ public final class WebSocketPassage implements Passage {
             if (closed) {
                 throw new IOException("닫힌 통로");
             }
-            signalled = false;
+            if (timeoutMs != 0) {
+                signalled = false;
+            }
         }
         return Inbound.none();
     }
@@ -283,7 +284,7 @@ public final class WebSocketPassage implements Passage {
             // Close는 앞선 보내기가 끝난 뒤에 보낸다. JDK는 보내기가 겹치면 거부한다.
             int code = message.webSocketCloseCode();
             CompletableFuture<?> send = busy
-                    ? last.handle((sent, failure) -> null).thenCompose(ignored -> open.sendClose(code, ""))
+                    ? last.handle((sent, failure) -> null).thenCompose(ignored -> closeOnce(open, code))
                     : open.sendClose(code, "");
             failIfAlreadyFailed(send);
             watch(send);
@@ -321,12 +322,22 @@ public final class WebSocketPassage implements Passage {
     public void shutdownOutput() {
         WebSocket open = socket;
         if (open != null && !open.isOutputClosed()) {
-            open.sendClose(NORMAL_CLOSURE, "").whenComplete((sent, failure) -> {
+            // 앞선 보내기(마지막 프레임이나 write가 이어 붙인 Close)가 끝난 뒤에 보낸다. 겹치면 JDK가 거부해 abort로 번진다.
+            CompletableFuture<?> last = sending;
+            CompletableFuture<?> close = last != null && !last.isDone()
+                    ? last.handle((sent, failure) -> null).thenCompose(ignored -> closeOnce(open, NORMAL_CLOSURE))
+                    : closeOnce(open, NORMAL_CLOSURE);
+            sending = close;
+            close.whenComplete((sent, failure) -> {
                 if (failure != null) {
                     open.abort();
                 }
             });
         }
+    }
+
+    private static CompletableFuture<?> closeOnce(WebSocket open, int code) {
+        return open.isOutputClosed() ? CompletableFuture.completedFuture(null) : open.sendClose(code, "");
     }
 
     @Override
