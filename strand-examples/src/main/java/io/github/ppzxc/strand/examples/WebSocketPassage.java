@@ -60,7 +60,7 @@ public final class WebSocketPassage implements Passage {
     // 아직 끝나지 않은 마지막 보내기. 전송 스레드만 바꾸고, 완료 콜백은 완료 여부만 본다.
     private volatile @Nullable CompletableFuture<?> sending;
     private final Object signal = new Object();
-    private boolean signalled;
+    private volatile boolean signalled;
 
     /** 열린 소켓은 {@link #listener()}의 {@code onOpen}으로 들어온다. 직접 열려면 {@link #connect}를 쓴다. */
     WebSocketPassage() {
@@ -160,8 +160,11 @@ public final class WebSocketPassage implements Passage {
             return Inbound.end();
         }
         // 읽기를 기다리는 동안 쌓인 깨움 신호는 이 호출이 이미 처리한다.
-        synchronized (signal) {
-            signalled = false;
+        // 값을 읽기만 하는 길이 대부분이라 잠금은 신호가 쌓였을 때만 잡는다.
+        if (signalled) {
+            synchronized (signal) {
+                signalled = false;
+            }
         }
         // 이미 쓸 수 있으면 기다리지 않고 지금 큐에 있는 것(읽을 것, 실패)만 가져간다.
         long limit = waitForWrite && writable() ? 0 : timeoutMs;
