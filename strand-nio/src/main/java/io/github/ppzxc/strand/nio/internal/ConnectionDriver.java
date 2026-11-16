@@ -281,7 +281,8 @@ public final class ConnectionDriver implements AutoCloseable {
     private final AtomicLong writtenFrames = new AtomicLong();
     private final AtomicLong discardedBytes = new AtomicLong();
     private final Object writeBlockedLock = new Object();
-    // 쓰기 대기열이 다 나가지 못하고 쓰기 가능을 기다리는 동안 true. 쓰는 스레드는 전송 스레드 하나뿐이라 바뀔 때만 writeBlockedLock을 잡고 깨우며, 기다리는 쪽은 그 잠금 안에서 읽는다.
+    // 쓰기 대기열이 다 나가지 못하고 쓰기 가능을 기다리는 동안 true.
+    // 쓰는 스레드는 전송 스레드 하나뿐이라 바뀔 때만 writeBlockedLock을 잡고 깨우며, 기다리는 쪽은 그 잠금 안에서 읽는다.
     private volatile boolean writeBlocked;
 
     private ConnectionDriver(
@@ -502,7 +503,10 @@ public final class ConnectionDriver implements AutoCloseable {
      * 관측하게 하는 패키지 범위 관측점이다. 사건이 아니라 현재 상태를 기다리므로 막힌 동안에 불러야 한다. 그 상태는 대기열이 다 나가거나 버려지거나 입출력 오류가 나면 풀린다.
      *
      * @param blocked 기다릴 상태. true면 막힘, false면 풀림
+     * @param timeout 기다릴 최대 시간
+     * @param unit timeout의 단위
      * @return 제한 시간 안에 그 상태이면 true, 아니면 false
+     * @throws InterruptedException 기다리다 중단되면
      */
     boolean awaitWriteBlocked(boolean blocked, long timeout, TimeUnit unit) throws InterruptedException {
         long start = System.nanoTime();
@@ -941,14 +945,17 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /** 쓰기 대기열에 남은 메시지를 버리고 남은 바이트를 센다. */
         void discardQueued() {
-            // 대기열을 버리면 막힘 신호도 푼다. 아래에서 예외가 나도 풀려 있게 먼저 한다.
-            setWriteBlocked(false);
-            // 끊긴 엔드포인트가 마지막으로 낸 메시지(명령 소진 중 난 것)도 보내지 못한 것이다.
-            takeOutput();
-            discardedBytes.addAndGet(queuedBytes);
-            writeQueue.clear();
-            writeOffset = 0;
-            queuedBytes = 0;
+            try {
+                // 끊긴 엔드포인트가 마지막으로 낸 메시지(명령 소진 중 난 것)도 보내지 못한 것이다.
+                takeOutput();
+                discardedBytes.addAndGet(queuedBytes);
+                writeQueue.clear();
+                writeOffset = 0;
+                queuedBytes = 0;
+            } finally {
+                // 버리기를 마친 뒤에 막힘 신호를 푼다. 풀린 것을 본 쪽이 집계를 온전히 보게 하며, 중간에 예외가 나도 푼다.
+                setWriteBlocked(false);
+            }
         }
 
         private boolean write() {
