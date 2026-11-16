@@ -309,7 +309,7 @@
     },
     {
       "id": "ping-length-above-max-frame-size-closes",
-      "description": "연결을 수립한 뒤 받은 평상시 프레임의 length가 최댓값(알린 max_frame_size 65,536에서 4를 뺀 65,532)을 넘으면(65533) 연결 오류다. 나머지 바이트를 기다리지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
+      "description": "연결을 수립한 뒤 받은 평상시 프레임의 length가 최댓값(알린 max_frame_size 16,384에서 4를 뺀 16,380)을 넘으면(16381) 연결 오류다. 나머지 바이트를 기다리지 않고 CLOSE(PROTOCOL_ERROR)를 보낸다",
       "spec": [
         "2.2.1",
         "5.1"
@@ -320,12 +320,15 @@
       ],
       "setup": {
         "role": "server",
-        "established": true
+        "established": true,
+        "local_hello": {
+          "max_frame_size": 16384
+        }
       },
       "steps": [
         {
           "kind": "recv",
-          "hex": "0000fffd00020000000000000000000000000000",
+          "hex": "00003ffd00020000000000000000000000000000",
           "send": [
             {
               "type": "CLOSE",
@@ -557,8 +560,31 @@
       ]
     },
     {
+      "id": "reserved-type-length-sixteen-is-accepted",
+      "description": "length가 최솟값 16인 프레임(헤더만 있는 20바이트)은 범위 안이다. 예약 제어 타입이라 무시하며 CLOSE를 보내지 않는다",
+      "spec": [
+        "2.2.1",
+        "2.2.2"
+      ],
+      "requirements": [
+        "req-frame-length-range-error"
+      ],
+      "setup": {
+        "role": "server",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000060000000000000000000000000000",
+          "send": [],
+          "events": []
+        }
+      ]
+    },
+    {
       "id": "own-close-ends-queued-request-without-stream-id",
-      "description": "AUTH 관문이 열리기 전이라 번호를 받지 못하고 미뤄진 요청은 내가 CLOSE를 보내면 그 즉시 stream_id 없는 UNAVAILABLE(처리 안 됨)로 끝난다.",
+      "description": "AUTH 관문이 열리기 전이라 번호를 받지 못하고 미뤄진 요청은 내가 CLOSE를 보내면 그 즉시 stream_id 없는 UNAVAILABLE(처리 안 됨)로 끝난다",
       "spec": [
         "3.5",
         "4.4"
