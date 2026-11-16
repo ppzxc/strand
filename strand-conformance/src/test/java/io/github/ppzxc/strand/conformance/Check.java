@@ -24,7 +24,6 @@ final class Check {
 
     private static final Pattern ID = Pattern.compile("[a-z0-9]+(-[a-z0-9]+)*");
     private static final Pattern PING_PAYLOAD = Pattern.compile("[0-9a-f]{16}");
-    private static final Pattern SPEC_SECTION = Pattern.compile("(?:[0-9]+|[A-G])(?:\\.[0-9]+)*");
 
     static final Pattern REQUIREMENT_ID = Pattern.compile("req-[a-z0-9]+(-[a-z0-9]+)*");
     private static final Pattern DECIMAL = Pattern.compile("0|[1-9][0-9]*");
@@ -190,20 +189,6 @@ final class Check {
         }
     }
 
-    /** 근거 규격 절 번호 목록. 비어 있지 않고 모두 절 번호 형식이어야 한다. */
-    void specSections(String path, JsonElement element) {
-        JsonArray array = array(path, element);
-        if (array.isEmpty()) {
-            throw failAt(path, "비어 있으면 안 된다");
-        }
-        for (int i = 0; i < array.size(); i++) {
-            String section = string(item(path, i), array.get(i));
-            if (!SPEC_SECTION.matcher(section).matches()) {
-                throw failAt(item(path, i), "규격 절 번호가 아니다: '" + section + "'");
-            }
-        }
-    }
-
     /** 요구사항 식별자 목록: 비어 있지 않고, 모두 규격 앵커 id 형식이다. */
     void requirementIds(String path, JsonElement element) {
         JsonArray array = array(path, element);
@@ -214,6 +199,11 @@ final class Check {
             String id = string(item(path, i), array.get(i));
             if (!REQUIREMENT_ID.matcher(id).matches()) {
                 throw failAt(item(path, i), "요구사항 식별자가 아니다(req-로 시작하는 소문자 kebab-case): '" + id + "'");
+            }
+            for (int j = 0; j < i; j++) {
+                if (array.get(j).getAsString().equals(id)) {
+                    throw failAt(item(path, i), "요구사항 식별자가 두 번 나온다: '" + id + "'");
+                }
             }
         }
     }

@@ -1,5 +1,10 @@
 package io.github.ppzxc.strand.conformance;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -152,13 +157,36 @@ final class RequirementIndex {
     private final Map<String, Integer> keywordSections = new TreeMap<>();
     private final Map<String, Requirement> requirements = new LinkedHashMap<>();
     private final List<Problem> problems = new ArrayList<>();
+    private List<Requirement> requirementList = Collections.emptyList();
 
     private RequirementIndex() {}
 
     static RequirementIndex parse(String markdown) {
         RequirementIndex index = new RequirementIndex();
         index.scan(markdown.split("\r?\n", -1));
+        index.requirementList = Collections.unmodifiableList(new ArrayList<>(index.requirements.values()));
         return index;
+    }
+
+    /** 저장소의 실제 규격 문서를 읽어 만든 색인. */
+    static synchronized RequirementIndex ofSpecification() {
+        if (specification == null) {
+            specification = readSpecification();
+        }
+        return specification;
+    }
+
+    private static RequirementIndex specification;
+
+    private static RequirementIndex readSpecification() {
+        Path spec = VectorSuite.defaultDirectory()
+                .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
+                .normalize();
+        try {
+            return parse(new String(Files.readAllBytes(spec), StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /** 규범 키워드가 있는 절 번호와 그 줄 수(앵커 유무와 무관하다). */
@@ -168,7 +196,7 @@ final class RequirementIndex {
 
     /** 앵커 순서대로의 요구사항 목록. */
     List<Requirement> requirements() {
-        return Collections.unmodifiableList(new ArrayList<>(requirements.values()));
+        return requirementList;
     }
 
     /** 식별자로 찾은 요구사항. 없으면 null. */

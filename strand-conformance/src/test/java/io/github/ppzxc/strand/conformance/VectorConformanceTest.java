@@ -18,9 +18,10 @@ import org.junit.jupiter.api.io.TempDir;
 /** 벡터 디렉터리의 모든 벡터 파일을 읽어 벡터마다 동적 테스트 하나를 만든다. 이름은 {@code 파일명/id}(파일명의 {@code .json}은 뺀다). */
 class VectorConformanceTest {
 
-    private static final String VECTOR_TEMPLATE = "{\"id\":\"%s\",\"description\":\"d\",\"spec\":[\"3.4\"],"
-            + "\"setup\":{\"role\":\"server\",\"established\":true},"
-            + "\"steps\":[{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[],\"events\":[]}]}";
+    private static final String VECTOR_TEMPLATE =
+            "{\"id\":\"%s\",\"description\":\"d\",\"requirements\":[\"req-ping-ack-reply\"],"
+                    + "\"setup\":{\"role\":\"server\",\"established\":true},"
+                    + "\"steps\":[{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[],\"events\":[]}]}";
 
     private static void writeFile(Path dir, String name, String... ids) throws IOException {
         String vectors =
@@ -85,7 +86,7 @@ class VectorConformanceTest {
     @Test
     void vectorsAreExecutedAndMismatchesFail(@TempDir Path dir) throws IOException {
         // 아무것도 보내지 않을 입력에 closed를 기대하면 실패해야 한다.
-        String vector = "{\"id\":\"x\",\"description\":\"d\",\"spec\":[\"3.4\"],"
+        String vector = "{\"id\":\"x\",\"description\":\"d\",\"requirements\":[\"req-ping-ack-reply\"],"
                 + "\"setup\":{\"role\":\"server\",\"established\":true},"
                 + "\"steps\":[{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[],"
                 + "\"events\":[{\"event\":\"closed\"}]}]}";

@@ -28,7 +28,7 @@ class VectorRunnerTest {
         for (String step : steps) {
             list.add(JsonParser.parseString(step).getAsJsonObject());
         }
-        return new ConformanceVector("v", "d", Arrays.asList("3.4"), Arrays.<String>asList(), setupJson, list);
+        return new ConformanceVector("v", "d", Arrays.asList("req-ping-ack-reply"), setupJson, list);
     }
 
     private static String recv(String hex, String send, String events) {

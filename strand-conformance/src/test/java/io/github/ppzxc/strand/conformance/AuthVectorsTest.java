@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -77,14 +78,28 @@ class AuthVectorsTest {
         assertThat(inFile).containsExactlyInAnyOrderElementsOf(REQUIRED);
     }
 
+    /** 3.3.x 요구사항 대신 자기가 확인하는 프레임 검사의 절을 가리키는 AUTH 벡터. 벡터를 더하려면 여기에 올린다. */
+    private static final Map<String, String> FRAME_CHECK_SECTIONS = new HashMap<>();
+
+    static {
+        FRAME_CHECK_SECTIONS.put("auth/client-receives-unauthenticated-close", "3.5");
+        FRAME_CHECK_SECTIONS.put("auth/server-auth-stream-id-nonzero-closes", "2.2.5");
+    }
+
     @Test
     void everyAuthVectorPointsToTheAuthSectionsOrTheFramesItChecks() {
+        RequirementIndex index = RequirementIndex.ofSpecification();
         for (String key : REQUIRED) {
-            List<String> spec = new ArrayList<>();
-            for (JsonElement ref : vector(key).getAsJsonArray("spec")) {
-                spec.add(ref.getAsString());
+            List<String> sections = new ArrayList<>();
+            for (String id : RawVectors.requirementsOf(vector(key))) {
+                assertThat(index.requirement(id)).as(key + "의 " + id).isNotNull();
+                sections.add(index.requirement(id).section());
             }
-            assertThat(spec).as(key).containsAnyOf("3.3", "3.3.1");
+            if (FRAME_CHECK_SECTIONS.containsKey(key)) {
+                assertThat(sections).as(key).contains(FRAME_CHECK_SECTIONS.get(key));
+            } else {
+                assertThat(sections).as(key).anyMatch(section -> section.startsWith("3.3"));
+            }
         }
     }
 

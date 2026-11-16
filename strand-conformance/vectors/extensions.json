@@ -4,9 +4,6 @@
     {
       "id": "response-unknown-extension-tag-is-ignored",
       "description": "응답의 확장 영역은 형식만 검사하고 내용은 무시한다. 모르는 tag가 있어도 정상 응답으로 애플리케이션에 전달한다",
-      "spec": [
-        "2.4.2"
-      ],
       "requirements": [
         "req-ext-response-content-ignore"
       ],
@@ -44,9 +41,6 @@
     {
       "id": "response-defined-extension-tag-is-ignored",
       "description": "정의된 tag(timeout, traceparent)가 응답에 있어도 요청에서만 의미가 있으므로 내용을 무시하고 정상 응답으로 전달한다",
-      "spec": [
-        "2.4.2"
-      ],
       "requirements": [
         "req-ext-response-content-ignore"
       ],
@@ -84,9 +78,6 @@
     {
       "id": "response-invalid-timeout-length-is-ignored",
       "description": "응답의 timeout 길이가 4가 아니거나 idempotency-key 길이가 0이어도 값을 해석하지 않으므로 오류 없이 정상 응답으로 전달한다",
-      "spec": [
-        "2.4.2"
-      ],
       "requirements": [
         "req-ext-response-content-ignore"
       ],
@@ -148,11 +139,6 @@
     {
       "id": "response-extension-duplicate-tag-closes",
       "description": "응답의 확장 영역도 형식은 검사한다. 같은 tag가 두 번 나오면 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보내고 닫으며 대기 중인 요청 1은 로컬 UNAVAILABLE을 받는다",
-      "spec": [
-        "2.4.1",
-        "2.4.2",
-        "5.1"
-      ],
       "requirements": [
         "req-ext-duplicate-tag-error",
         "req-check-connection-error-close",
@@ -202,11 +188,6 @@
     {
       "id": "response-extension-length-mismatch-closes",
       "description": "응답의 확장 영역에서 항목 길이의 합이 extensions_length와 다르면(항목 뒤에 2바이트가 남음) 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
-      "spec": [
-        "2.4.1",
-        "2.4.2",
-        "5.1"
-      ],
       "requirements": [
         "req-ext-length-sum-exact",
         "req-check-connection-error-close",
@@ -256,10 +237,6 @@
     {
       "id": "unknown-extension-tag-is-skipped",
       "description": "요청의 확장 영역에 모르는 tag가 있으면 건너뛴다. 정의된 항목(timeout)은 그대로 해석하고 요청을 애플리케이션에 전달한다",
-      "spec": [
-        "2.4.1",
-        "5.1"
-      ],
       "requirements": [
         "req-ext-unknown-tag-skip"
       ],
@@ -285,10 +262,6 @@
     {
       "id": "extensions-length-8192-is-accepted",
       "description": "extensions_length가 8,192이면 한도 안이다. 모르는 tag 하나가 확장 영역을 가득 채워도 건너뛰고 요청을 전달한다",
-      "spec": [
-        "2.2.6",
-        "2.4.1"
-      ],
       "requirements": [
         "req-frame-extensions-length-error",
         "req-ext-unknown-tag-skip"
@@ -315,11 +288,6 @@
     {
       "id": "extensions-length-8193-closes",
       "description": "extensions_length가 8,193이면 항목 형식이 맞아도 한도(8,192) 초과로 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
-      "spec": [
-        "2.2.6",
-        "2.4.1",
-        "5.1"
-      ],
       "requirements": [
         "req-frame-extensions-length-error",
         "req-check-connection-error-close",
@@ -351,10 +319,6 @@
     {
       "id": "tlv-overruns-extension-area-closes",
       "description": "항목이 자기 length(8)만큼의 value를 갖지 못하고 확장 영역이 끝나면 길이 합이 extensions_length와 맞지 않으므로 연결 오류다",
-      "spec": [
-        "2.4.1",
-        "5.1"
-      ],
       "requirements": [
         "req-ext-length-sum-exact",
         "req-check-connection-error-close",
@@ -386,10 +350,6 @@
     {
       "id": "tlv-leaves-trailing-bytes-closes",
       "description": "항목 길이의 합(4)이 extensions_length(6)보다 작아 확장 영역 끝에 2바이트가 남으면 연결 오류다",
-      "spec": [
-        "2.4.1",
-        "5.1"
-      ],
       "requirements": [
         "req-ext-length-sum-exact",
         "req-check-connection-error-close",
@@ -421,10 +381,6 @@
     {
       "id": "duplicate-unknown-tag-closes",
       "description": "모르는 tag도 같은 tag를 두 번 쓸 수 없다. 연결 오류로 CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
-      "spec": [
-        "2.4.1",
-        "5.1"
-      ],
       "requirements": [
         "req-ext-duplicate-tag-error",
         "req-check-connection-error-close",
@@ -456,10 +412,6 @@
     {
       "id": "duplicate-defined-tag-closes",
       "description": "정의된 tag(timeout)가 두 번 나오면 값이 올바르더라도 확장 영역 형식 위반이라 연결 오류다. 확장 값 오류에 대한 응답이 아니라 CLOSE(PROTOCOL_ERROR)를 보낸다",
-      "spec": [
-        "2.4.1",
-        "5.1"
-      ],
       "requirements": [
         "req-ext-duplicate-tag-error",
         "req-check-connection-error-close",
@@ -491,10 +443,6 @@
     {
       "id": "unknown-type-with-malformed-extensions-closes",
       "description": "확장 영역 형식 위반은 연결 오류 집합이라 요청 type을 보기 전에 걸린다. 모르는 type의 요청이어도 미구현 응답이 아니라 CLOSE(PROTOCOL_ERROR)를 보낸다",
-      "spec": [
-        "2.4.1",
-        "5.1"
-      ],
       "requirements": [
         "req-ext-duplicate-tag-error",
         "req-check-connection-error-close",

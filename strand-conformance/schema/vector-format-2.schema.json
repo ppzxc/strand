@@ -417,18 +417,14 @@
     "vector": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "description", "spec", "setup", "steps"],
+      "required": ["id", "description", "requirements", "setup", "steps"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
         "description": { "type": "string", "minLength": 1 },
-        "spec": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "type": "string", "pattern": "^(?:[0-9]+|[A-G])(?:\\.[0-9]+)*$" }
-        },
         "requirements": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": { "type": "string", "pattern": "^req-[a-z0-9]+(-[a-z0-9]+)*$" }
         },
         "setup": { "$ref": "#/$defs/setup" },

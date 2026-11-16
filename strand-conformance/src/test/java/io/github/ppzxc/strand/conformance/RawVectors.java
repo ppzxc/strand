@@ -15,6 +15,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /**
  * 로더를 거치지 않고 벡터 파일을 JSON 그대로 읽는 테스트 도구. 파일 목록, 파일별 벡터, `byKey()`의 결과를 벡터 디렉터리별로 한 번만
@@ -50,6 +52,27 @@ final class RawVectors {
         if (target.put(key, vector) != null) {
             throw new IllegalStateException("벡터 키가 겹친다: " + key);
         }
+    }
+
+    /** 벡터 객체가 적은 요구사항 식별자. */
+    static List<String> requirementsOf(JsonObject vector) {
+        if (!vector.has("requirements")) {
+            throw new IllegalStateException("requirements가 없는 벡터: " + vector.get("id"));
+        }
+        List<String> ids = new ArrayList<>();
+        for (JsonElement id : vector.getAsJsonArray("requirements")) {
+            ids.add(id.getAsString());
+        }
+        return ids;
+    }
+
+    /** 어떤 벡터든 하나라도 가리키는 요구사항 식별자. */
+    static SortedSet<String> referencedRequirements() {
+        SortedSet<String> result = new TreeSet<>();
+        for (JsonObject vector : byKey().values()) {
+            result.addAll(requirementsOf(vector));
+        }
+        return result;
     }
 
     static synchronized List<Path> files() {

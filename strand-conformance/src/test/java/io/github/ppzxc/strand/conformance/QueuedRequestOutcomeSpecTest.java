@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
@@ -19,8 +20,6 @@ class QueuedRequestOutcomeSpecTest {
     private static final Path ROOT =
             VectorSuite.defaultDirectory().resolve("../..").normalize();
     private static final Path SPEC = ROOT.resolve("docs/specification/STRAND_SPECIFICATION.md");
-    private static final Path UNCOVERED =
-            ROOT.resolve("strand-conformance/src/test/resources/uncovered-spec-sections.txt");
 
     private static List<String> lines() throws IOException {
         return Files.readAllLines(SPEC, StandardCharsets.UTF_8);
@@ -130,14 +129,19 @@ class QueuedRequestOutcomeSpecTest {
     }
 
     @Test
-    void uncoveredReasonsNameTheUnobservableItems() throws IOException {
-        List<String> uncovered = Files.readAllLines(UNCOVERED, StandardCharsets.UTF_8);
-        // 요청 기한 벡터(deadline_ms)가 4.4.1절을 가리키므로 이 절은 목록에 없다(#191).
-        assertThat(uncovered.stream().filter(l -> l.startsWith("4.4.1 ")).collect(Collectors.toList()))
-                .isEmpty();
-        assertThat(uncovered.stream().filter(l -> l.startsWith("3.4.1 ")).collect(Collectors.toList()))
-                .singleElement()
-                .asString()
-                .contains("PING");
+    void deadlineRequirementsOfSection441AreCoveredByVectorsNotExcluded() throws IOException {
+        RequirementIndex index = RequirementIndex.ofSpecification();
+        UncoveredRequirements uncovered = UncoveredRequirements.load();
+        Set<String> referenced = RawVectors.referencedRequirements();
+        // 요청 기한 벡터(deadline_ms)가 4.4.1절의 MUST를 가리키므로 이 절은 제외 목록에 없다(#191).
+        int checked = 0;
+        for (RequirementIndex.Requirement requirement : index.requirements()) {
+            if (requirement.section().equals("4.4.1") && requirement.keyword().mandatory()) {
+                assertThat(referenced).as(requirement.id()).contains(requirement.id());
+                assertThat(uncovered.ids()).as(requirement.id()).doesNotContain(requirement.id());
+                checked++;
+            }
+        }
+        assertThat(checked).isPositive();
     }
 }

@@ -220,15 +220,4 @@ class NewVectorCoverageTest {
             assertThat(last.getAsJsonArray("send")).isEmpty();
         }
     }
-
-    @Test
-    void newVectorSpecReferencesNeverUseRemovedSubsections() throws IOException {
-        for (Map.Entry<Integer, List<String>> entry : required().entrySet()) {
-            for (String key : entry.getValue()) {
-                for (JsonElement ref : vector(key).getAsJsonArray("spec")) {
-                    assertThat(ref.getAsString()).as(key).doesNotStartWith("5.1.");
-                }
-            }
-        }
-    }
 }
