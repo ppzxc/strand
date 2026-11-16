@@ -127,11 +127,18 @@ class SpecCoverageTest {
 
     @Test
     void section51DefinesOnlyTheCheckOrderAndReactions() throws IOException {
+        int inSection = 0;
         for (RequirementIndex.Requirement requirement : index().requirements()) {
-            if (requirement.section().equals("5.1")) {
-                assertThat(requirement.id()).as("5.1절의 앵커는 표의 검사 순서·반응이다").startsWith("req-check-");
+            boolean inTable = requirement.section().equals("5.1");
+            boolean checkId = requirement.id().startsWith("req-check-");
+            assertThat(inTable)
+                    .as("%s: 5.1절의 앵커는 req-check-이고, req-check-는 5.1절에만 있다", requirement.id())
+                    .isEqualTo(checkId);
+            if (inTable) {
+                inSection++;
             }
         }
+        assertThat(inSection).as("5.1절 표의 검사 순서·반응 앵커").isGreaterThanOrEqualTo(6);
     }
 
     private static void assertRequirement(
