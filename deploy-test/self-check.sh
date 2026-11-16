@@ -98,6 +98,18 @@ if ! grep -q "버전 불일치" <<<"$output" || ! grep -q "expected=0.0.0-wrong"
 fi
 echo "틀린 기대 버전에서 하네스가 버전 불일치로 실패 확인"
 
+# nio만 기대 버전이 틀려도(core는 맞음) 같은 방식으로 실패해야 한다.
+if output="$(STRAND_CONSUMERS=gradle-classpath STRAND_EXPECTED_NIO_VERSION="0.0.0-wrong" "$here/run.sh" "$version" 2>&1)"; then
+  echo "nio 기대 버전이 틀렸는데 하네스가 통과했다" >&2
+  exit 1
+fi
+if ! grep -q "버전 불일치" <<<"$output" || ! grep -q "strand-nio expected=0.0.0-wrong" <<<"$output"; then
+  echo "하네스가 nio 버전 불일치가 아닌 다른 사유로 실패했다:" >&2
+  echo "$output" >&2
+  exit 1
+fi
+echo "틀린 nio 기대 버전에서 하네스가 버전 불일치로 실패 확인"
+
 # Maven 3.9.x와 3.10의 출처 기록 형식을 모두 인정하고, 다른 저장소나 빈 기록은 거부하는지 확인한다.
 check_origin() { # <기대: ok|no> <기록 내용>
   printf '%s\n' "$2" > "$tmp"
