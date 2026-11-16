@@ -409,7 +409,8 @@ class ConnectionDriverReadPauseTest {
         InMemoryPassage.Pair link = InMemoryPassage.messages();
         assertThatThrownBy(
                         () -> ConnectionDriver.client(config(2), link.first()).maxWriteQueueBytes(MAX_FRAME_SIZE - 1))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("16384");
         // 하한은 그 값 자체를 받는다.
         ConnectionDriver.client(config(2), link.first()).maxWriteQueueBytes(MAX_FRAME_SIZE);
     }
