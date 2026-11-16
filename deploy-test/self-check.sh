@@ -100,7 +100,7 @@ echo "틀린 기대 버전에서 하네스가 버전 불일치로 실패 확인"
 
 # Maven 3.9.x와 3.10의 출처 기록 형식을 모두 인정하고, 다른 저장소나 빈 기록은 거부하는지 확인한다.
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -rf "$pomdir"; rm -f "$tmp"' EXIT
 check_origin() { # <기대: ok|no> <기록 내용>
   printf '%s\n' "$2" > "$tmp"
   if recorded_from_input "$tmp"; then got=ok; else got=no; fi
