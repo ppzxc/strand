@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -78,7 +79,7 @@ class AuthVectorsTest {
     }
 
     /** 3.3.x 요구사항 대신 자기가 확인하는 프레임 검사의 절을 가리키는 AUTH 벡터. 벡터를 더하려면 여기에 올린다. */
-    private static final java.util.Map<String, String> FRAME_CHECK_SECTIONS = new java.util.HashMap<>();
+    private static final Map<String, String> FRAME_CHECK_SECTIONS = new HashMap<>();
 
     static {
         FRAME_CHECK_SECTIONS.put("auth/client-receives-unauthenticated-close", "3.5");

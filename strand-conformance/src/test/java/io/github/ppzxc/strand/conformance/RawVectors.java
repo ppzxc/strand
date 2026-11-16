@@ -15,6 +15,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /**
  * 로더를 거치지 않고 벡터 파일을 JSON 그대로 읽는 테스트 도구. 파일 목록, 파일별 벡터, `byKey()`의 결과를 벡터 디렉터리별로 한 번만
@@ -65,8 +67,8 @@ final class RawVectors {
     }
 
     /** 어떤 벡터든 하나라도 가리키는 요구사항 식별자. */
-    static java.util.SortedSet<String> referencedRequirements() {
-        java.util.SortedSet<String> result = new java.util.TreeSet<>();
+    static SortedSet<String> referencedRequirements() {
+        SortedSet<String> result = new TreeSet<>();
         for (JsonObject vector : byKey().values()) {
             result.addAll(requirementsOf(vector));
         }

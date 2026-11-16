@@ -41,7 +41,7 @@
 - 모든 벡터는 `requirements`에 자기 기대 결과가 단언하는 요구사항 식별자를 적는다. SHOULD·SHOULD NOT 요구사항은 적지 않으며 적으면 실패한다. 형식은 `docs/specification/STRAND_CONFORMANCE_VECTORS.md` 3절이 정한다.
 - MUST·MUST NOT 요구사항은 그것을 가리키는 벡터가 있거나 `strand-conformance/src/test/resources/uncovered-requirements.txt`에 올라 있어야 한다. 줄은 `req-… 범주 사유`이고 범주는 둘뿐이다.
   - `관측불가`: 엔드포인트의 입출력(바이트와 메시지)으로 볼 수 없다. 예: TLS 요구, WebSocket 핸드셰이크 헤더.
-  - `형식미지원`: 규격상 볼 수 있지만 지금 벡터 형식이 입력이나 비교를 표현하지 못한다. 형식을 넓혀 갚을 빚이며, 갚으면 그 줄을 지운다.
+  - `형식미지원`: 규격상 볼 수 있어야 하는데 지금 벡터 형식에 입력(트리거 단계)·비교 필드·이벤트가 없다. 형식(과 필요하면 규격)을 넓혀 갚을 빚이며, 갚으면 그 줄을 지운다.
 - 제외 목록에는 MUST·MUST NOT만 올린다. 벡터가 가리키기 시작한 식별자는 줄을 지운다.
 
 ### `check`가 강제하는 것
