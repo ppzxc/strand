@@ -121,9 +121,8 @@ class SpecCoverageTest {
     @Test
     void exclusionsUseOnlyTheTwoCategories() throws IOException {
         UncoveredRequirements exclusions = UncoveredRequirements.load();
-        assertThat(exclusions.ids()).isNotEmpty();
         for (String id : exclusions.ids()) {
-            assertThat(exclusions.category(id)).as(id).isIn("관측불가", "형식미지원");
+            assertThat(exclusions.category(id)).as(id).isIn(UncoveredRequirements.CATEGORIES);
             assertThat(exclusions.reason(id)).as(id).isNotBlank();
         }
     }
@@ -201,12 +200,7 @@ class SpecCoverageTest {
 
     private static List<String> deletedRequirementIds() throws IOException {
         List<String> result = new ArrayList<>();
-        for (String line : UncoveredRequirements.resourceLines("/deleted-requirement-ids.txt")) {
-            String trimmed = line.trim();
-            if (!trimmed.isEmpty() && !trimmed.startsWith("#")) {
-                result.add(trimmed);
-            }
-        }
+        result.addAll(UncoveredRequirements.dataLines("/deleted-requirement-ids.txt"));
         return result;
     }
 

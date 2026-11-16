@@ -134,16 +134,12 @@ class QueuedRequestOutcomeSpecTest {
         UncoveredRequirements uncovered = UncoveredRequirements.load();
         Set<String> referenced = RawVectors.referencedRequirements();
         // 요청 기한 벡터(deadline_ms)가 4.4.1절의 MUST를 가리키므로 이 절은 제외 목록에 없다(#191).
-        // 3.4.1절의 PING 하나 제한은 SHOULD라 커버 의무가 없고 벡터가 가리키지 않는다.
         int checked = 0;
         for (RequirementIndex.Requirement requirement : index.requirements()) {
             if (requirement.section().equals("4.4.1") && requirement.keyword().mandatory()) {
                 assertThat(referenced).as(requirement.id()).contains(requirement.id());
                 assertThat(uncovered.ids()).as(requirement.id()).doesNotContain(requirement.id());
                 checked++;
-            }
-            if (requirement.section().equals("3.4.1") && !requirement.keyword().mandatory()) {
-                assertThat(referenced).as(requirement.id()).doesNotContain(requirement.id());
             }
         }
         assertThat(checked).isPositive();

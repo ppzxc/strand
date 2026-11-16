@@ -66,6 +66,18 @@ final class UncoveredRequirements {
         return parse(resourceLines("/uncovered-requirements.txt"));
     }
 
+    /** 테스트 리소스에서 빈 줄과 {@code #} 주석 줄을 뺀 줄 목록(앞뒤 공백 제거). */
+    static List<String> dataLines(String name) throws IOException {
+        List<String> result = new ArrayList<>();
+        for (String line : resourceLines(name)) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty() && !trimmed.startsWith("#")) {
+                result.add(trimmed);
+            }
+        }
+        return result;
+    }
+
     /** 테스트 리소스의 줄 목록. 리소스가 없으면 이름을 들어 실패한다. */
     static List<String> resourceLines(String name) throws IOException {
         InputStream stream = UncoveredRequirements.class.getResourceAsStream(name);

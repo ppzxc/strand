@@ -157,13 +157,14 @@ final class RequirementIndex {
     private final Map<String, Integer> keywordSections = new TreeMap<>();
     private final Map<String, Requirement> requirements = new LinkedHashMap<>();
     private final List<Problem> problems = new ArrayList<>();
-    private List<Requirement> requirementList;
+    private List<Requirement> requirementList = Collections.emptyList();
 
     private RequirementIndex() {}
 
     static RequirementIndex parse(String markdown) {
         RequirementIndex index = new RequirementIndex();
         index.scan(markdown.split("\r?\n", -1));
+        index.requirementList = Collections.unmodifiableList(new ArrayList<>(index.requirements.values()));
         return index;
     }
 
@@ -195,9 +196,6 @@ final class RequirementIndex {
 
     /** 앵커 순서대로의 요구사항 목록. */
     List<Requirement> requirements() {
-        if (requirementList == null) {
-            requirementList = Collections.unmodifiableList(new ArrayList<>(requirements.values()));
-        }
         return requirementList;
     }
 
