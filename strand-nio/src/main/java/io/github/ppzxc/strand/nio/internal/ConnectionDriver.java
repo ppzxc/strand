@@ -605,11 +605,19 @@ public final class ConnectionDriver implements AutoCloseable {
             if (next.isPresent()) {
                 limit = Math.max(0, next.getAsLong() - (now - startedAt));
             }
-            if (closed && !finished) {
-                long untilFinish = Math.max(0, closedFinishDeadline - now);
+            long untilFinish = untilFinish(now);
+            if (untilFinish >= 0) {
                 limit = limit < 0 ? untilFinish : Math.min(limit, untilFinish);
             }
             return limit;
+        }
+
+        /** CLOSED 뒤 마무리 기한까지 남은 시간(밀리초, 0이면 지났다). 마무리 중이 아니면 -1이다. */
+        private long untilFinish(long now) {
+            if (!closed || finished) {
+                return -1;
+            }
+            return Math.max(0, closedFinishDeadline - now);
         }
 
         /** 주입 시계로 흐른 시간만큼 엔드포인트의 시계를 보낸다. */
@@ -704,7 +712,7 @@ public final class ConnectionDriver implements AutoCloseable {
          */
         void settle() {
             dispatchEvents();
-            if (closed && !finished && clock.getAsLong() >= closedFinishDeadline) {
+            if (untilFinish(clock.getAsLong()) == 0) {
                 // CLOSED 뒤 마무리 기한이 지났다. 이미 종료 알림이 나갔으므로 새 알림 없이 끝낸다. 남은 출력은 통로가 받아 주는 만큼 한 번만 쓴다.
                 finished = true;
             }
