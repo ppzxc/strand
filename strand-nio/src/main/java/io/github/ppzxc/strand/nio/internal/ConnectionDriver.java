@@ -85,8 +85,6 @@ public final class ConnectionDriver implements AutoCloseable {
     private static final int FRAME_HEADER_BYTES = Endpoint.FRAME_HEADER_SIZE;
     /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
-    /** 규격이 허용하는 가장 작은 {@code max_frame_size}(규격 3.2.1절). */
-    private static final long MIN_FRAME_SIZE = 16_384L;
     /** 쓰기 대기열 상한의 기본 절대 한도. 상대가 HELLO로 알린 큰 값이 상한을 사실상 없애지 못하게 한다. */
     static final long DEFAULT_MAX_WRITE_QUEUE_BYTES = 64L * 1024 * 1024;
 
@@ -181,13 +179,14 @@ public final class ConnectionDriver implements AutoCloseable {
          * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임에 프레임 하나를 더한 값이 기본값 {@value #DEFAULT_MAX_WRITE_QUEUE_BYTES}을
          * 넘는 설정에서는, 그 범위를 꽉 채워 주고받는 두 끝이 읽기 멈춤에 걸리지 않도록 이 값을 그 값 이상으로 올린다. 정하지 않으면 기본값이다.
          *
-         * @param bytes 절대 한도. 규격이 허용하는 가장 작은 {@code max_frame_size}(16384) 이상이어야 한다. 상한은 이 값이 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다
+         * @param bytes 절대 한도. 규격이 허용하는 가장 작은 {@code max_frame_size}({@value EndpointConfig#MIN_MAX_FRAME_SIZE}) 이상이어야 한다. 상한은 이 값이 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다
          * @return 이 빌더
-         * @throws IllegalArgumentException {@code bytes}가 16384보다 작을 때
+         * @throws IllegalArgumentException {@code bytes}가 {@link EndpointConfig#MIN_MAX_FRAME_SIZE}보다 작을 때
          */
         public Builder maxWriteQueueBytes(long bytes) {
-            if (bytes < MIN_FRAME_SIZE) {
-                throw new IllegalArgumentException("maxWriteQueueBytes는 " + MIN_FRAME_SIZE + " 이상이어야 한다: " + bytes);
+            if (bytes < EndpointConfig.MIN_MAX_FRAME_SIZE) {
+                throw new IllegalArgumentException(
+                        "maxWriteQueueBytes는 " + EndpointConfig.MIN_MAX_FRAME_SIZE + " 이상이어야 한다: " + bytes);
             }
             this.maxWriteQueueBytes = bytes;
             return this;
