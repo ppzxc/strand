@@ -234,6 +234,8 @@ class ConnectionDriverClosedFinishTest {
         connected(true, DEFAULT);
         clientPassage.writeCapacity(0);
         java.util.concurrent.CompletableFuture<Void> unusedPing = client.ping(new byte[8]);
+        // PING 명령이 전송 스레드에서 처리돼 쓰기 대기열에 놓인 뒤에 상대가 CLOSE한다(경주 방지).
+        settle();
         server.closeConnection();
         settle();
         assertThat(client.discardedBytes()).isZero();
