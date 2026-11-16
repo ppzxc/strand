@@ -230,23 +230,20 @@ class ConnectionDriverClosedFinishTest {
     }
 
     @Test
-    void aVeryLargeLimitDoesNotOverflowIntoAnImmediateEnd() {
+    void aVeryLargeLimitDoesNotOverflowAndTheWaitStaysWithinTheIntRange() {
         connected(true, Long.MAX_VALUE);
         client.closeConnection();
         settle();
         assertThat(closed).hasSize(1);
+        assertThat(clientPassage.lastAwaitTimeoutMs()).isEqualTo(Integer.MAX_VALUE);
 
         tick(DEFAULT_LIMIT_MS * 10);
-        try {
-            client.transportThread().join(500);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
         assertThat(client.transportThread().isAlive()).isTrue();
+        assertThat(clientPassage.lastAwaitTimeoutMs()).isEqualTo(Integer.MAX_VALUE);
     }
 
     @Test
-    void theWaitAfterClosedIsBoundedByTheRemainingLimitWithoutAnyWakeup() {
+    void theWaitAfterClosedIsBoundedByTheRemainingLimit() {
         connected(true, DEFAULT);
         client.closeConnection();
         settle();

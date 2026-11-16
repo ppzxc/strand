@@ -27,8 +27,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>전송 스레드가 한 번 도는 순서는 읽기와 기다림, {@code receive}/{@code receiveMessage}, 시계 진행({@code advance}), 명령 처리, 이벤트
  * 배출, core 쓰기 대기열에서 메시지 꺼내기, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을
- * 잡는다. 기다림은 core의 {@code nextDeadline}, 읽을 것, (쓰기 대기열이 남았으면) 통로의 쓰기 가능, 깨움 가운데 먼저 오는 것까지이고, 기한이
- * 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
+ * 잡는다. 기다림은 core의 {@code nextDeadline}, (CLOSED 뒤라면) 마무리 기한, 읽을 것, (쓰기 대기열이 남았으면) 통로의 쓰기 가능, 깨움 가운데 먼저
+ * 오는 것까지이고, 기한이 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
  *
  * <p><b>쓰기 대기열.</b> 드라이버는 쓰기 대기열을 든다. core 쓰기 대기열에서는 매 스텝 메시지를 모두 꺼내 이 대기열에 붙이고, 통로가 받아 주는 만큼만
  * 쓴다(비블로킹·부분 쓰기). 쓰기가 막혀도(상대가 읽지 않아 소켓 버퍼가 찬 경우) 전송 스레드는 쓰기에서 기다리지 않고 읽기, 시계, 명령 처리를 계속
@@ -52,7 +52,7 @@ import org.jspecify.annotations.Nullable;
  * {@link #close}를 따로 부를 필요가 없다. 이미 종료 알림이 나갔으므로 상한에 걸려도 새 알림을 내지 않고 {@link ConnectionClosed}도 바뀌지 않는다.
  * 전송 스레드의 기다림은 core의 {@code nextDeadline}과 이 마무리 기한 가운데 이른 쪽까지다.
  *
- * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버린다. 즉시 끊기는 통로를
+ * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김, CLOSED 뒤 마무리 상한) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버린다. 즉시 끊기는 통로를
  * 먼저 닫으므로 더 쓰지 않고, 그 밖의 경우는 마치기 전에 통로가 받아 주는 만큼 한 번 쓴다.
  *
  * <p><b>알려진 한계.</b> 쓰기 대기열의 크기에는 아직 상한이 없다. 상대가 읽지 않으면서 PING 같은 응답이 필요한 프레임을 계속 보내면 대기열이 늘 수
@@ -599,13 +599,12 @@ public final class ConnectionDriver implements AutoCloseable {
          * 기다림의 상한. core가 알려 준 다음 기한과 CLOSED 뒤 마무리 기한 가운데 이른 쪽까지이고, 둘 다 없으면 상한이 없다.
          */
         private long waitLimit() {
-            long now = clock.getAsLong();
             long limit = -1;
             OptionalLong next = endpoint.nextDeadline();
             if (next.isPresent()) {
-                limit = Math.max(0, next.getAsLong() - (now - startedAt));
+                limit = Math.max(0, next.getAsLong() - (clock.getAsLong() - startedAt));
             }
-            long untilFinish = untilFinish(now);
+            long untilFinish = untilFinish();
             if (untilFinish >= 0) {
                 limit = limit < 0 ? untilFinish : Math.min(limit, untilFinish);
             }
@@ -613,11 +612,12 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         /** CLOSED 뒤 마무리 기한까지 남은 시간(밀리초, 0이면 지났다). 마무리 중이 아니면 -1이다. */
-        private long untilFinish(long now) {
+        private long untilFinish() {
             if (!closed || finished) {
                 return -1;
             }
-            return Math.max(0, closedFinishDeadline - now);
+            // 통로의 시간 제한이 int 범위로 잘리는 구현에서 바쁜 대기가 되지 않게, 한 번의 기다림은 int 범위로 자른다. 기한이 더 멀면 깨어난 뒤 다시 계산한다.
+            return Math.min(Math.max(0, closedFinishDeadline - clock.getAsLong()), Integer.MAX_VALUE);
         }
 
         /** 주입 시계로 흐른 시간만큼 엔드포인트의 시계를 보낸다. */
@@ -712,7 +712,7 @@ public final class ConnectionDriver implements AutoCloseable {
          */
         void settle() {
             dispatchEvents();
-            if (untilFinish(clock.getAsLong()) == 0) {
+            if (untilFinish() == 0) {
                 // CLOSED 뒤 마무리 기한이 지났다. 이미 종료 알림이 나갔으므로 새 알림 없이 끝낸다. 남은 출력은 통로가 받아 주는 만큼 한 번만 쓴다.
                 finished = true;
             }
