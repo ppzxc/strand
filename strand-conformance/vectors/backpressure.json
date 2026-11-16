@@ -8,6 +8,11 @@
         "4.3",
         "4.5"
       ],
+      "requirements": [
+        "req-check-new-request-limit-refuse",
+        "req-stream-ends-on-response-or-reset",
+        "req-check-nonpending-discard"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -91,6 +96,11 @@
       "spec": [
         "4.3",
         "4.5"
+      ],
+      "requirements": [
+        "req-check-new-request-limit-refuse",
+        "req-stream-ends-on-response-or-reset",
+        "req-check-nonpending-discard"
       ],
       "setup": {
         "role": "server",
@@ -189,6 +199,11 @@
         "4.4",
         "4.5"
       ],
+      "requirements": [
+        "req-check-new-request-limit-refuse",
+        "req-stream-ends-on-response-or-reset",
+        "req-reset-no-reply"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -259,6 +274,11 @@
       "spec": [
         "4.3",
         "4.5"
+      ],
+      "requirements": [
+        "req-check-new-request-limit-refuse",
+        "req-stream-ends-on-response-or-reset",
+        "req-check-nonpending-discard"
       ],
       "setup": {
         "role": "server",
@@ -349,6 +369,10 @@
       "spec": [
         "4.3",
         "4.5"
+      ],
+      "requirements": [
+        "req-check-new-request-limit-refuse",
+        "req-check-nonpending-discard"
       ],
       "setup": {
         "role": "server",
@@ -453,6 +477,12 @@
         "4.4",
         "4.5"
       ],
+      "requirements": [
+        "req-check-new-request-limit-refuse",
+        "req-stream-ends-on-response-or-reset",
+        "req-check-nonpending-discard",
+        "req-reset-no-reply"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -530,6 +560,10 @@
         "3.2.1",
         "4.5"
       ],
+      "requirements": [
+        "req-check-new-request-limit-refuse",
+        "req-backpressure-no-read-stop"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -584,6 +618,10 @@
       "spec": [
         "4.5",
         "5.1"
+      ],
+      "requirements": [
+        "req-check-new-request-limit-refuse",
+        "req-stream-ends-on-response-or-reset"
       ],
       "setup": {
         "role": "server",
@@ -663,6 +701,10 @@
         "3.2.1",
         "3.2.3"
       ],
+      "requirements": [
+        "req-hello-peer-concurrent-limit",
+        "req-stream-ends-on-response-or-reset"
+      ],
       "setup": {
         "role": "client",
         "established": true,
@@ -727,6 +769,9 @@
         "3.5",
         "5.1"
       ],
+      "requirements": [
+        "req-check-new-request-close-discard"
+      ],
       "setup": {
         "role": "server",
         "established": true
@@ -763,6 +808,9 @@
       "spec": [
         "3.5",
         "5.1"
+      ],
+      "requirements": [
+        "req-check-new-request-close-discard"
       ],
       "setup": {
         "role": "client",
@@ -807,6 +855,11 @@
         "3.5",
         "4.2.1",
         "5.1"
+      ],
+      "requirements": [
+        "req-check-new-request-close-discard",
+        "req-stream-id-regression-error",
+        "req-check-connection-error-silent-close"
       ],
       "setup": {
         "role": "server",
