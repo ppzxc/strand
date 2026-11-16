@@ -457,4 +457,14 @@ class VectorRunnerTest {
         assertThat(actual.get(0)).doesNotContain("reason");
         assertThat(actual.get(1)).endsWith("reason=616263");
     }
+
+    @Test
+    void aServerRunnerTreatsItsOwnEvenStreamAsARequestAndOddAsAResponse() throws ReflectiveOperationException {
+        String ownRequest = frameHex("00000010", "0100", "01", "0000000000000002", "0000", "");
+        String peerResponse = frameHex("00000010", "0100", "00", "0000000000000001", "0000", "");
+
+        assertThat(sentOnce(false, ownRequest)).singleElement().asString().endsWith(" sent_status=1");
+        assertThat(sentOnce(false, peerResponse))
+                .containsExactly(expectedOf("{\"type\":256,\"stream_id\":\"1\",\"status\":\"OK\"}"));
+    }
 }
