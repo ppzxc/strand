@@ -146,7 +146,8 @@ mavenPublishing {
 
   pom {
     name = artifactName
-    description = "strand: 바이트 인코딩·디코딩 규격의 Java 구현"
+    // 모듈 build 스크립트가 정한 project.description을 쓴다(모듈마다 다르다).
+    description = providers.provider { project.description?.takeUnless { it.isBlank() } ?: error("${project.path}에 description이 없다. 모듈 build.gradle.kts에 description = \"...\"을 지정한다") }
     url = "https://github.com/ppzxc/strand"
     licenses {
       license {
