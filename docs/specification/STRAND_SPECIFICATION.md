@@ -29,9 +29,9 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
    - 바이트 스트림 기반 사용 환경. 4바이트 `length` 필드를 읽어 프레임 경계를 구분한다.
 
 2. **strand over WebSocket** [^RFC6455]:
-   - 메시지 기반 사용 환경. 단일 WebSocket 바이너리 메시지(`Opcode 0x02`) 1개에 정확히 Strand 프레임 1개를 싣는다. WebSocket 연결의 식별은 1.2.1절이 정한다.
+   - 메시지 기반 사용 환경. 단일 WebSocket 바이너리 메시지(`Opcode 0x02`) 1개에 정확히 Strand 프레임 1개를 싣는다(MUST)<a id="req-ws-one-frame-per-message"></a>. WebSocket 연결의 식별은 1.2.1절이 정한다.
    - 프레임 헤더(20바이트)와 payload 형식, 제어 프레임 및 상태 머신은 strand over TCP와 100% 동일하다.
-   - 연결 서문(Connection Preface)은 첫 번째 바이너리 메시지로 보내며(3.1절), 연결을 닫을 때(3.5절)는 WebSocket 닫기(`Close Frame 0x08`)를 수행한다. CLOSE를 보내는 종료에서는 CLOSE 송신 뒤에 수행하고, `NO_ERROR` 종료에는 `1000 Normal Closure`를 쓴다.
+   - 연결 서문(Connection Preface)은 첫 번째 바이너리 메시지로 보내며(3.1절), 연결을 닫을 때(3.5절)는 WebSocket 닫기(`Close Frame 0x08`)를 수행한다. CLOSE를 보내는 종료에서는 CLOSE 송신 뒤에 수행하고(MUST)<a id="req-ws-close-after-close-send"></a>, `NO_ERROR` 종료에는 `1000 Normal Closure`를 쓴다(MUST)<a id="req-ws-close-no-error-1000"></a>.
    - 메시지 경계 위반: 서문 메시지의 위반은 3.1절을 따른다. 서문 뒤에 텍스트 메시지가 오거나, 크기가 4 + `length`와 다른 바이너리 메시지가 오면 연결 오류다(MUST, 5.1절 3번)<a id="req-ws-message-boundary-violation"></a>.
 
 #### 1.2.1 WebSocket 하위 프로토콜
@@ -282,7 +282,7 @@ C0 DE 53 54 52 30 00 00
  식별값  "STR0"     예약(0)
 ```
 
-서버는 앞 6바이트가 이 값과 다르면 아무 응답 없이 연결을 끊는다(5.1절 1번). strand over WebSocket에서 서문 메시지가 바이너리 메시지가 아니거나 정확히 8바이트가 아닌 경우도 같다. 마지막 2바이트는 예약 영역이라 0으로 보내고, 받는 쪽에서는 보지 않는다.
+서버는 앞 6바이트가 이 값과 다르면 아무 응답 없이 연결을 끊는다(5.1절 1번). strand over WebSocket에서 서문 메시지가 바이너리 메시지가 아니거나 정확히 8바이트가 아닌 경우도 같다. 마지막 2바이트는 예약 영역이라 0으로 보내고(MUST)<a id="req-preface-reserved-zero-send"></a>, 받는 쪽에서는 보지 않는다(MUST)<a id="req-preface-reserved-ignore-recv"></a>.
 
 `"STR0"`의 `0`이 이 프로토콜의 메이저 버전이다. 버전 번호는 여기 한 곳에만 있고, 값이 다르면 서로 통신할 수 없다. 같은 버전 안에서 기능을 늘릴 때는 버전을 올리는 대신 기능 비트(3.2절)를 쓴다.
 
@@ -350,7 +350,7 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 1. 클라이언트는 연결 서문을 보내고 곧바로 파라미터 HELLO를 이어 보낸다(MUST)<a id="req-setup-client-hello-after-preface"></a>.
 2. 서버는 연결 서문을 3.1절 기준으로 확인한 즉시 자기 파라미터 HELLO를 보낸다(3.2.2절).
 3. 양쪽은 상대 HELLO를 받으면 3.2.4절 첫 프레임 검사를 한다. 실패하면 조용히 닫는다. 통과하면 3.2.3절 검증을 하고, 통과하면 ACK HELLO로 답하며 실패하면 연결 오류다(3.2.3절).
-4. 클라이언트는 서버 HELLO에 ACK HELLO를 보낸 직후 `AUTH`를 한 번 보낸다(MUST)<a id="req-setup-client-auth-after-hello-ack"></a>. 서버 ACK를 기다리지 않는다. 서버는 자격 증명을 확인해 통과시키면 `AUTH(ACK)`로 답한다(3.3.1절).
+4. 클라이언트는 서버 HELLO에 ACK HELLO를 보낸 직후 `AUTH`를 한 번 보낸다(MUST)<a id="req-setup-client-auth-after-hello-ack"></a>. 서버 ACK를 기다리지 않는다. 서버는 자격 증명을 확인해 통과시키면 `AUTH(ACK)`로 답한다(MUST, 3.3.1절)<a id="req-auth-pass-ack-reply"></a>.
 
 **송신 규칙.** HELLO·CLOSE 외 모든 프레임은 상대 HELLO에 ACK를 보낸 뒤에만 보낸다(MUST)<a id="req-setup-send-after-hello-ack"></a>. `AUTH`와 `AUTH(ACK)`를 뺀 프레임(PING, RESET, 애플리케이션 프레임, 서버가 먼저 보내는 요청)은 AUTH 관문을 통과한 뒤에만 보낸다(MUST)<a id="req-setup-send-after-auth-gate"></a>. "수립 완료" 같은 별도 상태는 없다.
 
