@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.conformance;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
@@ -52,19 +53,28 @@ final class UncoveredRequirements {
                 result.problems.add(parts[0] + "의 범주 표지가 " + CATEGORIES + " 중 하나가 아니다: " + parts[1]);
                 continue;
             }
-            if (result.entries.put(parts[0], new String[] {parts[1], parts[2]}) != null) {
+            if (result.entries.containsKey(parts[0])) {
                 result.problems.add("식별자가 두 번 올랐다: " + parts[0]);
+                continue;
             }
+            result.entries.put(parts[0], new String[] {parts[1], parts[2]});
         }
         return result;
     }
 
     static UncoveredRequirements load() throws IOException {
-        try (Reader reader = new InputStreamReader(
-                        UncoveredRequirements.class.getResourceAsStream("/uncovered-requirements.txt"),
-                        StandardCharsets.UTF_8);
+        return parse(resourceLines("/uncovered-requirements.txt"));
+    }
+
+    /** 테스트 리소스의 줄 목록. 리소스가 없으면 이름을 들어 실패한다. */
+    static List<String> resourceLines(String name) throws IOException {
+        InputStream stream = UncoveredRequirements.class.getResourceAsStream(name);
+        if (stream == null) {
+            throw new IllegalStateException(name + " 리소스가 없다");
+        }
+        try (Reader reader = new InputStreamReader(stream, StandardCharsets.UTF_8);
                 BufferedReader lines = new BufferedReader(reader)) {
-            return parse(lines.lines().collect(Collectors.toList()));
+            return lines.lines().collect(Collectors.toList());
         }
     }
 

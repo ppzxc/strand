@@ -3,11 +3,7 @@ package io.github.ppzxc.strand.conformance;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.google.gson.JsonObject;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -205,17 +201,11 @@ class SpecCoverageTest {
 
     private static List<String> deletedRequirementIds() throws IOException {
         List<String> result = new ArrayList<>();
-        assertThat(SpecCoverageTest.class.getResource("/deleted-requirement-ids.txt"))
-                .as("deleted-requirement-ids.txt가 없다")
-                .isNotNull();
-        try (Reader reader = new InputStreamReader(
-                        SpecCoverageTest.class.getResourceAsStream("/deleted-requirement-ids.txt"),
-                        StandardCharsets.UTF_8);
-                BufferedReader lines = new BufferedReader(reader)) {
-            lines.lines()
-                    .map(String::trim)
-                    .filter(l -> !l.isEmpty() && !l.startsWith("#"))
-                    .forEach(result::add);
+        for (String line : UncoveredRequirements.resourceLines("/deleted-requirement-ids.txt")) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty() && !trimmed.startsWith("#")) {
+                result.add(trimmed);
+            }
         }
         return result;
     }

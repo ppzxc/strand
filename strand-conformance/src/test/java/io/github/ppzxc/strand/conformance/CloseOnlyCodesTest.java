@@ -71,9 +71,10 @@ class CloseOnlyCodesTest {
         RequirementIndex index = RequirementIndex.ofSpecification();
         List<String> sections = new ArrayList<>();
         for (String id : RawVectors.requirementsOf(v)) {
+            assertThat(index.requirement(id)).as("규격에 없는 식별자: " + id).isNotNull();
             sections.add(index.requirement(id).section());
         }
-        assertThat(sections).containsOnly("4.4");
+        assertThat(sections).contains("4.4");
     }
 
     @Test

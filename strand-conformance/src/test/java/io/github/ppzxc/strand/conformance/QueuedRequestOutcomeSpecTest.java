@@ -128,13 +128,26 @@ class QueuedRequestOutcomeSpecTest {
     }
 
     @Test
-    void exclusionListHoldsNeitherTheCoveredQueuedDeadlineNorTheShouldIdlePing() throws IOException {
+    void deadlineRequirementsOfSection441AreCoveredByVectorsNotExcluded() throws IOException {
         RequirementIndex index = RequirementIndex.ofSpecification();
         UncoveredRequirements uncovered = UncoveredRequirements.load();
-        // 요청 기한 벡터(deadline_ms)가 4.4.1절을 가리키므로 이 절의 요구사항은 목록에 없다(#191).
-        // 3.4.1절의 PING 하나 제한은 SHOULD라 커버 의무가 없어 목록에 올리지 않는다.
-        for (String id : uncovered.ids()) {
-            assertThat(index.requirement(id).section()).as(id).isNotIn("4.4.1", "3.4.1");
+        java.util.Set<String> referenced = new java.util.TreeSet<>();
+        for (com.google.gson.JsonObject vector : RawVectors.byKey().values()) {
+            referenced.addAll(RawVectors.requirementsOf(vector));
         }
+        // 요청 기한 벡터(deadline_ms)가 4.4.1절의 MUST를 가리키므로 이 절은 제외 목록에 없다(#191).
+        // 3.4.1절의 PING 하나 제한은 SHOULD라 커버 의무가 없고 벡터가 가리키지 않는다.
+        int checked = 0;
+        for (RequirementIndex.Requirement requirement : index.requirements()) {
+            if (requirement.section().equals("4.4.1") && requirement.keyword().mandatory()) {
+                assertThat(referenced).as(requirement.id()).contains(requirement.id());
+                assertThat(uncovered.ids()).as(requirement.id()).doesNotContain(requirement.id());
+                checked++;
+            }
+            if (requirement.section().equals("3.4.1") && !requirement.keyword().mandatory()) {
+                assertThat(referenced).as(requirement.id()).doesNotContain(requirement.id());
+            }
+        }
+        assertThat(checked).isPositive();
     }
 }

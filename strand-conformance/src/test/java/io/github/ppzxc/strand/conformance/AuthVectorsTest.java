@@ -82,8 +82,8 @@ class AuthVectorsTest {
 
     @Test
     void everyAuthVectorPointsToTheAuthSectionsOrTheFramesItChecks() {
+        RequirementIndex index = RequirementIndex.ofSpecification();
         for (String key : REQUIRED) {
-            RequirementIndex index = RequirementIndex.ofSpecification();
             assertThat(RawVectors.requirementsOf(vector(key)))
                     .as(key)
                     .anyMatch(id -> index.requirement(id) != null
