@@ -1007,10 +1007,8 @@ class VectorLoaderTest {
         assertThat(jsonBlocks(lf.replace("\n", "\r\n"))).containsExactly("{\"a\":1}", "[2]");
     }
 
-    /** 형식 문서의 JSON 예시가 모두 로더를 통과한다. */
-    @Test
-    void jsonExamplesInTheFormatDocumentPassTheLoader() throws IOException {
-        // 벡터 디렉터리에서 위로 올라가며 문서를 찾는다. 실행 위치와 벡터 디렉터리의 깊이에 기대지 않는다.
+    /** 벡터 디렉터리에서 위로 올라가며 형식 문서를 찾아 읽는다. 실행 위치와 벡터 디렉터리의 깊이에 기대지 않는다. */
+    private static String formatDocument() throws IOException {
         Path doc = null;
         for (Path dir = VectorSuite.defaultDirectory().toAbsolutePath();
                 dir != null && doc == null;
@@ -1019,7 +1017,13 @@ class VectorLoaderTest {
             doc = Files.exists(candidate) ? candidate : null;
         }
         assertThat(doc).as("형식 문서를 찾을 수 없다").isNotNull();
-        List<String> blocks = jsonBlocks(new String(Files.readAllBytes(doc), StandardCharsets.UTF_8));
+        return new String(Files.readAllBytes(doc), StandardCharsets.UTF_8);
+    }
+
+    /** 형식 문서의 JSON 예시가 모두 로더를 통과한다. */
+    @Test
+    void jsonExamplesInTheFormatDocumentPassTheLoader() throws IOException {
+        List<String> blocks = jsonBlocks(formatDocument());
         for (int i = 0; i < blocks.size(); i++) {
             assertThat(VectorLoader.parse("doc-example-" + (i + 1) + ".json", blocks.get(i)))
                     .isNotEmpty();
