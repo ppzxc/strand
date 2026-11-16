@@ -194,6 +194,43 @@ class TcpConnectionTest {
         }
     }
 
+    /** 쓴 바이트 수가 한동안 늘지 않을 때까지 기다린다. 쓰기가 소켓 버퍼에 막혀 더 나가지 않는 상태다. */
+    private static void awaitWritesStopped(ConnectionDriver driver) throws InterruptedException {
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long last = -1;
+        while (System.nanoTime() < limit) {
+            long now = driver.writtenBytes();
+            if (now == last) {
+                return;
+            }
+            last = now;
+            Thread.sleep(200);
+        }
+        throw new AssertionError("쓰기가 5초 안에 멈추지 않았다");
+    }
+
+    /**
+     * 서로 소켓 버퍼를 넘는 요청을 동시에 많이 보내도 두 끝이 교착하지 않는다. 쓰기가 막힌 끝도 읽기를 멈추지 않아 상대의 쓰기가 풀리기 때문이다.
+     */
+    @Test
+    void bothEndsSendingLargeRequestsAtOnceDoNotDeadlock() throws Exception {
+        TcpLoopback link = TcpLoopback.open(4096);
+        RequestHandler echo = request -> request.respond(0, new byte[0]).join();
+        ConnectionDriver server = start(ConnectionDriver.server(EndpointConfig.defaults(), TcpPassage.of(link.accepted))
+                .handler(handlers, echo));
+        ConnectionDriver client = start(ConnectionDriver.client(EndpointConfig.defaults(), TcpPassage.of(link.client))
+                .handler(handlers, echo));
+        List<RequestHandle> handles = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            handles.add(client.request(APPLICATION_TYPE, new byte[60_000]));
+            handles.add(server.request(APPLICATION_TYPE, new byte[60_000]));
+        }
+
+        for (RequestHandle handle : handles) {
+            assertThat(await(handle.result()).certainty()).isEqualTo(Certainty.RESPONSE);
+        }
+    }
+
     /**
      * 상대가 살아 있지만 읽지 않아 쓰기가 막혀 있어도 즉시 끊기는 끝나야 한다. 응답하지 않는 상대 때문에 종료가 늘어지지 않게 하려는 것이 즉시
      * 끊기의 목적이다. 상대의 전송 스레드를 붙잡아 읽지 않게 하고, 클라이언트가 소켓 버퍼를 넘게 요청을 보내 쓰기가 막힌 뒤에 끊는다. 남은 요청의 Future는
@@ -220,6 +257,7 @@ class TcpConnectionTest {
 
             // 클라이언트의 쓰기가 소켓 버퍼가 차서 실제로 막힌 뒤에 끊는다.
             StackWatch.awaitFrame(client.transportThread(), StackWatch::inWriteWait);
+            awaitWritesStopped(client);
             CompletableFuture<Void> closing = CompletableFuture.runAsync(client::close);
             closing.get(5, TimeUnit.SECONDS);
 

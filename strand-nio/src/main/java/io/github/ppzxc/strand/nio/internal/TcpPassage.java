@@ -101,6 +101,10 @@ public final class TcpPassage implements Passage {
                 selector.select(timeoutMs);
             }
             selector.selectedKeys().clear();
+            if (closed.get()) {
+                // 닫힘이 선택기를 깨웠다. 닫는 중에는 선택기가 아직 열려 있어 위 호출이 던지지 않을 수 있다.
+                throw new IOException("닫힌 통로");
+            }
             return waitForRead ? readNow() : Inbound.none();
         } catch (ClosedSelectorException | CancelledKeyException e) {
             throw new IOException("닫힌 통로", e);
