@@ -216,6 +216,10 @@ final class OwnRequestLedger {
         this.peerMaxConcurrentStreams = peerMaxConcurrentStreams;
     }
 
+    long peerMaxConcurrentStreams() {
+        return peerMaxConcurrentStreams;
+    }
+
     /** 스트림 번호가 내 번호 공간에 속하는지(규격 2.2.5절). */
     boolean isOwnSpace(long streamId) {
         return (streamId & 1) == ownParity;

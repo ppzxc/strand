@@ -16,9 +16,12 @@ final class FakeWebSocket implements WebSocket {
     final List<Long> requests = new ArrayList<>();
     final List<byte[]> sentBinary = new ArrayList<>();
     final List<Boolean> sentBinaryLast = new ArrayList<>();
-    final List<Integer> sentCloseCodes = new ArrayList<>();
+    final List<Integer> sentCloseCodes = new java.util.concurrent.CopyOnWriteArrayList<>();
     boolean aborted;
     boolean failSends;
+    // 켜면 보낸 것은 상대에게 바로 가지만 보내기 완료는 releaseSends까지 미룬다. 쓰기 막힘을 흉내 낸다.
+    boolean holdSends;
+    private final List<CompletableFuture<WebSocket>> held = new ArrayList<>();
 
     private boolean outputClosed;
     private FakeWebSocket peer;
@@ -52,7 +55,7 @@ final class FakeWebSocket implements WebSocket {
             peerListener.onBinary(peer, delivered, last);
             java.util.Arrays.fill(delivered.array(), (byte) 0);
         }
-        return CompletableFuture.completedFuture(this);
+        return completion();
     }
 
     @Override
@@ -65,7 +68,24 @@ final class FakeWebSocket implements WebSocket {
         if (peerListener != null) {
             peerListener.onClose(peer, statusCode, reason);
         }
-        return CompletableFuture.completedFuture(this);
+        return completion();
+    }
+
+    private CompletableFuture<WebSocket> completion() {
+        if (!holdSends) {
+            return CompletableFuture.completedFuture(this);
+        }
+        CompletableFuture<WebSocket> pending = new CompletableFuture<>();
+        held.add(pending);
+        return pending;
+    }
+
+    /** 미뤄 둔 보내기 완료를 모두 끝내고 이후는 바로 끝낸다. */
+    void releaseSends() {
+        holdSends = false;
+        List<CompletableFuture<WebSocket>> toComplete = new ArrayList<>(held);
+        held.clear();
+        toComplete.forEach(pending -> pending.complete(this));
     }
 
     @Override

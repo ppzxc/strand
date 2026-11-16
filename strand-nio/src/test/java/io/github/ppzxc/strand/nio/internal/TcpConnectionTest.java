@@ -165,7 +165,7 @@ class TcpConnectionTest {
         }
 
         @Override
-        public Inbound await(long timeoutMs) throws IOException {
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
             if (stalling) {
                 stalled.countDown();
                 try {
@@ -175,12 +175,12 @@ class TcpConnectionTest {
                     throw new IOException("멈춘 채 중단됨", e);
                 }
             }
-            return delegate.await(timeoutMs);
+            return delegate.await(timeoutMs, waitForRead, waitForWrite);
         }
 
         @Override
-        public void write(OutboundMessage message) throws IOException {
-            delegate.write(message);
+        public int write(OutboundMessage message, int offset) throws IOException {
+            return delegate.write(message, offset);
         }
 
         @Override
@@ -191,6 +191,48 @@ class TcpConnectionTest {
         @Override
         public void close() {
             delegate.close();
+        }
+    }
+
+    private static final int STABLE_POLLS = 6;
+    private static final long POLL_MILLIS = 50;
+
+    /** 쓴 바이트 수가 한동안 늘지 않을 때까지 기다린다. 쓰기가 소켓 버퍼에 막혀 더 나가지 않는 상태다. */
+    private static void awaitWritesStopped(ConnectionDriver driver) throws InterruptedException {
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long last = -1;
+        int stable = 0;
+        while (System.nanoTime() < limit) {
+            long now = driver.writtenBytes();
+            stable = now == last && now > 0 ? stable + 1 : 0;
+            if (stable >= STABLE_POLLS) {
+                return;
+            }
+            last = now;
+            Thread.sleep(POLL_MILLIS);
+        }
+        throw new AssertionError("쓰기가 5초 안에 멈추지 않았다");
+    }
+
+    /**
+     * 서로 소켓 버퍼를 넘는 요청을 동시에 많이 보내도 두 끝이 교착하지 않는다. 쓰기가 막힌 끝도 쓰기 대기열이 읽기 멈춤 상한 아래인 동안은 읽기를 멈추지 않아 상대의 쓰기가 풀리기 때문이다. 요청 수와 크기가 흐름 제어 범위 안이라는 것에 기댄 시험이다.
+     */
+    @Test
+    void bothEndsSendingLargeRequestsAtOnceDoNotDeadlock() throws Exception {
+        TcpLoopback link = TcpLoopback.open(4096);
+        RequestHandler echo = request -> request.respond(0, new byte[0]).join();
+        ConnectionDriver server = start(ConnectionDriver.server(EndpointConfig.defaults(), TcpPassage.of(link.accepted))
+                .handler(handlers, echo));
+        ConnectionDriver client = start(ConnectionDriver.client(EndpointConfig.defaults(), TcpPassage.of(link.client))
+                .handler(handlers, echo));
+        List<RequestHandle> handles = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            handles.add(client.request(APPLICATION_TYPE, new byte[60_000]));
+            handles.add(server.request(APPLICATION_TYPE, new byte[60_000]));
+        }
+
+        for (RequestHandle handle : handles) {
+            assertThat(await(handle.result()).certainty()).isEqualTo(Certainty.RESPONSE);
         }
     }
 
@@ -220,6 +262,7 @@ class TcpConnectionTest {
 
             // 클라이언트의 쓰기가 소켓 버퍼가 차서 실제로 막힌 뒤에 끊는다.
             StackWatch.awaitFrame(client.transportThread(), StackWatch::inWriteWait);
+            awaitWritesStopped(client);
             CompletableFuture<Void> closing = CompletableFuture.runAsync(client::close);
             closing.get(5, TimeUnit.SECONDS);
 

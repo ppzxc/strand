@@ -20,9 +20,6 @@ import org.junit.jupiter.api.Test;
 /** TCP 통로만의 동작: 읽기 버퍼 크기, 부분 쓰기와 백프레셔, 리셋, 보내는 쪽만 닫기. */
 class TcpPassageTest {
 
-    private static final int APPLICATION_TYPE = 256;
-    private static final int LARGE_BODY_BYTES = 60_000;
-    private static final int LARGE_MESSAGES = 20;
     private static final int SMALL_SOCKET_BUFFER = 4096;
     /** 이 시간 동안 쓰기가 끝나지 않으면 막힌 것으로 본다. */
     private static final int SILENCE_MS = 300;
@@ -57,48 +54,33 @@ class TcpPassageTest {
         return result;
     }
 
-    /** 엔드포인트 둘을 직접 이어 핸드셰이크를 마치고, 클라이언트가 보내는 큰 요청 메시지들을 얻는다. 통로는 쓰지 않는다. */
-    private static List<OutboundMessage> largeRequestMessages() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
-        List<OutboundMessage> requests = new ArrayList<>();
-        for (int i = 0; i < LARGE_MESSAGES; i++) {
-            client.request(APPLICATION_TYPE, new byte[LARGE_BODY_BYTES]);
-        }
-        boolean moved = true;
-        while (moved) {
-            moved = false;
-            for (OutboundMessage message : client.drainMessages()) {
-                moved = true;
-                if (message.bytes().length >= LARGE_BODY_BYTES) {
-                    requests.add(message);
+    /**
+     * 연결 드라이버처럼 한 스레드에서 메시지들을 쓰면서 읽는다. 쓰기가 막히면 쓰기 가능과 읽기를 함께 기다리고, 다 쓴 뒤에는 상대가 보낸 만큼 읽어
+     * 모은다. 읽은 바이트를 돌려준다.
+     */
+    private static byte[] writeWhileReading(Passage passage, List<OutboundMessage> messages) throws IOException {
+        ByteArrayOutputStream received = new ByteArrayOutputStream();
+        int expected = TestMessages.totalBytes(messages);
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        int index = 0;
+        int offset = 0;
+        while ((index < messages.size() || received.size() < expected) && System.nanoTime() < limit) {
+            while (index < messages.size()) {
+                OutboundMessage message = messages.get(index);
+                int accepted = passage.write(message, offset);
+                offset += accepted;
+                if (offset == message.length()) {
+                    index++;
+                    offset = 0;
                 }
-                server.receive(message.bytes());
+                if (accepted == 0) {
+                    break;
+                }
             }
-            for (OutboundMessage message : server.drainMessages()) {
-                moved = true;
-                client.receive(message.bytes());
-            }
+            Inbound inbound = passage.await(100, true, index < messages.size());
+            received.write(inbound.data(), 0, inbound.data().length);
         }
-        assertThat(requests).hasSize(LARGE_MESSAGES);
-        return requests;
-    }
-
-    private static int totalBytes(List<OutboundMessage> messages) {
-        int total = 0;
-        for (OutboundMessage message : messages) {
-            total += message.bytes().length;
-        }
-        return total;
-    }
-
-    private static byte[] concatenated(List<OutboundMessage> messages) {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        for (OutboundMessage message : messages) {
-            byte[] bytes = message.bytes();
-            out.write(bytes, 0, bytes.length);
-        }
-        return out.toByteArray();
+        return received.toByteArray();
     }
 
     /** 상한 시간 안에서 {@code count}바이트가 모일 때까지 기다리며 읽는다. */
@@ -139,64 +121,54 @@ class TcpPassageTest {
 
     @Test
     void writingMoreThanTheSocketBuffersBlocksUntilThePeerReadsAndDeliversEverything() throws Exception {
-        List<OutboundMessage> messages = largeRequestMessages();
+        List<OutboundMessage> messages = TestMessages.largeRequests();
         TcpLoopback link = TcpLoopback.open(SMALL_SOCKET_BUFFER);
         Passage writer = TcpPassage.of(link.client);
         Passage reader = TcpPassage.of(link.accepted);
 
         CompletableFuture<Void> writing = inBackground(() -> {
             for (OutboundMessage message : messages) {
-                writer.write(message);
+                PassageContract.writeFully(writer, message);
             }
         });
 
         // 읽는 쪽이 읽기 전에는 다 쓸 수 없다(백프레셔). 읽기 시작하면 모두 닿고 쓰기가 끝난다.
         assertStaysBlocked(writing);
-        byte[] received = readExactly(reader, totalBytes(messages));
+        byte[] received = readExactly(reader, TestMessages.totalBytes(messages));
         within(writing);
-        assertThat(received).isEqualTo(concatenated(messages));
+        assertThat(received).isEqualTo(TestMessages.concatenated(messages));
         writer.close();
         reader.close();
     }
 
     @Test
     void bothSidesWritingALotAtOnceBeforeReadingDoNotDeadlock() throws Exception {
-        List<OutboundMessage> messages = largeRequestMessages();
+        List<OutboundMessage> messages = TestMessages.largeRequests();
         TcpLoopback link = TcpLoopback.open(SMALL_SOCKET_BUFFER);
         Passage a = TcpPassage.of(link.client);
         Passage b = TcpPassage.of(link.accepted);
         byte[][] receivedBy = new byte[2][];
 
-        // 양쪽이 모두 다 쓴 뒤에야 읽는다. 쓰는 동안 읽지 않으면 두 끝이 서로의 소켓 버퍼를 채워 멈춘다.
-        CompletableFuture<Void> aDone = inBackground(() -> {
-            for (OutboundMessage message : messages) {
-                a.write(message);
-            }
-            receivedBy[0] = readExactly(a, totalBytes(messages));
-        });
-        CompletableFuture<Void> bDone = inBackground(() -> {
-            for (OutboundMessage message : messages) {
-                b.write(message);
-            }
-            receivedBy[1] = readExactly(b, totalBytes(messages));
-        });
+        // 양쪽이 모두 다 쓰고 나서야 읽으려 한다. 한쪽이 쓰기에 막혀도 읽기를 멈추지 않으면 소켓 버퍼가 비어 서로의 쓰기가 풀린다.
+        CompletableFuture<Void> aDone = inBackground(() -> receivedBy[0] = writeWhileReading(a, messages));
+        CompletableFuture<Void> bDone = inBackground(() -> receivedBy[1] = writeWhileReading(b, messages));
 
         within(aDone);
         within(bDone);
-        assertThat(receivedBy[0]).isEqualTo(concatenated(messages));
-        assertThat(receivedBy[1]).isEqualTo(concatenated(messages));
+        assertThat(receivedBy[0]).isEqualTo(TestMessages.concatenated(messages));
+        assertThat(receivedBy[1]).isEqualTo(TestMessages.concatenated(messages));
         a.close();
         b.close();
     }
 
     @Test
     void closingWhileAWriteIsBlockedEndsTheWriteWithAnIoError() throws Exception {
-        List<OutboundMessage> messages = largeRequestMessages();
+        List<OutboundMessage> messages = TestMessages.largeRequests();
         TcpLoopback link = TcpLoopback.open(SMALL_SOCKET_BUFFER);
         Passage writer = TcpPassage.of(link.client);
         CompletableFuture<Void> writing = inBackground(() -> {
             for (OutboundMessage message : messages) {
-                writer.write(message);
+                PassageContract.writeFully(writer, message);
             }
         });
         assertStaysBlocked(writing);
@@ -244,7 +216,7 @@ class TcpPassageTest {
         assertThat(seen.kind()).isEqualTo(Inbound.Kind.END);
         OutboundMessage preface =
                 Endpoint.client(EndpointConfig.defaults()).drainMessages().get(0);
-        peer.write(preface);
+        PassageContract.writeFully(peer, preface);
         assertThat(readExactly(passage, preface.bytes().length)).isEqualTo(preface.bytes());
         passage.close();
         peer.close();
@@ -279,19 +251,19 @@ class TcpPassageTest {
 
     @Test
     void anEndSeenWhileAWriteIsBlockedDoesNotStopTheWriteAndIsReportedAfterwards() throws Exception {
-        List<OutboundMessage> messages = largeRequestMessages();
+        List<OutboundMessage> messages = TestMessages.largeRequests();
         TcpLoopback link = TcpLoopback.open(SMALL_SOCKET_BUFFER);
         Passage writer = TcpPassage.of(link.client);
         link.accepted.shutdownOutput();
         CompletableFuture<Void> writing = inBackground(() -> {
             for (OutboundMessage message : messages) {
-                writer.write(message);
+                PassageContract.writeFully(writer, message);
             }
         });
 
         // 상대는 보내는 쪽만 닫았을 뿐 계속 읽는다. 쓰기는 EOF를 만나도 끝까지 가야 한다.
         ByteBuffer sink = ByteBuffer.allocate(8192);
-        int total = totalBytes(messages);
+        int total = TestMessages.totalBytes(messages);
         int received = 0;
         while (received < total) {
             sink.clear();

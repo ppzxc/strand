@@ -38,9 +38,9 @@ final class StackWatch {
                 && element.getMethodName().contains("elect");
     }
 
-    /** {@link TcpPassage}가 쓰기 자리를 기다리는 프레임인가. */
+    /** {@link TcpPassage}가 선택기에서 기다리는 {@code await} 프레임인가(쓰기 가능을 기다릴 때도 여기다). */
     static boolean inWriteWait(StackTraceElement element) {
         return element.getClassName().equals(TcpPassage.class.getName())
-                && element.getMethodName().equals("awaitWritable");
+                && element.getMethodName().equals("await");
     }
 }

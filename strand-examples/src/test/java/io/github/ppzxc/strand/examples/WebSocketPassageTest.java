@@ -131,7 +131,7 @@ class WebSocketPassageTest {
         listener.onOpen(socket);
         OutboundMessage message = firstMessage();
 
-        passage.write(message);
+        passage.write(message, 0);
 
         assertThat(socket.sentBinary).hasSize(1);
         assertThat(socket.sentBinary.get(0)).isEqualTo(message.bytes());
@@ -143,12 +143,12 @@ class WebSocketPassageTest {
         listener.onOpen(socket);
         socket.failSends = true;
 
-        assertThatThrownBy(() -> passage.write(firstMessage())).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> passage.write(firstMessage(), 0)).isInstanceOf(IOException.class);
     }
 
     @Test
     void writingBeforeTheSocketOpenedIsAnIoException() {
-        assertThatThrownBy(() -> passage.write(firstMessage())).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> passage.write(firstMessage(), 0)).isInstanceOf(IOException.class);
     }
 
     @Test
@@ -291,5 +291,55 @@ class WebSocketPassageTest {
         limited.listener().onText(socket, "\uDE00", true);
 
         assertThat(limited.await(0).data()).isEqualTo("\uD83D\uDE00".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void anOverflowQueuedWhileReadingIsPausedWakesAWriteWaitAndThrows() throws Exception {
+        WebSocketPassage limited = new WebSocketPassage(4);
+        FakeWebSocket held = new FakeWebSocket();
+        limited.listener().onOpen(held);
+        held.holdSends = true;
+        limited.write(firstMessage(), 0);
+        assertThat(limited.write(firstMessage(), 0)).as("앞선 보내기가 끝나지 않아 막힌다").isZero();
+        java.util.concurrent.CompletableFuture<Object> waiting = new java.util.concurrent.CompletableFuture<>();
+        Thread waiter = new Thread(() -> {
+            try {
+                waiting.complete(limited.await(-1, false, true));
+            } catch (Throwable e) {
+                waiting.complete(e);
+            }
+        });
+        waiter.setDaemon(true);
+        waiter.start();
+
+        limited.listener().onBinary(held, buffer(1, 2, 3, 4, 5), true);
+
+        assertThat(waiting.get(5, java.util.concurrent.TimeUnit.SECONDS)).isInstanceOf(IOException.class);
+    }
+
+    @Test
+    void aWakeupWhileReadingIsPausedLeavesNoEmptyWakeupForTheResumedRead() throws Exception {
+        listener.onOpen(socket);
+
+        passage.wakeup();
+        assertThat(passage.await(-1, false, false).kind()).isEqualTo(Inbound.Kind.NONE);
+        listener.onBinary(socket, buffer(1), true);
+
+        assertThat(passage.await(0).kind()).as("읽기를 다시 켜면 쌓인 메시지가 먼저다").isEqualTo(Inbound.Kind.MESSAGE);
+        assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.NONE);
+    }
+
+    @Test
+    void aPollDoesNotConsumeAWakeupMeantForTheNextWait() throws Exception {
+        listener.onOpen(socket);
+
+        passage.wakeup();
+        assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.NONE);
+
+        long start = System.nanoTime();
+        assertThat(passage.await(10_000).kind()).isEqualTo(Inbound.Kind.NONE);
+        assertThat(java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
+                .as("기다리기 전에 불린 wakeup이 다음 기다림을 바로 끝낸다")
+                .isLessThan(5_000);
     }
 }

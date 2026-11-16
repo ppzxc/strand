@@ -23,4 +23,23 @@ class WebSocketPassageContractTest extends PassageContract {
     protected Passage peer() {
         return peer;
     }
+
+    private FakeWebSocket sendingSocket;
+
+    /** 보내기 완료가 미뤄져, 앞선 보내기가 끝나기 전에는 다음 메시지를 받지 않는다. */
+    @Override
+    protected Passage createBlockable() {
+        WebSocketPassage passage = new WebSocketPassage();
+        peer = new WebSocketPassage();
+        sendingSocket = FakeWebSocket.link(passage, peer)[0];
+        sendingSocket.holdSends = true;
+        return passage;
+    }
+
+    @Override
+    protected byte[] unblockWrites(Passage blocked) {
+        sendingSocket.releaseSends();
+        sendingSocket.holdSends = true;
+        return new byte[0];
+    }
 }

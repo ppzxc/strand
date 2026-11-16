@@ -112,4 +112,17 @@ class ConnectionObservationTest {
         assertThat(server.receivedBytes()).isEqualTo(client.writtenBytes());
         assertThat(client.receivedBytes()).isEqualTo(server.writtenBytes());
     }
+
+    @Test
+    void aVeryFarCoreDeadlineStaysWithinTheIntRangeOfThePassageWait() {
+        InMemoryPassage.Pair link = InMemoryPassage.messages();
+        EndpointConfig config = EndpointConfig.defaults().webSocket().idleIntervalMs(Long.MAX_VALUE / 2);
+        start(ConnectionDriver.server(config, link.second().manualTime()));
+        start(ConnectionDriver.client(config, link.first().manualTime()));
+
+        InMemoryPassage.awaitQuiescence(link.first(), link.second());
+
+        // 통로의 시간 제한이 int 범위로 잘리는 구현에서도 바쁜 대기가 되지 않는다.
+        assertThat(link.first().lastAwaitTimeoutMs()).isEqualTo(Integer.MAX_VALUE);
+    }
 }
