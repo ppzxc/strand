@@ -141,7 +141,7 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /**
          * 연결이 CLOSE로 끝난 뒤(core가 CLOSED를 낸 뒤)의 마무리(남은 쓰기 비우기, 상대가 끊을 때까지 읽기)에 거는 시간 상한을 정한다. 상한은 core가
-         * CLOSED를 낸 시점(주입 시계)부터 세고, 지나면 통로를 닫고 전송 스레드를 끝낸다. 이미 종료 알림이 나갔으므로 새 알림을 내지 않는다. 정하지
+         * CLOSED를 낸 스텝에서 그 이벤트를 내보낸 시점(주입 시계)부터 세고, 지나면 통로를 닫고 전송 스레드를 끝낸다. 이미 종료 알림이 나갔으므로 새 알림을 내지 않는다. 정하지
          * 않으면 5초다. core의 {@code EndpointConfig}가 아니라 전송 모듈의 설정이다.
          *
          * @param limitMs 상한(밀리초, 1 이상)
@@ -818,7 +818,11 @@ public final class ConnectionDriver implements AutoCloseable {
                 case CLOSED:
                     // 알림이 실패해도 한 번만 나가도록 먼저 표시한다.
                     closed = true;
-                    closedFinishDeadline = clock.getAsLong() + closedFinishLimitMs;
+                    long closedAtMs = clock.getAsLong();
+                    // 아주 큰 상한이 넘쳐 음수 기한이 되지 않게 더하기를 포화시킨다.
+                    closedFinishDeadline = closedAtMs > Long.MAX_VALUE - closedFinishLimitMs
+                            ? Long.MAX_VALUE
+                            : closedAtMs + closedFinishLimitMs;
                     if (transportGone || isDisconnection(event)) {
                         finished = true;
                     }
