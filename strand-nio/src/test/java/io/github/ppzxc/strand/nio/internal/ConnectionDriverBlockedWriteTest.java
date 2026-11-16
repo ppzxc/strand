@@ -308,4 +308,12 @@ class ConnectionDriverBlockedWriteTest {
 
         assertThat(client.driver.awaitWriteBlocked(false, 5, TimeUnit.SECONDS)).isTrue();
     }
+
+    @Test
+    void waitingForWriteBlockedGivesUpAfterTheTimeoutWhenNoBlockHappens() throws Exception {
+        Side[] sides = connected();
+
+        assertThat(sides[0].driver.awaitWriteBlocked(true, 20, TimeUnit.MILLISECONDS))
+                .isFalse();
+    }
 }
