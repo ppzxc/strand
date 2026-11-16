@@ -147,7 +147,7 @@ mavenPublishing {
   pom {
     name = artifactName
     // 모듈 build 스크립트가 정한 project.description을 쓴다(모듈마다 다르다).
-    description = providers.provider { project.description ?: error("${project.path}에 description이 없다") }
+    description = providers.provider { project.description?.takeUnless { it.isBlank() } ?: error("${project.path}에 description이 없다") }
     url = "https://github.com/ppzxc/strand"
     licenses {
       license {

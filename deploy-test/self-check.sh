@@ -31,7 +31,7 @@ pom_dependency_artifacts() {
   sed -n '/<dependencies>/,/<\/dependencies>/p' "$1" | sed -n 's:.*<artifactId>\(.*\)</artifactId>.*:\1:p' | sort
 }
 
-# nio POM 검사: 메타데이터, core와 다른 description, core 외 의존이 없음.
+# nio POM 검사: 메타데이터, nio 전용 description(core와 다름), core 외 의존이 없음.
 # jspecify는 core도 POM에 compile 범위로 싣는 애너테이션 전용(compileOnlyApi) 의존이라 core와 같은 수준으로 허용한다.
 check_nio_pom() { # <nio pom 경로> <core pom 경로>
   local nio="$1" core="$2" deps
@@ -41,11 +41,17 @@ check_nio_pom() { # <nio pom 경로> <core pom 경로>
     echo "nio description이 core와 같다: $(pom_description_line "$nio")" >&2
     return 1
   fi
-  deps="$(pom_dependency_artifacts "$nio" | tr '\n' ' ')"
-  if [ "$deps" != "jspecify strand-core " ]; then
-    echo "nio POM의 의존이 strand-core(와 애너테이션 jspecify)뿐이 아니다: $deps" >&2
+  local nio_description="<description>strand: strand-core 규격을 TCP 위에서 주고받는 NIO 전송 구현</description>"
+  if [ "$(pom_description_line "$nio")" != "$nio_description" ]; then
+    echo "nio description이 기대한 문구가 아니다: $(pom_description_line "$nio")" >&2
     return 1
   fi
+  deps="$(pom_dependency_artifacts "$nio" | grep -vx jspecify || true)"
+  case "$deps" in
+    strand-core) ;;
+    "") echo "nio POM에 strand-core 의존이 없다" >&2; return 1 ;;
+    *) echo "nio POM에 strand-core 외 의존이 있다: $(tr '\n' ' ' <<<"$deps")" >&2; return 1 ;;
+  esac
 }
 
 core_pom="$m2/strand-core/$version/strand-core-$version.pom"
@@ -71,9 +77,9 @@ core_description="$(pom_description_line "$core_pom")"
 awk -v d="$core_description" '/<description>/ { print d; next } { print }' "$nio_pom" > "$pomdir/same-description.pom"
 expect_nio_pom_rejected "core와 같은 description" "$pomdir/same-description.pom" "description이 core와 같다"
 sed 's:</dependencies>:<dependency><groupId>x</groupId><artifactId>extra</artifactId></dependency></dependencies>:' "$nio_pom" > "$pomdir/extra-dependency.pom"
-expect_nio_pom_rejected "strand-core 외 의존을 가짐" "$pomdir/extra-dependency.pom" "의존이 strand-core"
+expect_nio_pom_rejected "strand-core 외 의존을 가짐" "$pomdir/extra-dependency.pom" "strand-core 외 의존이 있다"
 grep -v "<artifactId>strand-core</artifactId>" "$nio_pom" > "$pomdir/no-core.pom"
-expect_nio_pom_rejected "strand-core 의존이 없음" "$pomdir/no-core.pom" "의존이 strand-core"
+expect_nio_pom_rejected "strand-core 의존이 없음" "$pomdir/no-core.pom" "strand-core 의존이 없다"
 awk '/<description>/ { print "<description></description>"; next } { print }' "$nio_pom" > "$pomdir/empty-description.pom"
 expect_nio_pom_rejected "빈 description" "$pomdir/empty-description.pom" "description이 비어"
 echo "nio POM 변조(같은 description, 빈 description, 추가 의존, core 의존 누락) 거부 확인"
