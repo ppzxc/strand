@@ -221,6 +221,26 @@ class VectorRunnerTest {
                 .containsExactly("setup.future_setup", "단계 future_step");
     }
 
+    @Test
+    void unsupportedVectorHasAnUnsupportedOutcomeInsteadOfAnExecutionFailure() {
+        ConformanceVector v = vector(
+                "{\"role\":\"server\",\"established\":true,\"future_setup\":true}",
+                step("recv", "\"hex\":\"00\",", "[]", "[]"));
+
+        VectorOutcome outcome = VectorRunner.evaluate(v);
+
+        assertThat(outcome.status()).isEqualTo(VectorOutcome.Status.UNSUPPORTED);
+        assertThat(outcome.vectorId()).isEqualTo("v");
+        assertThat(outcome.details()).containsExactly("setup.future_setup");
+    }
+
+    @Test
+    void anExecutableVectorMismatchHasAFailureOutcome() {
+        ConformanceVector v = vector(ESTABLISHED, recv(PING, "[]", "[]"));
+
+        assertThat(VectorRunner.evaluate(v).status()).isEqualTo(VectorOutcome.Status.FAIL);
+    }
+
     private static final String WEBSOCKET_ESTABLISHED =
             "{\"role\":\"server\",\"established\":true,\"transport\":\"websocket\"}";
     private static final String WEBSOCKET_CLOSE_1000 = "{\"type\":\"WEBSOCKET_CLOSE\",\"code\":1000}";

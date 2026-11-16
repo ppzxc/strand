@@ -45,9 +45,27 @@ final class VectorRunner {
     }
 
     static void run(ConformanceVector vector) {
+        VectorOutcome outcome = evaluate(vector);
+        assertThat(outcome.status())
+                .as("벡터 %s: %s", vector.id(), outcome.details())
+                .isEqualTo(VectorOutcome.Status.PASS);
+    }
+
+    static VectorOutcome evaluate(ConformanceVector vector) {
+        List<String> unsupported = unsupportedFeatures(vector);
+        if (!unsupported.isEmpty()) {
+            return VectorOutcome.unsupported(vector.id(), unsupported);
+        }
+        try {
+            runSupported(vector);
+            return VectorOutcome.pass(vector.id());
+        } catch (AssertionError | RuntimeException failure) {
+            return VectorOutcome.fail(vector.id(), failure.getMessage());
+        }
+    }
+
+    private static void runSupported(ConformanceVector vector) {
         JsonObject setup = vector.setup();
-        List<String> unsupported = unsupportedFeatures(vector, setup);
-        assertThat(unsupported).as("미지원 기능 (%s)", vector.id()).isEmpty();
 
         boolean client = setup.get("role").getAsString().equals("client");
         String authMechanism = authMechanism(setup);
