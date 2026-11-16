@@ -36,9 +36,12 @@ public final class Main {
     /** nio 클래스를 담은 jar 매니페스트의 Implementation-Version. 찾지 못하면 사유 문자열을 돌려줘 불일치로 실패시킨다. */
     private static String nioVersion() {
         try {
-            Class<?> probe = Class.forName(NIO_PROBE_CLASS);
+            Class<?> probe = Class.forName(NIO_PROBE_CLASS, false, Main.class.getClassLoader()); // 초기화 없이 위치만 찾는다
             File jar = new File(probe.getProtectionDomain().getCodeSource().getLocation().toURI());
             try (JarFile jarFile = new JarFile(jar)) {
+                if (jarFile.getManifest() == null) {
+                    return "(nio jar에 매니페스트 없음)";
+                }
                 String version = jarFile.getManifest().getMainAttributes().getValue("Implementation-Version");
                 return version == null ? "(Implementation-Version 없음)" : version;
             }
