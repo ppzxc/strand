@@ -1038,16 +1038,9 @@ class VectorLoaderTest {
         assertThat(jsonBlocks(lf.replace("\n", "\r\n"))).containsExactly("{\"a\":1}", "[2]");
     }
 
-    /** 벡터 디렉터리에서 위로 올라가며 형식 문서를 찾아 JSON 블록을 모은다. 실행 위치와 벡터 디렉터리의 깊이에 기대지 않는다. */
+    /** 형식 문서의 JSON 블록을 모은다. 위치는 규격 위치에서 구한다. */
     private static String formatDocument() throws IOException {
-        Path doc = null;
-        for (Path dir = VectorSuite.defaultDirectory().toAbsolutePath();
-                dir != null && doc == null;
-                dir = dir.getParent()) {
-            Path candidate = dir.resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
-            doc = Files.exists(candidate) ? candidate : null;
-        }
-        assertThat(doc).as("형식 문서를 찾을 수 없다").isNotNull();
+        Path doc = RequirementIndex.repositoryRoot().resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
         return new String(Files.readAllBytes(doc), StandardCharsets.UTF_8);
     }
 
