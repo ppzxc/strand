@@ -27,8 +27,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>전송 스레드가 한 번 도는 순서는 읽기와 기다림, {@code receive}/{@code receiveMessage}, 시계 진행({@code advance}), 명령 처리, 이벤트
  * 배출, core 쓰기 대기열에서 메시지 꺼내기, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을
- * 잡는다. 기다림은 core의 {@code nextDeadline}, 읽을 것, (쓰기 대기열이 남았으면) 통로의 쓰기 가능, 깨움 가운데 먼저 오는 것까지이고, 기한이
- * 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
+ * 잡는다. 기다림은 core의 {@code nextDeadline}, (CLOSED 뒤라면) 마무리 기한, 읽을 것, (쓰기 대기열이 남았으면) 통로의 쓰기 가능, 깨움 가운데 먼저
+ * 오는 것까지이고, 기한이 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
  *
  * <p><b>쓰기 대기열.</b> 드라이버는 쓰기 대기열을 든다. core 쓰기 대기열에서는 매 스텝 메시지를 모두 꺼내 이 대기열에 붙이고, 통로가 받아 주는 만큼만
  * 쓴다(비블로킹·부분 쓰기). 쓰기가 막혀도(상대가 읽지 않아 소켓 버퍼가 찬 경우) 전송 스레드는 쓰기에서 기다리지 않고 읽기, 시계, 명령 처리를 계속
@@ -46,10 +46,13 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>끝내는 방법은 셋이다. {@link #closeConnection}은 연결 종료(CLOSE)를 보내고 대기 중인 스트림이 끝나길 기다리고, {@link #abortClosing}은
  * 종료 중인 연결에서 기다림을 그만두고, {@link #close}는 즉시 끊는다. 연결이 끝나면 core가 낸 결과로 남은 Future가 모두 끝나고, 종료 알림이 핸들러
- * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 시간 제한 없이 읽는다. 이때 core의 {@code nextDeadline}이
- * 비어 있으므로, 상대가 끊지 않으면 전송 스레드는 끝나지 않고 남는다. 그런 연결은 {@link #close}를 불러 정리한다.
+ * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다. 이 마무리(남은 쓰기 비우기, {@code shutdownOutput},
+ * 상대가 끊을 때까지 읽기)에는 시간 상한이 있다({@link Builder#closedFinishLimitMs}, 기본 5초). 상한은 core가 낸 CLOSED 이벤트를 내보낸 시점(주입 시계)부터
+ * 세며, 지나면 통로를 닫고 전송 스레드를 끝낸다. 오류 CLOSE가 막힌 쓰기 뒤에 있어 상대가 받지 못해도 같은 상한으로 끝난다. 그래서 상대가 끊지 않아도
+ * {@link #close}를 따로 부를 필요가 없다. 이미 종료 알림이 나갔으므로 상한에 걸려도 새 알림을 내지 않고 {@link ConnectionClosed}도 바뀌지 않는다.
+ * 전송 스레드의 기다림은 core의 {@code nextDeadline}과 이 마무리 기한 가운데 이른 쪽까지다.
  *
- * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버린다. 즉시 끊기는 통로를
+ * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김, CLOSED 뒤 마무리 상한) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버린다. 즉시 끊기는 통로를
  * 먼저 닫으므로 더 쓰지 않고, 그 밖의 경우는 마치기 전에 통로가 받아 주는 만큼 한 번 쓴다.
  *
  * <p><b>알려진 한계.</b> 쓰기 대기열의 크기에는 아직 상한이 없다. 상대가 읽지 않으면서 PING 같은 응답이 필요한 프레임을 계속 보내면 대기열이 늘 수
@@ -62,6 +65,8 @@ public final class ConnectionDriver implements AutoCloseable {
     private static final int FRAME_HEADER_BYTES = Endpoint.FRAME_HEADER_SIZE;
     /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
+    /** CLOSED 뒤 마무리 시간 상한의 기본값(밀리초). */
+    private static final long DEFAULT_CLOSED_FINISH_LIMIT_MS = 5000;
 
     private enum Role {
         CLIENT,
@@ -77,6 +82,7 @@ public final class ConnectionDriver implements AutoCloseable {
         private @Nullable RequestHandler handler;
         private @Nullable ConnectionListener listener;
         private LongSupplier clock = () -> System.nanoTime() / 1_000_000L;
+        private long closedFinishLimitMs = DEFAULT_CLOSED_FINISH_LIMIT_MS;
 
         private Builder(Role role, EndpointConfig config, Passage passage) {
             this.role = role;
@@ -134,6 +140,23 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         /**
+         * 연결이 CLOSE로 끝난 뒤(core가 CLOSED를 낸 뒤)의 마무리(남은 쓰기 비우기, 상대가 끊을 때까지 읽기)에 거는 시간 상한을 정한다. 상한은 core가
+         * CLOSED를 낸 스텝에서 그 이벤트를 내보낸 시점(주입 시계)부터 세고, 지나면 통로를 닫고 전송 스레드를 끝낸다. 이미 종료 알림이 나갔으므로 새 알림을 내지 않는다. 정하지
+         * 않으면 5초다. core의 {@code EndpointConfig}가 아니라 전송 모듈의 설정이다.
+         *
+         * @param limitMs 상한(밀리초, 1 이상)
+         * @return 이 빌더
+         * @throws IllegalArgumentException {@code limitMs}가 1보다 작을 때
+         */
+        public Builder closedFinishLimitMs(long limitMs) {
+            if (limitMs < 1) {
+                throw new IllegalArgumentException("closedFinishLimitMs는 1 이상이어야 한다: " + limitMs);
+            }
+            this.closedFinishLimitMs = limitMs;
+            return this;
+        }
+
+        /**
          * 전송 스레드를 시작한다. 클라이언트는 서문과 HELLO를 먼저 내보낸다.
          *
          * @return 돌아가는 연결 드라이버
@@ -142,8 +165,8 @@ public final class ConnectionDriver implements AutoCloseable {
             if (listener != null && handlerExecutor == null) {
                 throw new IllegalStateException("리스너를 받으려면 실행기가 있어야 한다");
             }
-            ConnectionDriver driver =
-                    new ConnectionDriver(role, config, passage, handlerExecutor, handler, listener, clock);
+            ConnectionDriver driver = new ConnectionDriver(
+                    role, config, passage, handlerExecutor, handler, listener, clock, closedFinishLimitMs);
             driver.thread.start();
             return driver;
         }
@@ -183,6 +206,7 @@ public final class ConnectionDriver implements AutoCloseable {
     private final @Nullable RequestHandler handler;
     private final @Nullable ConnectionListener listener;
     private final LongSupplier clock;
+    private final long closedFinishLimitMs;
 
     private final Queue<Command> commands = new ConcurrentLinkedQueue<>();
     private final Thread thread;
@@ -200,7 +224,8 @@ public final class ConnectionDriver implements AutoCloseable {
             @Nullable Executor handlerExecutor,
             @Nullable RequestHandler handler,
             @Nullable ConnectionListener listener,
-            LongSupplier clock) {
+            LongSupplier clock,
+            long closedFinishLimitMs) {
         this.role = role;
         this.config = config;
         this.passage = passage;
@@ -208,6 +233,7 @@ public final class ConnectionDriver implements AutoCloseable {
         this.handler = handler;
         this.listener = listener;
         this.clock = clock;
+        this.closedFinishLimitMs = closedFinishLimitMs;
         this.thread = new Thread(this::run, "strand-nio-transport");
         this.thread.setDaemon(true);
     }
@@ -515,6 +541,8 @@ public final class ConnectionDriver implements AutoCloseable {
         boolean finished;
         // core가 CLOSED를 냈다. 종료 알림은 이때 한 번만 나간다.
         private boolean closed;
+        // CLOSED 뒤 마무리 기한(주입 시계 값). CLOSED를 낸 시점에 정해진다.
+        private long closedFinishDeadline;
         // 읽기나 쓰기가 실패했거나 상대가 끊었다. 더 읽을 것이 없다.
         private boolean transportGone;
         private boolean outputShutdown;
@@ -567,13 +595,29 @@ public final class ConnectionDriver implements AutoCloseable {
             }
         }
 
-        /** 기다림의 상한. core가 알려 준 다음 기한까지만이고, 기한이 없으면 상한이 없다. */
+        /**
+         * 기다림의 상한. core가 알려 준 다음 기한과 CLOSED 뒤 마무리 기한 가운데 이른 쪽까지이고, 둘 다 없으면 상한이 없다.
+         */
         private long waitLimit() {
+            long limit = -1;
             OptionalLong next = endpoint.nextDeadline();
-            if (!next.isPresent()) {
+            if (next.isPresent()) {
+                limit = Math.max(0, next.getAsLong() - (clock.getAsLong() - startedAt));
+            }
+            long untilFinish = untilFinish();
+            if (untilFinish >= 0) {
+                limit = limit < 0 ? untilFinish : Math.min(limit, untilFinish);
+            }
+            return limit;
+        }
+
+        /** CLOSED 뒤 마무리 기한까지 남은 시간(밀리초, 0이면 지났다). 마무리 중이 아니면 -1이다. */
+        private long untilFinish() {
+            if (!closed || finished) {
                 return -1;
             }
-            return Math.max(0, next.getAsLong() - (clock.getAsLong() - startedAt));
+            // 통로의 시간 제한이 int 범위로 잘리는 구현에서 바쁜 대기가 되지 않게, 한 번의 기다림은 int 범위로 자른다. 기한이 더 멀면 깨어난 뒤 다시 계산한다.
+            return Math.min(Math.max(0, closedFinishDeadline - clock.getAsLong()), Integer.MAX_VALUE);
         }
 
         /** 주입 시계로 흐른 시간만큼 엔드포인트의 시계를 보낸다. */
@@ -668,6 +712,10 @@ public final class ConnectionDriver implements AutoCloseable {
          */
         void settle() {
             dispatchEvents();
+            if (untilFinish() == 0) {
+                // CLOSED 뒤 마무리 기한이 지났다. 이미 종료 알림이 나갔으므로 새 알림 없이 끝낸다. 남은 출력은 통로가 받아 주는 만큼 한 번만 쓴다.
+                finished = true;
+            }
             if (!write()) {
                 // 스스로 끊는 중이면 통로를 먼저 닫아서 난 실패다. 낸 명령을 처리한 뒤 step이 끊는다.
                 if (!closeRequested) {
@@ -769,6 +817,13 @@ public final class ConnectionDriver implements AutoCloseable {
                     break;
                 case CLOSED:
                     // 알림이 실패해도 한 번만 나가도록 먼저 표시한다.
+                    if (!closed) {
+                        long closedAtMs = clock.getAsLong();
+                        // 아주 큰 상한이 넘쳐 음수 기한이 되지 않게 더하기를 포화시킨다. 기한은 처음 CLOSED에서만 정한다.
+                        closedFinishDeadline = closedAtMs > Long.MAX_VALUE - closedFinishLimitMs
+                                ? Long.MAX_VALUE
+                                : closedAtMs + closedFinishLimitMs;
+                    }
                     closed = true;
                     if (transportGone || isDisconnection(event)) {
                         finished = true;
