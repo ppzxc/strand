@@ -281,7 +281,8 @@ class ConnectionDriverReadPauseTest {
         flood.flood(FLOOD_SIZE, ConnectionDriverReadPauseTest::request);
         settle(client, server);
 
-        assertThat(flood.delivered()).isLessThan(FLOOD_SIZE / 2);
+        // RESET(REFUSED) 한 프레임이 대기열에 쌓이는 만큼 읽고 멈춘다. 상한 49152바이트에 못 미치게 읽거나 크게 넘지 않는다.
+        assertThat(flood.delivered()).isBetween(1000, 2300);
         assertThat(flood.remaining()).isPositive();
 
         client.tick(IDLE_INTERVAL_MS);
@@ -309,7 +310,8 @@ class ConnectionDriverReadPauseTest {
         flood.flood(FLOOD_SIZE, ConnectionDriverReadPauseTest::request);
         settle(client, server);
 
-        assertThat(flood.delivered()).isLessThan(FLOOD_SIZE / 2);
+        // 응답(120바이트)과 한도를 넘은 요청의 REFUSED(24바이트)가 섞여 쌓이므로 정확한 수는 핸들러 스레드 속도에 달렸다. 상한 81920바이트 안팎에서 멈춘다.
+        assertThat(flood.delivered()).isBetween(300, 5000);
         assertThat(flood.remaining()).isPositive();
 
         client.tick(IDLE_INTERVAL_MS);
@@ -341,41 +343,39 @@ class ConnectionDriverReadPauseTest {
     @Test
     void twoCompliantPeersThatFillTheFlowControlLimitDoNotTripTheReadPauseOrDeadlock() throws Exception {
         long concurrent = 2;
-        Side[] sides = connected(config(concurrent), config(concurrent), request -> {});
+        List<IncomingRequest> clientReceived = new CopyOnWriteArrayList<>();
+        Side[] sides = connected(config(concurrent), config(concurrent), clientReceived::add);
         Side client = sides[0];
         Side server = sides[1];
         byte[] body = new byte[MAX_FRAME_SIZE - HEADER];
-        // 두 끝 모두 상대가 읽지 않는 것처럼 쓰기를 막은 채 한도까지 요청을 내고, 서로의 요청에 한도까지 응답한다.
+        // 상대가 읽지 않는 것처럼 클라이언트 쓰기를 막은 채, 내 요청 둘과 상대 요청 둘에 대한 응답 둘(프레임 넷, 상한은 다섯)을 대기열에 채운다.
         client.passage.writeCapacity(0);
-        server.passage.writeCapacity(0);
-        List<RequestHandle> fromClient = new ArrayList<>();
-        for (int i = 0; i < concurrent; i++) {
-            fromClient.add(client.driver.request(APPLICATION_TYPE, body));
-            server.driver.request(APPLICATION_TYPE, body);
-        }
-        settle(client, server);
-        // 풀어 주고받게 한다.
-        client.passage.addWriteCapacity(PLENTY);
-        server.passage.addWriteCapacity(PLENTY);
-        settle(client, server);
-        assertThat(server.received).hasSize((int) concurrent);
-
-        // 이제 응답까지 한도를 꽉 채운 채 막는다: 내 요청 둘과 응답 둘이 대기열에 있어도 읽기는 계속된다.
-        client.passage.writeCapacity(0);
-        long before = client.driver.receivedBytes();
-        for (IncomingRequest request : server.received) {
-            request.respond(0, body).get(5, TimeUnit.SECONDS);
-        }
         for (int i = 0; i < concurrent; i++) {
             client.driver.request(APPLICATION_TYPE, body);
         }
+        List<RequestHandle> fromServer = new ArrayList<>();
+        for (int i = 0; i < concurrent; i++) {
+            fromServer.add(server.driver.request(APPLICATION_TYPE, body));
+        }
         settle(client, server);
-        assertThat(client.driver.receivedBytes()).isGreaterThan(before);
+        assertThat(clientReceived).hasSize((int) concurrent);
+        for (IncomingRequest request : clientReceived) {
+            request.respond(0, body).get(5, TimeUnit.SECONDS);
+        }
+        settle(client, server);
+
+        // 대기열이 정상 범위를 꽉 채운 채여도 읽기는 계속된다.
+        long before = client.driver.receivedBytes();
+        server.driver.ping(new byte[8]).get(5, TimeUnit.SECONDS);
+        settle(client, server);
+        assertThat(client.driver.receivedBytes()).isEqualTo(before + PING_FRAME);
+
         client.passage.addWriteCapacity(PLENTY);
         settle(client, server);
         assertThat(client.closed).isEmpty();
         assertThat(server.closed).isEmpty();
-        assertThat(fromClient).allSatisfy(handle -> assertThat(handle.result()).isDone());
+        assertThat(fromServer).allSatisfy(handle -> assertThat(handle.result()).isDone());
+        assertThat(server.received).hasSize((int) concurrent);
     }
 
     @Test
@@ -405,7 +405,7 @@ class ConnectionDriverReadPauseTest {
     }
 
     @Test
-    void theAbsoluteLimitMustBePositive() {
+    void theAbsoluteLimitCannotBeBelowTheSmallestFrameSize() {
         InMemoryPassage.Pair link = InMemoryPassage.messages();
         assertThatThrownBy(
                         () -> ConnectionDriver.client(config(2), link.first()).maxWriteQueueBytes(0))
