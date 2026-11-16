@@ -216,6 +216,10 @@ _Avoid_: WebSocket 어댑터, TCP 어댑터, WebSocket 바인딩
 정의: [적합성 벡터 형식](docs/specification/STRAND_CONFORMANCE_VECTORS.md)
 _Avoid_: conformance 벡터, 테스트 데이터, 픽스처, 골든 파일
 
+**요구사항 (Requirement)**:
+벡터 하나가 확인하거나 사유를 붙여 제외할 수 있는 규격의 가장 작은 규범 단위다. MUST·MUST NOT·SHOULD·SHOULD NOT 키워드 하나가 요구사항 하나다. 다음 두 경우는 예외다. 열거하는 줄("다음은 모두 연결 오류다")에서는 열거 항목 하나가 요구사항 하나다. 키워드 하나가 보내는 쪽과 받는 쪽의 행동을 함께 정하면 쪽마다 요구사항 하나다. MAY는 요구사항이 아니다.
+_Avoid_: 조항, 규범 문장, 규범 줄, assertion
+
 ---
 
 ## 5. 코드 식별자 (Identifiers)
