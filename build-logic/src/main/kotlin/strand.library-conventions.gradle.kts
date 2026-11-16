@@ -126,8 +126,22 @@ val verifyDependencies = tasks.register<VerifyDependencyAllowlist>("verifyDepend
   passedMarker.set(layout.buildDirectory.file("verifyDependencies/ok"))
 }
 
+// POM description은 POM 생성 시점에야 읽혀 늦게 실패하므로, check에서 먼저 누락을 드러낸다.
+val verifyPomDescription = tasks.register("verifyPomDescription") {
+  group = "verification"
+  description = "모듈 build 스크립트가 POM description(project.description)을 지정했는지 검사한다."
+  // 구성 시점 값만 캡처한다(구성 캐시 호환).
+  val modulePath = project.path
+  val moduleDescription = project.description
+  doLast {
+    if (moduleDescription.isNullOrBlank()) {
+      error("${modulePath}에 description이 없다. 모듈 build.gradle.kts에 description = \"...\"을 지정한다")
+    }
+  }
+}
+
 tasks.check {
-  dependsOn(verifyDependencies, tasks.jacocoTestCoverageVerification, tasks.javadoc)
+  dependsOn(verifyPomDescription, verifyDependencies, tasks.jacocoTestCoverageVerification, tasks.javadoc)
 }
 
 // 배포: Central Portal USER_MANAGED(VALIDATED에서 멈추고 사람이 Publish). jar, sources jar, javadoc jar.
@@ -146,7 +160,8 @@ mavenPublishing {
 
   pom {
     name = artifactName
-    description = "strand: 바이트 인코딩·디코딩 규격의 Java 구현"
+    // 모듈 build 스크립트가 정한 project.description을 쓴다(모듈마다 다르다).
+    description = providers.provider { project.description?.takeUnless { it.isBlank() } ?: error("${project.path}에 description이 없다. 모듈 build.gradle.kts에 description = \"...\"을 지정한다") }
     url = "https://github.com/ppzxc/strand"
     licenses {
       license {
@@ -173,7 +188,7 @@ mavenPublishing {
 // SBOM: CycloneDX JSON만 만든다(릴리스 워크플로가 서명해 GitHub Release에 붙인다. Central에는 올리지 않는다).
 tasks.cyclonedxBom {
   xmlOutput.unsetConvention()
-  // 배포 좌표 io.github.ppzxc:strand-core:<version>으로 기록한다.
+  // 모듈의 배포 좌표 io.github.ppzxc:<모듈>:<version>으로 기록한다.
   componentName.set(artifactName)
   componentGroup.set(project.group.toString())
   componentVersion.set(project.version.toString())

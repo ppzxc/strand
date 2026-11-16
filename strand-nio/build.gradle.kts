@@ -7,6 +7,9 @@ plugins {
   `java-test-fixtures`
 }
 
+// POM description. strand.library-conventions가 발행 POM에 쓴다.
+description = "strand: strand-core 규격을 TCP 위에서 주고받는 NIO 전송 구현"
+
 dependencies {
   api(project(":strand-core"))
   testFixturesApi(project(":strand-core"))

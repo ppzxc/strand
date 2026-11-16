@@ -29,8 +29,8 @@ class VersionArg(@get:Input val version: Provider<String>) : CommandLineArgument
 val deployTestVersion = providers.gradleProperty("version")
 tasks.register<Exec>("deployTest") {
   group = "verification"
-  description = "~/.m2에 strand-core를 발행하고(정리하지 않는다) deploy-test/run.sh로 외부 소비자 4개를 돌린다(하네스 a)."
-  dependsOn(":strand-core:publishToMavenLocal")
+  description = "~/.m2에 strand-core와 strand-nio를 발행하고(정리하지 않는다) deploy-test/run.sh로 외부 소비자 4개를 돌린다(하네스 a)."
+  dependsOn(":strand-core:publishToMavenLocal", ":strand-nio:publishToMavenLocal")
   workingDir = layout.projectDirectory.asFile
   executable = layout.projectDirectory.file("deploy-test/run.sh").asFile.path
   argumentProviders.add(VersionArg(deployTestVersion))
