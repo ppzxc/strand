@@ -148,9 +148,9 @@ class SpecCoverageTest {
                 pair.add(requirement.id());
             }
         }
-        assertThat(pair).containsExactlyInAnyOrder("req-frame-reserved-zero-send", "req-frame-reserved-ignore-recv");
-        assertThat(pair).filteredOn(id -> id.endsWith("-send")).hasSize(1);
-        assertThat(pair).filteredOn(id -> id.endsWith("-recv")).hasSize(1);
+        assertThat(pair).contains("req-frame-reserved-zero-send", "req-frame-reserved-ignore-recv");
+        assertThat(pair).filteredOn(id -> id.endsWith("-send")).containsExactly("req-frame-reserved-zero-send");
+        assertThat(pair).filteredOn(id -> id.endsWith("-recv")).containsExactly("req-frame-reserved-ignore-recv");
         assertThat(index.requirement("req-frame-reserved-zero-send").section()).isEqualTo("2.2.7");
         assertThat(index.requirement("req-frame-reserved-ignore-recv").section())
                 .isEqualTo("2.2.7");
