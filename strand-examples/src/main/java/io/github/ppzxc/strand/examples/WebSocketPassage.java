@@ -234,6 +234,14 @@ public final class WebSocketPassage implements Passage {
             if (closed) {
                 throw new IOException("닫힌 통로");
             }
+            // 보내기 실패는 읽기를 기다리지 않을 때도 알린다.
+            Object head = queue.peek();
+            if (head instanceof Throwable) {
+                queue.poll();
+                throw head instanceof IOException
+                        ? (IOException) head
+                        : new IOException("WebSocket 오류", (Throwable) head);
+            }
             if (timeoutMs != 0) {
                 signalled = false;
             }

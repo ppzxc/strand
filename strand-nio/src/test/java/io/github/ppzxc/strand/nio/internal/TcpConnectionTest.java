@@ -198,9 +198,11 @@ class TcpConnectionTest {
     private static void awaitWritesStopped(ConnectionDriver driver) throws InterruptedException {
         long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         long last = -1;
+        int stable = 0;
         while (System.nanoTime() < limit) {
             long now = driver.writtenBytes();
-            if (now == last) {
+            stable = now == last && now > 0 ? stable + 1 : 0;
+            if (stable >= 3) {
                 return;
             }
             last = now;

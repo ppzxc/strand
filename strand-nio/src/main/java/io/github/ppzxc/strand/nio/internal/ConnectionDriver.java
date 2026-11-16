@@ -49,6 +49,9 @@ import org.jspecify.annotations.Nullable;
  * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 시간 제한 없이 읽는다. 이때 core의 {@code nextDeadline}이
  * 비어 있으므로, 상대가 끊지 않으면 전송 스레드는 끝나지 않고 남는다. 그런 연결은 {@link #close}를 불러 정리한다.
  *
+ * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버린다. 마치기 전에 쓸
+ * 수 있는 만큼은 한 번 쓴다.
+ *
  * <p><b>알려진 한계.</b> 쓰기 대기열의 크기에는 아직 상한이 없다. 상대가 읽지 않으면서 PING 같은 응답이 필요한 프레임을 계속 보내면 대기열이 늘 수
  * 있다. 이 경우를 막는 읽기 멈춤은 아직 없다.
  */
@@ -418,7 +421,7 @@ public final class ConnectionDriver implements AutoCloseable {
     }
 
     /**
-     * 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 통로를 닫으므로 상대가 읽지 않아 쓰기가 막혀 있어도 끝난다. 남은 Future는 core가 내는 결과로 끝난다.
+     * 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 통로를 닫으므로 상대가 읽지 않아 쓰기가 막혀 있어도 끝난다. 쓰기 대기열에 남은 메시지는 다 쓰지 않고 버린다. 남은 Future는 core가 내는 결과로 끝난다.
      * 즉시 끊기라서 이미 큐에 넣은 출력은 보장하지 않는다. 아직 처리되지 않은 {@link #request}, {@link #respond}, {@link #ping}은 전송 스레드가 통로
      * 닫힘을 보기 전에 처리되지 못할 수 있고, 그 요청은 core가 내는 결과나 예외로 끝난다. 출력을 다 내보내고 끝내려면 {@link #closeConnection()}을 쓴다.
      * 여러 번 불러도 된다.
@@ -430,7 +433,7 @@ public final class ConnectionDriver implements AutoCloseable {
         if (Thread.currentThread() == thread) {
             return;
         }
-        // 상대가 읽지 않아 쓰기에서 막혀 있으면 깨움만으로는 전송 스레드가 돌아오지 않는다. 통로를 닫아 막힌 입출력을 끝낸다.
+        // 깨움으로는 끝나지 않는 대기(선택기, 통로 안쪽의 보내기 대기 등)를 통로를 닫아 끝낸다.
         passage.close();
         try {
             thread.join();

@@ -8,6 +8,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 통로를 감싸 두 가지를 해 준다. 쓴 프레임의 type을 쓴 순서대로 적고, 전송 스레드가 같은 한 바퀴에 여러 명령을 처리하거나 두 연결이 서로의 쓰기를 보기 전에
@@ -21,6 +22,7 @@ final class ControlledPassage implements Passage {
     private final Object lock = new Object();
     private final List<Integer> writtenFrameTypes = new ArrayList<>();
     private final List<OutboundMessage> deferred = new ArrayList<>();
+    private @Nullable OutboundMessage lastRecorded;
     private boolean deferWrites;
     private boolean holdWakeups;
     private boolean waiting;
@@ -52,12 +54,13 @@ final class ControlledPassage implements Passage {
     @Override
     public int write(OutboundMessage message, int offset) throws IOException {
         synchronized (lock) {
-            // 한 메시지를 나눠 쓰는 두 번째 호출부터는 처음 쓴 프레임을 다시 적지 않는다.
-            if (offset == 0
+            // 막혀서 같은 메시지로 다시 부르는 호출은 한 번만 적는다.
+            if (message != lastRecorded
                     && message.kind() == OutboundMessage.Kind.BINARY
                     && message.length() >= FRAME_HEADER_BYTES) {
                 byte[] bytes = message.bytes();
                 writtenFrameTypes.add(((bytes[4] & 0xff) << 8) | (bytes[5] & 0xff));
+                lastRecorded = message;
             }
             if (deferWrites) {
                 // 미뤄 둔 메시지는 통로가 다 받은 것으로 돌려준다. 나중에 releaseWrites가 내보낸다.
