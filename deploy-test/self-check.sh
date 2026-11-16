@@ -58,6 +58,8 @@ core_pom="$m2/strand-core/$version/strand-core-$version.pom"
 nio_pom="$m2/strand-nio/$version/strand-nio-$version.pom"
 check_pom_metadata strand-core "$core_pom" || exit 1
 check_pom_description "$core_pom" || exit 1
+[ "$(pom_description_line "$core_pom")" = "<description>strand: 바이트 인코딩·디코딩 규격의 Java 구현</description>" ] \
+  || { echo "core description이 기대한 문구가 아니다: $(pom_description_line "$core_pom")" >&2; exit 1; }
 echo "POM 메타데이터 확인: strand-core"
 check_nio_pom "$nio_pom" "$core_pom" || exit 1
 echo "nio POM 메타데이터, core와 다른 description, 의존(strand-core) 확인"
