@@ -57,14 +57,22 @@ import org.jspecify.annotations.Nullable;
  * 계속한다. 읽기를 멈춘 동안에는 쓰기 가능, 깨움, 기한으로만 깨어난다. 대기열이 상한 이하로 내려가면 다시 읽는다. 받는 것이 없으니 core의 유휴 PING이
  * 나가고(꺼내는 순간 확인 대기가 시작된다), 상대가 계속 읽지 않으면 확인 대기 초과로 끊긴다. 새 타이머나 새 종료 원인은 없다.
  *
- * <p>상한은 협상 값에서 셈한다. (상대가 알린 {@code max_concurrent_streams} + 내가 알린 {@code max_concurrent_streams}) × 상대가 알린
- * {@code max_frame_size}에 제어 프레임을 위한 프레임 하나를 더한 값(상대가 정하는 값이라 절대 한도로 막는다. 기본 64MiB이고 {@link Builder#maxWriteQueueBytes}로 바꾼다)으로, 절대 한도에 걸리지 않는 설정에서는 규칙을 지키며 흐름 제어 한도 안에서 주고받는 상대의 정상 범위보다 작지 않다.
- * 이 범위 밖의 출력(이미 취소한 요청의 프레임과 RESET, 애플리케이션이 따로 낸 PING 등)이 겹쳐 상한을 넘으면, 읽는 상대라도 대기열이 내려갈 때까지 읽기가
- * 멈춘다. 두 끝이 동시에 그러면 서로 기다리므로, 유휴 PING 확인 대기로 끊기거나 기한이 없으면 풀리지 않는다. 상한은 한 스텝에서 받은 입력이 만든 출력만큼 넘을 수 있다. 그 양은 한 스텝에서 받는 입력의 양({@value #MAX_RECEIVES_PER_STEP}번의
- * 읽기)으로 막히며, 바이트 스트림 통로에서는 읽기 한 번이 여러 프레임이다.
+ * <p><b>상한.</b> 협상 값에서 셈한다. (상대가 알린 {@code max_concurrent_streams} + 내가 알린 {@code max_concurrent_streams}) × 상대가 알린
+ * {@code max_frame_size}에 제어 프레임을 위한 프레임 하나를 더한 값이다. 절대 한도에 걸리지 않는 설정에서는 규칙을 지키며 흐름 제어 한도 안에서 주고받는
+ * 상대의 정상 범위보다 작지 않다.
  *
- * <p><b>읽기 멈춤의 한계.</b> 읽기를 멈추면 그동안 상대의 EOF, CLOSE, ACK도 읽지 않는다. 시계는 계속 가므로 멈춘 사이 확인 대기가 지날 수 있다. 기한이 없는 연결에서는 읽지 않는 상대가 연결을 끊게 하지 못한다.
- * 유휴 PING 간격이 0인 설정과 종료 중인 연결이 그렇다. 이때는 요청 기한과 애플리케이션의 {@link #close}에 맡긴다.
+ * <p><b>절대 한도.</b> 위 값은 상대가 알린 값에 달려 있어 상대가 크게 알리면 상한이 사실상 없어진다. 그래서 절대 한도로 막는다. 기본은 64MiB이고
+ * {@link Builder#maxWriteQueueBytes}로 바꾼다. 절대 한도가 정상 범위보다 작으면 그 범위를 꽉 채워 주고받는 두 끝도 읽기 멈춤에 걸릴 수 있으므로, 그런
+ * 설정에서는 한도를 올린다. 절대 한도가 작아도 상한은 상대가 알린 최대 프레임 하나보다 작아지지 않는다.
+ *
+ * <p><b>범위 밖 출력과 넘침.</b> 정상 범위 밖의 출력(이미 취소한 요청의 프레임과 RESET, 애플리케이션이 따로 낸 PING 등)이 겹쳐 상한을 넘으면, 읽는
+ * 상대라도 대기열이 내려갈 때까지 읽기가 멈춘다. 두 끝이 동시에 그러면 서로 기다리므로, 유휴 PING 확인 대기로 끊기거나 기한이 없으면 풀리지 않는다. 읽기
+ * 멈춤 판단은 스텝이 시작될 때 한 번 하므로, 상한은 한 스텝에서 받은 입력이 만든 출력만큼 넘을 수 있다. 그 양은 한 스텝에서 받는 입력의 양, 곧 통로의 읽기 한
+ * 번의 크기 × {@value #MAX_RECEIVES_PER_STEP}번으로 막힌다. 바이트 스트림 통로에서는 읽기 한 번이 여러 프레임이다.
+ *
+ * <p><b>읽기 멈춤의 한계.</b> 읽기를 멈추면 그동안 상대의 EOF, CLOSE, ACK도 읽지 않는다. 시계는 계속 가므로 멈춘 사이 확인 대기가 지날 수 있다. 기한이
+ * 없는 연결에서는 읽지 않는 상대가 연결을 끊게 하지 못한다. 유휴 PING 간격이 0인 설정과 종료 중인 연결이 그렇다. 이때는 요청 기한과 애플리케이션의
+ * {@link #close}에 맡긴다. 읽기를 멈춘 동안에도 통로가 닫혔거나 쓰기가 실패하면 대기에서 입출력 오류가 나오고, 연결은 끊긴 것으로 처리된다.
  */
 public final class ConnectionDriver implements AutoCloseable {
 
@@ -73,8 +81,6 @@ public final class ConnectionDriver implements AutoCloseable {
     private static final int FRAME_HEADER_BYTES = Endpoint.FRAME_HEADER_SIZE;
     /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
-    /** 규격이 허용하는 가장 작은 {@code max_frame_size}(규격 3.2.1절). */
-    private static final long MIN_FRAME_SIZE = 16_384L;
     /** 쓰기 대기열 상한의 기본 절대 한도. 상대가 HELLO로 알린 큰 값이 상한을 사실상 없애지 못하게 한다. */
     static final long DEFAULT_MAX_WRITE_QUEUE_BYTES = 64L * 1024 * 1024;
 
@@ -86,7 +92,7 @@ public final class ConnectionDriver implements AutoCloseable {
     static long writeQueueLimit(
             long peerMaxFrameSize, long peerMaxConcurrentStreams, long ownMaxConcurrentStreams, long absoluteLimit) {
         long range = (peerMaxConcurrentStreams + ownMaxConcurrentStreams) * peerMaxFrameSize + peerMaxFrameSize;
-        return Math.min(range, absoluteLimit);
+        return Math.max(peerMaxFrameSize, Math.min(range, absoluteLimit));
     }
 
     private enum Role {
@@ -165,13 +171,13 @@ public final class ConnectionDriver implements AutoCloseable {
          * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임이 기본값 {@value #DEFAULT_MAX_WRITE_QUEUE_BYTES}을
          * 넘는 설정에서는, 그 범위를 꽉 채워 주고받는 두 끝이 읽기 멈춤에 걸리지 않도록 이 값을 그 범위 이상으로 올린다. 정하지 않으면 기본값이다.
          *
-         * @param bytes 절대 한도. 최소 프레임 크기(16384) 이상이어야 한다
+         * @param bytes 절대 한도(1 이상). 상한은 이 값이 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다
          * @return 이 빌더
-         * @throws IllegalArgumentException {@code bytes}가 16384보다 작을 때
+         * @throws IllegalArgumentException {@code bytes}가 1보다 작을 때
          */
         public Builder maxWriteQueueBytes(long bytes) {
-            if (bytes < MIN_FRAME_SIZE) {
-                throw new IllegalArgumentException("maxWriteQueueBytes는 " + MIN_FRAME_SIZE + " 이상이어야 한다: " + bytes);
+            if (bytes < 1) {
+                throw new IllegalArgumentException("maxWriteQueueBytes는 1 이상이어야 한다: " + bytes);
             }
             this.maxWriteQueueBytes = bytes;
             return this;

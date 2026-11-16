@@ -400,11 +400,40 @@ class ConnectionDriverReadPauseTest {
     }
 
     @Test
-    void theAbsoluteLimitCannotBeSetBelowTheSmallestFrameSize() {
+    void theLimitIsNeverBelowOneFrameEvenWithASmallAbsoluteLimit() {
+        assertThat(ConnectionDriver.writeQueueLimit(1_048_576, 100, 100, 1)).isEqualTo(1_048_576);
+    }
+
+    @Test
+    void theAbsoluteLimitMustBePositive() {
         InMemoryPassage.Pair link = InMemoryPassage.messages();
         assertThatThrownBy(
-                        () -> ConnectionDriver.client(config(2), link.first()).maxWriteQueueBytes(MAX_FRAME_SIZE - 1))
+                        () -> ConnectionDriver.client(config(2), link.first()).maxWriteQueueBytes(0))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void theAbsoluteLimitFromTheBuilderReachesTheDriver() {
+        InMemoryPassage.Pair link = InMemoryPassage.messages();
+        Side client = new Side(link.first());
+        Side server = new Side(link.second());
+        Flood flood = new Flood(client.passage);
+        start(server, server.passage, config(2), false, server.received::add);
+        client.driver = ConnectionDriver.client(config(2), flood)
+                .handler(handlers, request -> {})
+                .maxWriteQueueBytes(MAX_FRAME_SIZE)
+                .clock(client.clock::get)
+                .start();
+        started.add(client.driver);
+        settle(client, server);
+        client.passage.writeCapacity(0);
+
+        flood.flood(FLOOD_SIZE, ConnectionDriverReadPauseTest::ping);
+        settle(client, server);
+
+        // 협상 값에서 셈한 상한은 81920이지만 연결 설정의 절대 한도 16384가 먼저 걸린다.
+        int capFrames = MAX_FRAME_SIZE / PING_FRAME;
+        assertThat(flood.delivered()).isBetween(capFrames - 10, capFrames + 64 + 10);
     }
 
     @Test
