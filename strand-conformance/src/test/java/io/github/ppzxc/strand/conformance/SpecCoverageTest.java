@@ -141,6 +141,9 @@ class SpecCoverageTest {
     @Test
     void sendAndRecvAnchorsAreSeparateRequirements() throws IOException {
         RequirementIndex index = index();
+        assertThat(index.requirement("req-frame-reserved-zero-send"))
+                .isNotNull()
+                .isNotSameAs(index.requirement("req-frame-reserved-ignore-recv"));
         assertThat(index.requirement("req-frame-reserved-zero-send").section()).isEqualTo("2.2.7");
         assertThat(index.requirement("req-frame-reserved-ignore-recv").section())
                 .isEqualTo("2.2.7");

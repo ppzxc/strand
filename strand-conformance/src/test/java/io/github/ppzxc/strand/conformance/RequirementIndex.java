@@ -159,13 +159,27 @@ final class RequirementIndex {
     /** 규격 파일별로 한 번만 읽은 색인. 파일 하나는 프로세스 안에서 바뀌지 않으므로 읽는 순서에 결과가 달라지지 않는다. */
     private static final Map<Path, RequirementIndex> BY_FILE = new HashMap<>();
 
-    /** 빌드가 {@value #SPEC_FILE_PROPERTY} 시스템 프로퍼티로 넘긴 규격 문서를 읽어 만든 색인. 벡터 디렉터리와 무관하다. */
+    /**
+     * 규격 문서를 읽어 만든 색인. 위치는 {@value #SPEC_FILE_PROPERTY} 시스템 프로퍼티(빌드가 넘긴다)이고, 없으면 작업 디렉터리에서 위로
+     * 올라가며 찾는다. 벡터 디렉터리와 무관하다.
+     */
     static synchronized RequirementIndex ofSpecification() {
-        String file = System.getProperty(SPEC_FILE_PROPERTY);
-        if (file == null) {
-            throw new IllegalStateException("시스템 프로퍼티 " + SPEC_FILE_PROPERTY + "가 없다");
+        Path file = specificationFile().toAbsolutePath().normalize();
+        return BY_FILE.computeIfAbsent(file, RequirementIndex::readSpecification);
+    }
+
+    private static Path specificationFile() {
+        String property = System.getProperty(SPEC_FILE_PROPERTY);
+        if (property != null) {
+            return Paths.get(property);
         }
-        return BY_FILE.computeIfAbsent(Paths.get(file), RequirementIndex::readSpecification);
+        for (Path dir = Paths.get("").toAbsolutePath(); dir != null; dir = dir.getParent()) {
+            Path candidate = dir.resolve("docs/specification/STRAND_SPECIFICATION.md");
+            if (Files.exists(candidate)) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("규격 문서를 찾지 못했다. 시스템 프로퍼티 " + SPEC_FILE_PROPERTY + "를 준다");
     }
 
     private static RequirementIndex readSpecification(Path spec) {

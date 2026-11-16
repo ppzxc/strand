@@ -60,6 +60,9 @@ class RequirementIndexTest {
         RequirementIndex index = RequirementIndex.parse(
                 spec("## 3. 절", "0으로 보내고 받으면 무시한다(MUST)<a id=\"req-z-send\"></a><a id=\"req-z-recv\"></a>."));
 
+        assertThat(only(index, "req-z-send").id()).isEqualTo("req-z-send");
+        assertThat(only(index, "req-z-recv").id()).isEqualTo("req-z-recv");
+        assertThat(index.requirements()).hasSize(2);
         assertThat(index.problems()).isEmpty();
     }
 

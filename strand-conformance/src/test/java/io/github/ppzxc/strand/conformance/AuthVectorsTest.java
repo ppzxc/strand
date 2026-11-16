@@ -78,7 +78,10 @@ class AuthVectorsTest {
         assertThat(inFile).containsExactlyInAnyOrderElementsOf(REQUIRED);
     }
 
-    /** 3.3.x 요구사항 대신 자기가 확인하는 프레임 검사의 절을 가리키는 AUTH 벡터. 벡터를 더하려면 여기에 올린다. */
+    /**
+     * 3.3.x 요구사항이 없고 자기가 확인하는 프레임 검사의 절만 가리키는 AUTH 벡터. 두 벡터의 requirements에 3.3.x 앵커가 없어 옛 "3.3 또는 3.3.1"
+     * 단언을 그대로 복원할 수 없다. 벡터를 더하려면 여기에 올린다.
+     */
     private static final Map<String, String> FRAME_CHECK_SECTIONS = new HashMap<>();
 
     static {
