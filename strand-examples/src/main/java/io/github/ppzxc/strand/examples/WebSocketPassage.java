@@ -159,6 +159,10 @@ public final class WebSocketPassage implements Passage {
         if (ended) {
             return Inbound.end();
         }
+        // 읽기를 기다리는 동안 쌓인 깨움 신호는 이 호출이 이미 처리한다.
+        synchronized (signal) {
+            signalled = false;
+        }
         // 이미 쓸 수 있으면 기다리지 않고 지금 큐에 있는 것(읽을 것, 실패)만 가져간다.
         long limit = waitForWrite && writable() ? 0 : timeoutMs;
         Object item;
@@ -335,7 +339,7 @@ public final class WebSocketPassage implements Passage {
             CompletableFuture<?> close = last != null && !last.isDone()
                     ? last.handle((sent, failure) -> null).thenCompose(ignored -> closeOnce(open, NORMAL_CLOSURE))
                     : closeOnce(open, NORMAL_CLOSURE);
-            sending = close;
+            watch(close);
             close.whenComplete((sent, failure) -> {
                 if (failure != null) {
                     open.abort();

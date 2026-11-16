@@ -64,7 +64,7 @@ final class ControlledPassage implements Passage {
             }
             if (deferWrites) {
                 // 미뤄 둔 메시지는 통로가 다 받은 것으로 돌려준다. 나중에 releaseWrites가 내보낸다.
-                if (offset == 0) {
+                if (!deferred.contains(message)) {
                     deferred.add(message);
                 }
                 return message.length() - offset;
