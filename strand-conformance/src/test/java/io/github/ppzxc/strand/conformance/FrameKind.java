@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.conformance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -31,6 +32,10 @@ final class FrameKind {
             put(name, value);
             return this;
         }
+
+        Fields withIf(boolean condition, String name, String value) {
+            return condition ? with(name, value) : this;
+        }
     }
 
     /** 디코딩한 프레임 하나. */
@@ -38,14 +43,20 @@ final class FrameKind {
         final int type;
         final int flags;
         final int status;
+        final int reserved;
+        /** 기대 항목이 reason을 적었는가. 아니면 reason을 그리지 않아 비교하지 않는다. */
+        final boolean withReason;
+
         final long streamId;
         final int extensions;
         final byte[] payload;
 
-        Wire(byte[] frame) {
+        Wire(byte[] frame, boolean withReason) {
+            this.withReason = withReason;
             this.type = Bytes.readUnsignedShort(frame, Protocol.TYPE_AT);
             this.flags = frame[Protocol.FLAGS_AT] & 0xFF;
             this.status = frame[Protocol.STATUS_AT] & 0xFF;
+            this.reserved = Bytes.readUnsignedShort(frame, Protocol.RESERVED_AT);
             this.streamId = Bytes.readLong(frame, Protocol.STREAM_ID_AT);
             this.extensions = Bytes.readUnsignedShort(frame, Protocol.EXTENSIONS_LENGTH_AT);
             assertThat(Protocol.HEADER_SIZE + extensions)
@@ -176,23 +187,37 @@ final class FrameKind {
             FRAME_BASE
                     .require("error_code", VectorSchema.ERROR_CODE)
                     .require("last_stream_id", VectorSchema.LAST_STREAM_ID)
-                    .allow("stream_id", VectorSchema.ZERO_STREAM_ID),
-            frame -> controlHead(false)
-                    .with("error_code", Protocol.nameOfError(frame.get("error_code")))
-                    .with("last_stream_id", frame.get("last_stream_id").getAsString()),
+                    .allow("stream_id", VectorSchema.ZERO_STREAM_ID)
+                    .allow("reason", Check::string),
+            frame -> {
+                Fields fields = controlHead(false)
+                        .with("error_code", Protocol.nameOfError(frame.get("error_code")))
+                        .with("last_stream_id", frame.get("last_stream_id").getAsString());
+                if (frame.has("reason")) {
+                    fields.with("reason", Bytes.toHex(reasonBytes(frame)));
+                }
+                return fields;
+            },
             frame -> {
                 ByteArrayOutputStream payload = new ByteArrayOutputStream();
                 Bytes.writeInt(payload, Protocol.errorCode(frame.get("error_code")));
                 Bytes.writeLong(
                         payload,
                         Long.parseUnsignedLong(frame.get("last_stream_id").getAsString()));
+                byte[] reason = reasonBytes(frame);
+                payload.write(reason, 0, reason.length);
                 return control(Protocol.TYPE_CLOSE, false, payload.toByteArray());
             },
             (wire, client) -> wire.payload.length < Protocol.CLOSE_PAYLOAD_SIZE
                     ? null
                     : wire.head()
                             .with("error_code", Protocol.nameOfError((int) Bytes.readUnsignedInt(wire.payload, 0)))
-                            .with("last_stream_id", Long.toUnsignedString(Bytes.readLong(wire.payload, 4))));
+                            .with("last_stream_id", Long.toUnsignedString(Bytes.readLong(wire.payload, 4)))
+                            .withIf(
+                                    wire.withReason,
+                                    "reason",
+                                    Bytes.toHex(Arrays.copyOfRange(
+                                            wire.payload, Protocol.CLOSE_PAYLOAD_SIZE, wire.payload.length))));
 
     private static final FrameKind RESET_KIND = new FrameKind(
             "RESET",
@@ -261,9 +286,7 @@ final class FrameKind {
             (wire, client) -> {
                 Fields fields = new Fields().with("type", String.valueOf(wire.type));
                 fields.putAll(wire.head());
-                // 자기 번호 공간(클라이언트는 홀수, 서버는 짝수)의 프레임은 요청이라 status를 비교하지 않는다.
-                boolean ownSpace = (wire.streamId & 1) == (client ? 1 : 0);
-                if (!ownSpace) {
+                if (isResponse(wire, client)) {
                     fields.with("status", Protocol.nameOfStatus(wire.status));
                 }
                 return fields.with("payload", Bytes.toHex(wire.payload));
@@ -401,7 +424,17 @@ final class FrameKind {
      * 엔드포인트가 보낸 바이트를 프레임으로 풀어 벡터의 {@code send}와 같은 표기로 바꾼다. 잘린 프레임은 실패시킨다. {@code client}는
      * 이 쪽 역할로, 애플리케이션 프레임의 status 비교 여부를 정한다.
      */
+    /** CLOSE의 reason을 그리지 않는 풀이. reason 비교가 필요 없는 호출이 쓴다. */
     static List<String> describe(byte[] output, boolean startsWithPreface, boolean client) {
+        return describe(output, startsWithPreface, client, index -> false, 0);
+    }
+
+    /**
+     * 같은 일을 하되, {@code reasonListed}가 참인 항목 번호의 CLOSE는 reason도 그린다. 항목 번호는 {@code firstIndex}에 이 호출이
+     * 지금까지 낸 항목 수를 더한 값으로, 한 단계 {@code send}의 순서와 같다.
+     */
+    static List<String> describe(
+            byte[] output, boolean startsWithPreface, boolean client, IntPredicate reasonListed, int firstIndex) {
         List<String> result = new ArrayList<>();
         byte[] rest = output;
         byte[] preface = PREFACE_BYTES;
@@ -412,9 +445,32 @@ final class FrameKind {
             rest = Arrays.copyOfRange(rest, preface.length, rest.length);
         }
         for (byte[] frame : split(rest)) {
-            result.add(describeFrame(new Wire(frame), client));
+            Wire wire = new Wire(frame, reasonListed.test(firstIndex + result.size()));
+            result.add(describeFrame(wire, client));
         }
         return result;
+    }
+
+    /** 상대의 번호 공간(클라이언트는 짝수, 서버는 홀수)의 프레임은 응답이다. 자기 번호 공간의 프레임은 요청이다. */
+    private static boolean isResponse(Wire wire, boolean client) {
+        return (wire.streamId & 1) != (client ? 1 : 0);
+    }
+
+    /**
+     * 비교 규칙: reserved는 모든 송신 프레임에서, status는 응답이 아닌 프레임에서 늘 0이어야 한다. 기대 표기는 이 필드를 갖지 않으므로 0이
+     * 아니면 어긋난다. 해석하지 못하는 프레임에도 적용한다.
+     */
+    private static void markNonZero(Fields fields, Wire wire, boolean response) {
+        if (wire.reserved != 0) {
+            fields.with("reserved", String.format("0x%04x", wire.reserved));
+        }
+        if (wire.status != 0 && !response) {
+            fields.with("sent_status", String.valueOf(wire.status));
+        }
+    }
+
+    private static byte[] reasonBytes(JsonObject close) {
+        return close.has("reason") ? close.get("reason").getAsString().getBytes(StandardCharsets.UTF_8) : new byte[0];
     }
 
     private static String describeFrame(Wire wire, boolean client) {
@@ -422,12 +478,25 @@ final class FrameKind {
             if (kind.onWire.test(wire.type)) {
                 Fields fields = kind.decoder.apply(wire, client);
                 if (fields != null) {
+                    markNonZero(fields, wire, kind == APPLICATION_KIND && isResponse(wire, client));
                     return format(kind.name, fields);
                 }
             }
         }
         // 어느 종류도 아닌 바이트는 type 번호 그대로 그려 비교가 실패하게 한다.
-        return format(String.format("type=0x%04x", wire.type), wire.head().with("payload", Bytes.toHex(wire.payload)));
+        Fields unknown = wire.head().with("payload", Bytes.toHex(wire.payload));
+        markNonZero(unknown, wire, false);
+        return format(String.format("type=0x%04x", wire.type), unknown);
+    }
+
+    /**
+     * 벡터가 {@code reason}을 적은 CLOSE 항목의 번호. 적은 항목만 바이트까지 비교하고, 적지 않은 항목의 reason은 비교하지 않는다. 규격은
+     * AUTH 거부와 폐기에서만 reason을 비우라 하고 다른 CLOSE에는 설명을 허용한다(벡터 형식 6.1절).
+     */
+    static IntPredicate reasonListed(JsonArray expectedSend) {
+        return index -> index < expectedSend.size()
+                && "CLOSE".equals(VectorSchema.frameType(expectedSend.get(index).getAsJsonObject()))
+                && expectedSend.get(index).getAsJsonObject().has("reason");
     }
 
     private static List<byte[]> split(byte[] output) {

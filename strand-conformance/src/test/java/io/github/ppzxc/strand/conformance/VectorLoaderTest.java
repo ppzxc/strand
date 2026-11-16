@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.conformance;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.google.gson.JsonElement;
@@ -616,6 +617,22 @@ class VectorLoaderTest {
                         "x.json",
                         recvWithSend("{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}")))
                 .hasSize(1);
+    }
+
+    @Test
+    void acceptsAnOptionalStringCloseReasonAndRejectsANonString() {
+        assertThatCode(
+                        () -> VectorLoader.parse(
+                                "x.json",
+                                recvWithSend(
+                                        "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"\"}")))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(
+                        () -> VectorLoader.parse(
+                                "x.json",
+                                recvWithSend(
+                                        "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":1}")))
+                .hasMessageContaining("reason");
     }
 
     @TestFactory

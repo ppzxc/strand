@@ -19,6 +19,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntPredicate;
 
 /**
  * 벡터 하나를 엔드포인트에 실행한다. `setup`으로 엔드포인트를 만들고 단계마다 입력을 넣어, 보낸 바이트를 프레임으로 풀어 `send`와,
@@ -69,7 +70,8 @@ final class VectorRunner {
             sent.addAll(runner.endpoint.drainMessages());
             boolean startsWithPreface = !opening.isEmpty();
             opening = new ArrayList<>();
-            assertThat(runner.describeMessages(sent, startsWithPreface))
+            assertThat(runner.describeMessages(
+                            sent, startsWithPreface, FrameKind.reasonListed(step.getAsJsonArray("send"))))
                     .as("%d번째 단계의 send", number)
                     .isEqualTo(expectedFrames(step));
             assertThat(describe(runner.endpoint.drainEvents()))
@@ -271,6 +273,12 @@ final class VectorRunner {
      * (벡터 형식 6.1절), WebSocket Close는 자기 항목이다. 바이트 스트림에서는 메시지를 이어 붙여 프레임으로 푼다.
      */
     List<String> describeMessages(List<OutboundMessage> messages, boolean startsWithPreface) {
+        return describeMessages(messages, startsWithPreface, index -> false);
+    }
+
+    /** {@code reasonListed}는 reason을 비교할 CLOSE 항목의 번호(벡터 형식 6.1절). */
+    List<String> describeMessages(
+            List<OutboundMessage> messages, boolean startsWithPreface, IntPredicate reasonListed) {
         List<String> result = new ArrayList<>();
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         boolean first = true;
@@ -283,11 +291,17 @@ final class VectorRunner {
             boolean withPreface = startsWithPreface && first;
             first = false;
             if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE) {
-                result.addAll(FrameKind.describe(stream.toByteArray(), startsWithPreface && result.isEmpty(), client));
+                result.addAll(FrameKind.describe(
+                        stream.toByteArray(),
+                        startsWithPreface && result.isEmpty(),
+                        client,
+                        reasonListed,
+                        result.size()));
                 stream.reset();
                 result.add(FrameKind.webSocketClose(message.webSocketCloseCode()));
             } else if (webSocket) {
-                List<String> frames = FrameKind.describe(message.bytes(), withPreface, client);
+                List<String> frames =
+                        FrameKind.describe(message.bytes(), withPreface, client, reasonListed, result.size());
                 assertThat(frames).as("WebSocket 메시지마다 프레임이 하나").hasSize(1);
                 result.addAll(frames);
             } else {
@@ -295,7 +309,8 @@ final class VectorRunner {
                 stream.write(bytes, 0, bytes.length);
             }
         }
-        result.addAll(FrameKind.describe(stream.toByteArray(), startsWithPreface && result.isEmpty(), client));
+        result.addAll(FrameKind.describe(
+                stream.toByteArray(), startsWithPreface && result.isEmpty(), client, reasonListed, result.size()));
         return result;
     }
 }
