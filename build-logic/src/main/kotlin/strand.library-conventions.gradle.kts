@@ -126,8 +126,22 @@ val verifyDependencies = tasks.register<VerifyDependencyAllowlist>("verifyDepend
   passedMarker.set(layout.buildDirectory.file("verifyDependencies/ok"))
 }
 
+// POM description은 POM 생성 시점에야 읽혀 늦게 실패하므로, check에서 먼저 누락을 드러낸다.
+val verifyPomDescription = tasks.register("verifyPomDescription") {
+  group = "verification"
+  description = "모듈 build 스크립트가 POM description(project.description)을 지정했는지 검사한다."
+  // 구성 시점 값만 캡처한다(구성 캐시 호환).
+  val modulePath = project.path
+  val moduleDescription = project.description
+  doLast {
+    if (moduleDescription.isNullOrBlank()) {
+      error("${modulePath}에 description이 없다. 모듈 build.gradle.kts에 description = \"...\"을 지정한다")
+    }
+  }
+}
+
 tasks.check {
-  dependsOn(verifyDependencies, tasks.jacocoTestCoverageVerification, tasks.javadoc)
+  dependsOn(verifyPomDescription, verifyDependencies, tasks.jacocoTestCoverageVerification, tasks.javadoc)
 }
 
 // 배포: Central Portal USER_MANAGED(VALIDATED에서 멈추고 사람이 Publish). jar, sources jar, javadoc jar.

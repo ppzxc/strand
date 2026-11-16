@@ -46,7 +46,7 @@ public final class Main {
                 return version == null ? "(Implementation-Version 없음)" : version;
             }
         } catch (ClassNotFoundException e) {
-            return "(nio 클래스 없음)";
+            return "(nio 탐침 클래스를 찾지 못함: " + NIO_PROBE_CLASS + ". nio가 클래스패스에 없거나 클래스 이름이 바뀜)";
         } catch (java.io.IOException | URISyntaxException | RuntimeException e) {
             return "(nio jar 매니페스트를 읽지 못함: " + e + ")";
         }
