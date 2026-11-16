@@ -3201,6 +3201,16 @@ class EndpointTest {
     }
 
     @Test
+    void configMaxFrameSizeAcceptsTheLowerBoundAndRejectsBelowIt() {
+        EndpointConfig defaults = EndpointConfig.defaults();
+
+        assertThatThrownBy(() -> defaults.maxFrameSize(MIN_MAX_FRAME_SIZE - 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("16384");
+        defaults.maxFrameSize(MIN_MAX_FRAME_SIZE);
+    }
+
+    @Test
     void configRejectsOutOfRangeValues() {
         EndpointConfig defaults = EndpointConfig.defaults();
 
