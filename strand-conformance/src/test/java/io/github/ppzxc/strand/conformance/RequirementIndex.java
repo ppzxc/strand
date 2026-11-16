@@ -140,9 +140,9 @@ final class RequirementIndex {
     /** `(MUST)`, `(MUST NOT, 5.1절)`, `(모두 MUST)`. 괄호 안은 키워드로 시작한다. */
     private static final Pattern PARENTHESIS = Pattern.compile("\\((모두 )?" + KEYWORD_TEXT + "(?:,[^()]*)?\\)");
 
+    private static final Pattern HEADING_ANY = Pattern.compile("^#{1,6}\\s");
     private static final Pattern ANCHOR = Pattern.compile("<a id=\"(req-[^\"]*)\"></a>");
     private static final Pattern ANCHOR_RUN = Pattern.compile("(?:<a id=\"req-[^\"]*\"></a>)+");
-    private static final Pattern ID_SHAPE = Pattern.compile("req-[a-z0-9]+(-[a-z0-9]+)*");
     private static final Pattern LIST_MARKER = Pattern.compile("^(?:[-*]|\\d+\\.)\\s.*");
     private static final Pattern TABLE_SEPARATOR = Pattern.compile("^\\|[\\s:|-]+\\|?$");
     /** 용어 규칙을 설명하는 줄이라 규범 문장이 아니다. */
@@ -212,12 +212,23 @@ final class RequirementIndex {
             if (heading.find()) {
                 section = heading.group(1);
                 i++;
-            } else if (line.startsWith("#") || line.startsWith(KEYWORD_DEFINITION)) {
+            } else if (line.startsWith("```")) {
+                i = skipFence(lines, i);
+            } else if (HEADING_ANY.matcher(line).find() || line.startsWith(KEYWORD_DEFINITION)) {
                 i++;
             } else {
                 i = scanBlock(lines, i);
             }
         }
+    }
+
+    /** 코드 블록(```)은 규격 문장이 아니므로 건너뛴다. 닫는 줄 다음 줄 번호를 돌려준다. */
+    private static int skipFence(String[] lines, int open) {
+        int i = open + 1;
+        while (i < lines.length && !lines[i].startsWith("```")) {
+            i++;
+        }
+        return Math.min(i + 1, lines.length);
     }
 
     /** 일반 줄 하나를 처리한다. 열거 줄이면 이어지는 목록·표까지 처리하고 다음에 읽을 줄 번호를 돌려준다. */
@@ -365,7 +376,11 @@ final class RequirementIndex {
     }
 
     private void add(String id, Keyword keyword, int index) {
-        if (!ID_SHAPE.matcher(id).matches()) {
+        if (section == null) {
+            problem(ProblemKind.ORPHAN_ANCHOR, index, "절 제목 앞의 앵커다: " + id);
+            return;
+        }
+        if (!Check.REQUIREMENT_ID.matcher(id).matches()) {
             problem(ProblemKind.INVALID_ANCHOR, index, "식별자 형식이 아니다: " + id);
             return;
         }
@@ -394,8 +409,8 @@ final class RequirementIndex {
             Bracket bracket = new Bracket(Keyword.of(parenthesis.group(2)), parenthesis.group(1) != null);
             blank(rest, parenthesis.start(), parenthesis.end());
             int end = parenthesis.end();
-            Matcher run = ANCHOR_RUN.matcher(line);
-            if (run.find(end) && run.start() == end) {
+            Matcher run = ANCHOR_RUN.matcher(line).region(end, line.length());
+            if (run.lookingAt()) {
                 Matcher anchor = ANCHOR.matcher(run.group());
                 while (anchor.find()) {
                     bracket.anchors.add(anchor.group(1));

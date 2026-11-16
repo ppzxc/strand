@@ -116,6 +116,9 @@ class SpecCoverageTest {
 
     private static List<String> deletedRequirementIds() throws IOException {
         List<String> result = new ArrayList<>();
+        assertThat(SpecCoverageTest.class.getResource("/deleted-requirement-ids.txt"))
+                .as("deleted-requirement-ids.txt가 없다")
+                .isNotNull();
         try (Reader reader = new InputStreamReader(
                         SpecCoverageTest.class.getResourceAsStream("/deleted-requirement-ids.txt"),
                         StandardCharsets.UTF_8);

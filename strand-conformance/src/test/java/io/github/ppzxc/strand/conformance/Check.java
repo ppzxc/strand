@@ -26,7 +26,7 @@ final class Check {
     private static final Pattern PING_PAYLOAD = Pattern.compile("[0-9a-f]{16}");
     private static final Pattern SPEC_SECTION = Pattern.compile("(?:[0-9]+|[A-G])(?:\\.[0-9]+)*");
 
-    private static final Pattern REQUIREMENT_ID = Pattern.compile("req-[a-z0-9]+(-[a-z0-9]+)*");
+    static final Pattern REQUIREMENT_ID = Pattern.compile("req-[a-z0-9]+(-[a-z0-9]+)*");
     private static final Pattern DECIMAL = Pattern.compile("0|[1-9][0-9]*");
     /** 규격 3.3.1절(RFC 4422 3.1절의 문법): 대문자, 숫자, 하이픈, 밑줄로 이뤄진 1~20자. */
     private static final Pattern MECHANISM = Pattern.compile("[A-Z0-9_-]{1,20}");

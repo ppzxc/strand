@@ -219,4 +219,19 @@ class RequirementIndexTest {
         assertThat(only(index, "req-h2").keyword()).isEqualTo(RequirementIndex.Keyword.SHOULD);
         assertThat(index.keywordSections()).containsKey("2");
     }
+
+    @Test
+    void fencedCodeAndAnchorsBeforeTheFirstHeadingAreHandled() {
+        RequirementIndex index = RequirementIndex.parse(spec(
+                "앞말(MUST)<a id=\"req-pre\"></a>",
+                "## 2. 절",
+                "```",
+                "MUST (MUST)",
+                "```",
+                "끝(MUST)<a id=\"req-end\"></a>"));
+
+        assertThat(kinds(index)).containsExactly("ORPHAN_ANCHOR");
+        assertThat(index.requirement("req-end")).isNotNull();
+        assertThat(index.requirement("req-pre")).isNull();
+    }
 }
