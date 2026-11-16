@@ -67,6 +67,13 @@ strand-nio-9.9.9.jar" ]
   [ ! -e "$repo/release-assets" ]
 }
 
+# 로컬에 PyYAML이 없으면 건너뛰되, CI에서는 조용히 건너뛰지 않고 실패시킨다.
+require_yaml() {
+  python3 -c 'import yaml' 2>/dev/null && return 0
+  [ -z "${CI-}" ] || { echo "CI에는 python3-yaml이 있어야 한다" >&2; return 1; }
+  skip "python3-yaml이 없다"
+}
+
 # release.yml을 파싱해 단계를 이름으로 찾아, 수집 스크립트의 모듈 목록과 대조한다.
 # 모듈 목록의 출처는 수집 스크립트의 modules=(...) 한 곳이다.
 check_workflow() {
@@ -90,13 +97,13 @@ PY
 }
 
 @test "워크플로의 SBOM 태스크·서명 단계·Release 노트가 수집 스크립트의 모듈 목록과 일치한다" {
-  python3 -c 'import yaml' 2>/dev/null || skip "python3-yaml이 없다"
+  require_yaml
   run check_workflow
   [ "$status" -eq 0 ]
 }
 
 @test "수집 스크립트에 모듈을 더하고 워크플로를 그대로 두면 위 대조가 실패한다" {
-  python3 -c 'import yaml' 2>/dev/null || skip "python3-yaml이 없다"
+  require_yaml
   repo="$BATS_TEST_TMPDIR/drift"
   mkdir -p "$repo"
   sed 's/^modules=(strand-core strand-nio)$/modules=(strand-core strand-nio strand-xyz)/' "$collect" > "$repo/collect.sh"
