@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.SortedSet;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
@@ -66,11 +67,25 @@ final class RawVectors {
         return ids;
     }
 
+    /** 벡터 키에서 그 벡터가 적은 요구사항 식별자로. */
+    static Map<String, List<String>> requirementsByKey() {
+        Map<String, List<String>> result = new TreeMap<>();
+        for (Map.Entry<String, JsonObject> vector : byKey().entrySet()) {
+            result.put(vector.getKey(), requirementsOf(vector.getValue()));
+        }
+        return result;
+    }
+
     /** 어떤 벡터든 하나라도 가리키는 요구사항 식별자. */
     static SortedSet<String> referencedRequirements() {
+        return referencedIn(requirementsByKey());
+    }
+
+    /** {@code byVector}의 어느 벡터든 가리키는 식별자. 합성한 대응을 검사하는 시험도 쓴다. */
+    static SortedSet<String> referencedIn(Map<String, List<String>> byVector) {
         SortedSet<String> result = new TreeSet<>();
-        for (JsonObject vector : byKey().values()) {
-            result.addAll(requirementsOf(vector));
+        for (List<String> ids : byVector.values()) {
+            result.addAll(ids);
         }
         return result;
     }

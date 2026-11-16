@@ -5,12 +5,14 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -53,12 +55,6 @@ final class RequirementIndex {
         }
     }
 
-    enum Side {
-        SEND,
-        RECV,
-        NONE
-    }
-
     enum ProblemKind {
         /** 키워드 괄호 바로 뒤에 앵커가 없다. */
         ANCHORLESS_KEYWORD,
@@ -79,13 +75,11 @@ final class RequirementIndex {
         private final String id;
         private final String section;
         private final Keyword keyword;
-        private final Side side;
 
-        Requirement(String id, String section, Keyword keyword, Side side) {
+        Requirement(String id, String section, Keyword keyword) {
             this.id = id;
             this.section = section;
             this.keyword = keyword;
-            this.side = side;
         }
 
         String id() {
@@ -99,11 +93,6 @@ final class RequirementIndex {
 
         Keyword keyword() {
             return keyword;
-        }
-
-        /** 식별자가 `-send`/`-recv`로 끝나면 그 쪽, 아니면 {@link Side#NONE}. */
-        Side side() {
-            return side;
         }
     }
 
@@ -154,34 +143,32 @@ final class RequirementIndex {
     /** 용어 규칙을 설명하는 줄이라 규범 문장이 아니다. */
     private static final String KEYWORD_DEFINITION = "- MUST, MUST NOT";
 
-    private final Map<String, Integer> keywordSections = new TreeMap<>();
     private final Map<String, Requirement> requirements = new LinkedHashMap<>();
     private final List<Problem> problems = new ArrayList<>();
-    private List<Requirement> requirementList = Collections.emptyList();
 
     private RequirementIndex() {}
 
     static RequirementIndex parse(String markdown) {
         RequirementIndex index = new RequirementIndex();
         index.scan(markdown.split("\r?\n", -1));
-        index.requirementList = Collections.unmodifiableList(new ArrayList<>(index.requirements.values()));
         return index;
     }
 
-    /** 저장소의 실제 규격 문서를 읽어 만든 색인. */
+    static final String SPEC_FILE_PROPERTY = "strand.conformance.spec.file";
+
+    /** 규격 파일별로 한 번만 읽은 색인. 파일 하나는 프로세스 안에서 바뀌지 않으므로 읽는 순서에 결과가 달라지지 않는다. */
+    private static final Map<Path, RequirementIndex> BY_FILE = new HashMap<>();
+
+    /** 빌드가 {@value #SPEC_FILE_PROPERTY} 시스템 프로퍼티로 넘긴 규격 문서를 읽어 만든 색인. 벡터 디렉터리와 무관하다. */
     static synchronized RequirementIndex ofSpecification() {
-        if (specification == null) {
-            specification = readSpecification();
+        String file = System.getProperty(SPEC_FILE_PROPERTY);
+        if (file == null) {
+            throw new IllegalStateException("시스템 프로퍼티 " + SPEC_FILE_PROPERTY + "가 없다");
         }
-        return specification;
+        return BY_FILE.computeIfAbsent(Paths.get(file), RequirementIndex::readSpecification);
     }
 
-    private static RequirementIndex specification;
-
-    private static RequirementIndex readSpecification() {
-        Path spec = VectorSuite.defaultDirectory()
-                .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
-                .normalize();
+    private static RequirementIndex readSpecification(Path spec) {
         try {
             return parse(new String(Files.readAllBytes(spec), StandardCharsets.UTF_8));
         } catch (IOException e) {
@@ -189,19 +176,27 @@ final class RequirementIndex {
         }
     }
 
-    /** 규범 키워드가 있는 절 번호와 그 줄 수(앵커 유무와 무관하다). */
-    Map<String, Integer> keywordSections() {
-        return keywordSections;
-    }
-
     /** 앵커 순서대로의 요구사항 목록. */
-    List<Requirement> requirements() {
-        return requirementList;
+    Collection<Requirement> requirements() {
+        return Collections.unmodifiableCollection(requirements.values());
     }
 
     /** 식별자로 찾은 요구사항. 없으면 null. */
     Requirement requirement(String id) {
         return requirements.get(id);
+    }
+
+    /** 식별자들이 놓인 절 번호(식별자 순서). 규격에 없는 식별자가 있으면 {@code owner}를 들어 실패한다. */
+    List<String> sectionsOf(String owner, List<String> ids) {
+        List<String> sections = new ArrayList<>();
+        for (String id : ids) {
+            Requirement found = requirements.get(id);
+            if (found == null) {
+                throw new IllegalStateException(owner + "의 요구사항 식별자가 규격에 없다: " + id);
+            }
+            sections.add(found.section());
+        }
+        return sections;
     }
 
     List<Problem> problems() {
@@ -423,20 +418,16 @@ final class RequirementIndex {
             problem(ProblemKind.DUPLICATE_ANCHOR, index, "앵커가 두 번 나온다: " + id);
             return;
         }
-        Side side = id.endsWith("-send") ? Side.SEND : id.endsWith("-recv") ? Side.RECV : Side.NONE;
-        requirements.put(id, new Requirement(id, section, keyword, side));
+        requirements.put(id, new Requirement(id, section, keyword));
     }
 
     private void problem(ProblemKind kind, int index, String detail) {
         problems.add(new Problem(kind, index + 1, detail));
     }
 
-    /** 한 줄의 키워드 괄호·앵커·괄호 밖 키워드를 찾는다. 절 통계도 여기서 센다. */
+    /** 한 줄의 키워드 괄호·앵커·괄호 밖 키워드를 찾는다. */
     private Scan scanLine(String line) {
         Scan scan = new Scan();
-        if (section != null && KEYWORD.matcher(line).find()) {
-            keywordSections.merge(section, 1, Integer::sum);
-        }
         StringBuilder rest = new StringBuilder(line);
         boolean[] claimed = new boolean[line.length()];
         Matcher parenthesis = PARENTHESIS.matcher(line);

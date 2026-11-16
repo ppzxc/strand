@@ -19,4 +19,9 @@ tasks.test {
   inputs.file(rootProject.layout.projectDirectory.file("gradle.properties"))
   // 러너는 작업 디렉터리가 아니라 이 프로퍼티로 벡터 디렉터리를 찾는다. (다른 디렉터리의 벡터를 돌릴 때도 같은 프로퍼티를 쓴다.)
   systemProperty("strand.conformance.vectors.dir", layout.projectDirectory.dir("vectors").asFile.absolutePath)
+  // 규격 문서 위치도 벡터 디렉터리와 따로 넘긴다. 벡터 디렉터리를 다른 곳으로 바꿔도 규격 색인은 이 문서를 읽는다.
+  systemProperty(
+    "strand.conformance.spec.file",
+    rootProject.layout.projectDirectory.file("docs/specification/STRAND_SPECIFICATION.md").asFile.absolutePath,
+  )
 }

@@ -2,7 +2,6 @@ package io.github.ppzxc.strand.conformance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -10,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -19,19 +17,10 @@ import org.junit.jupiter.api.Test;
  */
 class SpecCoverageTest {
 
-    /** 벡터가 하나라도 가리키는 요구사항 식별자. */
-    private static Set<String> referenced(Map<String, List<String>> byVector) {
-        Set<String> result = new TreeSet<>();
-        for (List<String> ids : byVector.values()) {
-            result.addAll(ids);
-        }
-        return result;
-    }
-
     /** 벡터도 제외 목록도 가리키지 않는 MUST·MUST NOT 요구사항. */
     private static List<String> uncoveredMandatory(
             RequirementIndex index, Map<String, List<String>> byVector, UncoveredRequirements exclusions) {
-        Set<String> referenced = referenced(byVector);
+        Set<String> referenced = RawVectors.referencedIn(byVector);
         List<String> result = new ArrayList<>();
         for (RequirementIndex.Requirement requirement : index.requirements()) {
             if (requirement.keyword().mandatory()
@@ -47,7 +36,7 @@ class SpecCoverageTest {
     private static List<String> exclusionProblems(
             RequirementIndex index, Map<String, List<String>> byVector, UncoveredRequirements exclusions) {
         List<String> problems = new ArrayList<>(exclusions.problems());
-        Set<String> referenced = referenced(byVector);
+        Set<String> referenced = RawVectors.referencedIn(byVector);
         for (String id : exclusions.ids()) {
             RequirementIndex.Requirement requirement = index.requirement(id);
             if (requirement == null) {
@@ -64,14 +53,14 @@ class SpecCoverageTest {
 
     @Test
     void everyMandatoryRequirementIsCoveredByAVectorOrExcluded() throws IOException {
-        assertThat(uncoveredMandatory(index(), vectorRequirements(), UncoveredRequirements.load()))
+        assertThat(uncoveredMandatory(index(), RawVectors.requirementsByKey(), UncoveredRequirements.load()))
                 .as("벡터가 가리키지 않는 MUST·MUST NOT 요구사항. 벡터를 추가하거나 uncovered-requirements.txt에 범주와 사유를 붙여 올린다")
                 .isEmpty();
     }
 
     @Test
     void exclusionsAreWellFormedMandatoryRequirementsNoVectorCovers() throws IOException {
-        assertThat(exclusionProblems(index(), vectorRequirements(), UncoveredRequirements.load()))
+        assertThat(exclusionProblems(index(), RawVectors.requirementsByKey(), UncoveredRequirements.load()))
                 .isEmpty();
     }
 
@@ -150,10 +139,8 @@ class SpecCoverageTest {
     }
 
     @Test
-    void sendAndRecvSidesAreSeparateRequirements() throws IOException {
+    void sendAndRecvAnchorsAreSeparateRequirements() throws IOException {
         RequirementIndex index = index();
-        assertThat(index.requirement("req-frame-reserved-zero-send").side()).isEqualTo(RequirementIndex.Side.SEND);
-        assertThat(index.requirement("req-frame-reserved-ignore-recv").side()).isEqualTo(RequirementIndex.Side.RECV);
         assertThat(index.requirement("req-frame-reserved-zero-send").section()).isEqualTo("2.2.7");
         assertThat(index.requirement("req-frame-reserved-ignore-recv").section())
                 .isEqualTo("2.2.7");
@@ -189,19 +176,8 @@ class SpecCoverageTest {
         return RequirementIndex.ofSpecification();
     }
 
-    /** 벡터 키에서 그 벡터가 적은 요구사항 식별자로. 적지 않은 벡터는 빈 목록이다. */
-    private static Map<String, List<String>> vectorRequirements() {
-        Map<String, List<String>> result = new TreeMap<>();
-        for (Map.Entry<String, JsonObject> vector : RawVectors.byKey().entrySet()) {
-            result.put(vector.getKey(), RawVectors.requirementsOf(vector.getValue()));
-        }
-        return result;
-    }
-
     private static List<String> deletedRequirementIds() throws IOException {
-        List<String> result = new ArrayList<>();
-        result.addAll(UncoveredRequirements.dataLines("/deleted-requirement-ids.txt"));
-        return result;
+        return UncoveredRequirements.dataLines("/deleted-requirement-ids.txt");
     }
 
     /** 규격 색인에 없는 식별자를 가리키는 벡터. 어긋난 곳을 이름으로 짚는다. */
@@ -256,8 +232,8 @@ class SpecCoverageTest {
 
     @Test
     void vectorsPointOnlyToExistingMandatoryRequirements() throws IOException {
-        assertThat(unknownReferences(index(), vectorRequirements())).isEmpty();
-        assertThat(shouldReferences(index(), vectorRequirements())).isEmpty();
+        assertThat(unknownReferences(index(), RawVectors.requirementsByKey())).isEmpty();
+        assertThat(shouldReferences(index(), RawVectors.requirementsByKey())).isEmpty();
     }
 
     @Test
@@ -265,7 +241,7 @@ class SpecCoverageTest {
         assertThat(deletedRequirementIds())
                 .allMatch(id -> Check.REQUIREMENT_ID.matcher(id).matches());
         assertThat(revivedDeletedIds(
-                        index(), vectorRequirements(), UncoveredRequirements.load(), deletedRequirementIds()))
+                        index(), RawVectors.requirementsByKey(), UncoveredRequirements.load(), deletedRequirementIds()))
                 .isEmpty();
     }
 

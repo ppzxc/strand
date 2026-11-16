@@ -35,11 +35,7 @@ final class UncoveredRequirements {
 
     static UncoveredRequirements parse(List<String> lines) {
         UncoveredRequirements result = new UncoveredRequirements();
-        for (String raw : lines) {
-            String line = raw.trim();
-            if (line.isEmpty() || line.startsWith("#")) {
-                continue;
-            }
+        for (String line : significant(lines)) {
             String[] parts = line.split("\\s+", 3);
             if (parts.length < 3) {
                 result.problems.add("`req-… 범주 사유` 형식이 아니다: " + line);
@@ -66,16 +62,16 @@ final class UncoveredRequirements {
         return parse(resourceLines("/uncovered-requirements.txt"));
     }
 
-    /** 테스트 리소스에서 빈 줄과 {@code #} 주석 줄을 뺀 줄 목록(앞뒤 공백 제거). */
+    /** 테스트 리소스에서 빈 줄과 {@code #} 주석 줄을 뺀 줄 목록(앞뒤 공백 제거). 데이터 파일을 읽는 곳은 모두 이 규칙을 쓴다. */
     static List<String> dataLines(String name) throws IOException {
-        List<String> result = new ArrayList<>();
-        for (String line : resourceLines(name)) {
-            String trimmed = line.trim();
-            if (!trimmed.isEmpty() && !trimmed.startsWith("#")) {
-                result.add(trimmed);
-            }
-        }
-        return result;
+        return significant(resourceLines(name));
+    }
+
+    private static List<String> significant(List<String> lines) {
+        return lines.stream()
+                .map(String::trim)
+                .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                .collect(Collectors.toList());
     }
 
     /** 테스트 리소스의 줄 목록. 리소스가 없으면 이름을 들어 실패한다. */

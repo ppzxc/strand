@@ -398,10 +398,9 @@ class VectorRunnerTest {
                 "0000",
                 CLOSE_PAYLOAD_NO_ERROR + reasonHex);
         VectorRunner runner = new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()));
-        return runner.describeMessages(
-                Arrays.asList(binaryMessage(Bytes.fromHex(hex))),
-                false,
-                FrameKind.reasonListed(JsonParser.parseString(expectedSend).getAsJsonArray()));
+        return FrameKind.comparable(
+                runner.describeMessages(Arrays.asList(binaryMessage(Bytes.fromHex(hex))), false),
+                JsonParser.parseString(expectedSend).getAsJsonArray());
     }
 
     private static String expectedClose(String reasonField) {
@@ -449,10 +448,9 @@ class VectorRunnerTest {
         String expected = "[" + PING_EXPECTED + ","
                 + "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"abc\"}]";
 
-        List<String> actual = runner.describeMessages(
-                messages,
-                false,
-                FrameKind.reasonListed(JsonParser.parseString(expected).getAsJsonArray()));
+        List<String> actual = FrameKind.comparable(
+                runner.describeMessages(messages, false),
+                JsonParser.parseString(expected).getAsJsonArray());
 
         assertThat(actual.get(0)).doesNotContain("reason");
         assertThat(actual.get(1)).endsWith("reason=616263");

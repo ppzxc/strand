@@ -195,15 +195,14 @@ final class Check {
         if (array.isEmpty()) {
             throw failAt(path, "비어 있으면 안 된다");
         }
+        Set<String> seen = new HashSet<>();
         for (int i = 0; i < array.size(); i++) {
             String id = string(item(path, i), array.get(i));
             if (!REQUIREMENT_ID.matcher(id).matches()) {
                 throw failAt(item(path, i), "요구사항 식별자가 아니다(req-로 시작하는 소문자 kebab-case): '" + id + "'");
             }
-            for (int j = 0; j < i; j++) {
-                if (array.get(j).getAsString().equals(id)) {
-                    throw failAt(item(path, i), "요구사항 식별자가 두 번 나온다: '" + id + "'");
-                }
+            if (!seen.add(id)) {
+                throw failAt(item(path, i), "요구사항 식별자가 두 번 나온다: '" + id + "'");
             }
         }
     }

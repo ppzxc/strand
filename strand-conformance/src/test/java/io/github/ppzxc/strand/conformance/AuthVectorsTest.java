@@ -90,11 +90,7 @@ class AuthVectorsTest {
     void everyAuthVectorPointsToTheAuthSectionsOrTheFramesItChecks() {
         RequirementIndex index = RequirementIndex.ofSpecification();
         for (String key : REQUIRED) {
-            List<String> sections = new ArrayList<>();
-            for (String id : RawVectors.requirementsOf(vector(key))) {
-                assertThat(index.requirement(id)).as(key + "의 " + id).isNotNull();
-                sections.add(index.requirement(id).section());
-            }
+            List<String> sections = index.sectionsOf(key, RawVectors.requirementsOf(vector(key)));
             if (FRAME_CHECK_SECTIONS.containsKey(key)) {
                 assertThat(sections).as(key).contains(FRAME_CHECK_SECTIONS.get(key));
             } else {

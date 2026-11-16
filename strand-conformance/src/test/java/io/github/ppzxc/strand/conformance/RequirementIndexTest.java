@@ -35,7 +35,6 @@ class RequirementIndexTest {
         RequirementIndex.Requirement r = only(index, "req-a-b");
         assertThat(r.section()).isEqualTo("2.1");
         assertThat(r.keyword()).isEqualTo(RequirementIndex.Keyword.MUST);
-        assertThat(r.side()).isEqualTo(RequirementIndex.Side.NONE);
         assertThat(index.problems()).isEmpty();
     }
 
@@ -61,8 +60,6 @@ class RequirementIndexTest {
         RequirementIndex index = RequirementIndex.parse(
                 spec("## 3. 절", "0으로 보내고 받으면 무시한다(MUST)<a id=\"req-z-send\"></a><a id=\"req-z-recv\"></a>."));
 
-        assertThat(only(index, "req-z-send").side()).isEqualTo(RequirementIndex.Side.SEND);
-        assertThat(only(index, "req-z-recv").side()).isEqualTo(RequirementIndex.Side.RECV);
         assertThat(index.problems()).isEmpty();
     }
 
@@ -171,7 +168,6 @@ class RequirementIndexTest {
                 spec("## 1. 절", "- MUST, MUST NOT, SHOULD, SHOULD NOT, MAY는 대문자로 쓴 경우에만 요구 수준을 뜻한다."));
 
         assertThat(index.problems()).isEmpty();
-        assertThat(index.keywordSections()).isEmpty();
     }
 
     @Test
@@ -217,7 +213,6 @@ class RequirementIndexTest {
 
         assertThat(only(index, "req-h").keyword()).isEqualTo(RequirementIndex.Keyword.MUST);
         assertThat(only(index, "req-h2").keyword()).isEqualTo(RequirementIndex.Keyword.SHOULD);
-        assertThat(index.keywordSections()).containsKey("2");
     }
 
     @Test
@@ -241,7 +236,6 @@ class RequirementIndexTest {
                 spec("## 2. 절", "## 부록 A. 매핑", "끝(MUST)<a id=\"req-appendix\"></a>", "다시 말(MUST)"));
 
         assertThat(index.requirement("req-appendix")).isNull();
-        assertThat(index.keywordSections()).isEmpty();
     }
 
     @Test

@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntPredicate;
+import java.util.regex.Pattern;
 
 /**
  * 프레임 종류 하나의 정의. 종류마다 기대 JSON의 형태, 기대 JSON의 렌더링, 기대 JSON의 바이트 인코딩, 실제 바이트의 디코딩을 한 곳에
@@ -32,10 +33,6 @@ final class FrameKind {
             put(name, value);
             return this;
         }
-
-        Fields withIf(boolean condition, String name, String value) {
-            return condition ? with(name, value) : this;
-        }
     }
 
     /** 디코딩한 프레임 하나. */
@@ -44,15 +41,11 @@ final class FrameKind {
         final int flags;
         final int status;
         final int reserved;
-        /** 기대 항목이 reason을 적었는가. 아니면 reason을 그리지 않아 비교하지 않는다. */
-        final boolean withReason;
-
         final long streamId;
         final int extensions;
         final byte[] payload;
 
-        Wire(byte[] frame, boolean withReason) {
-            this.withReason = withReason;
+        Wire(byte[] frame) {
             this.type = Bytes.readUnsignedShort(frame, Protocol.TYPE_AT);
             this.flags = frame[Protocol.FLAGS_AT] & 0xFF;
             this.status = frame[Protocol.STATUS_AT] & 0xFF;
@@ -213,8 +206,7 @@ final class FrameKind {
                     : wire.head()
                             .with("error_code", Protocol.nameOfError((int) Bytes.readUnsignedInt(wire.payload, 0)))
                             .with("last_stream_id", Long.toUnsignedString(Bytes.readLong(wire.payload, 4)))
-                            .withIf(
-                                    wire.withReason,
+                            .with(
                                     "reason",
                                     Bytes.toHex(Arrays.copyOfRange(
                                             wire.payload, Protocol.CLOSE_PAYLOAD_SIZE, wire.payload.length))));
@@ -422,18 +414,10 @@ final class FrameKind {
 
     /**
      * 엔드포인트가 보낸 바이트를 프레임으로 풀어 벡터의 {@code send}와 같은 표기로 바꾼다. 잘린 프레임은 실패시킨다. {@code client}는
-     * 이 쪽 역할로, 애플리케이션 프레임의 status 비교 여부를 정한다. CLOSE의 reason을 그리지 않는다. reason 비교가 필요 없는 호출이 쓴다.
+     * 이 쪽 역할로, 애플리케이션 프레임의 status 비교 여부를 정한다. CLOSE는 reason도 그린다. 벡터가 reason을 적지 않은 항목의 reason은
+     * {@link #comparable}이 비교에서 뺀다.
      */
     static List<String> describe(byte[] output, boolean startsWithPreface, boolean client) {
-        return describe(output, startsWithPreface, client, index -> false, 0);
-    }
-
-    /**
-     * 같은 일을 하되, {@code reasonListed}가 참인 항목 번호의 CLOSE는 reason도 그린다. 항목 번호는 {@code firstIndex}에 이 호출이
-     * 지금까지 낸 항목 수를 더한 값으로, 한 단계 {@code send}의 순서와 같다.
-     */
-    static List<String> describe(
-            byte[] output, boolean startsWithPreface, boolean client, IntPredicate reasonListed, int firstIndex) {
         List<String> result = new ArrayList<>();
         byte[] rest = output;
         byte[] preface = PREFACE_BYTES;
@@ -444,7 +428,7 @@ final class FrameKind {
             rest = Arrays.copyOfRange(rest, preface.length, rest.length);
         }
         for (byte[] frame : split(rest)) {
-            Wire wire = new Wire(frame, reasonListed.test(firstIndex + result.size()));
+            Wire wire = new Wire(frame);
             result.add(describeFrame(wire, client));
         }
         return result;
@@ -488,14 +472,21 @@ final class FrameKind {
         return format(String.format("type=0x%04x", wire.type), unknown);
     }
 
+    private static final Pattern REASON_FIELD = Pattern.compile(" reason=[0-9a-f]*");
+
     /**
-     * 벡터가 {@code reason}을 적은 CLOSE 항목의 번호. 적은 항목만 바이트까지 비교하고, 적지 않은 항목의 reason은 비교하지 않는다. 규격은
-     * AUTH 거부와 폐기에서만 reason을 비우라 하고 다른 CLOSE에는 설명을 허용한다(벡터 형식 6.1절).
+     * 실제 표기 중 벡터가 {@code reason}을 적지 않은 CLOSE 항목에서 reason을 뺀다. 적은 항목만 바이트까지 비교한다. 규격은 AUTH 거부와
+     * 폐기에서만 reason을 비우라 하고 다른 CLOSE에는 설명을 허용한다(벡터 형식 6.1절).
      */
-    static IntPredicate reasonListed(JsonArray expectedSend) {
-        return index -> index < expectedSend.size()
-                && "CLOSE".equals(VectorSchema.frameType(expectedSend.get(index).getAsJsonObject()))
-                && expectedSend.get(index).getAsJsonObject().has("reason");
+    static List<String> comparable(List<String> actual, JsonArray expectedSend) {
+        List<String> result = new ArrayList<>(actual);
+        for (int i = 0; i < result.size() && i < expectedSend.size(); i++) {
+            JsonObject expected = expectedSend.get(i).getAsJsonObject();
+            if ("CLOSE".equals(VectorSchema.frameType(expected)) && !expected.has("reason")) {
+                result.set(i, REASON_FIELD.matcher(result.get(i)).replaceFirst(""));
+            }
+        }
+        return result;
     }
 
     private static List<byte[]> split(byte[] output) {

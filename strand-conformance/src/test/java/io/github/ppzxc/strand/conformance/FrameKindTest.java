@@ -61,14 +61,12 @@ class FrameKindTest {
             }
             for (String sample : kind.getValue()) {
                 JsonObject frame = json(sample);
-                JsonArray listed = new JsonArray();
-                listed.add(frame);
-                assertThat(FrameKind.describe(
-                                FrameKind.encode(frame),
-                                kind.getKey().equals("PREFACE"),
-                                true,
-                                FrameKind.reasonListed(listed),
-                                0))
+                JsonArray expectedSend = new JsonArray();
+                expectedSend.add(frame);
+                assertThat(FrameKind.comparable(
+                                FrameKind.describe(
+                                        FrameKind.encode(frame), kind.getKey().equals("PREFACE"), true),
+                                expectedSend))
                         .as(sample)
                         .containsExactly(FrameKind.expected(frame));
             }

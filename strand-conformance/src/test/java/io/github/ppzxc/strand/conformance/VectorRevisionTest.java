@@ -5,9 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -92,13 +90,7 @@ class VectorRevisionTest {
     }
 
     private static List<String> deletedIds() throws IOException {
-        try (Reader reader = new InputStreamReader(
-                VectorRevisionTest.class.getResourceAsStream("/deleted-vector-ids.txt"), StandardCharsets.UTF_8)) {
-            return new BufferedReader(reader)
-                    .lines()
-                    .filter(line -> !line.isEmpty() && !line.startsWith("#"))
-                    .collect(Collectors.toList());
-        }
+        return UncoveredRequirements.dataLines("/deleted-vector-ids.txt");
     }
 
     @Test

@@ -68,13 +68,14 @@ class CloseOnlyCodesTest {
         }
         assertThat(hexes).containsExactly("00000005", "00000006", "00000007");
         assertThat(internal).isEqualTo(3);
-        RequirementIndex index = RequirementIndex.ofSpecification();
-        List<String> sections = new ArrayList<>();
-        for (String id : RawVectors.requirementsOf(v)) {
-            assertThat(index.requirement(id)).as("규격에 없는 식별자: " + id).isNotNull();
-            sections.add(index.requirement(id).section());
-        }
-        assertThat(sections).contains("4.4");
+        // 옛 spec 단언은 2.5.2와 4.4를 함께 요구했다. 2.5.2절은 CLOSE 전용 코드를 표의 설명 칸에만 적고 앵커 요구사항이 없어(앵커는
+        // 8 이상 예약 값 하나뿐이다) 이 벡터가 가리킬 2.5.2 요구사항이 없다. 금지·수신 규칙은 4.4절에 있어 그것만 확인한다.
+        assertThat(sectionsOf("streams/reset-received-with-close-only-error-codes-gives-internal", v))
+                .contains("4.4");
+    }
+
+    private static List<String> sectionsOf(String key, JsonObject vector) {
+        return RequirementIndex.ofSpecification().sectionsOf(key, RawVectors.requirementsOf(vector));
     }
 
     @Test
@@ -83,5 +84,8 @@ class CloseOnlyCodesTest {
         String hex =
                 v.getAsJsonArray("steps").get(1).getAsJsonObject().get("hex").getAsString();
         assertThat(hex).endsWith("00000008");
+        // 예약 값 규칙의 앵커는 2.5.2절에 있다.
+        assertThat(sectionsOf("streams/reset-received-with-reserved-error-code-gives-internal", v))
+                .contains("2.5.2");
     }
 }
