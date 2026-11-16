@@ -61,6 +61,8 @@ public final class WebSocketPassage implements Passage {
     private volatile @Nullable CompletableFuture<?> sending;
     private final Object signal = new Object();
     private volatile boolean signalled;
+    // 앞선 보내기 때문에 write가 0을 돌려줬다. 그 보내기가 끝나면 전송 스레드를 깨운다.
+    private volatile boolean blocked;
 
     /** 열린 소켓은 {@link #listener()}의 {@code onOpen}으로 들어온다. 직접 열려면 {@link #connect}를 쓴다. */
     WebSocketPassage() {
@@ -209,7 +211,10 @@ public final class WebSocketPassage implements Passage {
         return inbound;
     }
 
-    /** 앞선 보내기가 끝나 다음 메시지를 받을 수 있는가. */
+    /**
+     * 앞선 보내기가 끝나 다음 메시지를 받을 수 있는가. JDK는 보내기를 돌려주는 future를 끝내기 전에 "진행 중인 보내기" 표시를 내리므로(내부 {@code
+     * enqueueExclusively}가 {@code whenComplete}로 감싼 future를 돌려준다), future가 끝났으면 다음 보내기를 받는다.
+     */
     private boolean writable() {
         CompletableFuture<?> last = sending;
         return last == null || last.isDone();
@@ -278,7 +283,11 @@ public final class WebSocketPassage implements Passage {
                 queue.add(unwrapped(failure));
             }
             signal();
-            wakeup();
+            // 막혀서 0을 돌려준 적이 있거나 실패했을 때만 전송 스레드를 읽기 대기에서 깨운다. 잘 끝난 보내기마다 깨우면 빈 스텝이 는다.
+            if (failure != null || blocked) {
+                blocked = false;
+                wakeup();
+            }
         });
     }
 
@@ -292,6 +301,7 @@ public final class WebSocketPassage implements Passage {
         boolean busy = last != null && !last.isDone();
         if (message.kind() == OutboundMessage.Kind.BINARY) {
             if (busy) {
+                blocked = true;
                 return 0;
             }
             CompletableFuture<?> send = open.sendBinary(ByteBuffer.wrap(message.bytes()), true);
