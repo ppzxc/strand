@@ -1085,7 +1085,8 @@ public final class Endpoint {
             }
             long value = Frames.readUnsignedInt(bytes, at + 2);
             if (identifier == HelloParams.MAX_FRAME_SIZE_ID
-                    && (value < EndpointConfig.MIN_MAX_FRAME_SIZE || value > HelloParams.MAX_FRAME_SIZE_UPPER_LIMIT)) {
+                    && (value < EndpointConfig.MAX_FRAME_SIZE_LOWER_LIMIT
+                            || value > HelloParams.MAX_FRAME_SIZE_UPPER_LIMIT)) {
                 return null;
             }
             if (identifier == HelloParams.MAX_FRAME_SIZE_ID) {

@@ -179,14 +179,14 @@ public final class ConnectionDriver implements AutoCloseable {
          * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임에 프레임 하나를 더한 값이 기본값 {@value #DEFAULT_MAX_WRITE_QUEUE_BYTES}을
          * 넘는 설정에서는, 그 범위를 꽉 채워 주고받는 두 끝이 읽기 멈춤에 걸리지 않도록 이 값을 그 값 이상으로 올린다. 정하지 않으면 기본값이다.
          *
-         * @param bytes 절대 한도. 규격이 허용하는 가장 작은 {@code max_frame_size}({@value EndpointConfig#MIN_MAX_FRAME_SIZE}) 이상이어야 한다. 상한은 이 값이 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다
+         * @param bytes 절대 한도. 규격이 허용하는 가장 작은 {@code max_frame_size}({@value EndpointConfig#MAX_FRAME_SIZE_LOWER_LIMIT}) 이상이어야 한다. 프레임 하나는 대기열에 담겨야 하므로 이 하한을 그대로 쓴다. 상한은 이 값이 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다
          * @return 이 빌더
-         * @throws IllegalArgumentException {@code bytes}가 {@link EndpointConfig#MIN_MAX_FRAME_SIZE}보다 작을 때
+         * @throws IllegalArgumentException {@code bytes}가 {@link EndpointConfig#MAX_FRAME_SIZE_LOWER_LIMIT}보다 작을 때
          */
         public Builder maxWriteQueueBytes(long bytes) {
-            if (bytes < EndpointConfig.MIN_MAX_FRAME_SIZE) {
+            if (bytes < EndpointConfig.MAX_FRAME_SIZE_LOWER_LIMIT) {
                 throw new IllegalArgumentException(
-                        "maxWriteQueueBytes는 " + EndpointConfig.MIN_MAX_FRAME_SIZE + " 이상이어야 한다: " + bytes);
+                        "maxWriteQueueBytes는 " + EndpointConfig.MAX_FRAME_SIZE_LOWER_LIMIT + " 이상이어야 한다: " + bytes);
             }
             this.maxWriteQueueBytes = bytes;
             return this;
