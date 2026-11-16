@@ -103,7 +103,7 @@ B-18 streams/reset-received-with-other-error-codes-gives-internal
 B-18 streams/reset-received-with-reserved-error-code-gives-internal
 B-19 streams/reserved-response-status-17-is-unknown
 B-19 streams/reserved-response-status-255-is-unknown
-B-19 close-races/reserved-close-error-code-six-closes-immediately
+B-19 close-races/reserved-close-error-code-eight-closes-immediately
 B-19 close-races/reserved-close-error-code-max-closes-immediately
 B-20 backpressure/zero-max-concurrent-streams-refuses-every-request
 B-21 backpressure/boundary-refuse-and-return

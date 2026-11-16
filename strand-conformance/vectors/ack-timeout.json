@@ -8,6 +8,9 @@
         "3.3",
         "3.4"
       ],
+      "requirements": [
+        "req-setup-ack-timeout-close"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -57,6 +60,9 @@
       "spec": [
         "3.3",
         "3.4"
+      ],
+      "requirements": [
+        "req-setup-ack-timeout-close"
       ],
       "setup": {
         "role": "client",
@@ -108,6 +114,9 @@
         "3.3",
         "3.4"
       ],
+      "requirements": [
+        "req-setup-ack-timeout-close"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -153,6 +162,11 @@
       "spec": [
         "3.3",
         "3.5"
+      ],
+      "requirements": [
+        "req-close-closing-liveness-continue",
+        "req-close-after-close-no-close",
+        "req-close-end-pending-unavailable"
       ],
       "setup": {
         "role": "client",
@@ -220,6 +234,10 @@
       "spec": [
         "3.3",
         "3.5"
+      ],
+      "requirements": [
+        "req-setup-ack-timeout-close",
+        "req-close-end-pending-unavailable"
       ],
       "setup": {
         "role": "client",
