@@ -8,6 +8,10 @@
         "2.2.1",
         "5.1"
       ],
+      "requirements": [
+        "req-frame-length-range-error",
+        "req-check-connection-error-close"
+      ],
       "setup": {
         "role": "server",
         "established": false,

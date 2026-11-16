@@ -8,6 +8,10 @@
         "1.2",
         "3.4"
       ],
+      "requirements": [
+        "req-ping-ack-reply",
+        "req-ws-one-frame-per-message"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -39,6 +43,9 @@
         "3.1",
         "5.1"
       ],
+      "requirements": [
+        "req-check-preface-close"
+      ],
       "setup": {
         "role": "server",
         "established": false,
@@ -65,6 +72,9 @@
         "1.2",
         "3.1",
         "5.1"
+      ],
+      "requirements": [
+        "req-check-preface-close"
       ],
       "setup": {
         "role": "server",
@@ -93,6 +103,9 @@
         "3.1",
         "5.1"
       ],
+      "requirements": [
+        "req-check-preface-close"
+      ],
       "setup": {
         "role": "server",
         "established": false,
@@ -119,6 +132,9 @@
         "1.2",
         "3.2.4",
         "5.1"
+      ],
+      "requirements": [
+        "req-check-first-frame-close"
       ],
       "setup": {
         "role": "server",
@@ -158,6 +174,9 @@
         "3.2.4",
         "5.1"
       ],
+      "requirements": [
+        "req-check-first-frame-close"
+      ],
       "setup": {
         "role": "server",
         "established": false,
@@ -195,6 +214,10 @@
         "1.2",
         "3.2.4",
         "5.1"
+      ],
+      "requirements": [
+        "req-ws-message-boundary-violation",
+        "req-check-connection-error-close"
       ],
       "setup": {
         "role": "server",
@@ -239,6 +262,10 @@
         "1.2",
         "5.1"
       ],
+      "requirements": [
+        "req-ws-message-boundary-violation",
+        "req-check-connection-error-close"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -270,6 +297,10 @@
       "spec": [
         "1.2",
         "5.1"
+      ],
+      "requirements": [
+        "req-ws-message-boundary-violation",
+        "req-check-connection-error-close"
       ],
       "setup": {
         "role": "server",
@@ -303,6 +334,10 @@
         "1.2",
         "3.5",
         "5.1"
+      ],
+      "requirements": [
+        "req-ws-message-boundary-violation",
+        "req-check-connection-error-silent-close"
       ],
       "setup": {
         "role": "server",
@@ -355,6 +390,10 @@
         "1.2",
         "5.1"
       ],
+      "requirements": [
+        "req-ws-message-boundary-violation",
+        "req-check-connection-error-close"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -386,6 +425,10 @@
       "spec": [
         "1.2",
         "5.1"
+      ],
+      "requirements": [
+        "req-ws-message-boundary-violation",
+        "req-check-connection-error-close"
       ],
       "setup": {
         "role": "server",
@@ -419,6 +462,9 @@
         "1.2",
         "3.2.4",
         "5.1"
+      ],
+      "requirements": [
+        "req-check-first-frame-close"
       ],
       "setup": {
         "role": "client",
@@ -454,6 +500,10 @@
         "3.5",
         "5.1"
       ],
+      "requirements": [
+        "req-ws-message-boundary-violation",
+        "req-check-connection-error-silent-close"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -479,6 +529,10 @@
       "spec": [
         "1.2",
         "3.5"
+      ],
+      "requirements": [
+        "req-ws-close-after-close-send",
+        "req-ws-close-no-error-1000"
       ],
       "setup": {
         "role": "server",
@@ -514,6 +568,11 @@
       "spec": [
         "1.2",
         "3.5"
+      ],
+      "requirements": [
+        "req-ws-close-after-close-send",
+        "req-ws-close-no-error-1000",
+        "req-close-no-error-drain-then-close"
       ],
       "setup": {
         "role": "server",
@@ -576,6 +635,9 @@
         "1.2",
         "3.5"
       ],
+      "requirements": [
+        "req-ws-close-no-error-1000"
+      ],
       "setup": {
         "role": "server",
         "established": true,
@@ -606,6 +668,10 @@
       "spec": [
         "1.2",
         "3.5"
+      ],
+      "requirements": [
+        "req-ws-close-no-error-1000",
+        "req-close-no-error-drain-then-close"
       ],
       "setup": {
         "role": "server",
