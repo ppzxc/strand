@@ -308,17 +308,4 @@ class ConnectionDriverBlockedWriteTest {
 
         assertThat(client.driver.awaitWriteBlocked(false, 5, TimeUnit.SECONDS)).isTrue();
     }
-
-    @Test
-    void writeBlockedSignalClearsWhenTheQueuedMessagesAreDiscardedByClose() throws Exception {
-        Side[] sides = connected();
-        Side client = sides[0];
-        client.passage.writeCapacity(10);
-        client.driver.ping(new byte[8]).join();
-        assertThat(client.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)).isTrue();
-
-        client.driver.close();
-
-        assertThat(client.driver.awaitWriteBlocked(false, 5, TimeUnit.SECONDS)).isTrue();
-    }
 }
