@@ -107,7 +107,7 @@ class ConnectionNotificationTest {
         }
 
         @Override
-        public Inbound await(long timeoutMs) throws IOException {
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
             try {
                 if (timeoutMs < 0) {
                     return inbox.take();
@@ -121,7 +121,9 @@ class ConnectionNotificationTest {
         }
 
         @Override
-        public void write(OutboundMessage message) {}
+        public int write(OutboundMessage message, int offset) {
+            return message.length() - offset;
+        }
 
         @Override
         public void wakeup() {
@@ -303,12 +305,14 @@ class ConnectionNotificationTest {
         Recorder recorder = new Recorder();
         Passage failing = new Passage() {
             @Override
-            public Inbound await(long timeoutMs) throws IOException {
+            public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
                 throw failure;
             }
 
             @Override
-            public void write(OutboundMessage message) {}
+            public int write(OutboundMessage message, int offset) {
+                return message.length() - offset;
+            }
 
             @Override
             public void wakeup() {}
@@ -334,7 +338,7 @@ class ConnectionNotificationTest {
             private final LinkedBlockingQueue<Boolean> wake = new LinkedBlockingQueue<>();
 
             @Override
-            public Inbound await(long timeoutMs) throws IOException {
+            public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
                 try {
                     wake.take();
                 } catch (InterruptedException e) {
@@ -344,7 +348,7 @@ class ConnectionNotificationTest {
             }
 
             @Override
-            public void write(OutboundMessage message) throws IOException {
+            public int write(OutboundMessage message, int offset) throws IOException {
                 throw failure;
             }
 
@@ -456,22 +460,22 @@ class ConnectionNotificationTest {
         }
 
         @Override
-        public Inbound await(long timeoutMs) throws IOException {
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
             if (shutdownDone) {
                 readResumedAfterShutdown.countDown();
                 if (failReadsAfterShutdown) {
                     throw new IOException("CLOSED 뒤 읽기 실패");
                 }
             }
-            return delegate.await(timeoutMs);
+            return delegate.await(timeoutMs, waitForRead, waitForWrite);
         }
 
         @Override
-        public void write(OutboundMessage message) throws IOException {
+        public int write(OutboundMessage message, int offset) throws IOException {
             if (failWrites) {
                 throw new IOException("쓰기 실패");
             }
-            delegate.write(message);
+            return delegate.write(message, offset);
         }
 
         @Override

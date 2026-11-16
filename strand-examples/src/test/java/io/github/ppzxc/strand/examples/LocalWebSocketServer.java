@@ -263,7 +263,11 @@ final class LocalWebSocketServer implements AutoCloseable {
         }
 
         @Override
-        public Inbound await(long timeoutMs) throws IOException {
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
+            // 시험용 서버라 쓰기는 늘 가능하다(보낼 때 블로킹한다). 읽기를 멈추는 호출은 쓰지 않는다.
+            if (!waitForRead && waitForWrite) {
+                return Inbound.none();
+            }
             if (ended) {
                 return Inbound.end();
             }
@@ -284,13 +288,14 @@ final class LocalWebSocketServer implements AutoCloseable {
         }
 
         @Override
-        public void write(OutboundMessage message) throws IOException {
+        public int write(OutboundMessage message, int offset) throws IOException {
             if (message.kind() == OutboundMessage.Kind.BINARY) {
                 session.send(2, true, message.bytes());
-            } else {
-                int code = message.webSocketCloseCode();
-                session.send(8, true, new byte[] {(byte) (code >> 8), (byte) code});
+                return message.length();
             }
+            int code = message.webSocketCloseCode();
+            session.send(8, true, new byte[] {(byte) (code >> 8), (byte) code});
+            return 0;
         }
 
         @Override

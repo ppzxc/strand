@@ -131,7 +131,7 @@ class WebSocketPassageTest {
         listener.onOpen(socket);
         OutboundMessage message = firstMessage();
 
-        passage.write(message);
+        passage.write(message, 0);
 
         assertThat(socket.sentBinary).hasSize(1);
         assertThat(socket.sentBinary.get(0)).isEqualTo(message.bytes());
@@ -143,12 +143,12 @@ class WebSocketPassageTest {
         listener.onOpen(socket);
         socket.failSends = true;
 
-        assertThatThrownBy(() -> passage.write(firstMessage())).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> passage.write(firstMessage(), 0)).isInstanceOf(IOException.class);
     }
 
     @Test
     void writingBeforeTheSocketOpenedIsAnIoException() {
-        assertThatThrownBy(() -> passage.write(firstMessage())).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> passage.write(firstMessage(), 0)).isInstanceOf(IOException.class);
     }
 
     @Test

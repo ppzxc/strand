@@ -8,6 +8,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 통로를 감싸 두 가지를 해 준다. 쓴 프레임의 type을 쓴 순서대로 적고, 전송 스레드가 같은 한 바퀴에 여러 명령을 처리하거나 두 연결이 서로의 쓰기를 보기 전에
@@ -21,6 +22,7 @@ final class ControlledPassage implements Passage {
     private final Object lock = new Object();
     private final List<Integer> writtenFrameTypes = new ArrayList<>();
     private final List<OutboundMessage> deferred = new ArrayList<>();
+    private @Nullable OutboundMessage lastRecorded;
     private boolean deferWrites;
     private boolean holdWakeups;
     private boolean waiting;
@@ -31,9 +33,9 @@ final class ControlledPassage implements Passage {
     }
 
     @Override
-    public Inbound await(long timeoutMs) throws IOException {
+    public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
         if (timeoutMs == 0) {
-            return delegate.await(0);
+            return delegate.await(0, waitForRead, waitForWrite);
         }
         synchronized (lock) {
             waitEntries++;
@@ -41,7 +43,7 @@ final class ControlledPassage implements Passage {
             lock.notifyAll();
         }
         try {
-            return delegate.await(timeoutMs);
+            return delegate.await(timeoutMs, waitForRead, waitForWrite);
         } finally {
             synchronized (lock) {
                 waiting = false;
@@ -50,17 +52,24 @@ final class ControlledPassage implements Passage {
     }
 
     @Override
-    public void write(OutboundMessage message) throws IOException {
+    public int write(OutboundMessage message, int offset) throws IOException {
         synchronized (lock) {
-            if (message.kind() == OutboundMessage.Kind.BINARY && message.length() >= FRAME_HEADER_BYTES) {
+            // 막혀서 같은 메시지로 다시 부르는 호출은 한 번만 적는다.
+            if (message != lastRecorded
+                    && message.kind() == OutboundMessage.Kind.BINARY
+                    && message.length() >= FRAME_HEADER_BYTES) {
                 byte[] bytes = message.bytes();
                 writtenFrameTypes.add(((bytes[4] & 0xff) << 8) | (bytes[5] & 0xff));
+                lastRecorded = message;
             }
             if (deferWrites) {
-                deferred.add(message);
-            } else {
-                delegate.write(message);
+                // 미뤄 둔 메시지는 통로가 다 받은 것으로 돌려준다. 나중에 releaseWrites가 내보낸다.
+                if (!deferred.contains(message)) {
+                    deferred.add(message);
+                }
+                return message.length() - offset;
             }
+            return delegate.write(message, offset);
         }
     }
 
@@ -123,6 +132,18 @@ final class ControlledPassage implements Passage {
         delegate.wakeup();
     }
 
+    /** 통로가 받아 주지 못하면 실패한다. 이 시험이 쓰는 통로는 쓰기 용량에 한도가 없다. */
+    private void writeFully(OutboundMessage message) throws IOException {
+        int offset = 0;
+        do {
+            int accepted = delegate.write(message, offset);
+            if (accepted == 0 && message.length() > 0) {
+                throw new IllegalStateException("통로가 미뤄 둔 쓰기를 받지 않았다");
+            }
+            offset += accepted;
+        } while (offset < message.length());
+    }
+
     /** 이 뒤의 쓰기를 통로에 내보내지 않고 모아 둔다. {@link #releaseWrites}가 모은 것을 쓴 순서대로 내보낸다. */
     void deferWrites() {
         synchronized (lock) {
@@ -136,7 +157,7 @@ final class ControlledPassage implements Passage {
             deferWrites = false;
             try {
                 for (OutboundMessage message : deferred) {
-                    delegate.write(message);
+                    writeFully(message);
                 }
             } catch (IOException e) {
                 throw new UncheckedIOException(e);

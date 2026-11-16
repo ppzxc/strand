@@ -7,6 +7,7 @@ import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.EOFException;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.OptionalLong;
@@ -24,9 +25,19 @@ import org.jspecify.annotations.Nullable;
  * #request}, {@link RequestHandle#cancel() cancel}, {@link #respond}, {@link #ping}, {@link #closeConnection}, {@link #abortClosing},
  * {@link #close})은 명령으로 큐에 넣고 전송 스레드를 깨운다. {@code Endpoint}를 잠금으로 감싸지 않는다.
  *
- * <p>전송 스레드가 한 번 도는 순서는 읽기, {@code receive}/{@code receiveMessage}, 시계 진행({@code advance}), 명령 처리, 이벤트 배출, 메시지
- * 꺼내기, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을 잡는다. 읽기는 core의
- * {@code nextDeadline}까지만 기다리고 기한이 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
+ * <p>전송 스레드가 한 번 도는 순서는 읽기와 기다림, {@code receive}/{@code receiveMessage}, 시계 진행({@code advance}), 명령 처리, 이벤트
+ * 배출, core 쓰기 대기열에서 메시지 꺼내기, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을
+ * 잡는다. 기다림은 core의 {@code nextDeadline}, 읽을 것, (쓰기 대기열이 남았으면) 통로의 쓰기 가능, 깨움 가운데 먼저 오는 것까지이고, 기한이
+ * 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
+ *
+ * <p><b>쓰기 대기열.</b> 드라이버는 쓰기 대기열을 든다. core 쓰기 대기열에서는 매 스텝 메시지를 모두 꺼내 이 대기열에 붙이고, 통로가 받아 주는 만큼만
+ * 쓴다(비블로킹·부분 쓰기). 쓰기가 막혀도(상대가 읽지 않아 소켓 버퍼가 찬 경우) 전송 스레드는 쓰기에서 기다리지 않고 읽기, 시계, 명령 처리를 계속
+ * 돈다. 그래서 읽지 않는 상대는 core의 기존 규칙(확인 대기, 요청 기한, 유휴 PING)으로 끊기고, 막힘이 풀린 뒤 흐른 시간이 한꺼번에 {@code advance}되지
+ * 않는다. {@link #writtenBytes()}와 {@link #writtenFrames()}는 메시지를 끝까지 다 썼을 때 는다.
+ *
+ * <p><b>꺼낸 요청의 결과 확정성.</b> core는 쓰기 대기열에서 꺼낸 시점을 "전송 계층에 넘김"으로 본다. 확인 대기는 그때 시작되고, 꺼냈지만 아직 다 쓰지
+ * 못한 요청은 연결이 끊기면 처리 안 됨이 아니라 결과 모름이 된다(안전한 쪽을 받아들인 대가다). 확인 대기 시간에는 드라이버 쓰기 대기열이 비는 시간이
+ * 포함된다.
  *
  * <p><b>{@code Authenticator}는 전송 스레드에서 불리며 블로킹하면 안 된다.</b> core가 {@code receive} 안에서 동기로 부르므로 {@code
  * EndpointConfig.authenticator}에 넣은 구현은 전송 스레드에서 돈다. 블로킹하는 인증(원격 조회 등)을 넣으면 그 연결 전체가 멈추므로, 블로킹하지
@@ -38,9 +49,11 @@ import org.jspecify.annotations.Nullable;
  * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 시간 제한 없이 읽는다. 이때 core의 {@code nextDeadline}이
  * 비어 있으므로, 상대가 끊지 않으면 전송 스레드는 끝나지 않고 남는다. 그런 연결은 {@link #close}를 불러 정리한다.
  *
- * <p><b>알려진 한계.</b> 통로 쓰기가 막히면(상대가 읽지 않아 소켓 버퍼가 찬 경우) 전송 스레드가 그 쓰기에서 돌아오지 못한다. 그동안 시계가 가지 않아 확인
- * 대기, 요청 기한, 유휴 PING이 동작하지 않고, 풀린 뒤에 흐른 시간이 한꺼번에 {@code advance}된다. 이 상태에서 빠져나가는 유일한 길은 {@link
- * #close()}(즉시 끊기)다. 통로 구현이 쌓는 읽기 입력의 한계는 {@link TcpPassage}를 본다.
+ * <p>연결이 끝나 전송 스레드가 마치는 때(즉시 끊기, 상대가 끊음, CLOSE 없는 끊김) 쓰기 대기열에 남아 다 쓰지 못한 메시지는 버린다. 즉시 끊기는 통로를
+ * 먼저 닫으므로 더 쓰지 않고, 그 밖의 경우는 마치기 전에 통로가 받아 주는 만큼 한 번 쓴다.
+ *
+ * <p><b>알려진 한계.</b> 쓰기 대기열의 크기에는 아직 상한이 없다. 상대가 읽지 않으면서 PING 같은 응답이 필요한 프레임을 계속 보내면 대기열이 늘 수
+ * 있다. 이 경우를 막는 읽기 멈춤은 아직 없다.
  */
 public final class ConnectionDriver implements AutoCloseable {
 
@@ -408,7 +421,7 @@ public final class ConnectionDriver implements AutoCloseable {
     }
 
     /**
-     * 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 통로를 닫으므로 상대가 읽지 않아 쓰기가 막혀 있어도 끝난다. 남은 Future는 core가 내는 결과로 끝난다.
+     * 연결을 즉시 끊고 전송 스레드가 끝나길 기다린다. 통로를 닫으므로 상대가 읽지 않아 쓰기가 막혀 있어도 끝난다. 쓰기 대기열에 남은 메시지는 다 쓰지 않고 버린다. 남은 Future는 core가 내는 결과로 끝난다.
      * 즉시 끊기라서 이미 큐에 넣은 출력은 보장하지 않는다. 아직 처리되지 않은 {@link #request}, {@link #respond}, {@link #ping}은 전송 스레드가 통로
      * 닫힘을 보기 전에 처리되지 못할 수 있고, 그 요청은 core가 내는 결과나 예외로 끝난다. 출력을 다 내보내고 끝내려면 {@link #closeConnection()}을 쓴다.
      * 여러 번 불러도 된다.
@@ -420,7 +433,7 @@ public final class ConnectionDriver implements AutoCloseable {
         if (Thread.currentThread() == thread) {
             return;
         }
-        // 상대가 읽지 않아 쓰기에서 막혀 있으면 깨움만으로는 전송 스레드가 돌아오지 않는다. 통로를 닫아 막힌 입출력을 끝낸다.
+        // 깨움으로는 끝나지 않는 대기(선택기, 통로 안쪽의 보내기 대기 등)를 통로를 닫아 끝낸다.
         passage.close();
         try {
             thread.join();
@@ -505,6 +518,9 @@ public final class ConnectionDriver implements AutoCloseable {
         // 읽기나 쓰기가 실패했거나 상대가 끊었다. 더 읽을 것이 없다.
         private boolean transportGone;
         private boolean outputShutdown;
+        // core 쓰기 대기열에서 꺼냈지만 아직 다 쓰지 못한 메시지. 맨 앞 메시지는 writeOffset바이트까지 통로가 받았다.
+        private final ArrayDeque<OutboundMessage> writeQueue = new ArrayDeque<>();
+        private int writeOffset;
         // 연결을 끊게 한 첫 입출력 예외. 종료 알림에 싣는다.
         private @Nullable IOException ioFailure;
         // 엔드포인트의 가상 시계는 0에서 시작한다. startedAt은 그 0에 해당하는 주입 시계 값이고, advancedTo까지 advance했다.
@@ -539,7 +555,7 @@ public final class ConnectionDriver implements AutoCloseable {
          * 읽히므로 그 사이 시계가 기한을 넘으면 오판할 수 있다. 상대가 계속 보내도 시계와 명령 처리가 굶지 않게 하려는 설계상 절충이다.
          */
         private void receiveAvailable() throws IOException {
-            Inbound inbound = passage.await(waitLimit());
+            Inbound inbound = passage.await(waitLimit(), true, !writeQueue.isEmpty());
             int received = 0;
             while (inbound.kind() != Inbound.Kind.NONE) {
                 receive(inbound);
@@ -660,7 +676,7 @@ public final class ConnectionDriver implements AutoCloseable {
                     write();
                     finished = true;
                 }
-            } else if (closed && !finished && !outputShutdown) {
+            } else if (closed && !finished && !outputShutdown && writeQueue.isEmpty()) {
                 outputShutdown = true;
                 passage.shutdownOutput();
             }
@@ -680,22 +696,49 @@ public final class ConnectionDriver implements AutoCloseable {
             }
         }
 
-        private boolean write() {
+        /** core 쓰기 대기열에서 메시지를 모두 꺼내 드라이버의 쓰기 대기열 뒤에 붙인다. 꺼낸 시점이 core가 보는 "전송 계층에 넘김"이다. */
+        private void takeOutput() {
+            writeQueue.addAll(endpoint.drainMessages());
+        }
+
+        /**
+         * 쓰기 대기열을 통로가 받아 주는 만큼만 비운다. 기다리지 않는다. 메시지를 끝까지 다 쓴 것만 쓴 양에 더한다.
+         *
+         * @return 입출력 오류 없이 돌아왔으면 true(다 못 쓰고 남았어도 true)
+         */
+        private boolean flush() {
             try {
-                for (OutboundMessage message : endpoint.drainMessages()) {
-                    passage.write(message);
-                    if (message.kind() == OutboundMessage.Kind.BINARY) {
-                        writtenBytes.addAndGet(message.length());
-                        if (message.length() >= FRAME_HEADER_BYTES) {
+                OutboundMessage head = writeQueue.peek();
+                while (head != null) {
+                    int length = head.length();
+                    // 내용이 없는 메시지(WebSocket 닫기)는 호출 한 번으로 끝난다.
+                    int accepted = passage.write(head, writeOffset);
+                    writeOffset += accepted;
+                    if (writeOffset < length) {
+                        return true;
+                    }
+                    writeQueue.poll();
+                    writeOffset = 0;
+                    if (head.kind() == OutboundMessage.Kind.BINARY) {
+                        writtenBytes.addAndGet(length);
+                        if (length >= FRAME_HEADER_BYTES) {
                             writtenFrames.incrementAndGet();
                         }
                     }
+                    head = writeQueue.peek();
                 }
                 return true;
             } catch (IOException e) {
                 recordTransportFailure(e);
+                writeQueue.clear();
+                writeOffset = 0;
                 return false;
             }
+        }
+
+        private boolean write() {
+            takeOutput();
+            return flush();
         }
 
         private void dispatchEvents() {

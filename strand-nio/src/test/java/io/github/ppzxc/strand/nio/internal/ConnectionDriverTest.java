@@ -405,16 +405,16 @@ class ConnectionDriverTest {
         }
 
         @Override
-        public Inbound await(long timeoutMs) throws IOException {
-            return delegate.await(timeoutMs);
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
+            return delegate.await(timeoutMs, waitForRead, waitForWrite);
         }
 
         @Override
-        public void write(OutboundMessage message) throws IOException {
+        public int write(OutboundMessage message, int offset) throws IOException {
             if (failWrites.get()) {
                 throw new IOException("쓸 수 없음");
             }
-            delegate.write(message);
+            return delegate.write(message, offset);
         }
 
         @Override
@@ -455,12 +455,12 @@ class ConnectionDriverTest {
         }
 
         @Override
-        public Inbound await(long timeoutMs) throws IOException {
-            return delegate.await(timeoutMs);
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
+            return delegate.await(timeoutMs, waitForRead, waitForWrite);
         }
 
         @Override
-        public void write(OutboundMessage message) throws IOException {
+        public int write(OutboundMessage message, int offset) throws IOException {
             writing.countDown();
             try {
                 release.await();

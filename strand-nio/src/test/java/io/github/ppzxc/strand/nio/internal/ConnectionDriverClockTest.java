@@ -371,7 +371,7 @@ class ConnectionDriverClockTest {
         }
 
         @Override
-        public Inbound await(long timeoutMs) throws IOException {
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
             while (true) {
                 if (remaining.get() > 0) {
                     if (remaining.decrementAndGet() == 0) {
@@ -379,7 +379,7 @@ class ConnectionDriverClockTest {
                     }
                     return Inbound.message(WebSocketMessageKind.BINARY, frame);
                 }
-                Inbound inbound = inner.await(timeoutMs);
+                Inbound inbound = inner.await(timeoutMs, waitForRead, waitForWrite);
                 // 기다리는 동안 켜졌으면 깨어난 그 읽기에서 바로 쏟아낸다.
                 if (inbound.kind() != Inbound.Kind.NONE || remaining.get() == 0) {
                     return inbound;
@@ -388,8 +388,8 @@ class ConnectionDriverClockTest {
         }
 
         @Override
-        public void write(OutboundMessage message) throws IOException {
-            inner.write(message);
+        public int write(OutboundMessage message, int offset) throws IOException {
+            return inner.write(message, offset);
         }
 
         @Override
