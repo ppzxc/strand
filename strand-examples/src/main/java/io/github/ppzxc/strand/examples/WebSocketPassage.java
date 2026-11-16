@@ -19,6 +19,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JDK 11 {@code java.net.http.WebSocket} 위의 메시지 통로. WebSocket은 메시지 하나가 프레임 하나이므로 {@link Inbound#message}로 넘기고, 연결
@@ -27,6 +28,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>JDK는 콜백으로 메시지를 밀어 넣으므로 {@link #listener()}가 큐에 쌓고 {@link #await}가 꺼낸다. 메시지 조각은 하나로 모아 넘긴다. 다음 메시지는
  * 앞서 넘긴 메시지를 {@code await}가 꺼낸 뒤에야 요청하므로 읽지 않는 쪽으로 메시지가 무한히 쌓이지 않는다. 조각이 이어지는 동안에는 다음 조각을 바로
  * 요청한다.
+ *
+ * <p>쓰기는 비블로킹이다. JDK는 보내기가 끝나기 전에 다음 보내기를 받지 않으므로, 앞선 보내기가 끝나지 않았으면 {@link #write}는 0을 돌려주고
+ * 보내기가 끝나면 쓰기를 기다리던 {@link #await}가 깨어난다. 메시지는 JDK가 한 번에 받으므로 받아 주면 메시지 하나를 통째로 받은 것이다.
  *
  * <p>{@link #await}와 {@link #write}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
@@ -53,6 +57,10 @@ public final class WebSocketPassage implements Passage {
     private volatile boolean closed;
     private boolean ended;
     private long encodedChars;
+    // 아직 끝나지 않은 마지막 보내기. 전송 스레드만 바꾸고, 완료 콜백은 완료 여부만 본다.
+    private volatile @Nullable CompletableFuture<?> sending;
+    private final Object signal = new Object();
+    private boolean signalled;
 
     /** 열린 소켓은 {@link #listener()}의 {@code onOpen}으로 들어온다. 직접 열려면 {@link #connect}를 쓴다. */
     WebSocketPassage() {
@@ -141,9 +149,15 @@ public final class WebSocketPassage implements Passage {
     }
 
     @Override
-    public Inbound await(long timeoutMs) throws IOException {
+    public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
         if (closed) {
             throw new IOException("닫힌 통로");
+        }
+        if (!waitForRead) {
+            return awaitSignal(timeoutMs, waitForWrite);
+        }
+        if (waitForWrite && timeoutMs != 0 && writable()) {
+            return Inbound.none();
         }
         if (ended) {
             return Inbound.end();
@@ -189,28 +203,111 @@ public final class WebSocketPassage implements Passage {
         return inbound;
     }
 
+    /** 앞선 보내기가 끝나 다음 메시지를 받을 수 있는가. */
+    private boolean writable() {
+        CompletableFuture<?> last = sending;
+        return last == null || last.isDone();
+    }
+
+    /** 읽지 않고 깨움, 쓰기 가능, 시간 제한만으로 기다린다. 읽을 것은 큐에 그대로 남는다. */
+    private Inbound awaitSignal(long timeoutMs, boolean waitForWrite) throws IOException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(timeoutMs, 0));
+        synchronized (signal) {
+            try {
+                while (!signalled && !closed && !(waitForWrite && writable())) {
+                    if (timeoutMs == 0) {
+                        break;
+                    }
+                    if (timeoutMs < 0) {
+                        signal.wait();
+                    } else {
+                        long remainingNanos = deadline - System.nanoTime();
+                        if (remainingNanos <= 0) {
+                            break;
+                        }
+                        TimeUnit.NANOSECONDS.timedWait(signal, remainingNanos);
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("기다리는 중 인터럽트", e);
+            }
+            if (closed) {
+                throw new IOException("닫힌 통로");
+            }
+            signalled = false;
+        }
+        return Inbound.none();
+    }
+
+    private void signal() {
+        synchronized (signal) {
+            signalled = true;
+            signal.notifyAll();
+        }
+    }
+
+    /** 보내기가 끝나면 쓰기를 기다리는 쪽을 깨우고, 실패는 다음 {@link #await}가 던지게 한다. */
+    private void watch(CompletableFuture<?> send) {
+        sending = send;
+        if (send.isDone()) {
+            return;
+        }
+        send.whenComplete((sent, failure) -> {
+            if (failure != null) {
+                queue.add(failure);
+            }
+            signal();
+            wakeup();
+        });
+    }
+
     @Override
-    public void write(OutboundMessage message) throws IOException {
+    public int write(OutboundMessage message, int offset) throws IOException {
         WebSocket open = socket;
         if (open == null) {
             throw new IOException("아직 열리지 않은 통로");
         }
-        try {
-            if (message.kind() == OutboundMessage.Kind.BINARY) {
-                open.sendBinary(ByteBuffer.wrap(message.bytes()), true).get();
-            } else if (!open.isOutputClosed()) {
-                open.sendClose(message.webSocketCloseCode(), "").get();
+        CompletableFuture<?> last = sending;
+        boolean busy = last != null && !last.isDone();
+        if (message.kind() == OutboundMessage.Kind.BINARY) {
+            if (busy) {
+                return 0;
             }
-        } catch (ExecutionException e) {
-            throw new IOException("WebSocket 쓰기 실패", e.getCause());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("쓰는 중 인터럽트", e);
+            CompletableFuture<?> send = open.sendBinary(ByteBuffer.wrap(message.bytes()), true);
+            failIfAlreadyFailed(send);
+            watch(send);
+            return message.length();
+        }
+        if (!open.isOutputClosed()) {
+            // Close는 앞선 보내기가 끝난 뒤에 보낸다. JDK는 보내기가 겹치면 거부한다.
+            int code = message.webSocketCloseCode();
+            CompletableFuture<?> send = busy
+                    ? last.handle((sent, failure) -> null).thenCompose(ignored -> open.sendClose(code, ""))
+                    : open.sendClose(code, "");
+            failIfAlreadyFailed(send);
+            watch(send);
+        }
+        return 0;
+    }
+
+    /** 바로 실패로 끝난 보내기는 이 호출에서 알린다. 나중에 실패하는 것은 {@link #await}가 알린다. */
+    private static void failIfAlreadyFailed(CompletableFuture<?> send) throws IOException {
+        if (send.isCompletedExceptionally()) {
+            try {
+                send.get();
+            } catch (ExecutionException e) {
+                throw new IOException("WebSocket 쓰기 실패", e.getCause());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("쓰는 중 인터럽트", e);
+            }
         }
     }
 
     @Override
     public void wakeup() {
+        signal();
         if (woken.compareAndSet(false, true)) {
             queue.add(Inbound.none());
         }
@@ -243,6 +340,7 @@ public final class WebSocketPassage implements Passage {
             open.abort();
         }
         queue.add(Inbound.none());
+        signal();
     }
 
     /** JDK가 부르는 콜백. 호출은 순서대로 오고 겹치지 않는다. */
