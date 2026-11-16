@@ -350,7 +350,7 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 1. 클라이언트는 연결 서문을 보내고 곧바로 파라미터 HELLO를 이어 보낸다(MUST)<a id="req-setup-client-hello-after-preface"></a>.
 2. 서버는 연결 서문을 3.1절 기준으로 확인한 즉시 자기 파라미터 HELLO를 보낸다(3.2.2절).
 3. 양쪽은 상대 HELLO를 받으면 3.2.4절 첫 프레임 검사를 한다. 실패하면 조용히 닫는다. 통과하면 3.2.3절 검증을 하고, 통과하면 ACK HELLO로 답하며 실패하면 연결 오류다(3.2.3절).
-4. 클라이언트는 서버 HELLO에 ACK HELLO를 보낸 직후 `AUTH`를 한 번 보낸다(MUST)<a id="req-setup-client-auth-after-hello-ack"></a>. 서버 ACK를 기다리지 않는다. 서버는 자격 증명을 확인해 통과시키면 `AUTH(ACK)`로 답한다(MUST, 3.3.1절)<a id="req-auth-pass-ack-reply"></a>.
+4. 클라이언트는 서버 HELLO에 ACK HELLO를 보낸 직후 `AUTH`를 한 번 보낸다(MUST)<a id="req-setup-client-auth-after-hello-ack"></a>. 서버 ACK를 기다리지 않는다. 서버는 자격 증명을 확인해 통과시키면 `AUTH(ACK)`로 답한다(3.3.1절).
 
 **송신 규칙.** HELLO·CLOSE 외 모든 프레임은 상대 HELLO에 ACK를 보낸 뒤에만 보낸다(MUST)<a id="req-setup-send-after-hello-ack"></a>. `AUTH`와 `AUTH(ACK)`를 뺀 프레임(PING, RESET, 애플리케이션 프레임, 서버가 먼저 보내는 요청)은 AUTH 관문을 통과한 뒤에만 보낸다(MUST)<a id="req-setup-send-after-auth-gate"></a>. "수립 완료" 같은 별도 상태는 없다.
 
@@ -410,7 +410,7 @@ AUTH는 클라이언트가 연결 인증(1.3절)에 쓰는 자격 증명을 서�
 * **type**: `0x0005`
 * **stream_id**: `0`
 * **AUTH** (`flags = 0`): 클라이언트가 서버로 보낸다. payload는 `mechanism_length` u8(1\~20) + `mechanism` + `credentials`다.
-* **AUTH(ACK)** (`flags = ACK`): 서버가 AUTH를 통과시키고 클라이언트로 보낸다. payload는 `(identifier u16, value u32)`의 반복이다.
+* **AUTH(ACK)** (`flags = ACK`): 서버가 AUTH를 통과시키면 클라이언트로 보낸다(MUST)<a id="req-auth-pass-ack-reply"></a>. payload는 `(identifier u16, value u32)`의 반복이다.
 
 ```
 AUTH payload
