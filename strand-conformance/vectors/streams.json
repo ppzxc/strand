@@ -49,6 +49,10 @@
         "4.4",
         "4.6"
       ],
+      "requirements": [
+        "req-frame-reserved-zero-send",
+        "req-frame-status-nonresponse-zero-send"
+      ],
       "setup": {
         "role": "client",
         "established": true
