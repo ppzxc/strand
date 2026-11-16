@@ -186,7 +186,11 @@ final class RequirementIndex {
 
     /** 저장소 루트. 규격 문서(docs/specification/ 아래)에서 구한다. */
     static Path repositoryRoot() {
-        return specificationFile().getParent().getParent().getParent();
+        Path docs = specificationFile().getParent().getParent();
+        if (!"docs".equals(docs.getFileName().toString())) {
+            throw new IllegalStateException("규격 문서가 docs/specification/ 아래에 있지 않다: " + specificationFile());
+        }
+        return docs.getParent();
     }
 
     private static RequirementIndex readSpecification(Path spec) {
@@ -207,13 +211,13 @@ final class RequirementIndex {
         return requirements.get(id);
     }
 
-    /** 식별자들이 놓인 절 번호(식별자 순서). 규격에 없는 식별자가 있으면 {@code owner}를 들어 실패한다. */
+    /** 식별자들이 놓인 절 번호(식별자 순서). 규격에 없는 식별자가 있으면 {@code owner}를 들어 검사 실패(AssertionError)로 알린다. */
     List<String> sectionsOf(String owner, List<String> ids) {
         List<String> sections = new ArrayList<>();
         for (String id : ids) {
             Requirement found = requirements.get(id);
             if (found == null) {
-                throw new IllegalStateException(owner + "의 요구사항 식별자가 규격에 없다: " + id);
+                throw new AssertionError(owner + "의 요구사항 식별자가 규격에 없다: " + id);
             }
             sections.add(found.section());
         }

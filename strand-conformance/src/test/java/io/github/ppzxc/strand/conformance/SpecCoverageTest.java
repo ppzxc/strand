@@ -141,8 +141,16 @@ class SpecCoverageTest {
     @Test
     void sendAndRecvAnchorsAreSeparateRequirements() throws IOException {
         RequirementIndex index = index();
-        assertThat(index.requirement("req-frame-reserved-zero-send")).isNotNull();
-        assertThat(index.requirement("req-frame-reserved-ignore-recv")).isNotNull();
+        // 보내는 쪽과 받는 쪽은 식별자 접미사(-send/-recv)로 갈리는 별개의 요구사항이다.
+        List<String> pair = new ArrayList<>();
+        for (RequirementIndex.Requirement requirement : index.requirements()) {
+            if (requirement.id().startsWith("req-frame-reserved-")) {
+                pair.add(requirement.id());
+            }
+        }
+        assertThat(pair).containsExactlyInAnyOrder("req-frame-reserved-zero-send", "req-frame-reserved-ignore-recv");
+        assertThat(pair).filteredOn(id -> id.endsWith("-send")).hasSize(1);
+        assertThat(pair).filteredOn(id -> id.endsWith("-recv")).hasSize(1);
         assertThat(index.requirement("req-frame-reserved-zero-send").section()).isEqualTo("2.2.7");
         assertThat(index.requirement("req-frame-reserved-ignore-recv").section())
                 .isEqualTo("2.2.7");
