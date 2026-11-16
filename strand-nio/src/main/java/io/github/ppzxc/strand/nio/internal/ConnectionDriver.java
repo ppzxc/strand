@@ -15,6 +15,7 @@ import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -280,6 +281,9 @@ public final class ConnectionDriver implements AutoCloseable {
     private final AtomicLong writtenBytes = new AtomicLong();
     private final AtomicLong writtenFrames = new AtomicLong();
     private final AtomicLong discardedBytes = new AtomicLong();
+    private final Object writeBlockedLock = new Object();
+    // 쓰기 대기열이 다 나가지 못하고 쓰기 가능을 기다리는 동안 true. 전송 스레드만 바꾸고 writeBlockedLock으로 지킨다.
+    private boolean writeBlocked;
 
     private ConnectionDriver(
             Role role,
@@ -492,6 +496,26 @@ public final class ConnectionDriver implements AutoCloseable {
      */
     public long receivedBytes() {
         return receivedBytes.get();
+    }
+
+    /**
+     * 쓰기 대기열이 통로가 받아 주는 만큼만 나가고 남아 쓰기 가능을 기다리는 상태가 될 때까지 기다린다. 시험이 시간 간격을 추측하지 않고 쓰기 막힘을
+     * 관측하게 하는 패키지 범위 관측점이다. 그 상태는 대기열이 다 나가거나 입출력 오류가 나면 풀린다.
+     *
+     * @return 제한 시간 안에 그 상태이면 true, 아니면 false
+     */
+    boolean awaitWriteBlocked(long timeout, TimeUnit unit) throws InterruptedException {
+        long deadline = System.nanoTime() + unit.toNanos(timeout);
+        synchronized (writeBlockedLock) {
+            while (!writeBlocked) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) {
+                    return false;
+                }
+                TimeUnit.NANOSECONDS.timedWait(writeBlockedLock, remaining);
+            }
+            return true;
+        }
     }
 
     /**
@@ -870,16 +894,26 @@ public final class ConnectionDriver implements AutoCloseable {
                     writeOffset += accepted;
                     queuedBytes -= accepted;
                     if (writeOffset < length) {
+                        setWriteBlocked(true);
                         return true;
                     }
                     completeHead(head);
                     head = writeQueue.peek();
                 }
+                setWriteBlocked(false);
                 return true;
             } catch (IOException e) {
+                setWriteBlocked(false);
                 recordTransportFailure(e);
                 discardQueued();
                 return false;
+            }
+        }
+
+        private void setWriteBlocked(boolean blocked) {
+            synchronized (writeBlockedLock) {
+                writeBlocked = blocked;
+                writeBlockedLock.notifyAll();
             }
         }
 

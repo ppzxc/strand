@@ -194,24 +194,11 @@ class TcpConnectionTest {
         }
     }
 
-    private static final int STABLE_POLLS = 6;
-    private static final long POLL_MILLIS = 50;
-
-    /** 쓴 바이트 수가 한동안 늘지 않을 때까지 기다린다. 쓰기가 소켓 버퍼에 막혀 더 나가지 않는 상태다. */
-    private static void awaitWritesStopped(ConnectionDriver driver) throws InterruptedException {
-        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        long last = -1;
-        int stable = 0;
-        while (System.nanoTime() < limit) {
-            long now = driver.writtenBytes();
-            stable = now == last && now > 0 ? stable + 1 : 0;
-            if (stable >= STABLE_POLLS) {
-                return;
-            }
-            last = now;
-            Thread.sleep(POLL_MILLIS);
-        }
-        throw new AssertionError("쓰기가 5초 안에 멈추지 않았다");
+    /** 드라이버가 쓰기 불가로 쓰기 가능을 기다리는 상태가 됐다는 신호를 기다린다. 5초 안에 오지 않으면 실패한다. */
+    private static void awaitWritesBlocked(ConnectionDriver driver) throws InterruptedException {
+        assertThat(driver.awaitWriteBlocked(5, TimeUnit.SECONDS))
+                .as("쓰기가 5초 안에 소켓 버퍼에 막히지 않았다")
+                .isTrue();
     }
 
     /**
@@ -262,7 +249,7 @@ class TcpConnectionTest {
 
             // 클라이언트의 쓰기가 소켓 버퍼가 차서 실제로 막힌 뒤에 끊는다.
             StackWatch.awaitFrame(client.transportThread(), StackWatch::inWriteWait);
-            awaitWritesStopped(client);
+            awaitWritesBlocked(client);
             CompletableFuture<Void> closing = CompletableFuture.runAsync(client::close);
             closing.get(5, TimeUnit.SECONDS);
 

@@ -281,4 +281,32 @@ class ConnectionDriverBlockedWriteTest {
         assertThat(client.driver.writtenBytes()).isEqualTo(bytesBefore + 28);
         assertThat(client.driver.writtenFrames()).isEqualTo(framesBefore + 1);
     }
+
+    @Test
+    void writeBlockedSignalArrivesWhenAMessageCannotBeWrittenToTheEnd() throws Exception {
+        Side[] sides = connected();
+        Side client = sides[0];
+        assertThat(client.driver.awaitWriteBlocked(50, TimeUnit.MILLISECONDS)).isFalse();
+        client.passage.writeCapacity(10);
+
+        client.driver.ping(new byte[8]).join();
+
+        // PING 프레임은 28바이트라 10바이트만 받으면 나머지는 쓰기 가능을 기다린다.
+        assertThat(client.driver.awaitWriteBlocked(5, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    void writeBlockedSignalClearsOnceTheQueuedMessagesAreWritten() throws Exception {
+        Side[] sides = connected();
+        Side client = sides[0];
+        Side server = sides[1];
+        client.passage.writeCapacity(10);
+        client.driver.ping(new byte[8]).join();
+        assertThat(client.driver.awaitWriteBlocked(5, TimeUnit.SECONDS)).isTrue();
+
+        client.passage.addWriteCapacity(PLENTY);
+        settle(client, server);
+
+        assertThat(client.driver.awaitWriteBlocked(50, TimeUnit.MILLISECONDS)).isFalse();
+    }
 }
