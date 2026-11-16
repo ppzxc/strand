@@ -309,7 +309,8 @@ public final class WebSocketPassage implements Passage {
             }
             notifyWaiters();
             // write가 막혀 0을 돌려준 뒤에만 전송 스레드를 읽기 대기에서 깨운다. 잘 끝난 보내기마다 깨우면 빈 스텝이 는다.
-            if (blocked) {
+            // 가장 최근 보내기의 완료만 본다. 앞선 보내기의 늦은 콜백이 새로 올린 표시를 지우면 안 된다.
+            if (blocked && sending == send) {
                 blocked = false;
                 wakeup();
             }
