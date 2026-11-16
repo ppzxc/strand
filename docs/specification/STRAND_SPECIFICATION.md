@@ -29,9 +29,9 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
    - 바이트 스트림 기반 사용 환경. 4바이트 `length` 필드를 읽어 프레임 경계를 구분한다.
 
 2. **strand over WebSocket** [^RFC6455]:
-   - 메시지 기반 사용 환경. 단일 WebSocket 바이너리 메시지(`Opcode 0x02`) 1개에 정확히 Strand 프레임 1개를 싣는다. WebSocket 연결의 식별은 1.2.1절이 정한다.
+   - 메시지 기반 사용 환경. 단일 WebSocket 바이너리 메시지(`Opcode 0x02`) 1개에 정확히 Strand 프레임 1개를 싣는다(MUST)<a id="req-ws-one-frame-per-message"></a>. WebSocket 연결의 식별은 1.2.1절이 정한다.
    - 프레임 헤더(20바이트)와 payload 형식, 제어 프레임 및 상태 머신은 strand over TCP와 100% 동일하다.
-   - 연결 서문(Connection Preface)은 첫 번째 바이너리 메시지로 보내며(3.1절), 연결을 닫을 때(3.5절)는 WebSocket 닫기(`Close Frame 0x08`)를 수행한다. CLOSE를 보내는 종료에서는 CLOSE 송신 뒤에 수행하고, `NO_ERROR` 종료에는 `1000 Normal Closure`를 쓴다.
+   - 연결 서문(Connection Preface)은 첫 번째 바이너리 메시지로 보내며(3.1절), 연결을 닫을 때(3.5절)는 WebSocket 닫기(`Close Frame 0x08`)를 수행한다. CLOSE를 보내는 종료에서는 CLOSE 송신 뒤에 수행하고(MUST)<a id="req-ws-close-after-close-send"></a>, `NO_ERROR` 종료에는 `1000 Normal Closure`를 쓴다(MUST)<a id="req-ws-close-no-error-1000"></a>.
    - 메시지 경계 위반: 서문 메시지의 위반은 3.1절을 따른다. 서문 뒤에 텍스트 메시지가 오거나, 크기가 4 + `length`와 다른 바이너리 메시지가 오면 연결 오류다(MUST, 5.1절 3번)<a id="req-ws-message-boundary-violation"></a>.
 
 #### 1.2.1 WebSocket 하위 프로토콜
@@ -282,7 +282,7 @@ C0 DE 53 54 52 30 00 00
  식별값  "STR0"     예약(0)
 ```
 
-서버는 앞 6바이트가 이 값과 다르면 아무 응답 없이 연결을 끊는다(5.1절 1번). strand over WebSocket에서 서문 메시지가 바이너리 메시지가 아니거나 정확히 8바이트가 아닌 경우도 같다. 마지막 2바이트는 예약 영역이라 0으로 보내고, 받는 쪽에서는 보지 않는다.
+서버는 앞 6바이트가 이 값과 다르면 아무 응답 없이 연결을 끊는다(5.1절 1번). strand over WebSocket에서 서문 메시지가 바이너리 메시지가 아니거나 정확히 8바이트가 아닌 경우도 같다. 마지막 2바이트는 예약 영역이라 0으로 보내고(MUST)<a id="req-preface-reserved-zero-send"></a>, 받는 쪽에서는 보지 않는다(MUST)<a id="req-preface-reserved-ignore-recv"></a>.
 
 `"STR0"`의 `0`이 이 프로토콜의 메이저 버전이다. 버전 번호는 여기 한 곳에만 있고, 값이 다르면 서로 통신할 수 없다. 같은 버전 안에서 기능을 늘릴 때는 버전을 올리는 대신 기능 비트(3.2절)를 쓴다.
 
@@ -410,7 +410,7 @@ AUTH는 클라이언트가 연결 인증(1.3절)에 쓰는 자격 증명을 서�
 * **type**: `0x0005`
 * **stream_id**: `0`
 * **AUTH** (`flags = 0`): 클라이언트가 서버로 보낸다. payload는 `mechanism_length` u8(1\~20) + `mechanism` + `credentials`다.
-* **AUTH(ACK)** (`flags = ACK`): 서버가 AUTH를 통과시키고 클라이언트로 보낸다. payload는 `(identifier u16, value u32)`의 반복이다.
+* **AUTH(ACK)** (`flags = ACK`): 서버가 AUTH를 통과시키면 클라이언트로 보낸다(MUST)<a id="req-auth-pass-ack-reply"></a>. payload는 `(identifier u16, value u32)`의 반복이다.
 
 ```
 AUTH payload
