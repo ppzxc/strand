@@ -35,7 +35,7 @@ public final class TestMessages {
             moved = false;
             for (OutboundMessage message : client.drainMessages()) {
                 moved = true;
-                if (message.bytes().length >= LARGE_BODY_BYTES) {
+                if (message.length() >= LARGE_BODY_BYTES) {
                     requests.add(message);
                 }
                 server.receive(message.bytes());
@@ -58,7 +58,7 @@ public final class TestMessages {
     public static int totalBytes(List<OutboundMessage> messages) {
         int total = 0;
         for (OutboundMessage message : messages) {
-            total += message.bytes().length;
+            total += message.length();
         }
         return total;
     }
