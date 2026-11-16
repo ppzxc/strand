@@ -389,6 +389,8 @@ class ConnectionDriverReadPauseTest {
         }
         settle(client, server);
 
+        // 읽기가 실제로 멈췄다: 서버가 보낸 PING을 다 받지 않았다.
+        assertThat(client.driver.receivedBytes()).isLessThan((long) pings * PING_FRAME);
         // 읽을 것이 남아 있어도 읽기를 멈춘 동안은 쓰기 가능, 깨움, 기한으로만 깨어난다.
         long calls = client.passage.awaitCalls();
         try {
