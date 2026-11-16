@@ -695,8 +695,7 @@ public final class ConnectionDriver implements AutoCloseable {
             long limit = -1;
             OptionalLong next = endpoint.nextDeadline();
             if (next.isPresent()) {
-                // 통로의 시간 제한이 int 범위로 잘리는 구현에서 바쁜 대기가 되지 않게, 한 번의 기다림은 int 범위로 자른다. 기한이 더 멀면 깨어난 뒤 다시 계산한다.
-                limit = Math.min(Math.max(0, next.getAsLong() - (clock.getAsLong() - startedAt)), Integer.MAX_VALUE);
+                limit = clampWait(next.getAsLong() - (clock.getAsLong() - startedAt));
             }
             long untilFinish = untilFinish();
             if (untilFinish >= 0) {
@@ -710,7 +709,15 @@ public final class ConnectionDriver implements AutoCloseable {
             if (!closed || finished) {
                 return -1;
             }
-            return Math.min(Math.max(0, closedFinishDeadline - clock.getAsLong()), Integer.MAX_VALUE);
+            return clampWait(closedFinishDeadline - clock.getAsLong());
+        }
+
+        /**
+         * 남은 시간을 0 이상 int 범위로 자른다. 통로의 시간 제한이 int 범위로 잘리는 구현에서 바쁜 대기가 되지 않게 한 번의 기다림을 int 범위로 자른다.
+         * 기한이 더 멀면 깨어난 뒤 다시 계산한다.
+         */
+        private long clampWait(long remainingMs) {
+            return Math.min(Math.max(0, remainingMs), Integer.MAX_VALUE);
         }
 
         /** 주입 시계로 흐른 시간만큼 엔드포인트의 시계를 보낸다. */
@@ -882,6 +889,8 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /** 쓰기 대기열에 남은 메시지를 버리고 남은 바이트를 센다. */
         void discardQueued() {
+            // 끊긴 엔드포인트가 마지막으로 낸 메시지(명령 소진 중 난 것)도 보내지 못한 것이다.
+            takeOutput();
             discardedBytes.addAndGet(queuedBytes);
             writeQueue.clear();
             writeOffset = 0;
