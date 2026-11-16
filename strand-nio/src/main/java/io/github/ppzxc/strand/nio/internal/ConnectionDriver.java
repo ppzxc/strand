@@ -625,12 +625,14 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /** 쓰기 대기열이 상한을 넘어 읽기를 멈춰야 하는가. 상한 아래로 내려가면 다시 읽는다. */
         private boolean readPaused() {
-            return queuedBytes
-                    > writeQueueLimit(
-                            endpoint.peerMaxFrameSize(),
-                            endpoint.peerMaxConcurrentStreams(),
-                            endpoint.ownMaxConcurrentStreams(),
-                            maxWriteQueueBytes);
+            // 대기열이 비었으면 멈추지 않는다. 멈춘 채 쓰기 가능을 기다리다 아무것도 깨우지 못하는 일이 없도록 하는 안전장치다.
+            return !writeQueue.isEmpty()
+                    && queuedBytes
+                            > writeQueueLimit(
+                                    endpoint.peerMaxFrameSize(),
+                                    endpoint.peerMaxConcurrentStreams(),
+                                    endpoint.ownMaxConcurrentStreams(),
+                                    maxWriteQueueBytes);
         }
 
         /** 기다림의 상한. core가 알려 준 다음 기한까지만이고, 기한이 없으면 상한이 없다. */
