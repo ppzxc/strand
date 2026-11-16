@@ -28,6 +28,9 @@ class ConnectionDriverClosedFinishTest {
     private static final long UNRESPONSIVE_ERROR_CODE = 6;
     private static final long ACK_TIMEOUT_MS = 1000;
     private static final long DEFAULT_LIMIT_MS = 5000;
+    /** 빌더에 상한을 주지 않는다(기본값). */
+    private static final long DEFAULT = 0;
+
     private static final long PLENTY = 1_000_000;
 
     /** 상대의 끊김(END)을 전하지 않는 통로. 연결 종료(CLOSE)를 마쳐도 상대가 끊지 않는 상황을 만든다. */
@@ -99,7 +102,7 @@ class ConnectionDriverClosedFinishTest {
         };
         ConnectionDriver.Builder builder =
                 isClient ? ConnectionDriver.client(config(), passage) : ConnectionDriver.server(config(), passage);
-        if (limitMs > 0) {
+        if (limitMs != DEFAULT) {
             builder.closedFinishLimitMs(limitMs);
         }
         ConnectionDriver driver =
@@ -146,7 +149,7 @@ class ConnectionDriverClosedFinishTest {
 
     @Test
     void afterClosedTheTransportThreadEndsAtTheDefaultLimitEvenIfThePeerNeverHangsUp() {
-        connected(true, 0);
+        connected(true, DEFAULT);
         client.closeConnection();
         settle();
         assertThat(closed).hasSize(1);
@@ -163,7 +166,7 @@ class ConnectionDriverClosedFinishTest {
 
     @Test
     void theLimitCountsFromTheMomentClosedWasProducedAndNotFromWhenTheDriverStarted() {
-        connected(true, 0);
+        connected(true, DEFAULT);
         tick(DEFAULT_LIMIT_MS * 2);
         client.closeConnection();
         settle();
@@ -188,7 +191,7 @@ class ConnectionDriverClosedFinishTest {
 
     @Test
     void ifTheWriteStaysBlockedAfterAnErrorCloseTheSameLimitEndsTheTransportThread() {
-        connected(false, 0);
+        connected(false, DEFAULT);
         clientPassage.writeCapacity(0);
         client.ping(new byte[8]).join();
         settle();
@@ -211,7 +214,7 @@ class ConnectionDriverClosedFinishTest {
 
     @Test
     void ifThePeersCloseIsRepliedToWhileTheWriteIsBlockedTheSameLimitEndsTheTransportThread() {
-        connected(true, 0);
+        connected(true, DEFAULT);
         clientPassage.writeCapacity(0);
         server.closeConnection();
         settle();
@@ -243,8 +246,22 @@ class ConnectionDriverClosedFinishTest {
     }
 
     @Test
+    void theWaitAfterClosedIsBoundedByTheRemainingLimitWithoutAnyWakeup() {
+        connected(true, DEFAULT);
+        client.closeConnection();
+        settle();
+        assertThat(clientPassage.lastAwaitTimeoutMs()).isEqualTo(DEFAULT_LIMIT_MS);
+
+        // 시계만 가고 깨우지 않아도 다음 기다림은 남은 시간까지다.
+        clock.addAndGet(1000);
+        clientPassage.wakeup();
+        settle();
+        assertThat(clientPassage.lastAwaitTimeoutMs()).isEqualTo(DEFAULT_LIMIT_MS - 1000);
+    }
+
+    @Test
     void ifThePeerHangsUpBeforeTheLimitTheTransportThreadEndsAtOnce() {
-        connected(false, 0);
+        connected(false, DEFAULT);
         client.closeConnection();
         settle();
 
@@ -263,7 +280,7 @@ class ConnectionDriverClosedFinishTest {
 
     @Test
     void aBlockedWriteThatClearsBeforeTheLimitStillLetsTheTransportThreadEndOnThePeersHangUp() {
-        connected(false, 0);
+        connected(false, DEFAULT);
         clientPassage.writeCapacity(0);
         client.ping(new byte[8]).join();
         settle();

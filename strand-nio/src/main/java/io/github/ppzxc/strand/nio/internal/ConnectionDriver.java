@@ -47,7 +47,7 @@ import org.jspecify.annotations.Nullable;
  * <p>끝내는 방법은 셋이다. {@link #closeConnection}은 연결 종료(CLOSE)를 보내고 대기 중인 스트림이 끝나길 기다리고, {@link #abortClosing}은
  * 종료 중인 연결에서 기다림을 그만두고, {@link #close}는 즉시 끊는다. 연결이 끝나면 core가 낸 결과로 남은 Future가 모두 끝나고, 종료 알림이 핸들러
  * 실행기로 한 번 나간다. 연결이 CLOSE로 끝난 뒤에는 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다. 이 마무리(남은 쓰기 비우기, {@code shutdownOutput},
- * 상대가 끊을 때까지 읽기)에는 시간 상한이 있다({@link Builder#closedFinishLimitMs}, 기본 5초). 상한은 core가 CLOSED를 낸 시점(주입 시계)부터
+ * 상대가 끊을 때까지 읽기)에는 시간 상한이 있다({@link Builder#closedFinishLimitMs}, 기본 5초). 상한은 core가 낸 CLOSED 이벤트를 내보낸 시점(주입 시계)부터
  * 세며, 지나면 통로를 닫고 전송 스레드를 끝낸다. 오류 CLOSE가 막힌 쓰기 뒤에 있어 상대가 받지 못해도 같은 상한으로 끝난다. 그래서 상대가 끊지 않아도
  * {@link #close}를 따로 부를 필요가 없다. 이미 종료 알림이 나갔으므로 상한에 걸려도 새 알림을 내지 않고 {@link ConnectionClosed}도 바뀌지 않는다.
  * 전송 스레드의 기다림은 core의 {@code nextDeadline}과 이 마무리 기한 가운데 이른 쪽까지다.
@@ -817,12 +817,14 @@ public final class ConnectionDriver implements AutoCloseable {
                     break;
                 case CLOSED:
                     // 알림이 실패해도 한 번만 나가도록 먼저 표시한다.
+                    if (!closed) {
+                        long closedAtMs = clock.getAsLong();
+                        // 아주 큰 상한이 넘쳐 음수 기한이 되지 않게 더하기를 포화시킨다. 기한은 처음 CLOSED에서만 정한다.
+                        closedFinishDeadline = closedAtMs > Long.MAX_VALUE - closedFinishLimitMs
+                                ? Long.MAX_VALUE
+                                : closedAtMs + closedFinishLimitMs;
+                    }
                     closed = true;
-                    long closedAtMs = clock.getAsLong();
-                    // 아주 큰 상한이 넘쳐 음수 기한이 되지 않게 더하기를 포화시킨다.
-                    closedFinishDeadline = closedAtMs > Long.MAX_VALUE - closedFinishLimitMs
-                            ? Long.MAX_VALUE
-                            : closedAtMs + closedFinishLimitMs;
                     if (transportGone || isDisconnection(event)) {
                         finished = true;
                     }
