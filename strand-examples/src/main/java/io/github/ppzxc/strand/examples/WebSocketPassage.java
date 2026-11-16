@@ -13,12 +13,14 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -60,6 +62,7 @@ public final class WebSocketPassage implements Passage {
     // 아직 끝나지 않은 마지막 보내기. 전송 스레드만 바꾸고, 완료 콜백은 완료 여부만 본다.
     private volatile @Nullable CompletableFuture<?> sending;
     private final Object signal = new Object();
+    private final AtomicInteger signalWaiters = new AtomicInteger();
     // wakeup()과 close()만 올린다. 보내기가 끝난 것은 신호가 아니라 writable()로 본다.
     private volatile boolean wakeRequested;
     // 보내기가 실패한 원인. 한 번 생기면 연결이 끝난 것으로 보고 await와 write가 던진다.
@@ -227,43 +230,55 @@ public final class WebSocketPassage implements Passage {
     /** 읽지 않고 깨움, 쓰기 가능, 시간 제한만으로 기다린다. 읽을 것은 큐에 그대로 남는다. */
     private Inbound awaitSignal(long timeoutMs, boolean waitForWrite) throws IOException {
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(timeoutMs, 0));
-        synchronized (signal) {
-            try {
-                while (!wakeRequested && !closed && sendFailure == null && !(waitForWrite && writable())) {
-                    if (timeoutMs == 0) {
-                        break;
-                    }
-                    if (timeoutMs < 0) {
-                        signal.wait();
-                    } else {
-                        long remainingNanos = deadline - System.nanoTime();
-                        if (remainingNanos <= 0) {
-                            break;
-                        }
-                        TimeUnit.NANOSECONDS.timedWait(signal, remainingNanos);
-                    }
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("기다리는 중 인터럽트", e);
+        signalWaiters.incrementAndGet();
+        try {
+            synchronized (signal) {
+                awaitInside(timeoutMs, waitForWrite, deadline);
             }
-            throwIfClosedOrFailed();
-            if (timeoutMs != 0) {
-                wakeRequested = false;
-            }
+        } finally {
+            signalWaiters.decrementAndGet();
         }
         return Inbound.none();
     }
 
+    /** {@code signal} 모니터를 쥔 채 부른다. */
+    private void awaitInside(long timeoutMs, boolean waitForWrite, long deadline) throws IOException {
+        try {
+            while (!wakeRequested && !closed && sendFailure == null && !(waitForWrite && writable())) {
+                if (timeoutMs == 0) {
+                    break;
+                }
+                if (timeoutMs < 0) {
+                    signal.wait();
+                } else {
+                    long remainingNanos = deadline - System.nanoTime();
+                    if (remainingNanos <= 0) {
+                        break;
+                    }
+                    TimeUnit.NANOSECONDS.timedWait(signal, remainingNanos);
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("기다리는 중 인터럽트", e);
+        }
+        throwIfClosedOrFailed();
+        if (timeoutMs != 0) {
+            wakeRequested = false;
+        }
+    }
+
+    /** awaitSignal에서 기다리는 스레드가 있을 때만 모니터를 잡는다. 읽기 대기만 쓰는 흔한 경우에는 잠금 경쟁이 없다. */
     private void notifyWaiters() {
-        synchronized (signal) {
-            signal.notifyAll();
+        if (signalWaiters.get() > 0) {
+            synchronized (signal) {
+                signal.notifyAll();
+            }
         }
     }
 
     private void fail(Throwable failure) {
         sendFailure = unwrapped(failure);
-        notifyWaiters();
         wakeup();
     }
 
@@ -366,9 +381,7 @@ public final class WebSocketPassage implements Passage {
     }
 
     private static Throwable unwrapped(Throwable failure) {
-        return failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
-                ? failure.getCause()
-                : failure;
+        return failure instanceof CompletionException && failure.getCause() != null ? failure.getCause() : failure;
     }
 
     private static CompletableFuture<?> closeOnce(WebSocket open, int code) {
