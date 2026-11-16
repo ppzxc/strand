@@ -184,6 +184,11 @@ final class RequirementIndex {
         throw new IllegalStateException("규격 문서를 찾지 못했다. 시스템 프로퍼티 " + SPEC_FILE_PROPERTY + "를 준다");
     }
 
+    /** 저장소 루트. 규격 문서(docs/specification/ 아래)에서 구한다. */
+    static Path repositoryRoot() {
+        return specificationFile().getParent().getParent().getParent();
+    }
+
     private static RequirementIndex readSpecification(Path spec) {
         try {
             return parse(new String(Files.readAllBytes(spec), StandardCharsets.UTF_8));

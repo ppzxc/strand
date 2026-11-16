@@ -17,8 +17,7 @@ import org.junit.jupiter.api.Test;
  */
 class QueuedRequestOutcomeSpecTest {
 
-    private static final Path ROOT =
-            VectorSuite.defaultDirectory().resolve("../..").normalize();
+    private static final Path ROOT = RequirementIndex.repositoryRoot();
     private static final Path SPEC = RequirementIndex.specificationFile();
 
     private static List<String> lines() throws IOException {
