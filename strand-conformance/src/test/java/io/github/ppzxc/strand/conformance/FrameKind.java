@@ -422,9 +422,8 @@ final class FrameKind {
 
     /**
      * 엔드포인트가 보낸 바이트를 프레임으로 풀어 벡터의 {@code send}와 같은 표기로 바꾼다. 잘린 프레임은 실패시킨다. {@code client}는
-     * 이 쪽 역할로, 애플리케이션 프레임의 status 비교 여부를 정한다.
+     * 이 쪽 역할로, 애플리케이션 프레임의 status 비교 여부를 정한다. CLOSE의 reason을 그리지 않는다. reason 비교가 필요 없는 호출이 쓴다.
      */
-    /** CLOSE의 reason을 그리지 않는 풀이. reason 비교가 필요 없는 호출이 쓴다. */
     static List<String> describe(byte[] output, boolean startsWithPreface, boolean client) {
         return describe(output, startsWithPreface, client, index -> false, 0);
     }
