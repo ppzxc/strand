@@ -108,7 +108,7 @@ public final class EndpointConfig {
      *
      * @param value 바이트 수
      * @return 새 설정
-     * @throws IllegalArgumentException 16384 미만이거나 1048576 초과일 때
+     * @throws IllegalArgumentException {@value #MIN_MAX_FRAME_SIZE} 미만이거나 1048576 초과일 때
      */
     public EndpointConfig maxFrameSize(long value) {
         ConfigDraft draft = draft();
