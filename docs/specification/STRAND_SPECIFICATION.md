@@ -213,7 +213,7 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 
 `timeout`은 요청을 받은 시점부터 센다. 0은 특수값이 아니며 받은 시점에 이미 만료된 것이다. 시간이 다 되면 받는 쪽은 처리를 멈추고 `DEADLINE_EXCEEDED`로 응답하는 것이 좋다(SHOULD)<a id="req-ext-timeout-deadline-exceeded"></a>.
 
-요청의 `timeout` 길이가 4가 아니거나 `idempotency-key` 길이가 1\~64를 벗어나면 연결은 그대로 두고 `status` = `INVALID_ARGUMENT`로 답한다(5.1절 5번).
+요청의 `timeout` 길이가 4가 아니거나 `idempotency-key` 길이가 1\~64를 벗어나면 연결은 그대로 두고 `status` = `INVALID_ARGUMENT`로 답한다(MUST)<a id="req-ext-invalid-length-invalid-argument"></a>.
 
 정의된 항목은 요청에서만 의미가 있다. 응답의 확장 영역은 형식만 검사하고(2.4.1절) 내용은 무시한다(MUST)<a id="req-ext-response-content-ignore"></a>.
 
@@ -680,7 +680,7 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 | 2 | 첫 프레임: 헤더를 읽을 수 있고 `type` = HELLO, `stream_id` = 0, `flags` = 0 (3.2.4절) | 상대에게서 처음 받는 프레임 | 닫음<a id="req-check-first-frame-close"></a> | 3번 |
 | 3 | 연결 오류 집합 (순서 없음, 아래 목록) | 모든 프레임 | `CLOSE(PROTOCOL_ERROR)`<a id="req-check-connection-error-close"></a> (이미 CLOSE를 보냈거나 받았거나 `type`이 CLOSE이면 CLOSE 없이 닫음<a id="req-check-connection-error-silent-close"></a>, 3.5절) | 예약 제어 타입은 무시. HELLO·AUTH·PING·CLOSE는 각 절의 처리(3.2절, 3.3.1절, 3.4절, 3.5절). 애플리케이션 프레임·RESET은 4번 |
 | 4 | 대기 중인 스트림 판정 (4.3절) | 애플리케이션 프레임, RESET | 새 요청이 아니면서 대기 중인 스트림을 가리키지 않으면 조용히 버림<a id="req-check-nonpending-discard"></a> | 새 요청은 5번. 대기 중인 스트림의 RESET은 4.4절. 대기 중인 스트림의 응답은 6번 |
-| 5 | 요청: (가) CLOSE를 보냈거나 받은 뒤(3.5절) → 조용히 버림(애플리케이션에 넘기지 않고 아무것도 보내지 않음)<a id="req-check-new-request-close-discard"></a>, 그 밖에 `n + 1 > max_concurrent_streams`이거나 로컬 사유로 거절하기로 한 요청(4.5절) → `RESET(REFUSED)`<a id="req-check-new-request-limit-refuse"></a>, (나) 모르는 `type`(4.1절) → `UNIMPLEMENTED`<a id="req-check-new-request-unknown-type-unimplemented"></a>, (다) 확장 값 오류(2.4.2절) → `INVALID_ARGUMENT`<a id="req-check-new-request-extension-invalid-argument"></a>. (가)→(나)→(다) 순서로 검사한다<a id="req-check-new-request-order"></a> | 새 요청 | 해당 반응 | 애플리케이션에 전달 |
+| 5 | 요청: (가) CLOSE를 보냈거나 받은 뒤(3.5절) → 조용히 버림(애플리케이션에 넘기지 않고 아무것도 보내지 않음)<a id="req-check-new-request-close-discard"></a>, 그 밖에 `n + 1 > max_concurrent_streams`이거나 로컬 사유로 거절하기로 한 요청(4.5절) → `RESET(REFUSED)`<a id="req-check-new-request-limit-refuse"></a>, (나) 모르는 `type`(4.1절) → `UNIMPLEMENTED`<a id="req-check-new-request-unknown-type-unimplemented"></a>, (다) 확장 값 오류(2.4.2절) → `INVALID_ARGUMENT`. (가)→(나)→(다) 순서로 검사한다<a id="req-check-new-request-order"></a> | 새 요청 | 해당 반응 | 애플리케이션에 전달 |
 | 6 | 응답: `type`이 요청과 다름 (4.1절) | 응답 | 로컬 `INTERNAL`<a id="req-check-response-type-internal"></a> (와이어 송신 없음<a id="req-check-response-type-no-wire"></a>) | 애플리케이션에 전달 |
 
 3번 연결 오류 집합에 드는 항목은 다음과 같다. 하나라도 해당하면 연결 오류이고, 항목 사이의 검사 순서는 없다.
