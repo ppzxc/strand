@@ -46,7 +46,8 @@ final class VectorRunner {
 
     static void run(ConformanceVector vector) {
         JsonObject setup = vector.setup();
-        requireSupported(vector, setup);
+        List<String> unsupported = unsupportedFeatures(vector, setup);
+        assertThat(unsupported).as("미지원 기능 (%s)", vector.id()).isEmpty();
 
         boolean client = setup.get("role").getAsString().equals("client");
         String authMechanism = authMechanism(setup);
@@ -80,38 +81,46 @@ final class VectorRunner {
     }
 
     /** 실행하지 못하는 부분이 있으면 벡터를 실패시킨다(건너뛰지 않는다). 한 단계도 실행하기 전에 판정한다. */
-    private static void requireSupported(ConformanceVector vector, JsonObject setup) {
+    static List<String> unsupportedFeatures(ConformanceVector vector) {
+        return unsupportedFeatures(vector, vector.setup());
+    }
+
+    private static List<String> unsupportedFeatures(ConformanceVector vector, JsonObject setup) {
+        List<String> unsupported = new ArrayList<>();
         for (String key : setup.keySet()) {
-            requireSupportedPart(SUPPORTED_SETUP.contains(key), vector, "setup." + key);
+            addIfUnsupported(unsupported, SUPPORTED_SETUP.contains(key), "setup." + key);
         }
         if (setup.has("config")) {
             for (String key : setup.getAsJsonObject("config").keySet()) {
-                requireSupportedPart(Protocol.CONFIG_DEFAULTS.containsKey(key), vector, "config." + key);
+                addIfUnsupported(unsupported, Protocol.CONFIG_DEFAULTS.containsKey(key), "config." + key);
             }
         }
         for (JsonObject step : vector.steps()) {
             String kindName = step.get(StepKind.TAG).getAsString();
             StepKind kind = StepKind.named(kindName);
-            requireSupportedPart(kind != null && kind.isSupported(), vector, "단계 " + kindName);
+            addIfUnsupported(unsupported, kind != null && kind.isSupported(), "단계 " + kindName);
             String unsupportedPart = kind == null ? null : kind.unsupportedPart(step);
-            requireSupportedPart(unsupportedPart == null, vector, unsupportedPart);
+            addIfUnsupported(unsupported, unsupportedPart == null, unsupportedPart);
             for (JsonElement element : step.getAsJsonArray("send")) {
                 JsonObject frame = element.getAsJsonObject();
-                requireSupportedPart(FrameKind.isSupported(frame), vector, "프레임 " + frame.get("type"));
-                requireSupportedPart(FrameKind.hasSupportedFlags(frame), vector, "프레임 flags");
+                addIfUnsupported(unsupported, FrameKind.isSupported(frame), "프레임 " + frame.get("type"));
+                addIfUnsupported(unsupported, FrameKind.hasSupportedFlags(frame), "프레임 flags");
             }
             for (JsonElement event : step.getAsJsonArray("events")) {
-                requireSupportedPart(
+                addIfUnsupported(
+                        unsupported,
                         EventKind.isSupported(
                                 event.getAsJsonObject().get("event").getAsString()),
-                        vector,
                         "이벤트 " + event);
             }
         }
+        return java.util.Collections.unmodifiableList(new ArrayList<>(unsupported));
     }
 
-    private static void requireSupportedPart(boolean supported, ConformanceVector vector, String what) {
-        assertThat(supported).as("러너 미지원: %s (%s)", what, vector.id()).isTrue();
+    private static void addIfUnsupported(List<String> unsupported, boolean supported, String what) {
+        if (!supported && what != null && !unsupported.contains(what)) {
+            unsupported.add(what);
+        }
     }
 
     private static boolean isWebSocket(JsonObject setup) {

@@ -211,6 +211,16 @@ class VectorRunnerTest {
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }
 
+    @Test
+    void unsupportedFeaturesAreReportedTogetherBeforeExecution() {
+        ConformanceVector v = vector(
+                "{\"role\":\"server\",\"established\":true,\"future_setup\":true}",
+                step("future_step", "", "[]", "[]"));
+
+        assertThat(VectorRunner.unsupportedFeatures(v))
+                .containsExactly("setup.future_setup", "단계 future_step");
+    }
+
     private static final String WEBSOCKET_ESTABLISHED =
             "{\"role\":\"server\",\"established\":true,\"transport\":\"websocket\"}";
     private static final String WEBSOCKET_CLOSE_1000 = "{\"type\":\"WEBSOCKET_CLOSE\",\"code\":1000}";
