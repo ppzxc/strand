@@ -66,6 +66,7 @@ final class VectorSchema {
             .require("id", Check::id)
             .require("description", Check::nonEmptyText)
             .require("spec", Check::specSections)
+            .allow("requirements", Check::requirementIds)
             .require("setup", VectorSchema::setup)
             .require("steps", VectorSchema::steps);
 
