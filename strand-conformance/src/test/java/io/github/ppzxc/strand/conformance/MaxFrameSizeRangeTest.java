@@ -16,9 +16,7 @@ import org.junit.jupiter.api.Test;
 class MaxFrameSizeRangeTest {
 
     private static final Path VECTOR_DIR = VectorSuite.defaultDirectory();
-    private static final Path SPEC = VECTOR_DIR
-            .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
-            .normalize();
+    private static final Path SPEC = RequirementIndex.specificationFile();
     private static final Path FORMAT = VECTOR_DIR
             .resolve("../../docs/specification/STRAND_CONFORMANCE_VECTORS.md")
             .normalize();

@@ -19,7 +19,7 @@ class QueuedRequestOutcomeSpecTest {
 
     private static final Path ROOT =
             VectorSuite.defaultDirectory().resolve("../..").normalize();
-    private static final Path SPEC = ROOT.resolve("docs/specification/STRAND_SPECIFICATION.md");
+    private static final Path SPEC = RequirementIndex.specificationFile();
 
     private static List<String> lines() throws IOException {
         return Files.readAllLines(SPEC, StandardCharsets.UTF_8);

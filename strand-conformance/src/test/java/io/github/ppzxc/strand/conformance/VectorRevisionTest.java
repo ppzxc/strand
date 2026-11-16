@@ -19,9 +19,7 @@ import org.junit.jupiter.api.Test;
 /** 규격 0.1.0에 맞춰 개정한 실제 벡터 디렉터리가 지킬 규칙(#97). 벡터 목록 자체는 단언하지 않는다. */
 class VectorRevisionTest {
 
-    private static final Path SPEC = VectorSuite.defaultDirectory()
-            .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
-            .normalize();
+    private static final Path SPEC = RequirementIndex.specificationFile();
 
     /** 삭제된 개념의 JSON 키 이름. 어느 깊이의 객체에도 나오면 안 된다. */
     private static final List<String> REMOVED_KEYS = Arrays.asList(

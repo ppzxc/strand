@@ -164,17 +164,19 @@ final class RequirementIndex {
      * 올라가며 찾는다. 벡터 디렉터리와 무관하다.
      */
     static synchronized RequirementIndex ofSpecification() {
-        Path file = specificationFile().toAbsolutePath().normalize();
+        Path file = specificationFile();
         return BY_FILE.computeIfAbsent(file, RequirementIndex::readSpecification);
     }
 
-    private static Path specificationFile() {
+    /** 규격 문서의 경로. 규격을 읽는 모든 시험이 이 하나를 쓴다. */
+    static Path specificationFile() {
         String property = System.getProperty(SPEC_FILE_PROPERTY);
         if (property != null) {
-            return Paths.get(property);
+            return Paths.get(property).toAbsolutePath().normalize();
         }
         for (Path dir = Paths.get("").toAbsolutePath(); dir != null; dir = dir.getParent()) {
-            Path candidate = dir.resolve("docs/specification/STRAND_SPECIFICATION.md");
+            Path candidate =
+                    dir.resolve("docs/specification/STRAND_SPECIFICATION.md").normalize();
             if (Files.exists(candidate)) {
                 return candidate;
             }

@@ -23,7 +23,7 @@ class SpecFinalizationTest {
 
     private static final Path ROOT =
             VectorSuite.defaultDirectory().resolve("../..").normalize();
-    private static final Path SPEC = ROOT.resolve("docs/specification/STRAND_SPECIFICATION.md");
+    private static final Path SPEC = RequirementIndex.specificationFile();
     private static final Path FORMAT = ROOT.resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
     private static final Path GLOSSARY = ROOT.resolve("GLOSSARY.md");
 
