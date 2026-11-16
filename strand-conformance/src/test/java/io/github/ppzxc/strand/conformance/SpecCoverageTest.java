@@ -141,16 +141,23 @@ class SpecCoverageTest {
     @Test
     void sendAndRecvAnchorsAreSeparateRequirements() throws IOException {
         RequirementIndex index = index();
-        // 보내는 쪽과 받는 쪽은 식별자 접미사(-send/-recv)로 갈리는 별개의 요구사항이다.
-        List<String> pair = new ArrayList<>();
-        for (RequirementIndex.Requirement requirement : index.requirements()) {
-            if (requirement.id().startsWith("req-frame-reserved-")) {
-                pair.add(requirement.id());
+        // 같은 어근의 -send/-recv 쌍은 한 문장의 두 앵커라 같은 절에 있고, 각자 별개의 요구사항으로 색인된다.
+        int pairs = 0;
+        for (RequirementIndex.Requirement send : index.requirements()) {
+            if (!send.id().endsWith("-send")) {
+                continue;
+            }
+            String stem = send.id().substring(0, send.id().length() - "-send".length());
+            RequirementIndex.Requirement recv = index.requirement(stem + "-recv");
+            if (recv != null) {
+                pairs++;
+                assertThat(recv.section()).as(stem).isEqualTo(send.section());
+                assertThat(recv.keyword()).as(stem).isEqualTo(send.keyword());
             }
         }
-        assertThat(pair).contains("req-frame-reserved-zero-send", "req-frame-reserved-ignore-recv");
-        assertThat(pair).filteredOn(id -> id.endsWith("-send")).containsExactly("req-frame-reserved-zero-send");
-        assertThat(pair).filteredOn(id -> id.endsWith("-recv")).containsExactly("req-frame-reserved-ignore-recv");
+        assertThat(pairs).as("-send/-recv 쌍").isPositive();
+        assertThat(index.requirement("req-frame-reserved-zero-send")).isNotNull();
+        assertThat(index.requirement("req-frame-reserved-ignore-recv")).isNotNull();
         assertThat(index.requirement("req-frame-reserved-zero-send").section()).isEqualTo("2.2.7");
         assertThat(index.requirement("req-frame-reserved-ignore-recv").section())
                 .isEqualTo("2.2.7");
