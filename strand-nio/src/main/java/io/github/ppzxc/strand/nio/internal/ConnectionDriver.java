@@ -872,14 +872,7 @@ public final class ConnectionDriver implements AutoCloseable {
                     if (writeOffset < length) {
                         return true;
                     }
-                    writeQueue.poll();
-                    writeOffset = 0;
-                    if (head.kind() == OutboundMessage.Kind.BINARY) {
-                        writtenBytes.addAndGet(length);
-                        if (length >= FRAME_HEADER_BYTES) {
-                            writtenFrames.incrementAndGet();
-                        }
-                    }
+                    completeHead(head);
                     head = writeQueue.peek();
                 }
                 return true;
@@ -887,6 +880,19 @@ public final class ConnectionDriver implements AutoCloseable {
                 recordTransportFailure(e);
                 discardQueued();
                 return false;
+            }
+        }
+
+        /** 대기열 맨 앞 메시지를 끝까지 다 썼을 때 대기열에서 빼고 쓴 양에 더한다. */
+        private void completeHead(OutboundMessage head) {
+            writeQueue.poll();
+            writeOffset = 0;
+            if (head.kind() == OutboundMessage.Kind.BINARY) {
+                int length = head.length();
+                writtenBytes.addAndGet(length);
+                if (length >= FRAME_HEADER_BYTES) {
+                    writtenFrames.incrementAndGet();
+                }
             }
         }
 
