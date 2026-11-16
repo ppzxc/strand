@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.nio.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
@@ -380,20 +381,30 @@ class ConnectionDriverReadPauseTest {
     @Test
     void theLimitIsTheFlowControlRangePlusOneFrame() {
         // (상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임 + 프레임 하나.
-        assertThat(ConnectionDriver.writeQueueLimit(65_536, 100, 100)).isEqualTo(200L * 65_536 + 65_536);
-        assertThat(ConnectionDriver.writeQueueLimit(16_384, 2, 2)).isEqualTo(5L * 16_384);
+        assertThat(ConnectionDriver.writeQueueLimit(65_536, 100, 100, PLENTY)).isEqualTo(200L * 65_536 + 65_536);
+        assertThat(ConnectionDriver.writeQueueLimit(16_384, 2, 2, PLENTY)).isEqualTo(5L * 16_384);
         // 동시 스트림이 0이어도 제어 프레임을 위한 프레임 하나는 남는다.
-        assertThat(ConnectionDriver.writeQueueLimit(16_384, 0, 0)).isEqualTo(16_384);
+        assertThat(ConnectionDriver.writeQueueLimit(16_384, 0, 0, PLENTY)).isEqualTo(16_384);
     }
 
     @Test
     void aPeerCannotRaiseTheLimitWithoutBoundByAdvertisingHugeValues() {
         long hugeStreams = 4_294_967_295L;
         long hugeFrame = 1_048_576L;
-        assertThat(ConnectionDriver.writeQueueLimit(hugeFrame, hugeStreams, hugeStreams))
-                .isEqualTo(ConnectionDriver.MAX_WRITE_QUEUE_BYTES);
-        assertThat(ConnectionDriver.writeQueueLimit(hugeFrame, hugeStreams, 0))
-                .isEqualTo(ConnectionDriver.MAX_WRITE_QUEUE_BYTES);
+        assertThat(ConnectionDriver.writeQueueLimit(
+                        hugeFrame, hugeStreams, hugeStreams, ConnectionDriver.DEFAULT_MAX_WRITE_QUEUE_BYTES))
+                .isEqualTo(ConnectionDriver.DEFAULT_MAX_WRITE_QUEUE_BYTES);
+        // 연결 설정으로 절대 한도를 올리면 정상 범위가 그만큼 열린다.
+        assertThat(ConnectionDriver.writeQueueLimit(hugeFrame, 100, 100, 1L << 40))
+                .isEqualTo(201L * hugeFrame);
+    }
+
+    @Test
+    void theAbsoluteLimitCannotBeSetBelowTheSmallestFrameSize() {
+        InMemoryPassage.Pair link = InMemoryPassage.messages();
+        assertThatThrownBy(
+                        () -> ConnectionDriver.client(config(2), link.first()).maxWriteQueueBytes(MAX_FRAME_SIZE - 1))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
