@@ -506,10 +506,11 @@ public final class ConnectionDriver implements AutoCloseable {
      * @return 제한 시간 안에 그 상태이면 true, 아니면 false
      */
     boolean awaitWriteBlocked(boolean blocked, long timeout, TimeUnit unit) throws InterruptedException {
-        long deadline = System.nanoTime() + unit.toNanos(timeout);
+        long start = System.nanoTime();
+        long limit = unit.toNanos(timeout);
         synchronized (writeBlockedLock) {
             while (writeBlocked != blocked) {
-                long remaining = deadline - System.nanoTime();
+                long remaining = limit - (System.nanoTime() - start);
                 if (remaining <= 0) {
                     return false;
                 }
