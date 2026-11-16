@@ -264,11 +264,15 @@ public final class WebSocketPassage implements Passage {
     private void watch(CompletableFuture<?> send) {
         sending = send;
         if (send.isDone()) {
+            if (send.isCompletedExceptionally()) {
+                send.whenComplete((sent, failure) -> queue.add(unwrapped(failure)));
+                signal();
+            }
             return;
         }
         send.whenComplete((sent, failure) -> {
             if (failure != null) {
-                queue.add(failure);
+                queue.add(unwrapped(failure));
             }
             signal();
             wakeup();
@@ -346,6 +350,12 @@ public final class WebSocketPassage implements Passage {
                 }
             });
         }
+    }
+
+    private static Throwable unwrapped(Throwable failure) {
+        return failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+                ? failure.getCause()
+                : failure;
     }
 
     private static CompletableFuture<?> closeOnce(WebSocket open, int code) {

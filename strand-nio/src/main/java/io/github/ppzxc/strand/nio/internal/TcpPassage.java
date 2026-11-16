@@ -139,7 +139,7 @@ public final class TcpPassage implements Passage {
         }
         // bytes()는 복사본을 주므로 한 메시지를 나눠 쓰는 동안은 한 번만 복사해 둔다.
         ByteBuffer buffer = writingBuffer;
-        if (writing != message || buffer == null) {
+        if (offset == 0 || writing != message || buffer == null) {
             buffer = ByteBuffer.wrap(message.bytes());
             writing = message;
             writingBuffer = buffer;
