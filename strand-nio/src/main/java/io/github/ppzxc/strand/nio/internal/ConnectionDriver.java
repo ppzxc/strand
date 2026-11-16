@@ -178,8 +178,8 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /**
          * 쓰기 대기열 상한의 절대 한도(바이트)를 정한다. 상한은 협상 값에서 셈하지만 상대가 알린 큰 값이 상한을 없애지 못하게 이 한도로 막는다. 정상 흐름
-         * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임이 기본값 {@value #DEFAULT_MAX_WRITE_QUEUE_BYTES}을
-         * 넘는 설정에서는, 그 범위를 꽉 채워 주고받는 두 끝이 읽기 멈춤에 걸리지 않도록 이 값을 그 범위에 프레임 하나(상대가 알린 최대 프레임)를 더한 값 이상으로 올린다. 정하지 않으면 기본값이다.
+         * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임에 프레임 하나를 더한 값이 기본값 {@value #DEFAULT_MAX_WRITE_QUEUE_BYTES}을
+         * 넘는 설정에서는, 그 범위를 꽉 채워 주고받는 두 끝이 읽기 멈춤에 걸리지 않도록 이 값을 그 값 이상으로 올린다. 정하지 않으면 기본값이다.
          *
          * @param bytes 절대 한도. 규격이 허용하는 가장 작은 {@code max_frame_size}(16384) 이상이어야 한다. 상한은 이 값이 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다
          * @return 이 빌더
@@ -665,7 +665,7 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /** 쓰기 대기열이 상한을 넘어 읽기를 멈춰야 하는가. 상한 아래로 내려가면 다시 읽는다. */
         private boolean readPaused() {
-            // 대기열이 비었으면 멈추지 않는다. 멈춘 채 쓰기 가능을 기다리다 아무것도 깨우지 못하는 일이 없도록 하는 안전장치다.
+            // 상한이 늘 프레임 하나 이상이라 빈 대기열은 어차피 상한을 넘지 않는다. 그 불변식이 깨져도 멈춘 채 쓰기 가능을 기다리다 아무것도 깨우지 못하는 일이 없게 하는 방어다.
             return !writeQueue.isEmpty()
                     && queuedBytes
                             > writeQueueLimit(
