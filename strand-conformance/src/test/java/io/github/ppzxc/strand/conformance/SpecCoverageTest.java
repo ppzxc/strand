@@ -183,6 +183,8 @@ class SpecCoverageTest {
 
     @Test
     void deletedRequirementIdsDoNotReturn() throws IOException {
+        assertThat(deletedRequirementIds())
+                .allMatch(id -> Check.REQUIREMENT_ID.matcher(id).matches());
         assertThat(revivedDeletedIds(index(), vectorRequirements(), deletedRequirementIds()))
                 .isEmpty();
     }

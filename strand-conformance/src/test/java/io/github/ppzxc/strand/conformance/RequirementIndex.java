@@ -132,7 +132,7 @@ final class RequirementIndex {
         }
     }
 
-    private static final Pattern HEADING = Pattern.compile("^#{2,4} (\\d+(?:\\.\\d+)*)\\.?\\s");
+    private static final Pattern HEADING = Pattern.compile("^#{2,4} (\\d+(?:\\.\\d+)*)\\.?(?:\\s|$)");
     /** {@code \b}는 JDK 19부터 한글을 단어 문자로 보지 않아 JDK마다 결과가 달랐다. 영문자 기준 lookaround로 고정한다. */
     private static final String KEYWORD_TEXT = "(?<![A-Za-z])(MUST NOT|SHOULD NOT|MUST|SHOULD)(?![A-Za-z])";
 
@@ -140,7 +140,7 @@ final class RequirementIndex {
     /** `(MUST)`, `(MUST NOT, 5.1절)`, `(모두 MUST)`. 괄호 안은 키워드로 시작한다. */
     private static final Pattern PARENTHESIS = Pattern.compile("\\((모두 )?" + KEYWORD_TEXT + "(?:,[^()]*)?\\)");
 
-    private static final Pattern TOP_HEADING = Pattern.compile("^##\\s");
+    private static final Pattern TOP_HEADING = Pattern.compile("^#{1,2}\\s");
     private static final Pattern HEADING_ANY = Pattern.compile("^#{1,6}\\s");
     private static final Pattern ANCHOR = Pattern.compile("<a id=\"((?i:req-)[^\"]*)\"></a>");
     private static final Pattern ANCHOR_RUN = Pattern.compile("(?:<a id=\"(?i:req-)[^\"]*\"></a>)+");
@@ -340,6 +340,7 @@ final class RequirementIndex {
     /** 열거 항목(여러 줄) 또는 표 행 하나. 자기 키워드 괄호 뒤 앵커는 그 키워드, 나머지 앵커는 이끄는 줄의 키워드다. */
     private void scanItem(String[] itemLines, int firstIndex, Keyword lead) {
         int anchors = 0;
+        boolean reported = false;
         for (int k = 0; k < itemLines.length; k++) {
             int index = firstIndex + k;
             Scan scan = scanLine(itemLines[k]);
@@ -351,6 +352,7 @@ final class RequirementIndex {
                 } else {
                     acceptBracket(bracket, index);
                     anchors += bracket.anchors.size();
+                    reported |= bracket.anchors.isEmpty();
                 }
             }
             for (String anchor : scan.looseAnchors) {
@@ -359,7 +361,7 @@ final class RequirementIndex {
             }
             record(scan, index);
         }
-        if (anchors == 0) {
+        if (anchors == 0 && !reported) {
             problem(ProblemKind.ANCHORLESS_ITEM, firstIndex, "열거 항목·표 행에 앵커가 없다");
         }
     }
