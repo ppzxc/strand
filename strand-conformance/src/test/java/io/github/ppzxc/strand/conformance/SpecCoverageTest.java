@@ -17,8 +17,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -32,27 +30,10 @@ class SpecCoverageTest {
             .resolve("../../docs/specification/STRAND_SPECIFICATION.md")
             .normalize();
 
-    private static final Pattern HEADING = Pattern.compile("^#{2,4} (\\d+(?:\\.\\d+)*)\\.?\\s");
-    /** {@code \b}는 JDK 19부터 한글을 단어 문자로 보지 않아 JDK마다 결과가 달랐다. 영문자 기준 lookaround로 고정한다. */
-    private static final Pattern NORMATIVE = Pattern.compile("(?<![A-Za-z])(MUST|SHOULD)(?![A-Za-z])");
-    /** 용어 규칙을 설명하는 줄이라 규범 문장이 아니다. */
-    private static final String KEYWORD_DEFINITION = "- MUST, MUST NOT";
-
     /** 규범 문장이 있는 절 번호와 그 줄 수. */
     private static Map<String, Integer> normativeSections() throws IOException {
-        Map<String, Integer> result = new TreeMap<>();
-        String current = null;
-        for (String line : Files.readAllLines(SPEC, StandardCharsets.UTF_8)) {
-            Matcher heading = HEADING.matcher(line);
-            if (heading.find()) {
-                current = heading.group(1);
-            } else if (current != null
-                    && !line.startsWith(KEYWORD_DEFINITION)
-                    && NORMATIVE.matcher(line).find()) {
-                result.merge(current, 1, Integer::sum);
-            }
-        }
-        return result;
+        return RequirementIndex.parse(new String(Files.readAllBytes(SPEC), StandardCharsets.UTF_8))
+                .keywordSections();
     }
 
     private static Set<String> referencedSections() {
