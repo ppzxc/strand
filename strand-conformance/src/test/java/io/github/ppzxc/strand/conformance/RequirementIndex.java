@@ -187,7 +187,7 @@ final class RequirementIndex {
     /** 저장소 루트. 규격 문서(docs/specification/ 아래)에서 구한다. */
     static Path repositoryRoot() {
         Path docs = specificationFile().getParent().getParent();
-        if (!"docs".equals(docs.getFileName().toString())) {
+        if (docs == null || !"docs".equals(String.valueOf(docs.getFileName()))) {
             throw new IllegalStateException("규격 문서가 docs/specification/ 아래에 있지 않다: " + specificationFile());
         }
         return docs.getParent();
