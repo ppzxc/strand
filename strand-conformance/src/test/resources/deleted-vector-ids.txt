@@ -66,3 +66,5 @@ server-sends-after-acking-client-hello-without-waiting-for-ack
 server-sends-ping-after-acking-client-hello
 ack-gate-while-closing-closes-without-close-frame
 hello-ack-timeout-while-closing-closes-without-close-frame
+# 예약 error_code의 CLOSE 벡터가 예약이 아닌 값 6(UNRESPONSIVE)을 쓰고 있어 예약 최솟값 8로 고치며 id를 바꿨다(#284). 이름을 되살리지 않는다.
+reserved-close-error-code-six-closes-immediately
