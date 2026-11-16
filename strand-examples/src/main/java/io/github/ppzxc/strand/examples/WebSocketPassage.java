@@ -291,8 +291,12 @@ public final class WebSocketPassage implements Passage {
     }
 
     private void fail(Throwable failure) {
-        sendFailure = unwrapped(failure);
-        wakeup();
+        Throwable cause = unwrapped(failure);
+        sendFailure = cause;
+        // 실패도 큐에 넣어 앞서 도착한 입력 뒤에 순서대로 알린다. 깨움 표시(none)에 기대지 않으므로 잃지 않는다.
+        queue.add(cause);
+        wakeRequested = true;
+        notifyWaiters();
     }
 
     /** 보내기가 끝나면 쓰기를 기다리는 쪽을 깨우고, 실패는 {@link #sendFailure}로 남겨 다음 {@link #await}가 던지게 한다. */
@@ -320,13 +324,12 @@ public final class WebSocketPassage implements Passage {
         }
         throwIfClosedOrFailed();
         CompletableFuture<?> last = sending;
-        boolean busy = last != null && !last.isDone();
+        boolean busy = !writable();
         if (message.kind() == OutboundMessage.Kind.BINARY) {
             if (busy) {
                 // 표시를 올린 뒤 다시 확인한다. 그 사이 끝났으면 깨울 사람이 없으므로 이 호출에서 계속 보낸다.
                 blocked = true;
-                CompletableFuture<?> again = sending;
-                if (again != null && !again.isDone()) {
+                if (!writable()) {
                     return 0;
                 }
                 blocked = false;
@@ -379,9 +382,8 @@ public final class WebSocketPassage implements Passage {
         if (open != null && !open.isOutputClosed()) {
             // 앞선 보내기(마지막 프레임이나 write가 이어 붙인 Close)가 끝난 뒤에 보낸다. 겹치면 JDK가 거부해 abort로 번진다.
             CompletableFuture<?> last = sending;
-            CompletableFuture<?> close = last != null && !last.isDone()
-                    ? afterPrevious(last, open, NORMAL_CLOSURE)
-                    : closeOnce(open, NORMAL_CLOSURE);
+            CompletableFuture<?> close =
+                    !writable() ? afterPrevious(last, open, NORMAL_CLOSURE) : closeOnce(open, NORMAL_CLOSURE);
             watch(close);
             close.whenComplete((sent, failure) -> {
                 if (failure != null) {

@@ -139,8 +139,8 @@ public final class TcpPassage implements Passage {
         }
         // bytes()는 복사본을 주므로 한 메시지를 나눠 쓰는 동안은 한 번만 복사해 둔다.
         ByteBuffer buffer = writingBuffer;
-        // 같은 메시지를 막혀서 다시 쓰는 것(위치 0)은 복사본을 쓰지만, 앞서 일부 쓰고 버려진 복사본(위치 > 0)에서 처음부터 쓰면 새로 만든다.
-        if (writing != message || buffer == null || (offset == 0 && buffer.position() > 0)) {
+        // 복사본은 같은 메시지를 이어 쓸 때만 쓴다(위치가 offset과 같을 때). 위치가 다르면 버려진 복사본이라 새로 만든다.
+        if (writing != message || buffer == null || buffer.position() != offset) {
             buffer = ByteBuffer.wrap(message.bytes());
             writing = message;
             writingBuffer = buffer;
