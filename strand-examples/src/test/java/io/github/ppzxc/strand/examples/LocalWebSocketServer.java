@@ -266,7 +266,7 @@ final class LocalWebSocketServer implements AutoCloseable {
         public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
             // 시험용 서버라 쓰기는 늘 가능하다(보낼 때 블로킹한다). 읽기를 멈추는 호출은 지원하지 않는다. 바쁜 대기가 되지 않게 가정을 드러낸다.
             if (!waitForRead) {
-                throw new UnsupportedOperationException("읽기를 멈추는 기다림은 지원하지 않는다");
+                throw new IOException("읽기를 멈추는 기다림은 지원하지 않는다");
             }
             if (ended) {
                 return Inbound.end();
