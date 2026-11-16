@@ -132,6 +132,20 @@ class VectorLoaderTest {
                 .hasMessageContaining("deadline_ms");
     }
 
+    private static String withRequirements(String requirements) {
+        return VALID_VECTOR.replace("\"spec\":[\"3.4\"],", "\"spec\":[\"3.4\"],\"requirements\":" + requirements + ",");
+    }
+
+    @Test
+    void requirementsIsAnOptionalListOfRequirementIds() {
+        assertThat(VectorLoader.parse("x.json", file(VALID_VECTOR)).get(0).requirements())
+                .isEmpty();
+        ConformanceVector vector = VectorLoader.parse("x.json", file(withRequirements("[\"req-a-b\",\"req-c-send\"]")))
+                .get(0);
+        assertThat(vector.requirements()).containsExactly("req-a-b", "req-c-send");
+        assertThatThrownBy(() -> vector.requirements().add("x")).isInstanceOf(UnsupportedOperationException.class);
+    }
+
     @Test
     void optionalFieldsMayBeOmitted() {
         // setup의 local_hello/peer_hello/config, request의 extensions/payload, 프레임의 flags/params 등을 생략한다.
@@ -313,6 +327,11 @@ class VectorLoaderTest {
                 "a"));
         t.add(rejected("spec element not string", file(vector("a", "[3]", SETUP, "[" + STEP + "]")), "spec", "a"));
         t.add(rejected("empty steps", file(vector("a", "[\"3.4\"]", SETUP, "[]")), "steps", "a"));
+        for (String bad :
+                new String[] {"[]", "[3]", "[\"a-b\"]", "[\"req-\"]", "[\"req-A\"]", "[\"req-a_b\"]", "[\"req-a--b\"]"
+                }) {
+            t.add(rejected("bad requirements " + bad, file(withRequirements(bad)), "requirements", "a"));
+        }
         return t.stream();
     }
 

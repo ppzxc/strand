@@ -62,6 +62,12 @@ final class VectorLoader {
         for (JsonElement section : vector.getAsJsonArray("spec")) {
             spec.add(section.getAsString());
         }
+        List<String> requirements = new ArrayList<>();
+        if (vector.has("requirements")) {
+            for (JsonElement id : vector.getAsJsonArray("requirements")) {
+                requirements.add(id.getAsString());
+            }
+        }
         List<JsonObject> steps = new ArrayList<>();
         for (JsonElement step : vector.getAsJsonArray("steps")) {
             steps.add(step.getAsJsonObject());
@@ -70,6 +76,7 @@ final class VectorLoader {
                 vector.get("id").getAsString(),
                 vector.get("description").getAsString(),
                 spec,
+                requirements,
                 vector.getAsJsonObject("setup"),
                 steps);
     }
