@@ -93,6 +93,55 @@ class SpecCoverageTest {
         assertThat(normativeSections()).doesNotContainKey("1");
     }
 
+    // ---- 규격의 앵커 ----
+
+    @Test
+    void specHasNoAnchorProblems() throws IOException {
+        assertThat(index().problems())
+                .as("앵커가 없는 키워드 괄호·열거 항목·표 행, 고아·중복 앵커, 괄호 밖 키워드")
+                .isEmpty();
+    }
+
+    @Test
+    void knownRequirementsSitInTheExpectedSections() throws IOException {
+        RequirementIndex index = index();
+        assertRequirement(index, "req-ws-subprotocol-client-offer", "1.2.1", RequirementIndex.Keyword.MUST);
+        assertRequirement(index, "req-status-reserved-unknown-recv", "2.5.1", RequirementIndex.Keyword.MUST);
+        assertRequirement(index, "req-hello-send-independent-frames", "3.2.2", RequirementIndex.Keyword.MUST);
+        assertRequirement(index, "req-close-last-stream-id-equals-highest", "3.5", RequirementIndex.Keyword.MUST);
+        assertRequirement(index, "req-ping-ack-no-reply", "3.4", RequirementIndex.Keyword.MUST_NOT);
+        assertRequirement(index, "req-ping-idle-send", "3.4.1", RequirementIndex.Keyword.SHOULD);
+        assertRequirement(index, "req-check-new-request-order", "5.1", RequirementIndex.Keyword.MUST);
+        assertRequirement(index, "req-security-tls-no-early-data", "6.1", RequirementIndex.Keyword.MUST);
+    }
+
+    @Test
+    void sendAndRecvSidesAreSeparateRequirements() throws IOException {
+        RequirementIndex index = index();
+        assertThat(index.requirement("req-frame-reserved-zero-send").side()).isEqualTo(RequirementIndex.Side.SEND);
+        assertThat(index.requirement("req-frame-reserved-ignore-recv").side()).isEqualTo(RequirementIndex.Side.RECV);
+        assertThat(index.requirement("req-frame-reserved-zero-send").section()).isEqualTo("2.2.7");
+        assertThat(index.requirement("req-frame-reserved-ignore-recv").section())
+                .isEqualTo("2.2.7");
+    }
+
+    @Test
+    void section51DefinesOnlyTheCheckOrderAndReactions() throws IOException {
+        for (RequirementIndex.Requirement requirement : index().requirements()) {
+            if (requirement.section().equals("5.1")) {
+                assertThat(requirement.id()).as("5.1절의 앵커는 표의 검사 순서·반응이다").startsWith("req-check-");
+            }
+        }
+    }
+
+    private static void assertRequirement(
+            RequirementIndex index, String id, String section, RequirementIndex.Keyword keyword) {
+        RequirementIndex.Requirement requirement = index.requirement(id);
+        assertThat(requirement).as(id).isNotNull();
+        assertThat(requirement.section()).as(id + " 절").isEqualTo(section);
+        assertThat(requirement.keyword()).as(id + " 키워드").isEqualTo(keyword);
+    }
+
     // ---- 벡터의 requirements (선택 필드) ----
 
     private static RequirementIndex index() throws IOException {

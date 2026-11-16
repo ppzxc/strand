@@ -32,11 +32,11 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
    - 메시지 기반 사용 환경. 단일 WebSocket 바이너리 메시지(`Opcode 0x02`) 1개에 정확히 Strand 프레임 1개를 싣는다. WebSocket 연결의 식별은 1.2.1절이 정한다.
    - 프레임 헤더(20바이트)와 payload 형식, 제어 프레임 및 상태 머신은 strand over TCP와 100% 동일하다.
    - 연결 서문(Connection Preface)은 첫 번째 바이너리 메시지로 보내며(3.1절), 연결을 닫을 때(3.5절)는 WebSocket 닫기(`Close Frame 0x08`)를 수행한다. CLOSE를 보내는 종료에서는 CLOSE 송신 뒤에 수행하고, `NO_ERROR` 종료에는 `1000 Normal Closure`를 쓴다.
-   - 메시지 경계 위반: 서문 메시지의 위반은 3.1절을 따른다. 서문 뒤에 텍스트 메시지가 오거나, 크기가 4 + `length`와 다른 바이너리 메시지가 오면 연결 오류다(MUST, 5.1절 3번).
+   - 메시지 경계 위반: 서문 메시지의 위반은 3.1절을 따른다. 서문 뒤에 텍스트 메시지가 오거나, 크기가 4 + `length`와 다른 바이너리 메시지가 오면 연결 오류다(MUST, 5.1절 3번)<a id="req-ws-message-boundary-violation"></a>.
 
 #### 1.2.1 WebSocket 하위 프로토콜
 
-strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로 식별한다. 클라이언트는 이 값을 제시하고(MUST), 서버는 이 값이 제시되지 않으면 WebSocket 연결을 수락하지 않는다(MUST).
+strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로 식별한다. 클라이언트는 이 값을 제시하고(MUST)<a id="req-ws-subprotocol-client-offer"></a>, 서버는 이 값이 제시되지 않으면 WebSocket 연결을 수락하지 않는다(MUST)<a id="req-ws-subprotocol-server-reject"></a>.
 
 ### 1.3 용어
 
@@ -130,11 +130,11 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 
 #### 2.2.1 length (4바이트)
 
-이 필드 바로 뒤부터 프레임 끝까지의 바이트 수다. 최솟값은 16이고, 최댓값은 받는 쪽이 알린 `max_frame_size`에서 4를 뺀 값이다. 받는 쪽은 언제나 자기가 알린 `max_frame_size`로 검사한다. 범위를 벗어난 프레임은 연결 오류다(MUST, 5.1절).
+이 필드 바로 뒤부터 프레임 끝까지의 바이트 수다. 최솟값은 16이고, 최댓값은 받는 쪽이 알린 `max_frame_size`에서 4를 뺀 값이다. 받는 쪽은 언제나 자기가 알린 `max_frame_size`로 검사한다. 범위를 벗어난 프레임은 연결 오류다(MUST, 5.1절)<a id="req-frame-length-range-error"></a>.
 
 #### 2.2.2 type (2바이트)
 
-프레임 종류를 나타낸다. `0x0000`부터 `0x00FF`까지는 제어 프레임(3절 및 4절), `0x0100`부터 `0xFFFF`까지는 애플리케이션 프레임에 쓴다(4.1절). 응답 프레임에는 요청과 같은 `type` 값을 넣는다(MUST). 제어 프레임 타입 중 `0x0000`과 `0x0006`\~`0x00FF`는 예약된 타입이며, 받으면 무시한다(MUST, 5.1절). 이때 `stream_id`는 검사하지 않는다. 다만 상대에게서 처음 받는 프레임이면 첫 프레임 검사(3.2.4절)가 먼저다.
+프레임 종류를 나타낸다. `0x0000`부터 `0x00FF`까지는 제어 프레임(3절 및 4절), `0x0100`부터 `0xFFFF`까지는 애플리케이션 프레임에 쓴다(4.1절). 응답 프레임에는 요청과 같은 `type` 값을 넣는다(MUST)<a id="req-frame-response-type-echo"></a>. 제어 프레임 타입 중 `0x0000`과 `0x0006`\~`0x00FF`는 예약된 타입이며, 받으면 무시한다(MUST, 5.1절)<a id="req-frame-reserved-control-type-ignore"></a>. 이때 `stream_id`는 검사하지 않는다. 다만 상대에게서 처음 받는 프레임이면 첫 프레임 검사(3.2.4절)가 먼저다.
 
 #### 2.2.3 flags (1바이트)
 
@@ -142,32 +142,32 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 
 #### 2.2.4 status (1바이트)
 
-애플리케이션 요청을 처리한 결과다. 값의 의미는 2.5.1절에 있다. 이 필드는 애플리케이션 응답에서만 의미가 있으므로, 그 밖의 프레임에서는 0으로 보내고 받는 쪽은 값을 보지 않는다(MUST).
+애플리케이션 요청을 처리한 결과다. 값의 의미는 2.5.1절에 있다. 이 필드는 애플리케이션 응답에서만 의미가 있으므로, 그 밖의 프레임에서는 0으로 보내고 받는 쪽은 값을 보지 않는다(MUST)<a id="req-frame-status-nonresponse-zero-send"></a><a id="req-frame-status-nonresponse-ignore-recv"></a>.
 
 #### 2.2.5 stream\_id (8바이트)
 
 클라이언트가 여는 스트림은 홀수, 서버가 여는 스트림은 짝수 `stream_id`를 쓴다. 이 두 구간이 번호 공간이다(1.3절). `stream_id`의 범위는 `1`\~`2^63-1`이며 최상위 비트는 항상 0이다.
 
-0번은 연결 전체를 다루는 제어 프레임 전용이다. HELLO·AUTH·PING·CLOSE의 `stream_id`는 정확히 `0x0000000000000000`이어야 한다(MUST). 위반하면 연결 오류다(MUST, 5.1절).
+0번은 연결 전체를 다루는 제어 프레임 전용이다. HELLO·AUTH·PING·CLOSE의 `stream_id`는 정확히 `0x0000000000000000`이어야 한다(MUST)<a id="req-stream-control-id-zero"></a>. 위반하면 연결 오류다(MUST, 5.1절)<a id="req-stream-control-id-nonzero-error"></a>.
 
-애플리케이션 프레임이나 RESET의 `stream_id`가 0이거나 최상위 비트가 1이면 연결 오류다(MUST, 5.1절).
+애플리케이션 프레임이나 RESET의 `stream_id`가 0이거나 최상위 비트가 1이면 연결 오류다(MUST, 5.1절)<a id="req-stream-app-id-invalid-error"></a>.
 
-새 스트림을 열 때는 자기 번호 공간에서 매번 이전보다 큰 `stream_id`를 쓴다(MUST). 첫 번호는 클라이언트가 1, 서버가 2다. 건너뛰는 것은 허용하며, 건너뛴 번호는 영원히 쓰이지 않는다. 같은 공간 안에서는 `stream_id`를 정수로 바로 비교한다.
+새 스트림을 열 때는 자기 번호 공간에서 매번 이전보다 큰 `stream_id`를 쓴다(MUST)<a id="req-stream-id-increasing"></a>. 첫 번호는 클라이언트가 1, 서버가 2다. 건너뛰는 것은 허용하며, 건너뛴 번호는 영원히 쓰이지 않는다. 같은 공간 안에서는 `stream_id`를 정수로 바로 비교한다.
 
 엔드포인트는 상대 공간의 `highest_peer_stream_id`를 유지한다.
 * `highest_peer_stream_id`: 지금까지 새 요청으로 인정한 가장 큰 `stream_id`(처음에는 0). 갱신 시점은 5.1절이 정한다.
 
-**번호 소진.** 내 공간에서 다음에 쓸 번호가 `2^63-1`을 넘으면, 그 요청은 프레임을 보내지 않고 애플리케이션에 로컬 `UNAVAILABLE`로 실패시킨다(MUST). 이 실패는 스트림을 열기 전의 로컬 결과라서 `stream_id`가 없고, 결과 확정성은 처리 안 됨이다. 엔드포인트는 `CLOSE(NO_ERROR)`를 보낸다(MUST). 이미 CLOSE를 보냈거나 받았다면 3.5절에 따라 보내지 않는다.
+**번호 소진.** 내 공간에서 다음에 쓸 번호가 `2^63-1`을 넘으면, 그 요청은 프레임을 보내지 않고 애플리케이션에 로컬 `UNAVAILABLE`로 실패시킨다(MUST)<a id="req-stream-id-exhausted-local-unavailable"></a>. 이 실패는 스트림을 열기 전의 로컬 결과라서 `stream_id`가 없고, 결과 확정성은 처리 안 됨이다. 엔드포인트는 `CLOSE(NO_ERROR)`를 보낸다(MUST)<a id="req-stream-id-exhausted-close-no-error"></a>. 이미 CLOSE를 보냈거나 받았다면 3.5절에 따라 보내지 않는다.
 
 `stream_id`는 같은 연결 안에서만 유일하다. 연결이 바뀌어도 같은 요청임을 알아봐야 할 때는 `idempotency-key` 확장(2.4절)을 쓴다.
 
 #### 2.2.6 extensions\_length (2바이트)
 
-확장 영역의 바이트 수다. 0이면 확장 영역이 없다는 뜻이다. `extensions_length`가 `length` − 16이나 8,192를 넘으면 오류로 처리한다. 이 오류는 2.4.1절의 형식 위반과 같이 연결 오류다(MUST, 5.1절).
+확장 영역의 바이트 수다. 0이면 확장 영역이 없다는 뜻이다. `extensions_length`가 `length` − 16이나 8,192를 넘으면 오류로 처리한다. 이 오류는 2.4.1절의 형식 위반과 같이 연결 오류다(MUST, 5.1절)<a id="req-frame-extensions-length-error"></a>.
 
 #### 2.2.7 reserved (2바이트)
 
-항상 0으로 보내고, 받은 값은 무시한다(MUST).
+항상 0으로 보내고, 받은 값은 무시한다(MUST)<a id="req-frame-reserved-zero-send"></a><a id="req-frame-reserved-ignore-recv"></a>.
 
 ### 2.3 플래그
 
@@ -181,7 +181,7 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 
 * `ACK`: HELLO·PING·AUTH에 대한 확인이다.
 
-규칙은 하나다. 해당 `type`에 의미가 정의되지 않은 비트(표의 —)와 `0x02`\~`0x80`은 0으로 보내고(MUST), 받으면 무시한다(MUST). 애플리케이션 프레임의 `flags`는 모든 비트가 미정의다. 요청과 응답은 `flags`가 아니라 번호 공간으로 구분한다(4.2절). 따라서 CLOSE·RESET·애플리케이션 프레임에 어떤 비트가 켜져 와도 오류로 처리하지 않으며, 이들의 `flags`를 따로 검사하는 단계는 없다.
+규칙은 하나다. 해당 `type`에 의미가 정의되지 않은 비트(표의 —)와 `0x02`\~`0x80`은 0으로 보내고(MUST)<a id="req-flags-undefined-zero-send"></a>, 받으면 무시한다(MUST)<a id="req-flags-undefined-ignore-recv"></a>. 애플리케이션 프레임의 `flags`는 모든 비트가 미정의다. 요청과 응답은 `flags`가 아니라 번호 공간으로 구분한다(4.2절). 따라서 CLOSE·RESET·애플리케이션 프레임에 어떤 비트가 켜져 와도 오류로 처리하지 않으며, 이들의 `flags`를 따로 검사하는 단계는 없다.
 
 연결 첫 프레임은 `flags == 0`이어야 한다(3.2.4절).
 
@@ -199,7 +199,7 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 +---------------------------------------------------------------+
 ```
 
-항목 사이에는 패딩이 없다. 각 항목의 (4 + `length`)를 모두 더한 값은 `extensions_length`와 정확히 같아야 한다(MUST). 한 프레임에 같은 `tag`를 두 번 쓸 수 없다. 이를 어기면 확장 영역 형식 위반이며 연결 오류다(MUST, 5.1절). `tag` 공간 전체(`0x0000`\~`0xFFFF`)가 같은 규칙을 따르며, 2.4.2절에 정의된 항목만 해석하고 모르는 `tag`는 모두 건너뛴다(MUST).
+항목 사이에는 패딩이 없다. 각 항목의 (4 + `length`)를 모두 더한 값은 `extensions_length`와 정확히 같아야 한다(MUST)<a id="req-ext-length-sum-exact"></a>. 한 프레임에 같은 `tag`를 두 번 쓸 수 없다. 이를 어기면 확장 영역 형식 위반이며 연결 오류다(MUST, 5.1절)<a id="req-ext-duplicate-tag-error"></a>. `tag` 공간 전체(`0x0000`\~`0xFFFF`)가 같은 규칙을 따르며, 2.4.2절에 정의된 항목만 해석하고 모르는 `tag`는 모두 건너뛴다(MUST)<a id="req-ext-unknown-tag-skip"></a>.
 
 > 비규범 주석: 받는 쪽이 반드시 이해해야 하는 기능은 확장 영역 항목으로 만들지 않고, 기능 비트(3.2절)로 먼저 합의한 연결에서만 쓴다.
 
@@ -211,15 +211,15 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 | `0x0002` | `traceparent` | 바이트열 | 분산 추적 문맥 [^W3C-TRACE-CONTEXT]. 프로토콜은 값을 검사하지 않는다 |
 | `0x0003` | `idempotency-key` | 바이트열, 1\~64바이트 | 같은 요청의 재전송을 식별하는 키 |
 
-`timeout`은 요청을 받은 시점부터 센다. 0은 특수값이 아니며 받은 시점에 이미 만료된 것이다. 시간이 다 되면 받는 쪽은 처리를 멈추고 `DEADLINE_EXCEEDED`로 응답하는 것이 좋다(SHOULD).
+`timeout`은 요청을 받은 시점부터 센다. 0은 특수값이 아니며 받은 시점에 이미 만료된 것이다. 시간이 다 되면 받는 쪽은 처리를 멈추고 `DEADLINE_EXCEEDED`로 응답하는 것이 좋다(SHOULD)<a id="req-ext-timeout-deadline-exceeded"></a>.
 
 요청의 `timeout` 길이가 4가 아니거나 `idempotency-key` 길이가 1\~64를 벗어나면 연결은 그대로 두고 `status` = `INVALID_ARGUMENT`로 답한다(5.1절 5번).
 
-정의된 항목은 요청에서만 의미가 있다. 응답의 확장 영역은 형식만 검사하고(2.4.1절) 내용은 무시한다(MUST).
+정의된 항목은 요청에서만 의미가 있다. 응답의 확장 영역은 형식만 검사하고(2.4.1절) 내용은 무시한다(MUST)<a id="req-ext-response-content-ignore"></a>.
 
 #### 2.4.3 제어 프레임의 확장 영역
 
-제어 프레임(`type` < `0x0100`, 예약 타입 포함)은 `extensions_length`가 0이어야 한다(MUST). 아니면 연결 오류이며(MUST, 5.1절), 제어 프레임의 확장 영역은 파싱하지 않는다.
+제어 프레임(`type` < `0x0100`, 예약 타입 포함)은 `extensions_length`가 0이어야 한다(MUST)<a id="req-ext-control-length-zero"></a>. 아니면 연결 오류이며(MUST, 5.1절)<a id="req-ext-control-nonzero-error"></a>, 제어 프레임의 확장 영역은 파싱하지 않는다.
 
 ### 2.5 코드 체계
 
@@ -248,7 +248,7 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 | 14 | `UNAVAILABLE` | 일시적으로 처리할 수 없음 |
 | 15 | `DATA_LOSS` | 복구할 수 없는 데이터 손실 |
 | 16 | `UNAUTHENTICATED` | 신원을 확인할 수 없음 |
-| 17\~255 | 예약 | 받으면 `UNKNOWN`으로 취급한다(MUST) |
+| 17\~255 | 예약 | 받으면 `UNKNOWN`으로 취급한다(MUST)<a id="req-status-reserved-unknown-recv"></a> |
 
 `status`가 `OK`가 아닌 응답의 payload는 비우거나 애플리케이션이 정한 내용을 넣는다. 프로토콜은 이 payload를 해석하지 않는다.
 
@@ -274,7 +274,7 @@ Strand는 두 엔드포인트 사이에 순서가 보장되는 양방향 전송 
 
 ### 3.1 연결 서문 (Connection Preface)
 
-연결이 열리면 클라이언트는 무엇보다 먼저 아래 8바이트 연결 서문(Connection Preface)을 보낸다(MUST). strand over WebSocket에서는 이를 첫 번째 바이너리 메시지로 보낸다.
+연결이 열리면 클라이언트는 무엇보다 먼저 아래 8바이트 연결 서문(Connection Preface)을 보낸다(MUST)<a id="req-preface-client-send-first"></a>. strand over WebSocket에서는 이를 첫 번째 바이너리 메시지로 보낸다.
 
 ```
 C0 DE 53 54 52 30 00 00
@@ -310,17 +310,17 @@ HELLO는 연결마다 한 번, 내가 받을 수 있는 한도와 지원하는 �
 
 HELLO 송신 규칙은 다음과 같다(모두 MUST).
 
-1. **독립 프레임**: 엔드포인트는 파라미터 `HELLO(flags=0)`와 확인용 `HELLO(flags=ACK, payload 길이 0)`를 서로 다른 두 프레임으로 보낸다. 둘을 합친 프레임(ACK이면서 payload가 비어 있지 않은 HELLO)은 허용하지 않으며, 받으면 3.2.5절의 연결 오류다.
-2. **순서**: 파라미터 HELLO가 먼저이고 상대 HELLO에 대한 ACK HELLO가 나중이다.
-3. **송신 시점**: 서버는 연결 서문을 확인한 즉시(3.1절) 자기 파라미터 HELLO를 보낸다. 클라이언트 HELLO를 기다리지 않는다.
+1. **독립 프레임**: 엔드포인트는 파라미터 `HELLO(flags=0)`와 확인용 `HELLO(flags=ACK, payload 길이 0)`를 서로 다른 두 프레임으로 보낸다. 둘을 합친 프레임(ACK이면서 payload가 비어 있지 않은 HELLO)은 허용하지 않으며, 받으면 3.2.5절의 연결 오류다.<a id="req-hello-send-independent-frames"></a>
+2. **순서**: 파라미터 HELLO가 먼저이고 상대 HELLO에 대한 ACK HELLO가 나중이다.<a id="req-hello-send-param-before-ack"></a>
+3. **송신 시점**: 서버는 연결 서문을 확인한 즉시(3.1절) 자기 파라미터 HELLO를 보낸다. 클라이언트 HELLO를 기다리지 않는다.<a id="req-hello-send-server-immediate"></a>
 
 #### 3.2.3 협상 규칙
 
-모르는 identifier는 무시한다(MUST). 같은 identifier가 두 번 나오는 것은 모르는 identifier라도 연결 오류다(3.2.5절).
+모르는 identifier는 무시한다(MUST)<a id="req-hello-unknown-identifier-ignore"></a>. 같은 identifier가 두 번 나오는 것은 모르는 identifier라도 연결 오류다(3.2.5절).
 
-`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알린 `max_frame_size`보다 큰 프레임을 보내지 않고(MUST), 내가 연 스트림 중 대기 중인 것(4.3절)이 이미 상대가 알린 `max_concurrent_streams`개이면 새 요청을 보내지 않는다(MUST). 받는 쪽이 세는 방법과 거절은 4.5절이다. 한도에 닿았을 때 새 요청을 기다리게 할지 로컬에서 실패시킬지는 구현이 정한다. 실패시키면 프레임을 보내지 않고 번호도 쓰지 않으며, 결과는 `stream_id` 없는 로컬 `UNAVAILABLE`(처리 안 됨)이다. 기다리게 한 요청이 대기열 요청이다(1.3절). 상대 HELLO를 받기 전에 보내는 프레임(HELLO·CLOSE)은 상대의 `max_frame_size`를 허용 범위의 최솟값 16 KiB로 보고 보낸다(MUST). 상대 HELLO가 연결 오류에 걸려 보내는 CLOSE도 같다.
+`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알린 `max_frame_size`보다 큰 프레임을 보내지 않고(MUST)<a id="req-hello-peer-frame-size-limit"></a>, 내가 연 스트림 중 대기 중인 것(4.3절)이 이미 상대가 알린 `max_concurrent_streams`개이면 새 요청을 보내지 않는다(MUST)<a id="req-hello-peer-concurrent-limit"></a>. 받는 쪽이 세는 방법과 거절은 4.5절이다. 한도에 닿았을 때 새 요청을 기다리게 할지 로컬에서 실패시킬지는 구현이 정한다. 실패시키면 프레임을 보내지 않고 번호도 쓰지 않으며, 결과는 `stream_id` 없는 로컬 `UNAVAILABLE`(처리 안 됨)이다. 기다리게 한 요청이 대기열 요청이다(1.3절). 상대 HELLO를 받기 전에 보내는 프레임(HELLO·CLOSE)은 상대의 `max_frame_size`를 허용 범위의 최솟값 16 KiB로 보고 보낸다(MUST)<a id="req-hello-prehello-frame-size-min"></a>. 상대 HELLO가 연결 오류에 걸려 보내는 CLOSE도 같다.
 
-각 엔드포인트는 상대 HELLO가 첫 프레임 검사(3.2.4절)를 통과하면 payload를 검증한다(MUST). `max_frame_size`가 허용 범위(16 KiB\~1 MiB) 밖이면 검증에 실패한 것이며 연결 오류다(5.1절). 통과하면 상대 HELLO에 ACK HELLO로 답하고, 실패하면 ACK를 보내지 않는다. 서버와 클라이언트가 같은 규칙을 쓴다.
+각 엔드포인트는 상대 HELLO가 첫 프레임 검사(3.2.4절)를 통과하면 payload를 검증한다(MUST)<a id="req-hello-payload-validate"></a>. `max_frame_size`가 허용 범위(16 KiB\~1 MiB) 밖이면 검증에 실패한 것이며 연결 오류다(5.1절). 통과하면 상대 HELLO에 ACK HELLO로 답하고, 실패하면 ACK를 보내지 않는다. 서버와 클라이언트가 같은 규칙을 쓴다.
 
 연결에서 실제로 쓸 수 있는 기능은 양쪽 `capabilities`에 공통으로 켜진 비트뿐이다.
 
@@ -339,28 +339,28 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 
 첫 프레임 검사를 통과한 뒤에도 HELLO 형태가 어긋나면 연결 오류다(모두 MUST, 5.1절).
 
-* 파라미터 HELLO의 payload 길이가 6의 배수가 아님
-* ACK HELLO의 payload가 비어 있지 않음(3.2.2절의 합친 프레임)
-* 파라미터 HELLO를 두 번째로 받음
-* 내가 보낸 HELLO에 대한 ACK를 두 번째로 받음
-* 파라미터 HELLO에 같은 identifier가 두 번 나옴(모르는 identifier도 포함). 확장 영역의 중복 tag 금지(2.4.1절)와 같은 규칙이다
+* 파라미터 HELLO의 payload 길이가 6의 배수가 아님<a id="req-hello-param-payload-length-error"></a>
+* ACK HELLO의 payload가 비어 있지 않음(3.2.2절의 합친 프레임)<a id="req-hello-ack-payload-nonempty-error"></a>
+* 파라미터 HELLO를 두 번째로 받음<a id="req-hello-second-param-error"></a>
+* 내가 보낸 HELLO에 대한 ACK를 두 번째로 받음<a id="req-hello-second-ack-error"></a>
+* 파라미터 HELLO에 같은 identifier가 두 번 나옴(모르는 identifier도 포함). 확장 영역의 중복 tag 금지(2.4.1절)와 같은 규칙이다<a id="req-hello-duplicate-identifier-error"></a>
 
 ### 3.3 수립 순서
 
-1. 클라이언트는 연결 서문을 보내고 곧바로 파라미터 HELLO를 이어 보낸다(MUST).
+1. 클라이언트는 연결 서문을 보내고 곧바로 파라미터 HELLO를 이어 보낸다(MUST)<a id="req-setup-client-hello-after-preface"></a>.
 2. 서버는 연결 서문을 3.1절 기준으로 확인한 즉시 자기 파라미터 HELLO를 보낸다(3.2.2절).
 3. 양쪽은 상대 HELLO를 받으면 3.2.4절 첫 프레임 검사를 한다. 실패하면 조용히 닫는다. 통과하면 3.2.3절 검증을 하고, 통과하면 ACK HELLO로 답하며 실패하면 연결 오류다(3.2.3절).
-4. 클라이언트는 서버 HELLO에 ACK HELLO를 보낸 직후 `AUTH`를 한 번 보낸다(MUST). 서버 ACK를 기다리지 않는다. 서버는 자격 증명을 확인해 통과시키면 `AUTH(ACK)`로 답한다(3.3.1절).
+4. 클라이언트는 서버 HELLO에 ACK HELLO를 보낸 직후 `AUTH`를 한 번 보낸다(MUST)<a id="req-setup-client-auth-after-hello-ack"></a>. 서버 ACK를 기다리지 않는다. 서버는 자격 증명을 확인해 통과시키면 `AUTH(ACK)`로 답한다(3.3.1절).
 
-**송신 규칙.** HELLO·CLOSE 외 모든 프레임은 상대 HELLO에 ACK를 보낸 뒤에만 보낸다(MUST). `AUTH`와 `AUTH(ACK)`를 뺀 프레임(PING, RESET, 애플리케이션 프레임, 서버가 먼저 보내는 요청)은 AUTH 관문을 통과한 뒤에만 보낸다(MUST). "수립 완료" 같은 별도 상태는 없다.
+**송신 규칙.** HELLO·CLOSE 외 모든 프레임은 상대 HELLO에 ACK를 보낸 뒤에만 보낸다(MUST)<a id="req-setup-send-after-hello-ack"></a>. `AUTH`와 `AUTH(ACK)`를 뺀 프레임(PING, RESET, 애플리케이션 프레임, 서버가 먼저 보내는 요청)은 AUTH 관문을 통과한 뒤에만 보낸다(MUST)<a id="req-setup-send-after-auth-gate"></a>. "수립 완료" 같은 별도 상태는 없다.
 
-**수신 규칙(ACK 관문).** 내가 보낸 HELLO에 대한 상대의 ACK를 받기 전에는 HELLO와 CLOSE만 받는다. 그 전에 AUTH·PING·RESET·애플리케이션 프레임이 오면 연결 오류다(MUST, 5.1절). 예약 제어 타입은 ACK 전에도 무시한다(2.2.2절).
+**수신 규칙(ACK 관문).** 내가 보낸 HELLO에 대한 상대의 ACK를 받기 전에는 HELLO와 CLOSE만 받는다. 그 전에 AUTH·PING·RESET·애플리케이션 프레임이 오면 연결 오류다(MUST, 5.1절)<a id="req-setup-ack-gate-early-frame-error"></a>. 예약 제어 타입은 ACK 전에도 무시한다(2.2.2절).
 
-**AUTH 관문.** 서버는 `AUTH(ACK)`를 보낸 때, 클라이언트는 `AUTH(ACK)`를 받은 때 AUTH 관문을 통과한다. 통과하기 전에는 양쪽 모두 HELLO·AUTH·CLOSE 외 프레임을 보내지도 받지도 않는다. 그 전에 PING·RESET·애플리케이션 프레임이 오면 연결 오류다(MUST, 5.1절). 예약 제어 타입은 AUTH 관문 전에도 무시한다(2.2.2절). AUTH 관문은 ACK 관문 위에 얹힌다. 곧 ACK 관문의 규칙이 먼저 적용된다.
+**AUTH 관문.** 서버는 `AUTH(ACK)`를 보낸 때, 클라이언트는 `AUTH(ACK)`를 받은 때 AUTH 관문을 통과한다. 통과하기 전에는 양쪽 모두 HELLO·AUTH·CLOSE 외 프레임을 보내지도 받지도 않는다. 그 전에 PING·RESET·애플리케이션 프레임이 오면 연결 오류다(MUST, 5.1절)<a id="req-setup-auth-gate-early-frame-error"></a>. 예약 제어 타입은 AUTH 관문 전에도 무시한다(2.2.2절). AUTH 관문은 ACK 관문 위에 얹힌다. 곧 ACK 관문의 규칙이 먼저 적용된다.
 
-**AUTH 대기.** 서버가 상대 HELLO에 ACK를 보낸 때부터 정해 둔 시간이 지나도록 `AUTH`를 받지 못하면 `CLOSE(UNAUTHENTICATED)`를 보내고 닫는다(MUST). 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(3.5절). 대기 시간의 값은 로컬 설정이다. 클라이언트의 `AUTH(ACK)` 대기는 아래 확인 대기를 따른다.
+**AUTH 대기.** 서버가 상대 HELLO에 ACK를 보낸 때부터 정해 둔 시간이 지나도록 `AUTH`를 받지 못하면 `CLOSE(UNAUTHENTICATED)`를 보내고 닫는다(MUST)<a id="req-setup-auth-timeout-close"></a>. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(3.5절). 대기 시간의 값은 로컬 설정이다. 클라이언트의 `AUTH(ACK)` 대기는 아래 확인 대기를 따른다.
 
-**확인 대기.** HELLO·PING·AUTH를 전송 계층에 넘긴 때(WebSocket에서는 그 프레임을 담은 바이너리 메시지를 WebSocket 계층에 넘긴 때)부터 정해 둔 시간이 지나도록 상대의 ACK가 오지 않으면 `CLOSE(UNRESPONSIVE)`를 보내고 닫는다(MUST). 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(3.5절). 대기 시간의 값은 로컬 설정이다.
+**확인 대기.** HELLO·PING·AUTH를 전송 계층에 넘긴 때(WebSocket에서는 그 프레임을 담은 바이너리 메시지를 WebSocket 계층에 넘긴 때)부터 정해 둔 시간이 지나도록 상대의 ACK가 오지 않으면 `CLOSE(UNRESPONSIVE)`를 보내고 닫는다(MUST)<a id="req-setup-ack-timeout-close"></a>. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(3.5절). 대기 시간의 값은 로컬 설정이다.
 
 ```mermaid
 sequenceDiagram
@@ -425,20 +425,20 @@ AUTH payload
 
 `mechanism`은 메커니즘 이름이며 [^RFC4422] 3.1절의 문법을 따른다. 곧 대문자 `A`\~`Z`, 숫자, 하이픈(`-`), 밑줄(`_`)로만 이뤄진 1\~20바이트다. `credentials`는 메커니즘이 정한 불투명 바이트열이고 프로토콜은 해석하지 않는다. 이 규격은 SASL의 이름 형식을 빌릴 뿐 SASL 프로필이 아니다. 메커니즘 협상, 서버의 메커니즘 목록 공지, 다단계 교환, 보안 계층은 없다.
 
-`AUTH(ACK)`의 identifier는 다음과 같다. 모르는 identifier는 무시한다(MUST).
+`AUTH(ACK)`의 identifier는 다음과 같다. 모르는 identifier는 무시한다(MUST)<a id="req-auth-ack-unknown-identifier-ignore"></a>.
 
 | identifier | 이름 | 값 |
 | --- | --- | --- |
 | `0x0001` | `credential_lifetime` | 서버가 `AUTH(ACK)`를 보내는 시점에 남은 자격 증명의 수명(초). 빠지면 만료를 알리지 않는다 |
 
-**메커니즘.** 사용할 메커니즘은 두 엔드포인트가 미리 합의한다. 서버는 메커니즘 목록을 알리지 않는다. 문법에는 맞지만 서버가 모르는 메커니즘이거나 서버가 자격 증명을 거부하면 서버는 `CLOSE(UNAUTHENTICATED)`를 보내고(MUST) 닫는다. 거부 사유는 구분하지 않으며 `reason`은 비운다(MUST). 인증 서버 장애 같은 일시적 실패는 `CLOSE(INTERNAL_ERROR)`를 보낸다(MUST).
+**메커니즘.** 사용할 메커니즘은 두 엔드포인트가 미리 합의한다. 서버는 메커니즘 목록을 알리지 않는다. 문법에는 맞지만 서버가 모르는 메커니즘이거나 서버가 자격 증명을 거부하면 서버는 `CLOSE(UNAUTHENTICATED)`를 보내고(MUST)<a id="req-auth-reject-close-unauthenticated"></a> 닫는다. 거부 사유는 구분하지 않으며 `reason`은 비운다(MUST)<a id="req-auth-reject-reason-empty"></a>. 인증 서버 장애 같은 일시적 실패는 `CLOSE(INTERNAL_ERROR)`를 보낸다(MUST)<a id="req-auth-transient-failure-close-internal"></a>.
 
-**만료와 폐기.** 연결 인증은 연결마다 한 번이다. 재인증은 없다. 서버는 자격 증명이 만료되면 `CLOSE(NO_ERROR)`를 보내고(MUST), 폐기되면 `CLOSE(UNAUTHENTICATED)`를 보낸다(MUST). 폐기의 `reason`도 비운다.
+**만료와 폐기.** 연결 인증은 연결마다 한 번이다. 재인증은 없다. 서버는 자격 증명이 만료되면 `CLOSE(NO_ERROR)`를 보내고(MUST)<a id="req-auth-expiry-close-no-error"></a>, 폐기되면 `CLOSE(UNAUTHENTICATED)`를 보낸다(MUST)<a id="req-auth-revoked-close-unauthenticated"></a>. 폐기의 `reason`도 비운다.
 
 **연결 오류.** 다음은 연결 오류다(모두 MUST, 5.1절).
-* 형태 위반: `AUTH`의 payload가 1바이트 미만이거나, `mechanism_length`가 1\~20 밖이거나, payload가 1 + `mechanism_length` 바이트보다 짧거나, `mechanism`이 위 문법을 어긴다. `AUTH(ACK)`의 payload가 6의 배수가 아니거나, 같은 identifier가 두 번 나온다(모르는 identifier도 포함).
-* 방향 위반: 서버가 `AUTH(ACK)`를 받음. 클라이언트가 `AUTH`를 받음.
-* 두 번째 `AUTH`나 두 번째 `AUTH(ACK)`를 받음.
+* 형태 위반: `AUTH`의 payload가 1바이트 미만이거나, `mechanism_length`가 1\~20 밖이거나, payload가 1 + `mechanism_length` 바이트보다 짧거나, `mechanism`이 위 문법을 어긴다. `AUTH(ACK)`의 payload가 6의 배수가 아니거나, 같은 identifier가 두 번 나온다(모르는 identifier도 포함).<a id="req-auth-malformed-error"></a>
+* 방향 위반: 서버가 `AUTH(ACK)`를 받음. 클라이언트가 `AUTH`를 받음.<a id="req-auth-direction-error"></a>
+* 두 번째 `AUTH`나 두 번째 `AUTH(ACK)`를 받음.<a id="req-auth-second-frame-error"></a>
 
 > 비규범 주석: 메커니즘마다 단일 왕복으로 되는지가 갈린다. 다단계가 필요한 메커니즘은 이 규격으로 쓸 수 없다.
 >
@@ -458,13 +458,13 @@ PING은 어느 쪽이든 보낼 수 있다.
 * **stream_id**: `0`
 * **payload**: 정확히 8바이트 (임의의 바이트열)
 
-`ACK` 플래그가 없는 PING을 받은 쪽은 같은 8바이트에 `ACK` 플래그(`flags = 0x01`)를 붙여 즉시 돌려준다(MUST). ACK PING에는 답하지 않는다(MUST NOT). 보낸 PING과 맞춰 보는 일은 로컬 몫이므로, 보낸 PING과 맞지 않는 ACK PING도 무시한다. payload 길이가 정확히 8바이트가 아니면 ACK PING이든 아니든 연결 오류다(5.1절). ACK를 기다리는 시간의 한도는 3.3절의 확인 대기 규칙을 따른다.
+`ACK` 플래그가 없는 PING을 받은 쪽은 같은 8바이트에 `ACK` 플래그(`flags = 0x01`)를 붙여 즉시 돌려준다(MUST)<a id="req-ping-ack-reply"></a>. ACK PING에는 답하지 않는다(MUST NOT)<a id="req-ping-ack-no-reply"></a>. 보낸 PING과 맞춰 보는 일은 로컬 몫이므로, 보낸 PING과 맞지 않는 ACK PING도 무시한다. payload 길이가 정확히 8바이트가 아니면 ACK PING이든 아니든 연결 오류다(5.1절). ACK를 기다리는 시간의 한도는 3.3절의 확인 대기 규칙을 따른다.
 
 > 비규범 주석: 확인 대기 시간은 상대의 `max_frame_size` 크기 프레임 하나를 보내는 데 걸리는 시간보다 길게 잡는다. 그보다 짧으면 큰 프레임을 주고받는 중인 정상 연결을 끊는다.
 
 #### 3.4.1 유휴 시 PING
 
-엔드포인트는 유휴 간격 동안 상대에게서 받은 프레임이 없으면 PING을 보낸다(SHOULD). 보내는 때는 3.3절의 송신 규칙을 따른다. 유휴 간격의 값은 로컬 설정이다. ACK를 기다리는 PING은 한 번에 하나만 둔다(SHOULD). 기다리는 PING이 있으면 유휴 PING을 새로 보내지 않는다.
+엔드포인트는 유휴 간격 동안 상대에게서 받은 프레임이 없으면 PING을 보낸다(SHOULD)<a id="req-ping-idle-send"></a>. 보내는 때는 3.3절의 송신 규칙을 따른다. 유휴 간격의 값은 로컬 설정이다. ACK를 기다리는 PING은 한 번에 하나만 둔다(SHOULD)<a id="req-ping-single-outstanding"></a>. 기다리는 PING이 있으면 유휴 PING을 새로 보내지 않는다.
 
 ### 3.5 연결 종료: CLOSE
 
@@ -486,7 +486,7 @@ CLOSE payload
 +-----------------------------+
 ```
 
-`last_stream_id`는 CLOSE를 보내는 순간의 `highest_peer_stream_id`(2.2.5절)와 같아야 한다(MUST). 상대가 보낸 요청이 아직 없으면 0이다.
+`last_stream_id`는 CLOSE를 보내는 순간의 `highest_peer_stream_id`(2.2.5절)와 같아야 한다(MUST)<a id="req-close-last-stream-id-equals-highest"></a>. 상대가 보낸 요청이 아직 없으면 0이다.
 
 `reason`은 사람이 읽으라고 넣는 설명이다. 받는 쪽은 `reason`의 UTF-8 유효성을 포함해 내용을 검증하지 않으며, 프로그램 동작이 이 값에 기대서는 안 된다.
 
@@ -497,18 +497,18 @@ CLOSE payload
 
 **받은 CLOSE.** `type`이 CLOSE인 프레임은 형태가 잘못돼도 받은 CLOSE로 치고, 형태가 잘못된 CLOSE는 오류 CLOSE처럼 다룬다. 예외는 없다. 따라서 형태가 잘못된 CLOSE를 받으면 CLOSE를 보내지 않고 즉시 닫는다. 이 CLOSE의 `last_stream_id`는 쓰지 않으므로, 내 요청은 아래 "연결이 끝날 때"의 규칙을 따른다. 번호가 있고 전송 계층에 넘긴 요청은 결과 모름, 번호가 없거나 아직 넘기지 못한 요청은 처리 안 됨이다.
 
-CLOSE를 받으면 그 즉시, 대기 중인 내 요청 가운데 `stream_id`가 그 CLOSE의 `last_stream_id`보다 큰 것마다 애플리케이션에 로컬 `status` = `UNAVAILABLE`(처리 안 됨) 결과를 정확히 한 번 넘기고 그 스트림을 끝낸다(MUST). CLOSE를 보내거나 받으면 그 즉시, 아직 번호를 받지 못한 대기열 요청마다(1.3절) 같은 결과를 정확히 한 번 넘기고 끝낸다(MUST). CLOSE를 둘 이상 받으면 처음 받은 CLOSE의 `last_stream_id`만 쓴다(MUST).
+CLOSE를 받으면 그 즉시, 대기 중인 내 요청 가운데 `stream_id`가 그 CLOSE의 `last_stream_id`보다 큰 것마다 애플리케이션에 로컬 `status` = `UNAVAILABLE`(처리 안 됨) 결과를 정확히 한 번 넘기고 그 스트림을 끝낸다(MUST)<a id="req-close-recv-unavailable-above-last-id"></a>. CLOSE를 보내거나 받으면 그 즉시, 아직 번호를 받지 못한 대기열 요청마다(1.3절) 같은 결과를 정확히 한 번 넘기고 끝낸다(MUST)<a id="req-close-queued-requests-unavailable-send"></a><a id="req-close-queued-requests-unavailable-recv"></a>. CLOSE를 둘 이상 받으면 처음 받은 CLOSE의 `last_stream_id`만 쓴다(MUST)<a id="req-close-first-last-id-only"></a>.
 
-엔드포인트는 CLOSE를 보내거나 받기 전이라면 로컬 판단으로 언제든 CLOSE를 보낼 수 있다(MAY). 과도한 사용 때문이면 `EXCESSIVE_USE`, 자격 증명을 폐기했다면 `UNAUTHENTICATED`(3.3.1절), 그 밖에는 `NO_ERROR`를 쓴다. 규격이 보내라고 정한 CLOSE의 사유는 각 절이 정한다. 연결 오류의 `PROTOCOL_ERROR`는 5.1절, 확인 대기 초과의 `UNRESPONSIVE`는 3.3절, 연결 인증의 `UNAUTHENTICATED`와 `INTERNAL_ERROR`는 3.3절과 3.3.1절이 정한다. CLOSE를 보냈거나 받은 뒤에는 CLOSE를 보내지 않고(MUST NOT) 새 스트림도 열지 않는다(MUST). 그 뒤에 보내야 할 오류 CLOSE(5.1절의 연결 오류, 확인 대기 초과, 연결 인증의 거부·폐기·대기 초과)도 보내지 않고 전송 계층만 닫는다. 상대는 이를 CLOSE 없이 끊긴 것으로 처리한다. 양쪽이 동시에 CLOSE를 보내 엇갈리는 것은 허용한다.
+엔드포인트는 CLOSE를 보내거나 받기 전이라면 로컬 판단으로 언제든 CLOSE를 보낼 수 있다(MAY). 과도한 사용 때문이면 `EXCESSIVE_USE`, 자격 증명을 폐기했다면 `UNAUTHENTICATED`(3.3.1절), 그 밖에는 `NO_ERROR`를 쓴다. 규격이 보내라고 정한 CLOSE의 사유는 각 절이 정한다. 연결 오류의 `PROTOCOL_ERROR`는 5.1절, 확인 대기 초과의 `UNRESPONSIVE`는 3.3절, 연결 인증의 `UNAUTHENTICATED`와 `INTERNAL_ERROR`는 3.3절과 3.3.1절이 정한다. CLOSE를 보냈거나 받은 뒤에는 CLOSE를 보내지 않고(MUST NOT)<a id="req-close-after-close-no-close"></a> 새 스트림도 열지 않는다(MUST)<a id="req-close-after-close-no-new-stream"></a>. 그 뒤에 보내야 할 오류 CLOSE(5.1절의 연결 오류, 확인 대기 초과, 연결 인증의 거부·폐기·대기 초과)도 보내지 않고 전송 계층만 닫는다. 상대는 이를 CLOSE 없이 끊긴 것으로 처리한다. 양쪽이 동시에 CLOSE를 보내 엇갈리는 것은 허용한다.
 
-CLOSE를 보냈거나 받은 뒤 애플리케이션이 새 요청을 내면 프레임을 보내지 않고 애플리케이션에 로컬 `UNAVAILABLE`(처리 안 됨)로 실패시킨다(MUST). 이 실패는 스트림을 열기 전의 로컬 결과라서 `stream_id`가 없다. CLOSE를 보냈거나 받은 뒤 상대가 보낸 새 요청은 끝까지 읽고 애플리케이션에 넘기지 않은 채 조용히 버린다(5.1절 5번 (가)). 그 요청에 대해서는 어떤 프레임도 보내지 않는다. 번호 역행 같은 연결 오류 검사는 이 요청에도 그대로 적용한다(5.1절). 상대는 내가 보낸 `last_stream_id`로 그 요청이 처리되지 않았음을 안다.
+CLOSE를 보냈거나 받은 뒤 애플리케이션이 새 요청을 내면 프레임을 보내지 않고 애플리케이션에 로컬 `UNAVAILABLE`(처리 안 됨)로 실패시킨다(MUST)<a id="req-close-new-request-local-unavailable"></a>. 이 실패는 스트림을 열기 전의 로컬 결과라서 `stream_id`가 없다. CLOSE를 보냈거나 받은 뒤 상대가 보낸 새 요청은 끝까지 읽고 애플리케이션에 넘기지 않은 채 조용히 버린다(5.1절 5번 (가)). 그 요청에 대해서는 어떤 프레임도 보내지 않는다. 번호 역행 같은 연결 오류 검사는 이 요청에도 그대로 적용한다(5.1절). 상대는 내가 보낸 `last_stream_id`로 그 요청이 처리되지 않았음을 안다.
 
 닫는 시점은 `error_code`가 정한다. 대기 중인 스트림은 내가 연 것과 상대가 연 것을 모두 센다(4.3절).
 
-* 오류 CLOSE(`NO_ERROR`가 아닌 코드)를 보냈거나 받았으면 즉시 전송 계층을 닫는다(MUST). 대기 중인 스트림이 남아 있어도 기다리지 않는다. 연결이 종료 중일 때 받은 오류 CLOSE도 같다.
-* 그 밖에 `NO_ERROR` CLOSE를 보냈거나 받았으면 연결은 **종료 중**이 된다. 대기 중인 스트림이 없어지면(처음부터 없는 경우 포함) 전송 계층을 닫는다(MUST). 종료 중 상태 자체에는 시간 제한을 두지 않으며 얼마나 기다릴지는 애플리케이션이 정한다. 종료 중에도 생존 확인(3.3절의 확인 대기, 3.4.1절의 유휴 시 PING)은 계속한다.
+* 오류 CLOSE(`NO_ERROR`가 아닌 코드)를 보냈거나 받았으면 즉시 전송 계층을 닫는다(MUST)<a id="req-close-error-close-immediate"></a>. 대기 중인 스트림이 남아 있어도 기다리지 않는다. 연결이 종료 중일 때 받은 오류 CLOSE도 같다.
+* 그 밖에 `NO_ERROR` CLOSE를 보냈거나 받았으면 연결은 **종료 중**이 된다. 대기 중인 스트림이 없어지면(처음부터 없는 경우 포함) 전송 계층을 닫는다(MUST)<a id="req-close-no-error-drain-then-close"></a>. 종료 중 상태 자체에는 시간 제한을 두지 않으며 얼마나 기다릴지는 애플리케이션이 정한다. 종료 중에도 생존 확인(3.3절의 확인 대기, 3.4.1절의 유휴 시 PING)은 계속한다.
 
-**연결이 끝날 때.** CLOSE를 보내거나 받아 닫을 때, CLOSE 없이 닫을 때(5.1절 1번·2번, 이미 CLOSE를 보냈거나 받은 뒤의 연결 오류와 확인 대기 초과 포함), 상대가 CLOSE 없이 전송 계층을 끊었을 때(TCP EOF·RST, WebSocket close) 모두 연결이 끝난 것이다. 전송 계층이 끊기면 보낼 수 없으므로 아무것도 보내지 않는다. 연결이 끝날 때 응답도 RESET도 받지 못한 채 대기 중인 내 요청(CLOSE의 `last_stream_id`로 이미 끝난 요청은 대기 중이 아니다. 상대 한도에 걸려 스트림을 열기 전에 대기열에서 기다리는 요청 포함)마다 애플리케이션에 로컬 `status` = `UNAVAILABLE` 결과를 정확히 한 번 넘기고(MUST), 그 뒤에 `closed` 이벤트를 낸다. 결과 확정성은 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(WebSocket에서는 그 프레임을 담은 바이너리 메시지를 WebSocket 계층에 넘겼는지). 넘기기 전이면 처리 안 됨이고, 넘긴 뒤이면 결과 모름이다. `closed`는 연결당 정확히 한 번 낸다. 이미 닫힌 뒤에 전송 계층 끊김이 감지되어도 `closed`를 다시 내지 않고 아무것도 보내지 않는다. `NO_ERROR`로 마저 끝내고 대기 중인 스트림이 없어져 닫을 때도 `closed`는 마지막 스트림의 result(정상 응답 포함) 다음에 낸다(MUST). 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 상대가 연 스트림은 내 요청이 아니므로 결과를 넘기지 않는다. 다시 보내도 되는지는 결과 확정성에 따라 4.6절이 정한다.
+**연결이 끝날 때.** CLOSE를 보내거나 받아 닫을 때, CLOSE 없이 닫을 때(5.1절 1번·2번, 이미 CLOSE를 보냈거나 받은 뒤의 연결 오류와 확인 대기 초과 포함), 상대가 CLOSE 없이 전송 계층을 끊었을 때(TCP EOF·RST, WebSocket close) 모두 연결이 끝난 것이다. 전송 계층이 끊기면 보낼 수 없으므로 아무것도 보내지 않는다. 연결이 끝날 때 응답도 RESET도 받지 못한 채 대기 중인 내 요청(CLOSE의 `last_stream_id`로 이미 끝난 요청은 대기 중이 아니다. 상대 한도에 걸려 스트림을 열기 전에 대기열에서 기다리는 요청 포함)마다 애플리케이션에 로컬 `status` = `UNAVAILABLE` 결과를 정확히 한 번 넘기고(MUST)<a id="req-close-end-pending-unavailable"></a>, 그 뒤에 `closed` 이벤트를 낸다. 결과 확정성은 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(WebSocket에서는 그 프레임을 담은 바이너리 메시지를 WebSocket 계층에 넘겼는지). 넘기기 전이면 처리 안 됨이고, 넘긴 뒤이면 결과 모름이다. `closed`는 연결당 정확히 한 번 낸다. 이미 닫힌 뒤에 전송 계층 끊김이 감지되어도 `closed`를 다시 내지 않고 아무것도 보내지 않는다. `NO_ERROR`로 마저 끝내고 대기 중인 스트림이 없어져 닫을 때도 `closed`는 마지막 스트림의 result(정상 응답 포함) 다음에 낸다(MUST)<a id="req-close-closed-after-last-result"></a>. 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 상대가 연 스트림은 내 요청이 아니므로 결과를 넘기지 않는다. 다시 보내도 되는지는 결과 확정성에 따라 4.6절이 정한다.
 
 ```mermaid
 sequenceDiagram
@@ -538,11 +538,11 @@ sequenceDiagram
 
 #### 3.5.1 끊기 전에 돌려보내기
 
-전송 계층을 닫기 전에, CLOSE를 보내거나 받기 전에 받아들인 상대의 요청 가운데 아직 애플리케이션에 넘기지 않은 것은 `RESET(REFUSED)`로 돌려보내는 것이 좋다(SHOULD). CLOSE를 보내거나 받은 뒤에 온 새 요청은 3.5절에 따라 버리므로 해당하지 않는다. 종료 중에 더 기다리지 않고 닫기로 했을 때와 오류 CLOSE를 보낼 때가 해당하며, 오류 CLOSE를 보낼 때는 CLOSE보다 먼저 보낸다. 돌려보낸 요청의 스트림은 RESET을 보내는 즉시 끝나고(4.3절), 상대는 그 요청을 처리 안 됨(4.4절)으로 확정한다. 돌려보내지 않은 요청은 상대에게 결과 모름으로 남는다.
+전송 계층을 닫기 전에, CLOSE를 보내거나 받기 전에 받아들인 상대의 요청 가운데 아직 애플리케이션에 넘기지 않은 것은 `RESET(REFUSED)`로 돌려보내는 것이 좋다(SHOULD)<a id="req-close-refuse-unstarted-reset"></a>. CLOSE를 보내거나 받은 뒤에 온 새 요청은 3.5절에 따라 버리므로 해당하지 않는다. 종료 중에 더 기다리지 않고 닫기로 했을 때와 오류 CLOSE를 보낼 때가 해당하며, 오류 CLOSE를 보낼 때는 CLOSE보다 먼저 보낸다. 돌려보낸 요청의 스트림은 RESET을 보내는 즉시 끝나고(4.3절), 상대는 그 요청을 처리 안 됨(4.4절)으로 확정한다. 돌려보내지 않은 요청은 상대에게 결과 모름으로 남는다.
 
 ### 3.6 제어 프레임 먼저 보내기
 
-엔드포인트는 아직 쓰기를 시작하지 않은 애플리케이션 프레임보다 제어 프레임을 먼저 보낸다(SHOULD). 쓰기를 시작한 프레임은 끝까지 쓴다. 제어 프레임끼리의 순서는 이 절이 정하지 않으며, 다른 절이 정한 순서(3.2.2절, 3.5.1절)는 그대로 지킨다.
+엔드포인트는 아직 쓰기를 시작하지 않은 애플리케이션 프레임보다 제어 프레임을 먼저 보낸다(SHOULD)<a id="req-control-frame-first"></a>. 쓰기를 시작한 프레임은 끝까지 쓴다. 제어 프레임끼리의 순서는 이 절이 정하지 않으며, 다른 절이 정한 순서(3.2.2절, 3.5.1절)는 그대로 지킨다.
 
 > 비규범 주석: 이미 커널 송신 버퍼에 넘어간 바이트는 되돌릴 수 없다. 한 번에 넘기는 양을 작게 유지해야 PING과 CLOSE가 앞선 프레임 뒤에서 오래 기다리지 않는다.
 
@@ -556,7 +556,7 @@ sequenceDiagram
 
 모르는 `type`으로 요청이 오면 연결은 그대로 두고 `status` = `UNIMPLEMENTED`로 답한다(5.1절 5번). payload 형식을 호환되지 않게 바꿔야 할 때는 기존 `type`을 고치지 말고 새 번호를 받는다.
 
-프로토콜은 애플리케이션 payload를 해석하지 않고 그대로 넘긴다. 애플리케이션은 요청 payload를 해석하지 못하면 `status` = `INVALID_ARGUMENT`로 답하는 것이 좋다(SHOULD).
+프로토콜은 애플리케이션 payload를 해석하지 않고 그대로 넘긴다. 애플리케이션은 요청 payload를 해석하지 못하면 `status` = `INVALID_ARGUMENT`로 답하는 것이 좋다(SHOULD)<a id="req-app-undecodable-invalid-argument"></a>.
 
 **응답 해석.** 응답의 `type`이 요청과 다르면(2.2.2절) 애플리케이션에 로컬 `status` = `INTERNAL`을 넘기고, 와이어로는 아무것도 보내지 않는다(RESET도 CLOSE도 보내지 않는다). 이 결과의 결과 확정성은 응답 받음이고, 이 응답도 정상 응답을 받은 것과 같게 다룬다(4.3절). 받은 응답의 `status`와 payload는 버린다.
 
@@ -570,7 +570,7 @@ sequenceDiagram
 
 #### 4.2.1 새 요청 판정과 번호 역행
 
-상대 공간의 번호인 애플리케이션 프레임은 모두 새 요청이다. 그 `stream_id`가 `highest_peer_stream_id` 이하이면 연결 오류다(MUST, 5.1절). 재사용한 번호도, 건너뛰고 나중에 온 번호도, 대기 중인 스트림을 가리키는 번호도 마찬가지다. 상대 공간의 RESET은 새 요청이 아니므로 번호가 `highest_peer_stream_id` 이하여도 4.3절에 따라 처리한다.
+상대 공간의 번호인 애플리케이션 프레임은 모두 새 요청이다. 그 `stream_id`가 `highest_peer_stream_id` 이하이면 연결 오류다(MUST, 5.1절)<a id="req-stream-id-regression-error"></a>. 재사용한 번호도, 건너뛰고 나중에 온 번호도, 대기 중인 스트림을 가리키는 번호도 마찬가지다. 상대 공간의 RESET은 새 요청이 아니므로 번호가 `highest_peer_stream_id` 이하여도 4.3절에 따라 처리한다.
 
 새 요청이 아닌 프레임, 곧 내 번호 공간의 애플리케이션 프레임(응답)과 양쪽 번호 공간의 RESET은 4.3절이 처리한다.
 
@@ -583,7 +583,7 @@ sequenceDiagram
 | 대기 | 요청 프레임을 보냄(받아들임) | 응답 프레임 또는 RESET을 보내거나 받음 → 끝남. 내 요청의 `stream_id`가 받은 CLOSE의 `last_stream_id`보다 큼(3.5절) → 끝남. 연결이 끝남(3.5절) → 끝남 |
 | 끝남 | 응답 또는 RESET을 보내거나 받음. 받은 CLOSE의 `last_stream_id`로 내 요청이 끝남. 연결이 끝남. 받은 요청을 `RESET(REFUSED)`으로 거절하면 대기를 거치지 않고 바로 끝남 | — |
 
-스트림은 응답이나 RESET을 보내거나 받는 즉시 끝난다(MUST). 응답을 보냈거나 받은 쪽만이 아니라 RESET을 보낸 쪽과 받은 쪽도 같다.
+스트림은 응답이나 RESET을 보내거나 받는 즉시 끝난다(MUST)<a id="req-stream-ends-on-response-or-reset"></a>. 응답을 보냈거나 받은 쪽만이 아니라 RESET을 보낸 쪽과 받은 쪽도 같다.
 
 ```mermaid
 stateDiagram-v2
@@ -613,15 +613,15 @@ RESET payload
 +-----------------------------+
 ```
 
-payload 길이가 정확히 4바이트가 아니면 연결 오류다(MUST, 5.1절).
+payload 길이가 정확히 4바이트가 아니면 연결 오류다(MUST, 5.1절)<a id="req-reset-payload-length-error"></a>.
 
-RESET의 `error_code`에는 CLOSE 전용 코드(2.5.2절의 5\~7)를 쓰지 않는다(MUST NOT). 받으면 그 밖의 RESET으로 다룬다.
+RESET의 `error_code`에는 CLOSE 전용 코드(2.5.2절의 5\~7)를 쓰지 않는다(MUST NOT)<a id="req-reset-close-only-code-forbidden"></a>. 받으면 그 밖의 RESET으로 다룬다.
 
-받은 RESET에는 어떤 경우에도 RESET으로 답하지 않는다(MUST NOT). 대기 상태인 스트림이 RESET을 받으면 끝남으로 넘어가고(4.3절), 대기 중이 아닌 스트림에 RESET이 오면 4.3절에 따라 아무것도 보내지 않고 버린다.
+받은 RESET에는 어떤 경우에도 RESET으로 답하지 않는다(MUST NOT)<a id="req-reset-no-reply"></a>. 대기 상태인 스트림이 RESET을 받으면 끝남으로 넘어가고(4.3절), 대기 중이 아닌 스트림에 RESET이 오면 4.3절에 따라 아무것도 보내지 않고 버린다.
 
-요청한 쪽이 결과가 더는 필요 없을 때는 `RESET(CANCEL)`을 보낸다. 요청 프레임의 쓰기를 시작했다면 그 프레임을 끊지 않고 마저 쓴 뒤 RESET을 보낸다(MUST). 받은 쪽은 할 수 있으면 처리를 멈추고, 응답은 보내지 않는다.
+요청한 쪽이 결과가 더는 필요 없을 때는 `RESET(CANCEL)`을 보낸다. 요청 프레임의 쓰기를 시작했다면 그 프레임을 끊지 않고 마저 쓴 뒤 RESET을 보낸다(MUST)<a id="req-reset-cancel-finish-frame"></a>. 받은 쪽은 할 수 있으면 처리를 멈추고, 응답은 보내지 않는다.
 
-**RESET으로 끝난 요청의 결과.** 내가 보낸 요청의 스트림이 RESET으로 끝나거나(내가 RESET을 보냈든 받았든) 요청 프레임을 한 바이트도 쓰기 전에 취소되면 애플리케이션에 로컬 `status` 결과를 정확히 한 번 넘긴다(MUST). 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 요청을 받은 쪽에는 결과를 기다리는 요청이 없으므로 애플리케이션에 넘기는 결과가 없다.
+**RESET으로 끝난 요청의 결과.** 내가 보낸 요청의 스트림이 RESET으로 끝나거나(내가 RESET을 보냈든 받았든) 요청 프레임을 한 바이트도 쓰기 전에 취소되면 애플리케이션에 로컬 `status` 결과를 정확히 한 번 넘긴다(MUST)<a id="req-reset-local-status-once"></a>. 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 요청을 받은 쪽에는 결과를 기다리는 요청이 없으므로 애플리케이션에 넘기는 결과가 없다.
 
 | 사건 | 애플리케이션에 넘기는 `status` | 결과 확정성 |
 | --- | --- | --- |
@@ -636,7 +636,7 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 #### 4.4.1 요청 기한
 
-요청한 쪽은 요청마다 로컬 기한을 둘 수 있다(MAY). 기한이 지났을 때 요청 프레임을 아직 한 바이트도 쓰지 않았다면(번호를 받지 못한 대기열 요청(1.3절)과, 번호는 받았지만 쓰기 전인 요청) `RESET` 없이 쓰지 않은 프레임을 버리고 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(처리 안 됨)를 넘기고 끝낸다(MUST). 쓰기를 시작했고 그 스트림이 아직 대기 중이면 `RESET(CANCEL)`을 보내고(MUST) 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(결과 모름)를 넘긴다. 기한의 값은 로컬 설정이다.
+요청한 쪽은 요청마다 로컬 기한을 둘 수 있다(MAY). 기한이 지났을 때 요청 프레임을 아직 한 바이트도 쓰지 않았다면(번호를 받지 못한 대기열 요청(1.3절)과, 번호는 받았지만 쓰기 전인 요청) `RESET` 없이 쓰지 않은 프레임을 버리고 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(처리 안 됨)를 넘기고 끝낸다(MUST)<a id="req-deadline-unwritten-local-exceeded"></a>. 쓰기를 시작했고 그 스트림이 아직 대기 중이면 `RESET(CANCEL)`을 보내고(MUST)<a id="req-deadline-written-reset-cancel"></a> 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(결과 모름)를 넘긴다. 기한의 값은 로컬 설정이다.
 
 ### 4.5 배압 (Backpressure)
 
@@ -644,11 +644,11 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 **동시 스트림 수.** 받는 쪽이 세는 대상은 상대 번호 공간의 스트림 중 대기 상태(4.3절)인 것의 개수 `n`이다. 상대의 새 요청이 5.1절 5번 (가)에 오면, `n + 1 > max_concurrent_streams`이면 그 요청을 `RESET(REFUSED)`으로 거절하고, 아니면 받아들인다. CLOSE를 보냈거나 받은 뒤의 새 요청은 이 검사에 오지 않고 3.5절에 따라 버린다. `n + 1`이 `max_concurrent_streams`와 같으면 받아들인다. `max_concurrent_streams`가 0이면 상대의 새 요청은 모두 거절한다. 스트림이 대기에서 끝남으로 넘어가면 `n`에서 빠진다(4.3절).
 
-**로컬 사유 거절.** 받는 쪽은 새 요청을 애플리케이션에 넘기기 전이면 자기 과부하나 초당 처리 한도 같은 어떤 로컬 사유로든 `RESET(REFUSED)`으로 거절할 수 있다(MAY). 요청을 애플리케이션에 넘겨 처리를 시작한 뒤에는 `RESET(REFUSED)`를 보내지 않는다(MUST NOT). 처리를 시작한 요청은 `status` 응답으로 끝낸다.
+**로컬 사유 거절.** 받는 쪽은 새 요청을 애플리케이션에 넘기기 전이면 자기 과부하나 초당 처리 한도 같은 어떤 로컬 사유로든 `RESET(REFUSED)`으로 거절할 수 있다(MAY). 요청을 애플리케이션에 넘겨 처리를 시작한 뒤에는 `RESET(REFUSED)`를 보내지 않는다(MUST NOT)<a id="req-backpressure-no-refuse-after-start"></a>. 처리를 시작한 요청은 `status` 응답으로 끝낸다.
 
 **거절한 요청.** 새 요청을 받자마자 `RESET(REFUSED)`으로 거절한 요청은 `n`에 넣지 않는다. 그 스트림은 대기 상태를 거치지 않고 바로 끝난다.
 
-소켓 읽기를 멈춰서는 안 된다(MUST NOT). 거절한 요청도 끝까지 읽고 버린다.
+소켓 읽기를 멈춰서는 안 된다(MUST NOT)<a id="req-backpressure-no-read-stop"></a>. 거절한 요청도 끝까지 읽고 버린다.
 
 단, 전송 구현은 자기 쓰기 대기열이 한도를 넘는 동안에는 읽기를 멈출 수 있다(MAY). 쓰기 대기열의 한도 값은 로컬 설정이다. 읽기를 멈춘 동안 상대의 생존은 유휴 PING(3.4.1절)의 확인 대기(3.3절) 초과로 판정된다.
 
@@ -658,7 +658,7 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 ### 4.6 다시 보내기 (Retry)
 
-결과 확정성(1.3절)이 처리 안 됨인 요청은 그대로 다시 보내도 안전하다. 상대가 처리를 시작하지 않았기 때문이다. 결과 모름인 요청은 처리됐는지 알 방법이 없으므로, 한 번만 처리돼야 하는 요청이라면 `idempotency-key`를 붙여 보내고(SHOULD) 다시 보낼지는 애플리케이션이 판단한다. 같은 키로 다시 온 요청을 어떻게 다룰지는 받는 쪽 애플리케이션이 정한다. 응답 받음인 요청은 다시 보내는 문제가 아니다.
+결과 확정성(1.3절)이 처리 안 됨인 요청은 그대로 다시 보내도 안전하다. 상대가 처리를 시작하지 않았기 때문이다. 결과 모름인 요청은 처리됐는지 알 방법이 없으므로, 한 번만 처리돼야 하는 요청이라면 `idempotency-key`를 붙여 보내고(SHOULD)<a id="req-retry-idempotency-key"></a> 다시 보낼지는 애플리케이션이 판단한다. 같은 키로 다시 온 요청을 어떻게 다룰지는 받는 쪽 애플리케이션이 정한다. 응답 받음인 요청은 다시 보내는 문제가 아니다.
 
 > 비규범 주석: `REFUSED`로 돌려받은 요청도 처리 안 됨이라 다시 보내도 안전하지만, 같은 연결로 곧바로 다시 보내면 같은 거절을 되풀이할 수 있다. 다른 연결로 보내거나, 같은 연결이면 점점 길게 기다렸다가 보낸다.
 
@@ -676,12 +676,12 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 | 번호 | 검사 | 적용 대상 | 걸리면 | 통과하면 |
 | --- | --- | --- | --- | --- |
-| 1 | 연결 서문 (3.1절, WebSocket 서문 메시지 형식 포함) | 서버가 받는 연결 서문 | 닫음 | 2번 |
-| 2 | 첫 프레임: 헤더를 읽을 수 있고 `type` = HELLO, `stream_id` = 0, `flags` = 0 (3.2.4절) | 상대에게서 처음 받는 프레임 | 닫음 | 3번 |
-| 3 | 연결 오류 집합 (순서 없음, 아래 목록) | 모든 프레임 | `CLOSE(PROTOCOL_ERROR)` (이미 CLOSE를 보냈거나 받았거나 `type`이 CLOSE이면 CLOSE 없이 닫음, 3.5절) | 예약 제어 타입은 무시. HELLO·AUTH·PING·CLOSE는 각 절의 처리(3.2절, 3.3.1절, 3.4절, 3.5절). 애플리케이션 프레임·RESET은 4번 |
-| 4 | 대기 중인 스트림 판정 (4.3절) | 애플리케이션 프레임, RESET | 새 요청이 아니면서 대기 중인 스트림을 가리키지 않으면 조용히 버림 | 새 요청은 5번. 대기 중인 스트림의 RESET은 4.4절. 대기 중인 스트림의 응답은 6번 |
-| 5 | 요청: (가) CLOSE를 보냈거나 받은 뒤(3.5절) → 조용히 버림(애플리케이션에 넘기지 않고 아무것도 보내지 않음), 그 밖에 `n + 1 > max_concurrent_streams`이거나 로컬 사유로 거절하기로 한 요청(4.5절) → `RESET(REFUSED)`, (나) 모르는 `type`(4.1절) → `UNIMPLEMENTED`, (다) 확장 값 오류(2.4.2절) → `INVALID_ARGUMENT`. (가)→(나)→(다) 순서로 검사한다 | 새 요청 | 해당 반응 | 애플리케이션에 전달 |
-| 6 | 응답: `type`이 요청과 다름 (4.1절) | 응답 | 로컬 `INTERNAL` (와이어 송신 없음) | 애플리케이션에 전달 |
+| 1 | 연결 서문 (3.1절, WebSocket 서문 메시지 형식 포함) | 서버가 받는 연결 서문 | 닫음<a id="req-check-preface-close"></a> | 2번 |
+| 2 | 첫 프레임: 헤더를 읽을 수 있고 `type` = HELLO, `stream_id` = 0, `flags` = 0 (3.2.4절) | 상대에게서 처음 받는 프레임 | 닫음<a id="req-check-first-frame-close"></a> | 3번 |
+| 3 | 연결 오류 집합 (순서 없음, 아래 목록) | 모든 프레임 | `CLOSE(PROTOCOL_ERROR)`<a id="req-check-connection-error-close"></a> (이미 CLOSE를 보냈거나 받았거나 `type`이 CLOSE이면 CLOSE 없이 닫음<a id="req-check-connection-error-silent-close"></a>, 3.5절) | 예약 제어 타입은 무시. HELLO·AUTH·PING·CLOSE는 각 절의 처리(3.2절, 3.3.1절, 3.4절, 3.5절). 애플리케이션 프레임·RESET은 4번 |
+| 4 | 대기 중인 스트림 판정 (4.3절) | 애플리케이션 프레임, RESET | 새 요청이 아니면서 대기 중인 스트림을 가리키지 않으면 조용히 버림<a id="req-check-nonpending-discard"></a> | 새 요청은 5번. 대기 중인 스트림의 RESET은 4.4절. 대기 중인 스트림의 응답은 6번 |
+| 5 | 요청: (가) CLOSE를 보냈거나 받은 뒤(3.5절) → 조용히 버림(애플리케이션에 넘기지 않고 아무것도 보내지 않음)<a id="req-check-new-request-close-discard"></a>, 그 밖에 `n + 1 > max_concurrent_streams`이거나 로컬 사유로 거절하기로 한 요청(4.5절) → `RESET(REFUSED)`<a id="req-check-new-request-limit-refuse"></a>, (나) 모르는 `type`(4.1절) → `UNIMPLEMENTED`<a id="req-check-new-request-unknown-type-unimplemented"></a>, (다) 확장 값 오류(2.4.2절) → `INVALID_ARGUMENT`<a id="req-check-new-request-extension-invalid-argument"></a>. (가)→(나)→(다) 순서로 검사한다<a id="req-check-new-request-order"></a> | 새 요청 | 해당 반응 | 애플리케이션에 전달 |
+| 6 | 응답: `type`이 요청과 다름 (4.1절) | 응답 | 로컬 `INTERNAL`<a id="req-check-response-type-internal"></a> (와이어 송신 없음<a id="req-check-response-type-no-wire"></a>) | 애플리케이션에 전달 |
 
 3번 연결 오류 집합에 드는 항목은 다음과 같다. 하나라도 해당하면 연결 오류이고, 항목 사이의 검사 순서는 없다.
 
@@ -711,16 +711,16 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 ### 6.1 채널 요구
 
-Strand는 기밀성, 무결성, 서버 인증을 직접 제공하지 않는다. 이 세 성질을 모두 제공하는 채널 위에서만 Strand를 쓴다(MUST). 조건은 없다. 채널은 성질로 정의하므로 구현 방법은 정하지 않는다. TLS 외에 IPsec이나 보호 터널도 이 성질을 제공하면 쓸 수 있다. 클라이언트 인증서는 선택이다. 클라이언트의 신원은 연결 인증(3.3.1절)이 정한다.
+Strand는 기밀성, 무결성, 서버 인증을 직접 제공하지 않는다. 이 세 성질을 모두 제공하는 채널 위에서만 Strand를 쓴다(MUST)<a id="req-security-channel-required"></a>. 조건은 없다. 채널은 성질로 정의하므로 구현 방법은 정하지 않는다. TLS 외에 IPsec이나 보호 터널도 이 성질을 제공하면 쓸 수 있다. 클라이언트 인증서는 선택이다. 클라이언트의 신원은 연결 인증(3.3.1절)이 정한다.
 
-strand over TCP는 TLS 1.3 [^RFC8446]을 쓴다(SHOULD). TLS를 쓰는 연결은 BCP 195 [^RFC9325]를 따르고(MUST) 다음을 지킨다(모두 MUST).
+strand over TCP는 TLS 1.3 [^RFC8446]을 쓴다(SHOULD)<a id="req-security-tls13-tcp"></a>. TLS를 쓰는 연결은 BCP 195 [^RFC9325]를 따르고(MUST)<a id="req-security-bcp195"></a> 다음을 지킨다(모두 MUST).
 
-* 클라이언트는 서버 인증서의 호스트 이름을 검증한다.
-* 0-RTT(early data)를 쓰지 않는다.
-* TLS 사후 인증(post-handshake authentication)과 재협상을 쓰지 않는다.
-* TLS 협상에 실패하면 평문 연결로 바꾸지 않는다.
+* 클라이언트는 서버 인증서의 호스트 이름을 검증한다.<a id="req-security-tls-hostname-verify"></a>
+* 0-RTT(early data)를 쓰지 않는다.<a id="req-security-tls-no-early-data"></a>
+* TLS 사후 인증(post-handshake authentication)과 재협상을 쓰지 않는다.<a id="req-security-tls-no-renegotiation"></a>
+* TLS 협상에 실패하면 평문 연결로 바꾸지 않는다.<a id="req-security-tls-no-plaintext-fallback"></a>
 
-strand over TCP는 TLS의 ALPN [^RFC7301] 식별자 `strand`로 식별한다. 클라이언트는 이 값을 제시하고(MUST), 서버는 제시되지 않았거나 지원하지 않는 값만 제시되면 연결을 거부한다(MUST). 이 규칙은 strand over TCP에만 적용한다. strand over WebSocket의 식별은 1.2.1절이 정한다.
+strand over TCP는 TLS의 ALPN [^RFC7301] 식별자 `strand`로 식별한다. 클라이언트는 이 값을 제시하고(MUST)<a id="req-security-alpn-client-offer"></a>, 서버는 제시되지 않았거나 지원하지 않는 값만 제시되면 연결을 거부한다(MUST)<a id="req-security-alpn-server-reject"></a>. 이 규칙은 strand over TCP에만 적용한다. strand over WebSocket의 식별은 1.2.1절이 정한다.
 
 TLS를 끝내는 중간 장비(프록시, 로드밸런서)는 장비 양쪽 구간이 각각 위 채널 성질을 제공하면 둘 수 있다(MAY). 이때 클라이언트가 채널로 확인한 서버 신원은 그 장비의 것이고, `AUTH`의 `credentials`(예: bearer 토큰)는 그 장비에서 복호화돼 평문으로 보인다.
 
