@@ -606,9 +606,12 @@ public final class ConnectionDriver implements AutoCloseable {
             }
             failure.addSuppressed(e);
         } finally {
-            // 연결이 끝나 더 쓰지 않는다. 남은 것은 버리고 센다.
-            loop.discardQueued();
-            loop.failPending();
+            try {
+                // 연결이 끝나 더 쓰지 않는다. 남은 것은 버리고 센다. 이것이 던져도 남은 Future는 끝낸다.
+                loop.discardQueued();
+            } finally {
+                loop.failPending();
+            }
         }
     }
 
