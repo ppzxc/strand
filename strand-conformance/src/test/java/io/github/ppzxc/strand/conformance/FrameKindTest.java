@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.conformance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.LinkedHashMap;
@@ -34,7 +35,9 @@ class FrameKindTest {
         });
         SAMPLES.put("CLOSE", new String[] {
             "{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\",\"last_stream_id\":\"7\"}",
-            "{\"type\":\"CLOSE\",\"error_code\":300,\"last_stream_id\":\"18446744073709551615\"}"
+            "{\"type\":\"CLOSE\",\"error_code\":300,\"last_stream_id\":\"18446744073709551615\"}",
+            "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"\"}",
+            "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"종료\"}"
         });
         SAMPLES.put("RESET", new String[] {"{\"type\":\"RESET\",\"stream_id\":\"3\",\"error_code\":\"CANCEL\"}"});
         SAMPLES.put("WEBSOCKET_CLOSE", new String[] {"{\"type\":\"WEBSOCKET_CLOSE\",\"code\":1000}"});
@@ -58,8 +61,14 @@ class FrameKindTest {
             }
             for (String sample : kind.getValue()) {
                 JsonObject frame = json(sample);
+                JsonArray listed = new JsonArray();
+                listed.add(frame);
                 assertThat(FrameKind.describe(
-                                FrameKind.encode(frame), kind.getKey().equals("PREFACE"), true))
+                                FrameKind.encode(frame),
+                                kind.getKey().equals("PREFACE"),
+                                true,
+                                FrameKind.reasonListed(listed),
+                                0))
                         .as(sample)
                         .containsExactly(FrameKind.expected(frame));
             }

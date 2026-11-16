@@ -41,6 +41,7 @@ final class Protocol {
     static final int STREAM_ID_AT = 8;
     static final int EXTENSIONS_LENGTH_AT = 16;
     static final int EXTENSIONS_LENGTH_HEX_AT = EXTENSIONS_LENGTH_AT * 2;
+    static final int RESERVED_AT = 18;
     /** 프레임 {@code length}의 최솟값(규격 2.2.1절). */
     static final int MIN_FRAME_LENGTH = 16;
     /** CLOSE payload의 최소 크기(error_code 4바이트와 last_stream_id 8바이트)와 RESET payload의 크기. */

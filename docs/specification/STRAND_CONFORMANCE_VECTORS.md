@@ -129,16 +129,20 @@
 | `HELLO` | `flags`(`ACK` 여부), `stream_id`(0), `params`(빠진 값은 규격 기본값으로 채워 비교. `ACK`이면 payload가 비어 있어야 함), 확장 영역(비어 있어야 함) | — |
 | `PING` | `flags`(`ACK` 여부), `stream_id`(0), `payload`(공백 없는 16자리 hex), 확장 영역(비어 있어야 함) | — |
 | `AUTH` | `flags`(`ACK` 여부), `stream_id`(0), 확장 영역(비어 있어야 함). `ACK`가 아니면 `mechanism`과 `credentials`(생략하면 빈 값). `ACK`이면 `params`(생략하면 빈 payload. 항목은 `credential_lifetime`이고 쓴 항목만 payload에 있어야 함) | — |
-| `CLOSE` | `stream_id`(0), `error_code`, `last_stream_id`, `flags`(0), 확장 영역(비어 있어야 함) | `reason` |
+| `CLOSE` | `stream_id`(0), `error_code`, `last_stream_id`, `flags`(0), 확장 영역(비어 있어야 함), `reason`(선택. 아래 설명) | — |
 | `RESET` | `stream_id`, `error_code`, `flags`(0), 확장 영역(비어 있어야 함) | — |
 | `WEBSOCKET_CLOSE` | `code`(`1000`만 쓴다) | — |
-| 애플리케이션 프레임 (`type` 256 이상 정수) | `type`, `flags`(0), `stream_id`, `status`(응답 프레임, 곧 `stream_id`가 상대 엔드포인트의 번호 공간인 프레임만. 생략하면 `OK`), `extensions`(tag별 값. 순서는 비교하지 않음), `payload`(생략하면 빈 값) | 요청 프레임의 `status` |
+| 애플리케이션 프레임 (`type` 256 이상 정수) | `type`, `flags`(0), `stream_id`, `status`(응답 프레임, 곧 `stream_id`가 상대 엔드포인트의 번호 공간인 프레임만. 생략하면 `OK`), `extensions`(tag별 값. 순서는 비교하지 않음), `payload`(생략하면 빈 값) | — |
 
 `WEBSOCKET_CLOSE`는 WebSocket Close(`Close Frame 0x08`)를 관측하는 항목이고 `transport`가 `websocket`인 벡터에서만 쓴다. 구현이 `NO_ERROR` CLOSE를 보냈거나 받아 연결을 끝낼 때(규격 1.2절, 3.5절) 마지막 프레임 메시지 뒤에 나온다(받아서 끝나면 보낸 프레임이 없을 수 있다). `NO_ERROR`가 아닌 CLOSE로 끝낼 때의 WebSocket Close와 상태 1000이 아닌 WebSocket Close는 이 형식으로 관측하지 않으며, 러너는 비교에서 뺀다.
 
 `AUTH` 항목에서 `ACK`가 아니면 `mechanism`이 필수이고 `params`를 쓸 수 없다. `ACK`이면 `mechanism`과 `credentials`를 쓸 수 없다. 서버 역할 구현은 적합성 실행 중 자격 증명의 수명을 알 수 없으므로 `AUTH(ACK)`에 `credential_lifetime`을 싣지 않는다(이 문서 8.1절).
 
-모든 프레임에서 `length`와 `reserved`는 비교하지 않는다. 비교 대상이지만 쓰지 않은 필드는 위 표의 기본값(빈 `flags`, 빈 확장 영역, 빈 `payload`)과 비교한다.
+모든 프레임에서 `length`는 비교하지 않는다. 비교 대상이지만 쓰지 않은 필드는 위 표의 기본값(빈 `flags`, 빈 확장 영역, 빈 `payload`)과 비교한다.
+
+**늘 0과 비교하는 필드.** 벡터에 적지 않고 비교 규칙으로 본다. `reserved`는 모든 송신 프레임에서 0이어야 한다. 헤더 `status`는 응답 프레임(`stream_id`가 상대 엔드포인트의 번호 공간인 애플리케이션 프레임)을 뺀 모든 송신 프레임, 곧 제어 프레임과 요청 프레임에서 0이어야 한다. 0이 아니면 실패다.
+
+**`CLOSE`의 `reason`.** `send`의 `CLOSE` 항목은 선택 필드 `reason`(UTF-8 문자열)을 둔다. 생략하면 비교하지 않고, 적으면 바이트까지 같아야 한다. 쓰지 않은 필드는 기본값과 비교한다는 위의 규칙에 대한 예외다. 규격은 AUTH 거부와 자격 증명 폐기에서만 `reason`을 비우라고 하고 다른 `CLOSE`에는 설명을 허용하기 때문이다.
 
 ### 6.2 `events`: 애플리케이션 경계 이벤트
 
@@ -373,7 +377,7 @@ payload 해석은 애플리케이션 계층의 몫이므로 벡터는 payload를
         {
           "kind": "recv",
           "hex": "0000001e 00050000 0000000000000000 00000000 05 504c41494e 0075736572007878",
-          "send": [{ "type": "CLOSE", "error_code": "UNAUTHENTICATED", "last_stream_id": "0" }],
+          "send": [{ "type": "CLOSE", "error_code": "UNAUTHENTICATED", "last_stream_id": "0", "reason": "" }],
           "events": [{ "event": "closed" }]
         }
       ]

@@ -56,7 +56,9 @@
         "req-reset-local-status-once",
         "req-reset-no-reply",
         "req-stream-ends-on-response-or-reset",
-        "req-check-nonpending-discard"
+        "req-check-nonpending-discard",
+        "req-frame-reserved-zero-send",
+        "req-frame-status-nonresponse-zero-send"
       ],
       "setup": {
         "role": "client",
