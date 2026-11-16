@@ -8,23 +8,18 @@ import java.nio.channels.ClosedSelectorException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
-import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JDK NIO 기반 TCP 통로. 이미 맺어진 {@link SocketChannel} 하나를 받아 바이트 스트림 통로({@link Inbound#bytes})로 쓴다. 채널은 이 통로가
  * 논블로킹으로 바꾸고 소유하므로, 넘긴 뒤에는 직접 읽고 쓰지 않는다.
  *
  * <p>읽기는 직접 버퍼 하나를 다시 쓰고, 읽은 양만큼 잘라 새 배열로 넘긴다({@code Endpoint.receive}에 길이 인자가 없어서 이 복사 한 번은 남는다).
- * 쓰기는 부분 쓰기를 이어 쓰고, 소켓 버퍼가 차면 쓸 수 있을 때까지 기다린다(백프레셔). 서로 쓰기만 하며 읽지 않는 두 끝이 맞물려 멈추지 않도록, 쓰기를
- * 기다리는 동안 읽을 수 있는 것은 읽어 안쪽에 쌓아 두었다가 다음 {@link #await}가 돌려준다. 쌓이는 양은 그 사이 상대가 보낸 양까지다.
- * 상대의 EOF는 {@link Inbound#end()}로, 리셋 같은 입출력 오류는 {@link IOException}으로 알린다. 쓰기가 실패하면 그때까지 쌓아 둔 읽기 입력은 전달되지
- * 않고 버려질 수 있다(드라이버는 쓰기 실패를 연결 끊김으로 보므로 그 입력을 더 처리하지 않는다).
- *
- * <p><b>알려진 한계.</b> 쌓아 두는 입력에는 상한이 없다. 쓰기를 기다리는 동안 상대가 보내기만 하고 우리 쪽 쓰기를 받지 않으면 메모리가 늘고, 그만큼 받는 쪽
- * 백프레셔가 사라진다. 또 쓰기에서 막혀 있는 동안 전송 스레드는 돌아오지 못하므로 시계가 가지 않는다. 확인 대기, 요청 기한, 유휴 PING이 그 사이에는
- * 동작하지 않고, 풀린 뒤에 흐른 시간이 한꺼번에 {@code advance}된다. 읽지 않는 상대에서 빠져나가는 유일한 길은 {@link ConnectionDriver#close()}(즉시
- * 끊기)다. 쌓는 양에 상한을 두려면 상한에 닿았을 때 읽기를 멈추면서도 서로 쓰기만 하는 두 끝이 교착하지 않게 하는 설계가 따로 필요하다.
+ * 읽은 입력은 안쪽에 쌓아 두지 않고 늘 {@link #await}가 바로 돌려주므로 입력이 통로 안에서 늘지 않는다. 쓰기는 비블로킹·부분 쓰기라서 소켓 버퍼가
+ * 찼으면 0을 돌려주고, 호출자(연결 드라이버)가 쓰기 대기로 기다리면서도 읽기와 시계를 계속 돌린다. 그래서 서로 쓰기만 하며 읽지 않는 두 끝도 맞물려
+ * 멈추지 않는다. 읽기와 쓰기 관심은 하나의 선택기에서 다룬다. 상대의 EOF는 {@link Inbound#end()}로, 리셋 같은 입출력 오류는
+ * {@link IOException}으로 알린다.
  *
  * <p>{@link #await}와 {@link #write}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
@@ -34,24 +29,18 @@ public final class TcpPassage implements Passage {
     public static final int DEFAULT_READ_BUFFER_BYTES = 16 * 1024;
 
     private final SocketChannel channel;
-    private final Selector readSelector;
+    private final Selector selector;
+    private final SelectionKey key;
     private final ByteBuffer readBuffer;
-    private final ArrayDeque<Inbound> stashed = new ArrayDeque<>();
-    private final Selector writeSelector;
-    private final SelectionKey writeKey;
     private final AtomicBoolean closed = new AtomicBoolean();
     private boolean ended;
+    private @Nullable OutboundMessage writing;
+    private @Nullable ByteBuffer writingBuffer;
 
-    private TcpPassage(
-            SocketChannel channel,
-            Selector readSelector,
-            Selector writeSelector,
-            SelectionKey writeKey,
-            int readBufferBytes) {
+    private TcpPassage(SocketChannel channel, Selector selector, SelectionKey key, int readBufferBytes) {
         this.channel = channel;
-        this.readSelector = readSelector;
-        this.writeSelector = writeSelector;
-        this.writeKey = writeKey;
+        this.selector = selector;
+        this.key = key;
         this.readBuffer = ByteBuffer.allocateDirect(readBufferBytes);
     }
 
@@ -80,38 +69,39 @@ public final class TcpPassage implements Passage {
             throw new IllegalArgumentException("readBufferBytes는 1 이상이어야 한다: " + readBufferBytes);
         }
         channel.configureBlocking(false);
-        // 읽기 기다림과 쓰기 기다림은 선택기를 따로 쓴다. 쓰기는 소켓 버퍼가 찼을 때만 기다리므로 쓰기 쪽 관심은 그때 켠다.
-        Selector readSelector = Selector.open();
-        Selector writeSelector = Selector.open();
+        // 읽기와 쓰기 관심은 한 선택기에서 다룬다. 관심은 기다릴 때마다 정한다.
+        Selector selector = Selector.open();
         try {
-            channel.register(readSelector, SelectionKey.OP_READ);
-            SelectionKey writeKey = channel.register(writeSelector, 0);
-            return new TcpPassage(channel, readSelector, writeSelector, writeKey, readBufferBytes);
+            SelectionKey key = channel.register(selector, 0);
+            return new TcpPassage(channel, selector, key, readBufferBytes);
         } catch (IOException | RuntimeException e) {
-            closeQuietly(readSelector);
-            closeQuietly(writeSelector);
+            closeQuietly(selector);
             throw e;
         }
     }
 
     @Override
-    public Inbound await(long timeoutMs) throws IOException {
+    public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
         try {
-            Inbound pending = stashed.poll();
-            if (pending != null) {
-                return pending;
+            if (waitForRead) {
+                Inbound inbound = readNow();
+                if (inbound.kind() != Inbound.Kind.NONE) {
+                    return inbound;
+                }
             }
-            Inbound inbound = readNow();
-            if (inbound.kind() != Inbound.Kind.NONE || timeoutMs == 0) {
-                return inbound;
+            if (timeoutMs == 0) {
+                return Inbound.none();
             }
+            int interest =
+                    (waitForRead && !ended ? SelectionKey.OP_READ : 0) | (waitForWrite ? SelectionKey.OP_WRITE : 0);
+            key.interestOps(interest);
             if (timeoutMs < 0) {
-                readSelector.select();
+                selector.select();
             } else {
-                readSelector.select(timeoutMs);
+                selector.select(timeoutMs);
             }
-            readSelector.selectedKeys().clear();
-            return readNow();
+            selector.selectedKeys().clear();
+            return waitForRead ? readNow() : Inbound.none();
         } catch (ClosedSelectorException | CancelledKeyException e) {
             throw new IOException("닫힌 통로", e);
         }
@@ -138,37 +128,31 @@ public final class TcpPassage implements Passage {
     }
 
     @Override
-    public void write(OutboundMessage message) throws IOException {
+    public int write(OutboundMessage message, int offset) throws IOException {
         // TCP에는 WebSocket Close에 해당하는 것이 없다. 그런 메시지는 내용이 비어 있어 아무것도 쓰지 않는다.
-        ByteBuffer remaining = ByteBuffer.wrap(message.bytes());
-        try {
-            while (remaining.hasRemaining()) {
-                if (channel.write(remaining) == 0) {
-                    awaitWritable();
-                }
-            }
-        } catch (ClosedSelectorException | CancelledKeyException e) {
-            throw new IOException("닫힌 통로", e);
+        if (offset >= message.length()) {
+            return 0;
         }
-    }
-
-    /** 소켓 버퍼에 자리가 날 때까지 기다린다. 기다리는 동안 읽을 수 있는 것은 읽어 쌓아 둔다. */
-    private void awaitWritable() throws IOException {
-        writeKey.interestOps(ended ? SelectionKey.OP_WRITE : SelectionKey.OP_WRITE | SelectionKey.OP_READ);
-        writeSelector.select();
-        writeSelector.selectedKeys().clear();
-        if (!ended) {
-            Inbound inbound = readNow();
-            if (inbound.kind() != Inbound.Kind.NONE) {
-                stashed.add(inbound);
-            }
+        // bytes()는 복사본을 주므로 한 메시지를 나눠 쓰는 동안은 한 번만 복사해 둔다.
+        ByteBuffer buffer = writingBuffer;
+        if (writing != message || buffer == null) {
+            buffer = ByteBuffer.wrap(message.bytes());
+            writing = message;
+            writingBuffer = buffer;
         }
+        buffer.position(offset);
+        int count = channel.write(buffer);
+        if (offset + count >= message.length()) {
+            writing = null;
+            writingBuffer = null;
+        }
+        return count;
     }
 
     @Override
     public void wakeup() {
         try {
-            readSelector.wakeup();
+            selector.wakeup();
         } catch (ClosedSelectorException | CancelledKeyException e) {
             // 이미 닫혔다. 기다리는 쪽은 닫힘으로 깨어난다.
         }
@@ -189,8 +173,7 @@ public final class TcpPassage implements Passage {
             return;
         }
         closeQuietly(channel);
-        closeQuietly(readSelector);
-        closeQuietly(writeSelector);
+        closeQuietly(selector);
     }
 
     private static void closeQuietly(java.io.Closeable closeable) {

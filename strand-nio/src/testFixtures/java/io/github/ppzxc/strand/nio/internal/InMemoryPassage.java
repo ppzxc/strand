@@ -5,6 +5,7 @@ import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -14,6 +15,8 @@ import java.util.concurrent.locks.LockSupport;
  * #messages}) 두 가지가 있다.
  */
 public final class InMemoryPassage implements Passage {
+
+    private static final long UNLIMITED = Long.MAX_VALUE;
 
     /** 서로 이어진 두 끝. */
     public static final class Pair {
@@ -54,6 +57,10 @@ public final class InMemoryPassage implements Passage {
     private boolean manualTime;
     private boolean muted;
     private boolean held;
+    private long writeCapacity = UNLIMITED;
+    private byte[] partial = new byte[0];
+    private boolean parkedForRead;
+    private boolean parkedForWrite;
     private boolean parked;
     private long lastAwaitTimeoutMs = Long.MIN_VALUE;
     private long activity;
@@ -91,7 +98,7 @@ public final class InMemoryPassage implements Passage {
     }
 
     @Override
-    public Inbound await(long timeoutMs) throws IOException {
+    public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
         synchronized (lock) {
             awaitCalls++;
             if (timeoutMs != 0) {
@@ -99,7 +106,7 @@ public final class InMemoryPassage implements Passage {
             }
             activity++;
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(timeoutMs, 0));
-            while ((held || inbox.isEmpty()) && !woken) {
+            while (!(waitForRead && readable()) && !(waitForWrite && writeCapacity > 0) && !woken) {
                 if (closed) {
                     throw new IOException("닫힌 통로");
                 }
@@ -109,6 +116,8 @@ public final class InMemoryPassage implements Passage {
                     } else if (manualTime) {
                         // 시간 제한은 실제 시간으로 흐르지 않는다. 테스트가 시계를 올리고 wakeup으로 깨운다.
                         parked = true;
+                        parkedForRead = waitForRead;
+                        parkedForWrite = waitForWrite;
                         lock.wait();
                         parked = false;
                     } else if (timeoutMs < 0) {
@@ -127,7 +136,7 @@ public final class InMemoryPassage implements Passage {
                 }
             }
             activity++;
-            if (!held && !inbox.isEmpty()) {
+            if (waitForRead && readable()) {
                 return inbox.poll();
             }
             woken = false;
@@ -135,25 +144,62 @@ public final class InMemoryPassage implements Passage {
         }
     }
 
+    /** 락을 쥔 채 부른다. */
+    private boolean readable() {
+        return !held && !inbox.isEmpty();
+    }
+
     @Override
-    public void write(OutboundMessage message) throws IOException {
+    public int write(OutboundMessage message, int offset) throws IOException {
         synchronized (lock) {
             if (closed || outputShutdown) {
                 throw new IOException("닫힌 통로");
             }
-            if (muted) {
-                return;
-            }
         }
-        if (message.kind() == OutboundMessage.Kind.BINARY) {
-            byte[] bytes = message.bytes();
+        if (message.kind() != OutboundMessage.Kind.BINARY) {
             synchronized (lock) {
-                written.add(bytes.clone());
+                if (muted) {
+                    return 0;
+                }
             }
-            peer.deliver(messages ? Inbound.message(WebSocketMessageKind.BINARY, bytes) : Inbound.bytes(bytes));
-        } else {
             peer.deliver(Inbound.end());
+            return 0;
         }
+        int remaining = message.length() - offset;
+        int accepted;
+        byte[] slice;
+        byte[] whole = null;
+        synchronized (lock) {
+            if (muted) {
+                return remaining;
+            }
+            accepted = (int) Math.min(remaining, writeCapacity);
+            if (accepted == 0) {
+                return 0;
+            }
+            if (writeCapacity != UNLIMITED) {
+                writeCapacity -= accepted;
+            }
+            slice = Arrays.copyOfRange(message.bytes(), offset, offset + accepted);
+            partial = concat(partial, slice);
+            if (accepted == remaining) {
+                whole = partial;
+                partial = new byte[0];
+                written.add(whole.clone());
+            }
+        }
+        if (!messages) {
+            peer.deliver(Inbound.bytes(slice));
+        } else if (whole != null) {
+            peer.deliver(Inbound.message(WebSocketMessageKind.BINARY, whole));
+        }
+        return accepted;
+    }
+
+    private static byte[] concat(byte[] head, byte[] tail) {
+        byte[] all = Arrays.copyOf(head, head.length + tail.length);
+        System.arraycopy(tail, 0, all, head.length, tail.length);
+        return all;
     }
 
     @Override
@@ -239,6 +285,33 @@ public final class InMemoryPassage implements Passage {
         }
     }
 
+    /**
+     * 이 통로가 지금부터 받아 줄 수 있는 바이트 수를 정한다. 쓰기는 이만큼까지만 받고 0을 돌려주며, 받은 만큼 줄어든다. 늘리려면 {@link
+     * #addWriteCapacity}를 쓴다. 정하지 않으면 한도가 없다. 쓰기 막힘을 결정적으로 만든다.
+     *
+     * @param bytes 받아 줄 수 있는 바이트 수(0이면 아무것도 받지 않는다)
+     */
+    public void writeCapacity(long bytes) {
+        synchronized (lock) {
+            activity++;
+            writeCapacity = bytes;
+            lock.notifyAll();
+        }
+    }
+
+    /**
+     * 받아 줄 수 있는 바이트 수를 늘리고 쓰기 가능을 기다리는 {@link #await}를 깨운다.
+     *
+     * @param bytes 더 받아 줄 바이트 수
+     */
+    public void addWriteCapacity(long bytes) {
+        synchronized (lock) {
+            activity++;
+            writeCapacity = writeCapacity > UNLIMITED - bytes ? UNLIMITED : writeCapacity + bytes;
+            lock.notifyAll();
+        }
+    }
+
     /** 이 통로로 쓰는 것을 상대에게 보내지 않고 버린다(쓰기는 성공한 것처럼 돌아온다). 말 없는 상대를 만든다. */
     public void mute() {
         synchronized (lock) {
@@ -273,7 +346,8 @@ public final class InMemoryPassage implements Passage {
      */
     private boolean parked() {
         synchronized (lock) {
-            return closed || (parked && (held || inbox.isEmpty()) && !woken);
+            return closed
+                    || (parked && !(parkedForRead && readable()) && !(parkedForWrite && writeCapacity > 0) && !woken);
         }
     }
 

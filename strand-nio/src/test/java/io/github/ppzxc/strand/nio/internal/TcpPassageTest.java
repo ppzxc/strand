@@ -54,6 +54,35 @@ class TcpPassageTest {
         return result;
     }
 
+    /**
+     * 연결 드라이버처럼 한 스레드에서 메시지들을 쓰면서 읽는다. 쓰기가 막히면 쓰기 가능과 읽기를 함께 기다리고, 다 쓴 뒤에는 상대가 보낸 만큼 읽어
+     * 모은다. 읽은 바이트를 돌려준다.
+     */
+    private static byte[] writeWhileReading(Passage passage, List<OutboundMessage> messages) throws IOException {
+        ByteArrayOutputStream received = new ByteArrayOutputStream();
+        int expected = TestMessages.totalBytes(messages);
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        int index = 0;
+        int offset = 0;
+        while ((index < messages.size() || received.size() < expected) && System.nanoTime() < limit) {
+            while (index < messages.size()) {
+                OutboundMessage message = messages.get(index);
+                int accepted = passage.write(message, offset);
+                offset += accepted;
+                if (offset == message.length()) {
+                    index++;
+                    offset = 0;
+                }
+                if (accepted == 0) {
+                    break;
+                }
+            }
+            Inbound inbound = passage.await(100, true, index < messages.size());
+            received.write(inbound.data(), 0, inbound.data().length);
+        }
+        return received.toByteArray();
+    }
+
     /** 상한 시간 안에서 {@code count}바이트가 모일 때까지 기다리며 읽는다. */
     private static byte[] readExactly(Passage passage, int count) throws IOException {
         ByteArrayOutputStream collected = new ByteArrayOutputStream();
@@ -99,7 +128,7 @@ class TcpPassageTest {
 
         CompletableFuture<Void> writing = inBackground(() -> {
             for (OutboundMessage message : messages) {
-                writer.write(message);
+                PassageContract.writeFully(writer, message);
             }
         });
 
@@ -120,19 +149,9 @@ class TcpPassageTest {
         Passage b = TcpPassage.of(link.accepted);
         byte[][] receivedBy = new byte[2][];
 
-        // 양쪽이 모두 다 쓴 뒤에야 읽는다. 쓰는 동안 읽지 않으면 두 끝이 서로의 소켓 버퍼를 채워 멈춘다.
-        CompletableFuture<Void> aDone = inBackground(() -> {
-            for (OutboundMessage message : messages) {
-                a.write(message);
-            }
-            receivedBy[0] = readExactly(a, TestMessages.totalBytes(messages));
-        });
-        CompletableFuture<Void> bDone = inBackground(() -> {
-            for (OutboundMessage message : messages) {
-                b.write(message);
-            }
-            receivedBy[1] = readExactly(b, TestMessages.totalBytes(messages));
-        });
+        // 양쪽이 모두 다 쓰고 나서야 읽으려 한다. 한쪽이 쓰기에 막혀도 읽기를 멈추지 않으면 소켓 버퍼가 비어 서로의 쓰기가 풀린다.
+        CompletableFuture<Void> aDone = inBackground(() -> receivedBy[0] = writeWhileReading(a, messages));
+        CompletableFuture<Void> bDone = inBackground(() -> receivedBy[1] = writeWhileReading(b, messages));
 
         within(aDone);
         within(bDone);
@@ -149,7 +168,7 @@ class TcpPassageTest {
         Passage writer = TcpPassage.of(link.client);
         CompletableFuture<Void> writing = inBackground(() -> {
             for (OutboundMessage message : messages) {
-                writer.write(message);
+                PassageContract.writeFully(writer, message);
             }
         });
         assertStaysBlocked(writing);
@@ -197,7 +216,7 @@ class TcpPassageTest {
         assertThat(seen.kind()).isEqualTo(Inbound.Kind.END);
         OutboundMessage preface =
                 Endpoint.client(EndpointConfig.defaults()).drainMessages().get(0);
-        peer.write(preface);
+        PassageContract.writeFully(peer, preface);
         assertThat(readExactly(passage, preface.bytes().length)).isEqualTo(preface.bytes());
         passage.close();
         peer.close();
@@ -238,7 +257,7 @@ class TcpPassageTest {
         link.accepted.shutdownOutput();
         CompletableFuture<Void> writing = inBackground(() -> {
             for (OutboundMessage message : messages) {
-                writer.write(message);
+                PassageContract.writeFully(writer, message);
             }
         });
 

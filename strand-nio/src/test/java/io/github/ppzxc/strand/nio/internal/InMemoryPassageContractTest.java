@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 /** {@link InMemoryPassage}가 {@link PassageContract}를 지킨다. 실제 시간 모드와 수동 시간 모드 둘 다 시험한다. */
 class InMemoryPassageContractTest {
 
+    private static final long BLOCKED_AFTER_BYTES = 4096;
+
     @Nested
     class RealTime extends PassageContract {
         private InMemoryPassage peer;
@@ -23,6 +25,20 @@ class InMemoryPassageContractTest {
         @Override
         protected Passage peer() {
             return peer;
+        }
+
+        @Override
+        protected Passage createBlockable() {
+            InMemoryPassage.Pair pair = InMemoryPassage.streams();
+            peer = pair.second();
+            pair.first().writeCapacity(BLOCKED_AFTER_BYTES);
+            return pair.first();
+        }
+
+        @Override
+        protected byte[] unblockWrites(Passage blocked) {
+            ((InMemoryPassage) blocked).addWriteCapacity(BLOCKED_AFTER_BYTES);
+            return new byte[0];
         }
     }
 
@@ -40,6 +56,20 @@ class InMemoryPassageContractTest {
         @Override
         protected Passage peer() {
             return peer;
+        }
+
+        @Override
+        protected Passage createBlockable() {
+            InMemoryPassage.Pair pair = InMemoryPassage.streams();
+            peer = pair.second();
+            pair.first().writeCapacity(BLOCKED_AFTER_BYTES);
+            return pair.first().manualTime();
+        }
+
+        @Override
+        protected byte[] unblockWrites(Passage blocked) {
+            ((InMemoryPassage) blocked).addWriteCapacity(BLOCKED_AFTER_BYTES);
+            return new byte[0];
         }
 
         @Override

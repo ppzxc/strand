@@ -165,7 +165,7 @@ class TcpConnectionTest {
         }
 
         @Override
-        public Inbound await(long timeoutMs) throws IOException {
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
             if (stalling) {
                 stalled.countDown();
                 try {
@@ -175,12 +175,12 @@ class TcpConnectionTest {
                     throw new IOException("멈춘 채 중단됨", e);
                 }
             }
-            return delegate.await(timeoutMs);
+            return delegate.await(timeoutMs, waitForRead, waitForWrite);
         }
 
         @Override
-        public void write(OutboundMessage message) throws IOException {
-            delegate.write(message);
+        public int write(OutboundMessage message, int offset) throws IOException {
+            return delegate.write(message, offset);
         }
 
         @Override

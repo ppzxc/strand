@@ -683,7 +683,7 @@ public final class ConnectionDriver implements AutoCloseable {
         private boolean write() {
             try {
                 for (OutboundMessage message : endpoint.drainMessages()) {
-                    passage.write(message);
+                    writeFully(message);
                     if (message.kind() == OutboundMessage.Kind.BINARY) {
                         writtenBytes.addAndGet(message.length());
                         if (message.length() >= FRAME_HEADER_BYTES) {
@@ -695,6 +695,22 @@ public final class ConnectionDriver implements AutoCloseable {
             } catch (IOException e) {
                 recordTransportFailure(e);
                 return false;
+            }
+        }
+
+        /** 임시: 통로가 받아 줄 때까지 쓰기 가능을 기다리며 메시지를 다 쓴다. */
+        private void writeFully(OutboundMessage message) throws IOException {
+            int offset = 0;
+            if (message.length() == 0) {
+                passage.write(message, 0);
+                return;
+            }
+            while (offset < message.length()) {
+                int accepted = passage.write(message, offset);
+                offset += accepted;
+                if (accepted == 0) {
+                    passage.await(-1, false, true);
+                }
             }
         }
 
