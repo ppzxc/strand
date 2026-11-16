@@ -292,4 +292,40 @@ class WebSocketPassageTest {
 
         assertThat(limited.await(0).data()).isEqualTo("\uD83D\uDE00".getBytes(StandardCharsets.UTF_8));
     }
+
+    @Test
+    void anOverflowQueuedWhileReadingIsPausedWakesAWriteWaitAndThrows() throws Exception {
+        WebSocketPassage limited = new WebSocketPassage(4);
+        FakeWebSocket held = new FakeWebSocket();
+        limited.listener().onOpen(held);
+        held.holdSends = true;
+        limited.write(firstMessage(), 0);
+        assertThat(limited.write(firstMessage(), 0)).as("앞선 보내기가 끝나지 않아 막힌다").isZero();
+        java.util.concurrent.CompletableFuture<Object> waiting = new java.util.concurrent.CompletableFuture<>();
+        Thread waiter = new Thread(() -> {
+            try {
+                waiting.complete(limited.await(-1, false, true));
+            } catch (Throwable e) {
+                waiting.complete(e);
+            }
+        });
+        waiter.setDaemon(true);
+        waiter.start();
+
+        limited.listener().onBinary(held, buffer(1, 2, 3, 4, 5), true);
+
+        assertThat(waiting.get(5, java.util.concurrent.TimeUnit.SECONDS)).isInstanceOf(IOException.class);
+    }
+
+    @Test
+    void aWakeupWhileReadingIsPausedLeavesNoEmptyWakeupForTheResumedRead() throws Exception {
+        listener.onOpen(socket);
+
+        passage.wakeup();
+        assertThat(passage.await(-1, false, false).kind()).isEqualTo(Inbound.Kind.NONE);
+        listener.onBinary(socket, buffer(1), true);
+
+        assertThat(passage.await(0).kind()).as("읽기를 다시 켜면 쌓인 메시지가 먼저다").isEqualTo(Inbound.Kind.MESSAGE);
+        assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.NONE);
+    }
 }
