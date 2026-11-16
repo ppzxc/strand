@@ -6,15 +6,6 @@ setup() {
   collect="$BATS_TEST_DIRNAME/../collect-release-assets.sh"
 }
 
-@test "SBOM을 core와 nio 두 모듈에서 만든다" {
-  grep -qE '^ +run: \./gradlew :strand-core:cyclonedxBom :strand-nio:cyclonedxBom$' "$workflow"
-}
-
-@test "워크플로가 수집 스크립트를 부르고 서명 단계가 그 디렉터리를 서명한다" {
-  grep -qE '^ +\.github/scripts/collect-release-assets\.sh "\$VERSION"$' "$workflow"
-  grep -qE '^ +\.\./\.github/scripts/sign-artifacts\.sh \./\*$' "$workflow"
-}
-
 # 스크립트는 자기 위치 기준으로 저장소 루트를 찾으므로, 임시 저장소 모양에 복사해 돌린다.
 make_repo() {
   repo="$BATS_TEST_TMPDIR/repo"
@@ -76,6 +67,39 @@ strand-nio-9.9.9.jar" ]
   [ ! -e "$repo/release-assets" ]
 }
 
-@test "draft Release 노트가 두 모듈을 말한다" {
-  grep -qF -- '--notes "strand-core·strand-nio $VERSION.' "$workflow"
+# release.yml을 파싱해 단계를 이름으로 찾아, 수집 스크립트의 모듈 목록과 대조한다.
+# 모듈 목록의 출처는 수집 스크립트의 modules=(...) 한 곳이다.
+check_workflow() {
+  python3 - "$workflow" "$collect" <<'PY'
+import re, sys, yaml
+wf, script = sys.argv[1:3]
+modules = re.search(r'^modules=\((.*?)\)$', open(script, encoding='utf-8').read(), re.M).group(1).split()
+assert modules, "modules=() 를 찾지 못했다"
+steps = {s["name"]: s for s in yaml.safe_load(open(wf, encoding='utf-8'))["jobs"]["release"]["steps"] if "name" in s}
+
+sbom = set(re.findall(r':([\w-]+):cyclonedxBom', steps["Generate SBOM"]["run"]))
+assert sbom == set(modules), f"SBOM 태스크 {sorted(sbom)} != 모듈 {modules}"
+
+collect = steps["Collect and sign release assets"]["run"]
+assert "collect-release-assets.sh" in collect and "sign-artifacts.sh" in collect
+
+notes = re.search(r'--notes "([^"]*)"', steps["Create draft GitHub Release"]["run"]).group(1)
+missing = [m for m in modules if m not in notes]
+assert not missing, f"노트가 {missing}를 말하지 않는다: {notes}"
+PY
+}
+
+@test "워크플로의 SBOM 태스크·서명 단계·Release 노트가 수집 스크립트의 모듈 목록과 일치한다" {
+  run check_workflow
+  [ "$status" -eq 0 ]
+}
+
+@test "수집 스크립트에 모듈을 더하고 워크플로를 그대로 두면 위 대조가 실패한다" {
+  repo="$BATS_TEST_TMPDIR/drift"
+  mkdir -p "$repo"
+  sed 's/^modules=(strand-core strand-nio)$/modules=(strand-core strand-nio strand-xyz)/' "$collect" > "$repo/collect.sh"
+  collect="$repo/collect.sh"
+  run check_workflow
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"strand-xyz"* ]]
 }
