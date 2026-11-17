@@ -116,6 +116,49 @@ class EndpointTest {
         return server;
     }
 
+    @Test
+    void serverCanAnnounceCredentialLifetimeInAuthAck() {
+        Endpoint server = serverAfterPreface(EndpointConfig.defaults().credentialLifetimeSeconds(60));
+        server.receive(bytes(HELLO));
+        server.drainMessages();
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo("000000160005010000000000000000000000000000010000003c");
+    }
+
+    @Test
+    void credentialExpiryRequestsGracefulClose() {
+        Endpoint server = established();
+
+        server.credentialExpired();
+
+        assertThat(sent(server)).isEqualTo(CLOSE_NO_ERROR);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void credentialNotificationsRequireServerAuthGate() {
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
+
+        assertThatThrownBy(server::credentialExpired).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(client::credentialRevoked).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void credentialRevocationRequestsUnauthenticatedCloseOnlyOnce() {
+        Endpoint server = established();
+
+        server.credentialRevoked();
+        server.credentialRevoked();
+
+        assertThat(sent(server)).contains("0000001c0003000000000000000000000000000000000007" + NO_STREAM);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
     private static Endpoint client() {
         return Endpoint.client(EndpointConfig.defaults());
     }

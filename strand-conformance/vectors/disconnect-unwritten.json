@@ -1,0 +1,43 @@
+{
+  "format": 2,
+  "vectors": [
+    {
+      "id": "disconnect-before-request-output-is-handed-to-transport",
+      "description": "마지막 요청 바이트를 전송 계층에 넘기기 전 끊기면 UNAVAILABLE/not_processed를 낸다",
+      "requirements": [
+        "req-close-end-pending-unavailable",
+        "req-close-end-certainty-by-handoff",
+        "req-close-end-closed-event"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "name": "unwritten",
+          "hold_output": true,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "disconnect",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "UNAVAILABLE",
+              "certainty": "not_processed"
+            },
+            {
+              "event": "closed"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

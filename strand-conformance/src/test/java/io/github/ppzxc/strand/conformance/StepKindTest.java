@@ -29,17 +29,12 @@ class StepKindTest {
                         "respond",
                         "cancel",
                         "close",
+                        "credential_expired",
+                        "credential_revoked",
                         "advance",
                         "disconnect");
         assertThat(StepKind.shapesByName().get("advance").names())
                 .containsExactlyInAnyOrder("kind", "send", "events", "ms");
-    }
-
-    @Test
-    void everyDefinedKindIsSupported() {
-        for (String name : StepKind.shapesByName().keySet()) {
-            assertThat(kind(name).isSupported()).as(name).isTrue();
-        }
     }
 
     @Test

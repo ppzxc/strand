@@ -5,17 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
+import io.github.ppzxc.strand.nio.internal.InMemoryConnectionPair.Side;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -27,38 +23,12 @@ class ConnectionDriverBlockedWriteTest {
 
     private static final int APPLICATION_TYPE = 256;
     private static final int STATUS_DEADLINE_EXCEEDED = 4;
+    private static final int STATUS_CANCELLED = 1;
     private static final int STATUS_UNAVAILABLE = 14;
     private static final long UNRESPONSIVE_ERROR_CODE = 6;
     private static final long ACK_TIMEOUT_MS = 1000;
     private static final long IDLE_INTERVAL_MS = 3000;
     private static final long PLENTY = 1_000_000;
-
-    /** 연결 드라이버와 그 시계·통로, 종료 알림. */
-    private static final class Side {
-        final AtomicLong clock = new AtomicLong(1_000_000);
-        final InMemoryPassage passage;
-        final ConcurrentLinkedQueue<ConnectionClosed> closed = new ConcurrentLinkedQueue<>();
-        final List<IncomingRequest> received = new CopyOnWriteArrayList<>();
-        ConnectionDriver driver;
-
-        Side(InMemoryPassage passage) {
-            this.passage = passage.manualTime();
-        }
-
-        void tick(long ms) {
-            clock.addAndGet(ms);
-            passage.wakeup();
-        }
-
-        /** 이 끝의 쓰기를 막는다(상대는 읽지 않는다). */
-        void blockWrites() {
-            passage.writeCapacity(0);
-        }
-
-        void unblockWrites() {
-            passage.addWriteCapacity(PLENTY);
-        }
-    }
 
     private final List<ConnectionDriver> started = new ArrayList<>();
     private final ExecutorService handlers = Executors.newSingleThreadExecutor(runnable -> {
@@ -80,46 +50,17 @@ class ConnectionDriverBlockedWriteTest {
                 .idleIntervalMs(IDLE_INTERVAL_MS);
     }
 
-    private void start(Side side, boolean client) {
-        ConnectionListener listener = new ConnectionListener() {
-            @Override
-            public void onClosed(ConnectionClosed event) {
-                side.closed.add(event);
-            }
-        };
-        ConnectionDriver.Builder builder = client
-                ? ConnectionDriver.client(config(), side.passage)
-                : ConnectionDriver.server(config(), side.passage);
-        side.driver = builder.handler(handlers, side.received::add)
-                .listener(listener)
-                .clock(side.clock::get)
-                .start();
-        started.add(side.driver);
-    }
-
     /** 핸드셰이크를 마친 연결 한 쌍. */
     private Side[] connected() {
-        InMemoryPassage.Pair link = InMemoryPassage.messages();
-        Side client = new Side(link.first());
-        Side server = new Side(link.second());
-        start(server, false);
-        start(client, true);
-        settle(client, server);
-        return new Side[] {client, server};
+        Side[] sides = InMemoryConnectionPair.connected(config(), handlers, true);
+        started.add(sides[0].driver);
+        started.add(sides[1].driver);
+        return sides;
     }
 
     /** 전송 스레드들이 가라앉고, 핸들러 실행기(하나의 스레드)에 넘어간 알림과 요청이 모두 처리되기를 기다린다. */
     private void settle(Side... sides) {
-        InMemoryPassage[] passages = new InMemoryPassage[sides.length];
-        for (int i = 0; i < sides.length; i++) {
-            passages[i] = sides[i].passage;
-        }
-        InMemoryPassage.awaitQuiescence(passages);
-        try {
-            handlers.submit(() -> {}).get(5, TimeUnit.SECONDS);
-        } catch (InterruptedException | ExecutionException | TimeoutException e) {
-            throw new IllegalStateException("핸들러 실행기가 비지 않았다", e);
-        }
+        InMemoryConnectionPair.settle(handlers, sides);
     }
 
     private static byte[] bytes(String text) {
@@ -203,7 +144,7 @@ class ConnectionDriverBlockedWriteTest {
         client.tick(ACK_TIMEOUT_MS - 400);
         settle(client, server);
 
-        client.unblockWrites();
+        client.unblockWrites(PLENTY);
         settle(client, server);
         // 서버가 요청을 받아 ACK를 돌려줬다. 풀린 뒤 시간이 다시 몰려 흐르지 않으니 연결이 그대로다.
         client.tick(ACK_TIMEOUT_MS - 400);
@@ -292,6 +233,22 @@ class ConnectionDriverBlockedWriteTest {
 
         // PING 프레임은 28바이트라 10바이트만 받으면 나머지는 쓰기 가능을 기다린다.
         assertThat(client.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    void cancellationAfterPartialRequestWriteFinishesFrameThenSendsReset() throws Exception {
+        PartialWriteObservation.Result result =
+                PartialWriteObservation.cancelAfterPartialWrite(APPLICATION_TYPE, bytes("partial"), 10);
+
+        assertThat(result.status()).isEqualTo(STATUS_CANCELLED);
+        assertThat(result.certainty()).isEqualTo(Certainty.UNKNOWN);
+        assertThat(result.frames()).hasSize(2);
+        assertThat(frameType(result.frames().get(0))).isEqualTo(APPLICATION_TYPE);
+        assertThat(frameType(result.frames().get(1))).isEqualTo(4);
+    }
+
+    private static int frameType(byte[] frame) {
+        return ((frame[4] & 0xff) << 8) | (frame[5] & 0xff);
     }
 
     @Test

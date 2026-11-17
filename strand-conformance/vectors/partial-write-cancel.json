@@ -1,0 +1,49 @@
+{
+  "format": 2,
+  "vectors": [
+    {
+      "id": "cancel-after-request-write-starts",
+      "description": "요청 프레임 일부를 전송 계층에 넘긴 뒤 취소하면 프레임을 끝까지 쓰고 RESET(CANCEL)을 보낸다",
+      "requirements": ["req-reset-cancel-finish-frame"],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 256,
+          "name": "partial",
+          "payload": "7061727469616c",
+          "write_limit_bytes": 10,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "cancel",
+          "request": "partial",
+          "send": [
+            {
+              "type": 256,
+              "stream_id": "1",
+              "payload": "7061727469616c"
+            },
+            {
+              "type": "RESET",
+              "stream_id": "1",
+              "error_code": "CANCEL"
+            }
+          ],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "CANCELLED",
+              "certainty": "unknown"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

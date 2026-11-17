@@ -14,6 +14,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 
 /** 러너가 기대와 다른 동작을 놓치지 않는지 본다. 벡터를 직접 만들어 일부러 어긋나게 한다. */
@@ -42,6 +43,98 @@ class VectorRunnerTest {
         ConformanceVector v = vector(ESTABLISHED, recv(PING, String.format(PING_ACK_SEND, "0102030405060708"), "[]"));
 
         assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void configuredTransientAuthenticationFailureClosesWithInternalError() {
+        String setup = "{\"role\":\"server\",\"established\":false,\"auth\":{\"decision\":\"transient_failure\"}}";
+        ConformanceVector v = vector(
+                setup,
+                recv("c0de535452300000", "[{\"type\":\"HELLO\"}]", "[]"),
+                recv("0000001000010000000000000000000000000000", "[{\"type\":\"HELLO\",\"flags\":[\"ACK\"]}]", "[]"),
+                recv("0000001000010100000000000000000000000000", "[]", "[]"),
+                recv(
+                        "0000001a0005000000000000000000000000000009414e4f4e594d4f5553",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"INTERNAL_ERROR\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void credentialExpiryAndRevocationStepsProduceTheirRequiredCloseCodes() {
+        ConformanceVector expired = vector(
+                ESTABLISHED,
+                step(
+                        "credential_expired",
+                        "",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"));
+        ConformanceVector revoked = vector(
+                ESTABLISHED,
+                step(
+                        "credential_revoked",
+                        "",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"UNAUTHENTICATED\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(expired)).doesNotThrowAnyException();
+        assertThatCode(() -> VectorRunner.run(revoked)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void closeStepComparesAnApplicationReason() {
+        ConformanceVector v = vector(
+                ESTABLISHED,
+                step(
+                        "close",
+                        "\"error_code\":\"NO_ERROR\",\"reason\":\"hi\",",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"hi\"}]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void aNamedQueuedRequestCanBeCancelledBeforeItGetsAStreamId() {
+        ConformanceVector v = vector(
+                "{\"role\":\"client\",\"established\":false}",
+                recv(
+                        HELLO_RECV,
+                        "[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"}," + HELLO_ACK_SEND
+                                + ",{\"type\":\"AUTH\",\"mechanism\":\"ANONYMOUS\"}]",
+                        "[]"),
+                step("request", "\"type\":257,\"name\":\"queued\",", "[]", "[]"),
+                step(
+                        "cancel",
+                        "\"request\":\"queued\",",
+                        "[]",
+                        "[{\"event\":\"result\",\"status\":\"CANCELLED\",\"certainty\":\"not_processed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void aSecondCredentialNotificationDoesNotSendAnotherCloseOrClosedEvent() {
+        ConformanceVector expiryThenRevocation = vector(
+                ESTABLISHED,
+                step(
+                        "credential_expired",
+                        "",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"),
+                step("credential_revoked", "", "[]", "[]"));
+        ConformanceVector revocationThenExpiry = vector(
+                ESTABLISHED,
+                step(
+                        "credential_revoked",
+                        "",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"UNAUTHENTICATED\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"),
+                step("credential_expired", "", "[]", "[]"));
+
+        assertThatCode(() -> VectorRunner.run(expiryThenRevocation)).doesNotThrowAnyException();
+        assertThatCode(() -> VectorRunner.run(revocationThenExpiry)).doesNotThrowAnyException();
     }
 
     @Test
@@ -211,6 +304,132 @@ class VectorRunnerTest {
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }
 
+    @Test
+    void unsupportedFeaturesAreReportedTogetherBeforeExecution() {
+        ConformanceVector v = vector(
+                "{\"role\":\"server\",\"established\":true,\"future_setup\":true}",
+                step("future_step", "", "[]", "[]"));
+
+        assertThat(VectorRunner.unsupportedFeatures(v)).containsExactly("setup.future_setup", "단계 future_step");
+    }
+
+    @Test
+    void corePreflightReportsTheTransportWriteControlAsUnsupported() {
+        ConformanceVector v =
+                vector(ESTABLISHED, step("request", "\"type\":257,\"write_limit_bytes\":10,", "[]", "[]"));
+
+        assertThat(VectorRunner.unsupportedFeatures(v)).containsExactly("request.write_limit_bytes");
+    }
+
+    @Test
+    void corePreflightReportsEveryUnsupportedRequestFeature() {
+        ConformanceVector v = vector(
+                "{\"role\":\"client\",\"established\":true}",
+                step(
+                        "request",
+                        "\"type\":257,\"write_limit_bytes\":10,\"extensions\":[{\"tag\":1,\"value\":\"aa\"}],",
+                        "[]",
+                        "[]"));
+
+        assertThat(VectorRunner.unsupportedFeatures(v))
+                .containsExactly("request.write_limit_bytes", "request.extensions");
+    }
+
+    @Test
+    void nioPreflightRejectsOtherFeaturesOnAPartialWriteVector() {
+        ConformanceVector v = vector(
+                "{\"role\":\"client\",\"established\":true}",
+                step(
+                        "request",
+                        "\"type\":257,\"name\":\"r\",\"write_limit_bytes\":10,"
+                                + "\"extensions\":[{\"tag\":1,\"value\":\"aa\"}],",
+                        "[]",
+                        "[]"),
+                step("cancel", "\"request\":\"r\",", "[]", "[]"));
+
+        assertThat(NioVectorRunner.unsupportedFeatures(v)).containsExactly("request.extensions");
+    }
+
+    @Test
+    void unsupportedVectorHasAnUnsupportedOutcomeInsteadOfAnExecutionFailure() {
+        ConformanceVector v = vector(
+                "{\"role\":\"server\",\"established\":true,\"future_setup\":true}",
+                step("recv", "\"hex\":\"00\",", "[]", "[]"));
+
+        VectorOutcome outcome = VectorRunner.evaluate(v);
+
+        assertThat(outcome.status()).isEqualTo(VectorOutcome.Status.UNSUPPORTED);
+        assertThat(outcome.vectorId()).isEqualTo("v");
+        assertThat(outcome.details()).containsExactly("setup.future_setup");
+    }
+
+    @Test
+    void anExecutableVectorMismatchHasAFailureOutcome() {
+        ConformanceVector v = vector(ESTABLISHED, recv(PING, "[]", "[]"));
+
+        assertThat(VectorRunner.evaluate(v).status()).isEqualTo(VectorOutcome.Status.FAIL);
+    }
+
+    @Test
+    void reportCountsOutcomesAndFailsOnFailureOrUnsupported() {
+        ConformanceReport report = ConformanceReport.forPath(
+                ConformanceReport.CORE_PATH,
+                Arrays.asList(
+                        VectorOutcome.pass("passed"),
+                        VectorOutcome.fail("failed", "mismatch"),
+                        VectorOutcome.unsupported("skipped", Arrays.asList("setup.future"))));
+
+        assertThat(report.count(VectorOutcome.Status.PASS)).isEqualTo(1);
+        assertThat(report.count(VectorOutcome.Status.FAIL)).isEqualTo(1);
+        assertThat(report.count(VectorOutcome.Status.UNSUPPORTED)).isEqualTo(1);
+        assertThat(report.passes()).isFalse();
+        assertThat(report.summary()).contains("failed FAIL", "skipped UNSUPPORTED");
+    }
+
+    @Test
+    void integratedResultPassesIfAnyPathPassesUnlessAnotherPathFails() {
+        java.util.Map<String, List<VectorOutcome>> outcomes = new java.util.LinkedHashMap<>();
+        outcomes.put(ConformanceReport.CORE_PATH, Arrays.asList(VectorOutcome.pass("v")));
+        outcomes.put("transport", Arrays.asList(VectorOutcome.unsupported("v", Arrays.asList("partial write"))));
+        ConformanceReport passing = ConformanceReport.integrated(outcomes);
+        outcomes.put("transport", Arrays.asList(VectorOutcome.fail("v", "wrong output")));
+        ConformanceReport failing = ConformanceReport.integrated(outcomes);
+
+        assertThat(passing.count(VectorOutcome.Status.PASS)).isEqualTo(1);
+        assertThat(failing.count(VectorOutcome.Status.FAIL)).isEqualTo(1);
+        assertThat(failing.passes()).isFalse();
+        assertThat(failing.summary()).contains("integrated/v FAIL", "transport: wrong output");
+    }
+
+    @Test
+    void integratedResultKeepsEveryPathFailureAndCause() {
+        java.util.Map<String, List<VectorOutcome>> outcomes = new java.util.LinkedHashMap<>();
+        outcomes.put(ConformanceReport.CORE_PATH, Arrays.asList(VectorOutcome.fail("v", "wrong close")));
+        outcomes.put(ConformanceReport.NIO_PATH, Arrays.asList(VectorOutcome.fail("v", "missing reset")));
+
+        ConformanceReport integrated = ConformanceReport.integrated(outcomes);
+
+        assertThat(integrated.summary())
+                .contains("integrated/v FAIL", "core: wrong close; nio: missing reset")
+                .doesNotContain("[[", "]; [");
+    }
+
+    @Test
+    void integratedResultIsUnsupportedWhenEveryPathIsUnsupported() {
+        java.util.Map<String, List<VectorOutcome>> outcomes = new java.util.LinkedHashMap<>();
+        outcomes.put(
+                ConformanceReport.CORE_PATH,
+                Arrays.asList(VectorOutcome.unsupported("v", Arrays.asList("write limit"))));
+        outcomes.put(
+                ConformanceReport.NIO_PATH, Arrays.asList(VectorOutcome.unsupported("v", Arrays.asList("websocket"))));
+
+        ConformanceReport integrated = ConformanceReport.integrated(outcomes);
+
+        assertThat(integrated.count(VectorOutcome.Status.UNSUPPORTED)).isEqualTo(1);
+        assertThat(integrated.passes()).isFalse();
+        assertThat(integrated.summary()).contains("write limit", "websocket");
+    }
+
     private static final String WEBSOCKET_ESTABLISHED =
             "{\"role\":\"server\",\"established\":true,\"transport\":\"websocket\"}";
     private static final String WEBSOCKET_CLOSE_1000 = "{\"type\":\"WEBSOCKET_CLOSE\",\"code\":1000}";
@@ -282,7 +501,8 @@ class VectorRunnerTest {
 
     @Test
     void skippingAnUnobservedWebSocketCloseKeepsTheNextMessageAsTheFirst() throws ReflectiveOperationException {
-        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        VectorRunner runner =
+                new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
         List<OutboundMessage> messages =
                 Arrays.asList(unobservedWebSocketClose(), binaryMessage(Bytes.fromHex("c0de535452300000")));
 
@@ -293,7 +513,8 @@ class VectorRunnerTest {
 
     @Test
     void aWebSocketMessageCarryingTwoFramesFails() throws ReflectiveOperationException {
-        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        VectorRunner runner =
+                new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
         List<OutboundMessage> messages = Arrays.asList(binaryMessage(Bytes.fromHex(PING_FRAME + PING_FRAME)));
 
         assertThatThrownBy(() -> runner.describeMessages(messages, false)).isInstanceOf(AssertionError.class);
@@ -301,7 +522,8 @@ class VectorRunnerTest {
 
     @Test
     void aFrameSplitAcrossTwoWebSocketMessagesFails() throws ReflectiveOperationException {
-        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        VectorRunner runner =
+                new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
         List<OutboundMessage> messages = Arrays.asList(
                 binaryMessage(Bytes.fromHex(PING_FRAME.substring(0, 20))),
                 binaryMessage(Bytes.fromHex(PING_FRAME.substring(20))));
@@ -311,7 +533,8 @@ class VectorRunnerTest {
 
     @Test
     void aByteStreamMayCarryTwoFramesInOneMessageOrSplitAcrossMessages() throws ReflectiveOperationException {
-        VectorRunner runner = new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()));
+        VectorRunner runner =
+                new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
         List<OutboundMessage> twoInOne = Arrays.asList(binaryMessage(Bytes.fromHex(PING_FRAME + PING_FRAME)));
         List<OutboundMessage> split = Arrays.asList(
                 binaryMessage(Bytes.fromHex(PING_FRAME.substring(0, 20))),
@@ -332,7 +555,8 @@ class VectorRunnerTest {
     }
 
     private static List<String> sentOnce(boolean client, String hex) throws ReflectiveOperationException {
-        VectorRunner runner = new VectorRunner(client, false, Endpoint.client(EndpointConfig.defaults()));
+        VectorRunner runner =
+                new VectorRunner(client, false, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
         return runner.describeMessages(Arrays.asList(binaryMessage(Bytes.fromHex(hex))), false);
     }
 
@@ -397,7 +621,8 @@ class VectorRunnerTest {
                 "0000000000000000",
                 "0000",
                 CLOSE_PAYLOAD_NO_ERROR + reasonHex);
-        VectorRunner runner = new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()));
+        VectorRunner runner =
+                new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
         return FrameKind.comparable(
                 runner.describeMessages(Arrays.asList(binaryMessage(Bytes.fromHex(hex))), false),
                 JsonParser.parseString(expectedSend).getAsJsonArray());
@@ -442,7 +667,8 @@ class VectorRunnerTest {
         String ping = frameHex("00000018", "0002", "00", "0000000000000000", "0000", "0102030405060708");
         String close =
                 frameHex("0000001f", "0003", "00", "0000000000000000", "0000", CLOSE_PAYLOAD_NO_ERROR + "616263");
-        VectorRunner runner = new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()));
+        VectorRunner runner =
+                new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
         List<OutboundMessage> messages =
                 Arrays.asList(binaryMessage(Bytes.fromHex(ping)), binaryMessage(Bytes.fromHex(close)));
         String expected = "[" + PING_EXPECTED + ","

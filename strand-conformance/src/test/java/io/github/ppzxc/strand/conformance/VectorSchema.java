@@ -7,7 +7,9 @@ import com.google.gson.JsonPrimitive;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 벡터 형식 문서가 정한 객체 형태의 단일 표. 단계 kind·프레임 type·이벤트 이름마다 필드 규칙을 한 곳에 모아 두므로, 형식에
@@ -98,8 +100,27 @@ final class VectorSchema {
         return new ArrayList<>(SETUP.names());
     }
 
-    static final Shape AUTH_SETUP =
-            Shape.EMPTY.allow("mechanism", Check::mechanism).allow("credentials", Check::hex);
+    static String hexOrEmpty(JsonObject object, String field) {
+        return object.has(field) ? object.get(field).getAsString() : "";
+    }
+
+    static long requestFrameSize(JsonObject request) {
+        long size = Protocol.HEADER_SIZE + (long) Bytes.fromHex(hexOrEmpty(request, "payload")).length;
+        if (request.has("extensions")) {
+            JsonArray extensions = request.getAsJsonArray("extensions");
+            for (int i = 0; i < extensions.size(); i++) {
+                JsonObject extension = extensions.get(i).getAsJsonObject();
+                size += 4L + Bytes.fromHex(extension.get("value").getAsString()).length;
+            }
+        }
+        return size;
+    }
+
+    static final Shape AUTH_SETUP = Shape.EMPTY
+            .allow("mechanism", Check::mechanism)
+            .allow("credentials", Check::hex)
+            .allow("decision", FieldCheck.oneOf(Arrays.asList("transient_failure")))
+            .allow("lifetime_seconds", U32);
 
     static final Shape AUTH_PARAMS = Shape.EMPTY.allow("credential_lifetime", U32);
 
@@ -130,6 +151,14 @@ final class VectorSchema {
     /** 필드별 검사에 더해, 필드 사이의 관계(next_stream_id의 홀짝)를 본다. */
     static void setup(Check c, String path, JsonElement element) {
         JsonObject setup = c.object(path, element, SETUP);
+        if (setup.has("auth")
+                && (setup.getAsJsonObject("auth").has("decision")
+                        || setup.getAsJsonObject("auth").has("lifetime_seconds"))
+                && "client".equals(setup.get("role").getAsString())) {
+            JsonObject auth = setup.getAsJsonObject("auth");
+            String field = auth.has("decision") ? "decision" : "lifetime_seconds";
+            throw c.failAt(Check.child(Check.child(path, "auth"), field), "서버 인증 설정은 서버 역할에서만 쓸 수 있다");
+        }
         if (setup.has("next_stream_id")) {
             boolean client = "client".equals(setup.get("role").getAsString());
             BigInteger next = new BigInteger(setup.get("next_stream_id").getAsString());
@@ -148,10 +177,38 @@ final class VectorSchema {
         JsonArray steps = vector.getAsJsonArray("steps");
         boolean server = "server".equals(setup.get("role").getAsString());
         boolean[] authAckReceived = AuthGate.ackReceivedThrough(vector);
-        boolean authGateOpen = false;
+        boolean authGateOpen = setup.get("established").getAsBoolean();
+        Set<String> requestNames = new HashSet<>();
         for (int i = 0; i < steps.size(); i++) {
             JsonObject step = steps.get(i).getAsJsonObject();
             StepKind kind = StepKind.of(step);
+            if (StepKind.REQUEST_NAME.equals(kind.name()) && step.has("write_limit_bytes")) {
+                if (step.get("write_limit_bytes").getAsLong() >= requestFrameSize(step)) {
+                    throw c.failAt(
+                            Check.child(Check.item("steps", i), "write_limit_bytes"), "부분 쓰기 한도는 요청 프레임 크기보다 작아야 한다");
+                }
+            }
+            if (StepKind.REQUEST_NAME.equals(kind.name()) && step.has("name")) {
+                String name = step.get("name").getAsString();
+                if (name.trim().isEmpty() || !requestNames.add(name)) {
+                    throw c.failAt(Check.child(Check.item("steps", i), "name"), "요청 이름은 비어 있지 않고 벡터 안에서 유일해야 한다");
+                }
+            }
+            if (StepKind.CANCEL_NAME.equals(kind.name())) {
+                boolean byStreamId = step.has("stream_id");
+                boolean byName = step.has("request");
+                if (byStreamId == byName) {
+                    throw c.failAt(
+                            Check.child(Check.item("steps", i), "kind"), "cancel은 stream_id 또는 request 이름 하나로 지정한다");
+                }
+                if (byName && !requestNames.contains(step.get("request").getAsString())) {
+                    throw c.failAt(Check.child(Check.item("steps", i), "request"), "앞에서 선언한 request 이름이어야 한다");
+                }
+            }
+            if (kind.isCredentialNotification() && (!server || !authGateOpen)) {
+                throw c.failAt(
+                        Check.child(Check.item("steps", i), StepKind.TAG), "자격 증명 통지는 서버 역할의 AUTH 관문 통과 뒤에만 쓸 수 있다");
+            }
             if (kind.onlyOnTransport() != null && !kind.onlyOnTransport().equals(transport)) {
                 throw c.failAt(
                         Check.child(Check.item("steps", i), StepKind.TAG),

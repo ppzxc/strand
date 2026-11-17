@@ -38,6 +38,127 @@ class VectorLoaderTest {
         return "{\"format\":2,\"vectors\":[" + String.join(",", vectors) + "]}";
     }
 
+    @Test
+    void rejectsServerAuthenticationDecisionForClientRole() {
+        String setup = "{\"role\":\"client\",\"established\":false," + "\"auth\":{\"decision\":\"transient_failure\"}}";
+        String invalid = file(vector(
+                "client-auth-decision", "[\"req-auth-transient-failure-close-internal\"]", setup, "[" + STEP + "]"));
+
+        assertThatThrownBy(() -> VectorLoader.parse("x.json", invalid))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("setup.auth.decision");
+    }
+
+    @Test
+    void rejectsCredentialLifetimeForClientRole() {
+        String setup = "{\"role\":\"client\",\"established\":false," + "\"auth\":{\"lifetime_seconds\":5}}";
+
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "x.json",
+                        file(vector(
+                                "client-auth-lifetime",
+                                "[\"req-auth-expiry-close-no-error\"]",
+                                setup,
+                                "[" + STEP + "]"))))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("setup.auth.lifetime_seconds");
+    }
+
+    @Test
+    void rejectsCredentialNotificationBeforeTheAuthGateOpens() {
+        String setup = "{\"role\":\"server\",\"established\":false}";
+        String step = "{\"kind\":\"credential_expired\",\"send\":[],\"events\":[]}";
+
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "x.json",
+                        file(vector(
+                                "expiry-before-auth",
+                                "[\"req-auth-expiry-close-no-error\"]",
+                                setup,
+                                "[" + step + "]"))))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("AUTH 관문 통과 뒤");
+    }
+
+    @Test
+    void rejectsInvalidNamedCancellationReferences() {
+        String setup = "{\"role\":\"client\",\"established\":false}";
+        String requestA = "{\"kind\":\"request\",\"type\":257,\"name\":\"same\",\"send\":[],\"events\":[]}";
+        String requestB = requestA;
+        String duplicate = file(vector(
+                "duplicate",
+                "[\"req-reset-local-cancel-before-write\"]",
+                setup,
+                "[" + requestA + "," + requestB + "]"));
+        String undeclared = file(vector(
+                "undeclared",
+                "[\"req-reset-local-cancel-before-write\"]",
+                setup,
+                "[{\"kind\":\"cancel\",\"request\":\"missing\",\"send\":[],\"events\":[]}]"));
+        String missingSelector = file(vector(
+                "missing-selector",
+                "[\"req-reset-local-cancel-before-write\"]",
+                setup,
+                "[{\"kind\":\"cancel\",\"send\":[],\"events\":[]}]"));
+        String ambiguous = file(
+                vector(
+                        "ambiguous",
+                        "[\"req-reset-local-cancel-before-write\"]",
+                        setup,
+                        "[" + requestA
+                                + ",{\"kind\":\"cancel\",\"request\":\"same\",\"stream_id\":\"1\",\"send\":[],\"events\":[]}]"));
+
+        assertThatThrownBy(() -> VectorLoader.parse("duplicate.json", duplicate))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("유일");
+        assertThatThrownBy(() -> VectorLoader.parse("undeclared.json", undeclared))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("선언");
+        assertThatThrownBy(() -> VectorLoader.parse("missing-selector.json", missingSelector))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("stream_id 또는 request");
+        assertThatThrownBy(() -> VectorLoader.parse("ambiguous.json", ambiguous))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("stream_id 또는 request");
+    }
+
+    @Test
+    void rejectsWriteLimitThatDoesNotStopInsideRequestFrame() {
+        String setup = "{\"role\":\"client\",\"established\":true}";
+        String step = "{\"kind\":\"request\",\"type\":256,\"payload\":\"abcd\","
+                + "\"write_limit_bytes\":24,\"send\":[],\"events\":[]}";
+
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "write-limit.json",
+                        file(vector("whole-frame-write-limit", "[\"req-write-partial\"]", setup, "[" + step + "]"))))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("write_limit_bytes")
+                .hasMessageContaining("프레임 크기보다 작아야");
+    }
+
+    @Test
+    void writeLimitCountsEncodedRequestExtensionsAsPartOfTheFrame() {
+        String setup = "{\"role\":\"client\",\"established\":true}";
+        String step = "{\"kind\":\"request\",\"type\":256,\"extensions\":["
+                + "{\"tag\":1,\"value\":\"0102\"}],\"write_limit_bytes\":24,\"send\":[],\"events\":[]}";
+
+        assertThatCode(() -> VectorLoader.parse(
+                        "extension-write-limit.json",
+                        file(vector("partial-extension-write", "[\"req-write-partial\"]", setup, "[" + step + "]"))))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsWhitespaceOnlyRequestName() {
+        String setup = "{\"role\":\"client\",\"established\":true}";
+        String step = "{\"kind\":\"request\",\"type\":256,\"name\":\"  \",\"send\":[],\"events\":[]}";
+
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "blank-name.json", file(vector("blank-name", "[\"req-cancel\"]", setup, "[" + step + "]"))))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("name");
+    }
+
     /** 유효한 벡터 하나에 단계 하나만 바꿔 넣은 파일. */
     private static String fileWithStep(String stepFields) {
         return file(vector("a", "[\"req-a-b\"]", SETUP, "[{" + stepFields + "}]"));

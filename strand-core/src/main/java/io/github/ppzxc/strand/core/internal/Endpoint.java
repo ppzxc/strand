@@ -1,5 +1,9 @@
 package io.github.ppzxc.strand.core.internal;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -10,6 +14,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -37,14 +42,13 @@ public final class Endpoint {
 
     private static final int PING_PAYLOAD_SIZE = 8;
     private static final int AUTH_ACK_PARAM_SIZE = 6;
-    private static final int CREDENTIAL_LIFETIME_ID = 0x0001;
 
     private static final int RESET_PAYLOAD_SIZE = 4;
     private static final int TLV_HEADER_SIZE = 4;
     private static final int TIMEOUT_TAG = 0x0001;
     private static final int TIMEOUT_LENGTH = 4;
-    private static final int CLOSE_ERROR_CODE_SIZE = 4;
-    private static final int CLOSE_MIN_PAYLOAD_SIZE = 12;
+    private static final int CLOSE_ERROR_CODE_SIZE = Integer.BYTES;
+    private static final int CLOSE_MIN_PAYLOAD_SIZE = Frames.CLOSE_FIXED_PAYLOAD_SIZE;
     private static final int IDEMPOTENCY_KEY_TAG = 0x0003;
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 64;
     /** extensions_length의 한도(규격 2.4절). */
@@ -551,16 +555,50 @@ public final class Endpoint {
      * @param errorCode 규격 2.5.2절의 error_code 값
      */
     public void close(int errorCode) {
+        close(errorCode, "");
+    }
+
+    /**
+     * 애플리케이션이 UTF-8 설명과 함께 연결을 닫게 한다. 프레임 상한에 맞춰 reason을 자른다.
+     *
+     * @param errorCode 규격 2.5.2절의 error_code 값
+     * @param reason non-null UTF-8 close reason; 빈 문자열은 허용한다
+     * @throws NullPointerException reason이 {@code null}일 때
+     */
+    public void close(int errorCode, String reason) {
+        Objects.requireNonNull(reason, "reason");
         if (!phase.isActive()) {
             return;
         }
         if (errorCode != ErrorCode.NO_ERROR) {
             refuseUnhandedRequests();
         }
-        send(Frames.close(errorCode, highestPeerStreamId));
+        long maxFrameSize = phase.hasPeerHello() ? peerMaxFrameSize : EndpointConfig.MAX_FRAME_SIZE_LOWER_LIMIT;
+        int reasonCapacity = (int) Math.max(0, maxFrameSize - Frames.HEADER_SIZE - Frames.CLOSE_FIXED_PAYLOAD_SIZE);
+        send(Frames.close(errorCode, highestPeerStreamId, utf8Prefix(reason, reasonCapacity)));
         phase.closeSent(errorCode);
         endQueuedRequests();
         conclude();
+    }
+
+    /** 인증기가 자격 증명의 만료를 알린다. 재인증 없이 정상 CLOSE로 연결을 마친다(규격 3.3.1절). */
+    public void credentialExpired() {
+        closeForCredentialEnd(ErrorCode.NO_ERROR);
+    }
+
+    /** 인증기가 자격 증명의 폐기를 알린다. 사유 없는 UNAUTHENTICATED CLOSE로 연결을 끝낸다(규격 3.3.1절). */
+    public void credentialRevoked() {
+        closeForCredentialEnd(ErrorCode.UNAUTHENTICATED);
+    }
+
+    private void closeForCredentialEnd(int errorCode) {
+        if (!server || !phase.hasPassedAuthGate()) {
+            throw new IllegalStateException("자격 증명 종료 통지는 서버의 AUTH 관문 통과 뒤에만 가능하다");
+        }
+        if (!phase.isActive()) {
+            return;
+        }
+        close(errorCode);
     }
 
     /**
@@ -965,6 +1003,24 @@ public final class Endpoint {
         sendAwaitingAck(auth, LivenessTimers.Kind.AUTH, null);
     }
 
+    private static byte[] utf8Prefix(String reason, int maxBytes) {
+        byte[] bytes = reason.getBytes(StandardCharsets.UTF_8);
+        int length = Math.min(bytes.length, maxBytes);
+        CharsetDecoder decoder = StandardCharsets.UTF_8
+                .newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        while (length > 0) {
+            try {
+                decoder.reset().decode(ByteBuffer.wrap(bytes, 0, length));
+                break;
+            } catch (CharacterCodingException invalidPrefix) {
+                length--;
+            }
+        }
+        return Arrays.copyOf(bytes, length);
+    }
+
     /**
      * 받은 {@code AUTH}와 {@code AUTH(ACK)}(규격 3.3.1절). 서버는 첫 {@code AUTH}를 애플리케이션에 넘기고, 클라이언트는 첫
      * {@code AUTH(ACK)}에서 {@code credential_lifetime}을 알린다. 방향 위반, 두 번째 {@code AUTH}·{@code AUTH(ACK)},
@@ -1014,7 +1070,8 @@ public final class Endpoint {
             connectionError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);
             return;
         }
-        send(Frames.control(FrameType.AUTH, Flags.ACK, new byte[0]));
+        OptionalLong credentialLifetime = config.credentialLifetimeSeconds();
+        send(Frames.authAck(credentialLifetime));
         openAuthGate();
     }
 
@@ -1031,7 +1088,7 @@ public final class Endpoint {
                 return;
             }
             // 모르는 identifier는 무시한다(규격 3.3.1절).
-            if (Frames.readUnsignedShort(bytes, at) == CREDENTIAL_LIFETIME_ID) {
+            if (Frames.readUnsignedShort(bytes, at) == Frames.AUTH_PARAM_CREDENTIAL_LIFETIME) {
                 lifetime = OptionalLong.of(Frames.readUnsignedInt(bytes, at + 2));
             }
         }

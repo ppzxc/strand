@@ -38,7 +38,15 @@ final class VectorSuite {
             // 테스트 이름은 `파일명/id`(벡터 형식 문서 3절).
             String name = fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
-                tests.add(DynamicTest.dynamicTest(name + "/" + vector.id(), () -> VectorRunner.run(vector)));
+                String id = name + "/" + vector.id();
+                tests.add(DynamicTest.dynamicTest(id, () -> {
+                    VectorOutcome core = VectorRunner.evaluate(vector, id);
+                    VectorOutcome nio = NioVectorRunner.evaluate(vector, id);
+                    VectorOutcome outcome = ConformanceReport.integratedOutcome(id, core, nio);
+                    assertThat(outcome.status())
+                            .as("벡터 %s (%s): %s", id, outcome.status(), outcome.details())
+                            .isEqualTo(VectorOutcome.Status.PASS);
+                }));
             }
         }
         return tests.stream();

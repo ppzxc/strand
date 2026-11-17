@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,77 @@ class EndpointCloseReasonTest {
 
     private static CloseReason closedReason(Endpoint endpoint) {
         return closedEvent(endpoint).closeReason().orElseThrow(AssertionError::new);
+    }
+
+    @Test
+    void applicationCanAttachUtf8ReasonToClose() {
+        Endpoint server = openServer();
+
+        server.close(ErrorCode.NO_ERROR, "hi");
+
+        assertThat(EndpointTest.hex(server.drainMessages().get(0).bytes()))
+                .isEqualTo("0000001e000300000000000000000000000000000000000000000000000000006869");
+    }
+
+    @Test
+    void closeRejectsANullReasonBeforeChangingConnectionState() {
+        Endpoint server = openServer();
+
+        assertThatThrownBy(() -> server.close(ErrorCode.NO_ERROR, null)).isInstanceOf(NullPointerException.class);
+        assertThat(server.drainMessages()).isEmpty();
+        assertThat(server.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void closeRejectsANullReasonEvenAfterClosingStarted() {
+        Endpoint server = openServer();
+        server.close(ErrorCode.NO_ERROR, "first");
+        server.drainMessages();
+        server.drainEvents();
+
+        assertThatThrownBy(() -> server.close(ErrorCode.NO_ERROR, null)).isInstanceOf(NullPointerException.class);
+        assertThat(server.drainMessages()).isEmpty();
+        assertThat(server.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void closeReasonIsTruncatedAtTheFrameLimitOnAValidUtf8Boundary() {
+        Endpoint server = openServer();
+        StringBuilder reason = new StringBuilder();
+        for (int i = 0; i < 21_836; i++) reason.append("가");
+
+        server.close(ErrorCode.NO_ERROR, reason.toString());
+
+        byte[] frame = server.drainMessages().get(0).bytes();
+        assertThat(frame).hasSize(65_534);
+        assertThat(EndpointTest.hex(java.util.Arrays.copyOfRange(frame, frame.length - 3, frame.length)))
+                .isEqualTo("eab080");
+    }
+
+    @Test
+    void closeReasonPreservesValuesBelowAndExactlyAtTheNegotiatedLimit() {
+        for (int reasonBytes : new int[] {65_503, 65_504}) {
+            Endpoint server = openServer();
+            StringBuilder reason = new StringBuilder();
+            for (int i = 0; i < reasonBytes; i++) reason.append('a');
+
+            server.close(ErrorCode.NO_ERROR, reason.toString());
+
+            assertThat(server.drainMessages().get(0).bytes()).hasSize(32 + reasonBytes);
+        }
+    }
+
+    @Test
+    void closeBeforePeerHelloUsesTheSixteenKiBFrameLimit() {
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        server.receive(bytes(PREFACE));
+        server.drainMessages();
+        StringBuilder reason = new StringBuilder();
+        for (int i = 0; i < 20_000; i++) reason.append('x');
+
+        server.close(ErrorCode.NO_ERROR, reason.toString());
+
+        assertThat(server.drainMessages().get(0).bytes()).hasSize(16_384);
     }
 
     private static void assertErrorClose(CloseReason reason, int errorCode, CloseReason.Sender sender) {

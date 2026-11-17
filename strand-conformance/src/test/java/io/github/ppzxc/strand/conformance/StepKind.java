@@ -7,20 +7,27 @@ import static io.github.ppzxc.strand.conformance.Protocol.streamId;
 import com.google.gson.JsonObject;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 /**
- * 벡터 형식이 정한 단계 종류의 단일 정의. 종류마다 형태(필드 규칙), 실행(엔드포인트에 적용), 지원 여부, 확인 대기 해석용 타이밍
- * 성질(들어오는 바이트인가, 연결을 끝내는가, 시간을 진행하는가)을 함께 갖는다. 형태 검사 표, 러너의 실행·지원 검사, 확인 대기
- * 해석기의 종류 판정이 모두 이 정의에서 나오므로 새 단계 종류는 여기에만 추가한다.
+ * 벡터 형식이 정한 단계 종류와 각 종류의 필드, 실행 동작, 확인 대기 해석용 성질을 정의한다. 벡터의 단계별 형태와 일반 실행은 여기서
+ * 가져오고, 여러 단계에 걸친 제약은 {@link VectorSchema}에서 검증한다.
  */
 final class StepKind {
 
     static final String TAG = "kind";
+    static final String REQUEST_NAME = "request";
+    static final String CANCEL_NAME = "cancel";
+    static final String CREDENTIAL_EXPIRED_NAME = "credential_expired";
+    static final String CREDENTIAL_REVOKED_NAME = "credential_revoked";
+    static final String HOLD_OUTPUT_FIELD = "hold_output";
+    static final String TIME_ADVANCE_FIELD = "ms";
     static final String LABEL = "단계 kind";
 
     /** 단계가 엔드포인트에 넣는 들어오는 바이트의 성격. */
@@ -67,28 +74,36 @@ final class StepKind {
                             endpoint.ping(Bytes.fromHex(step.get("payload").getAsString())))
             .pingSending();
 
-    private static final StepKind REQUEST = define(
-                    "request",
+    private static final StepKind REQUEST = register(
+                    REQUEST_NAME,
                     BASE.require("type", VectorSchema.APP_TYPE)
+                            .allow("name", Check::string)
+                            .allow(HOLD_OUTPUT_FIELD, Check::bool)
+                            .allow("write_limit_bytes", VectorSchema.POSITIVE_U32)
                             .allow("extensions", Check::extensions)
                             .allow("payload", Check::hex)
                             .allow("deadline_ms", VectorSchema.POSITIVE_U32),
-                    (endpoint, step) -> {
-                        byte[] payload = Bytes.fromHex(
-                                step.has("payload") ? step.get("payload").getAsString() : "");
-                        if (step.has("deadline_ms")) {
-                            endpoint.request(
-                                    step.get("type").getAsInt(),
-                                    payload,
-                                    step.get("deadline_ms").getAsLong());
-                        } else {
-                            endpoint.request(step.get("type").getAsInt(), payload);
-                        }
+                    (endpoint, step, requestTickets) -> {
+                        byte[] payload = Bytes.fromHex(VectorSchema.hexOrEmpty(step, "payload"));
+                        long ticket = step.has("deadline_ms")
+                                ? endpoint.request(
+                                        step.get("type").getAsInt(),
+                                        payload,
+                                        step.get("deadline_ms").getAsLong())
+                                : endpoint.request(step.get("type").getAsInt(), payload);
+                        if (step.has("name"))
+                            requestTickets.put(step.get("name").getAsString(), ticket);
                     })
-            .unsupportedPart(step ->
-                    step.has("extensions") && step.getAsJsonArray("extensions").size() > 0
-                            ? "request.extensions"
-                            : null);
+            .unsupportedParts(step -> {
+                List<String> unsupported = new ArrayList<>();
+                if (step.has("write_limit_bytes")) {
+                    unsupported.add("request.write_limit_bytes");
+                }
+                if (step.has("extensions") && step.getAsJsonArray("extensions").size() > 0) {
+                    unsupported.add("request.extensions");
+                }
+                return unsupported;
+            });
 
     private static final StepKind RESPOND = define(
             "respond",
@@ -99,23 +114,41 @@ final class StepKind {
             (endpoint, step) -> endpoint.respond(
                     streamId(step.get("stream_id")),
                     statusCode(step.get("status")),
-                    Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "")));
+                    Bytes.fromHex(VectorSchema.hexOrEmpty(step, "payload"))));
 
-    private static final StepKind CANCEL = define(
-            "cancel",
-            BASE.require("stream_id", VectorSchema.STREAM_ID),
-            (endpoint, step) -> endpoint.cancel(streamId(step.get("stream_id"))));
+    private static final StepKind CANCEL = register(
+            CANCEL_NAME,
+            BASE.allow("stream_id", VectorSchema.STREAM_ID).allow("request", Check::string),
+            (endpoint, step, requestTickets) -> {
+                if (step.has("request")) {
+                    endpoint.cancelRequest(
+                            requestTickets.get(step.get("request").getAsString()));
+                } else {
+                    endpoint.cancel(streamId(step.get("stream_id")));
+                }
+            });
 
     /** CLOSE를 보낼 뿐 연결은 끝나지 않는다(규격 3.3절). */
     private static final StepKind CLOSE = define(
             "close",
-            BASE.require("error_code", VectorSchema.ERROR_CODE),
-            (endpoint, step) -> endpoint.close(errorCode(step.get("error_code"))));
+            BASE.require("error_code", VectorSchema.ERROR_CODE).allow("reason", Check::string),
+            (endpoint, step) -> endpoint.close(
+                    errorCode(step.get("error_code")),
+                    step.has("reason") ? step.get("reason").getAsString() : ""));
+
+    private static final StepKind CREDENTIAL_EXPIRED = define(
+                    CREDENTIAL_EXPIRED_NAME, BASE, (endpoint, step) -> endpoint.credentialExpired())
+            .credentialNotification();
+
+    private static final StepKind CREDENTIAL_REVOKED = define(
+                    CREDENTIAL_REVOKED_NAME, BASE, (endpoint, step) -> endpoint.credentialRevoked())
+            .credentialNotification();
 
     private static final StepKind ADVANCE = define(
                     "advance",
-                    BASE.require("ms", VectorSchema.POSITIVE_U32),
-                    (endpoint, step) -> endpoint.advance(step.get("ms").getAsLong()))
+                    BASE.require(TIME_ADVANCE_FIELD, VectorSchema.POSITIVE_U32),
+                    (endpoint, step) ->
+                            endpoint.advance(step.get(TIME_ADVANCE_FIELD).getAsLong()))
             .timeAdvancing();
 
     private static final StepKind DISCONNECT = define("disconnect", BASE, (endpoint, step) -> endpoint.disconnect())
@@ -125,21 +158,26 @@ final class StepKind {
 
     private final String name;
     private final Shape shape;
-    private final BiConsumer<Endpoint, JsonObject> execution;
+    private final StepExecution execution;
     private Inbound inbound = Inbound.NONE;
     private boolean advancesTime;
     private boolean endsConnection;
     private boolean sendsPing;
+    private boolean credentialNotification;
     private String onlyOnTransport;
-    private Function<JsonObject, String> unsupportedPart = step -> null;
+    private Function<JsonObject, List<String>> unsupportedParts = step -> Collections.emptyList();
 
-    private StepKind(String name, Shape shape, BiConsumer<Endpoint, JsonObject> execution) {
+    private StepKind(String name, Shape shape, StepExecution execution) {
         this.name = name;
         this.shape = shape;
         this.execution = execution;
     }
 
     private static StepKind define(String name, Shape shape, BiConsumer<Endpoint, JsonObject> execution) {
+        return register(name, shape, (endpoint, step, requestTickets) -> execution.accept(endpoint, step));
+    }
+
+    private static StepKind register(String name, Shape shape, StepExecution execution) {
         StepKind kind = new StepKind(name, shape, execution);
         if (REGISTRY.put(name, kind) != null) {
             throw new IllegalStateException("단계 종류 정의가 겹친다: " + name);
@@ -168,13 +206,18 @@ final class StepKind {
         return this;
     }
 
+    private StepKind credentialNotification() {
+        this.credentialNotification = true;
+        return this;
+    }
+
     private StepKind onlyOnTransport(String transport) {
         this.onlyOnTransport = transport;
         return this;
     }
 
-    private StepKind unsupportedPart(Function<JsonObject, String> value) {
-        this.unsupportedPart = value;
+    private StepKind unsupportedParts(Function<JsonObject, List<String>> value) {
+        this.unsupportedParts = value;
         return this;
     }
 
@@ -213,22 +256,14 @@ final class StepKind {
         return name;
     }
 
-    /**
-     * 러너가 이 종류를 실행할 수 있는가. 지금 정의된 종류는 모두 실행 방법이 있어 늘 true다. 실행 방법 없이 형태만 정의하는 종류를 두면
-     * 이 값이 false가 되고, 러너의 지원 검사가 그 종류를 가진 벡터를 실행 전에 실패시킨다. 지원 여부를 정의에 두라는 #249의 요구로 남겨 둔다.
-     */
-    boolean isSupported() {
-        return execution != null;
-    }
-
     /** 단계를 엔드포인트에 적용한다. */
-    void execute(Endpoint endpoint, JsonObject step) {
-        execution.accept(endpoint, step);
+    void execute(Endpoint endpoint, JsonObject step, Map<String, Long> requestTickets) {
+        execution.execute(endpoint, step, requestTickets);
     }
 
-    /** 지원 종류여도 러너가 실행하지 못하는 단계 내용(예: request의 확장). 없으면 null. */
-    String unsupportedPart(JsonObject step) {
-        return unsupportedPart.apply(step);
+    /** 지원 종류여도 러너가 실행하지 못하는 단계 내용(예: request의 확장). */
+    List<String> unsupportedParts(JsonObject step) {
+        return unsupportedParts.apply(step);
     }
 
     Inbound inbound() {
@@ -238,6 +273,14 @@ final class StepKind {
     /** 단계의 {@code ms}만큼 시간을 진행하는가. */
     boolean advancesTime() {
         return advancesTime;
+    }
+
+    boolean holdsOutput(JsonObject step) {
+        return step.has(HOLD_OUTPUT_FIELD) && step.get(HOLD_OUTPUT_FIELD).getAsBoolean();
+    }
+
+    long timeAdvanceMilliseconds(JsonObject step) {
+        return step.get(TIME_ADVANCE_FIELD).getAsLong();
     }
 
     /** 이 단계만으로 연결이 끝나는가(상대가 끊었다). */
@@ -250,8 +293,17 @@ final class StepKind {
         return sendsPing;
     }
 
+    boolean isCredentialNotification() {
+        return credentialNotification;
+    }
+
     /** 이 종류를 쓸 수 있는 transport. 제한이 없으면 null. */
     String onlyOnTransport() {
         return onlyOnTransport;
+    }
+
+    @FunctionalInterface
+    private interface StepExecution {
+        void execute(Endpoint endpoint, JsonObject step, Map<String, Long> requestTickets);
     }
 }
