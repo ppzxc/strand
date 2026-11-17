@@ -2,8 +2,8 @@ package io.github.ppzxc.strand.conformance;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -50,7 +50,8 @@ final class ConformanceReport {
 
     private static VectorOutcome integrate(String id, List<VectorOutcome> results) {
         for (VectorOutcome result : results) {
-            if (result.status() == VectorOutcome.Status.FAIL) return VectorOutcome.fail(id, result.details().toString());
+            if (result.status() == VectorOutcome.Status.FAIL)
+                return VectorOutcome.fail(id, result.details().toString());
         }
         for (VectorOutcome result : results) {
             if (result.status() == VectorOutcome.Status.PASS) return VectorOutcome.pass(id);
@@ -85,7 +86,8 @@ final class ConformanceReport {
         for (Map.Entry<String, List<VectorOutcome>> path : byPath.entrySet()) {
             for (VectorOutcome outcome : path.getValue()) {
                 if (outcome.status() != VectorOutcome.Status.PASS) {
-                    details.add(path.getKey() + "/" + outcome.vectorId() + " " + outcome.status() + " " + outcome.details());
+                    details.add(path.getKey() + "/" + outcome.vectorId() + " " + outcome.status() + " "
+                            + outcome.details());
                 }
             }
         }

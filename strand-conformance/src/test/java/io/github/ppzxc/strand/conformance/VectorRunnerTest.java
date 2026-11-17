@@ -217,8 +217,7 @@ class VectorRunnerTest {
                 "{\"role\":\"server\",\"established\":true,\"future_setup\":true}",
                 step("future_step", "", "[]", "[]"));
 
-        assertThat(VectorRunner.unsupportedFeatures(v))
-                .containsExactly("setup.future_setup", "단계 future_step");
+        assertThat(VectorRunner.unsupportedFeatures(v)).containsExactly("setup.future_setup", "단계 future_step");
     }
 
     @Test
@@ -243,10 +242,12 @@ class VectorRunnerTest {
 
     @Test
     void reportCountsOutcomesAndFailsOnFailureOrUnsupported() {
-        ConformanceReport report = ConformanceReport.forPath("core", Arrays.asList(
-                VectorOutcome.pass("passed"),
-                VectorOutcome.fail("failed", "mismatch"),
-                VectorOutcome.unsupported("skipped", Arrays.asList("setup.future"))));
+        ConformanceReport report = ConformanceReport.forPath(
+                "core",
+                Arrays.asList(
+                        VectorOutcome.pass("passed"),
+                        VectorOutcome.fail("failed", "mismatch"),
+                        VectorOutcome.unsupported("skipped", Arrays.asList("setup.future"))));
 
         assertThat(report.count(VectorOutcome.Status.PASS)).isEqualTo(1);
         assertThat(report.count(VectorOutcome.Status.FAIL)).isEqualTo(1);
