@@ -70,6 +70,7 @@ final class StepKind {
     private static final StepKind REQUEST = define(
                     "request",
                     BASE.require("type", VectorSchema.APP_TYPE)
+                            .allow("name", Check::string)
                             .allow("extensions", Check::extensions)
                             .allow("payload", Check::hex)
                             .allow("deadline_ms", VectorSchema.POSITIVE_U32),
@@ -103,8 +104,10 @@ final class StepKind {
 
     private static final StepKind CANCEL = define(
             "cancel",
-            BASE.require("stream_id", VectorSchema.STREAM_ID),
-            (endpoint, step) -> endpoint.cancel(streamId(step.get("stream_id"))));
+            BASE.allow("stream_id", VectorSchema.STREAM_ID).allow("request", Check::string),
+            (endpoint, step) -> {
+                if (step.has("stream_id")) endpoint.cancel(streamId(step.get("stream_id")));
+            });
 
     /** CLOSE를 보낼 뿐 연결은 끝나지 않는다(규격 3.3절). */
     private static final StepKind CLOSE = define(

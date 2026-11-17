@@ -1,0 +1,60 @@
+{
+  "format": 2,
+  "vectors": [
+    {
+      "id": "queued-request-cancelled-by-name-before-stream-id",
+      "description": "AUTH 관문 전 번호표로 지연된 요청을 이름으로 취소하면 CANCELLED와 not_processed를 낸다",
+      "requirements": [
+        "req-reset-local-cancel-before-write"
+      ],
+      "setup": {
+        "role": "client",
+        "established": false
+      },
+      "steps": [
+        {
+          "kind": "recv",
+          "hex": "0000001000010000000000000000000000000000",
+          "send": [
+            {
+              "type": "PREFACE"
+            },
+            {
+              "type": "HELLO"
+            },
+            {
+              "type": "HELLO",
+              "flags": [
+                "ACK"
+              ]
+            },
+            {
+              "type": "AUTH",
+              "mechanism": "ANONYMOUS"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "request",
+          "type": 257,
+          "name": "queued",
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "cancel",
+          "request": "queued",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "status": "CANCELLED",
+              "certainty": "not_processed"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

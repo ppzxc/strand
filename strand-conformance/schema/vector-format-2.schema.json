@@ -358,6 +358,7 @@
           "properties": {
             "kind": { "const": "request" },
             "type": { "$ref": "#/$defs/app_type" },
+            "name": { "type": "string", "minLength": 1 },
             "extensions": { "$ref": "#/$defs/extensions" },
             "payload": { "$ref": "#/$defs/hex" },
             "deadline_ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
@@ -382,10 +383,11 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "stream_id", "send", "events"],
+          "required": ["kind", "send", "events"],
           "properties": {
             "kind": { "const": "cancel" },
             "stream_id": { "$ref": "#/$defs/stream_id" },
+            "request": { "type": "string", "minLength": 1 },
             "send": { "$ref": "#/$defs/expect_send" },
             "events": { "$ref": "#/$defs/expect_events" }
           }

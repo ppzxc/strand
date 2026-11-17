@@ -95,6 +95,25 @@ class VectorRunnerTest {
     }
 
     @Test
+    void aNamedQueuedRequestCanBeCancelledBeforeItGetsAStreamId() {
+        ConformanceVector v = vector(
+                "{\"role\":\"client\",\"established\":false}",
+                recv(
+                        HELLO_RECV,
+                        "[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"}," + HELLO_ACK_SEND
+                                + ",{\"type\":\"AUTH\",\"mechanism\":\"ANONYMOUS\"}]",
+                        "[]"),
+                step("request", "\"type\":257,\"name\":\"queued\",", "[]", "[]"),
+                step(
+                        "cancel",
+                        "\"request\":\"queued\",",
+                        "[]",
+                        "[{\"event\":\"result\",\"status\":\"CANCELLED\",\"certainty\":\"not_processed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
     void aSecondCredentialNotificationDoesNotSendAnotherCloseOrClosedEvent() {
         ConformanceVector expiryThenRevocation = vector(
                 ESTABLISHED,

@@ -98,9 +98,10 @@ final class VectorRunner {
             opening = new ArrayList<>();
         }
         int number = 0;
+        Map<String, Long> requestTickets = new java.util.HashMap<>();
         for (JsonObject step : vector.steps()) {
             number++;
-            runner.apply(step);
+            runner.apply(step, requestTickets);
             runner.trackCredentialLifetime(step);
             List<OutboundMessage> sent = new ArrayList<>(opening);
             sent.addAll(runner.endpoint.drainMessages());
@@ -303,8 +304,23 @@ final class VectorRunner {
         return frame;
     }
 
-    private void apply(JsonObject step) {
-        StepKind.of(step).execute(endpoint, step);
+    private void apply(JsonObject step, Map<String, Long> requestTickets) {
+        String kind = step.get(StepKind.TAG).getAsString();
+        if ("request".equals(kind) && step.has("name")) {
+            byte[] payload =
+                    Bytes.fromHex(step.has("payload") ? step.get("payload").getAsString() : "");
+            long ticket = step.has("deadline_ms")
+                    ? endpoint.request(
+                            step.get("type").getAsInt(),
+                            payload,
+                            step.get("deadline_ms").getAsLong())
+                    : endpoint.request(step.get("type").getAsInt(), payload);
+            requestTickets.put(step.get("name").getAsString(), ticket);
+        } else if ("cancel".equals(kind) && step.has("request")) {
+            endpoint.cancelRequest(requestTickets.get(step.get("request").getAsString()));
+        } else {
+            StepKind.of(step).execute(endpoint, step);
+        }
     }
 
     private void trackCredentialLifetime(JsonObject step) {

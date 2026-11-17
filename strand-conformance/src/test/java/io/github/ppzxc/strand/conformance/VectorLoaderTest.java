@@ -80,6 +80,40 @@ class VectorLoaderTest {
                 .hasMessageContaining("AUTH 관문 통과 뒤");
     }
 
+    @Test
+    void rejectsInvalidNamedCancellationReferences() {
+        String setup = "{\"role\":\"client\",\"established\":false}";
+        String requestA = "{\"kind\":\"request\",\"type\":257,\"name\":\"same\",\"send\":[],\"events\":[]}";
+        String requestB = requestA;
+        String duplicate = file(vector(
+                "duplicate",
+                "[\"req-reset-local-cancel-before-write\"]",
+                setup,
+                "[" + requestA + "," + requestB + "]"));
+        String undeclared = file(vector(
+                "undeclared",
+                "[\"req-reset-local-cancel-before-write\"]",
+                setup,
+                "[{\"kind\":\"cancel\",\"request\":\"missing\",\"send\":[],\"events\":[]}]"));
+        String ambiguous = file(
+                vector(
+                        "ambiguous",
+                        "[\"req-reset-local-cancel-before-write\"]",
+                        setup,
+                        "[" + requestA
+                                + ",{\"kind\":\"cancel\",\"request\":\"same\",\"stream_id\":\"1\",\"send\":[],\"events\":[]}]"));
+
+        assertThatThrownBy(() -> VectorLoader.parse("duplicate.json", duplicate))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("유일");
+        assertThatThrownBy(() -> VectorLoader.parse("undeclared.json", undeclared))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("선언");
+        assertThatThrownBy(() -> VectorLoader.parse("ambiguous.json", ambiguous))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("stream_id 또는 request");
+    }
+
     /** 유효한 벡터 하나에 단계 하나만 바꿔 넣은 파일. */
     private static String fileWithStep(String stepFields) {
         return file(vector("a", "[\"req-a-b\"]", SETUP, "[{" + stepFields + "}]"));

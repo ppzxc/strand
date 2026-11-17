@@ -7,7 +7,9 @@ import com.google.gson.JsonPrimitive;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 벡터 형식 문서가 정한 객체 형태의 단일 표. 단계 kind·프레임 type·이벤트 이름마다 필드 규칙을 한 곳에 모아 두므로, 형식에
@@ -160,9 +162,27 @@ final class VectorSchema {
         boolean server = "server".equals(setup.get("role").getAsString());
         boolean[] authAckReceived = AuthGate.ackReceivedThrough(vector);
         boolean authGateOpen = setup.get("established").getAsBoolean();
+        Set<String> requestNames = new HashSet<>();
         for (int i = 0; i < steps.size(); i++) {
             JsonObject step = steps.get(i).getAsJsonObject();
             StepKind kind = StepKind.of(step);
+            if ("request".equals(kind.name()) && step.has("name")) {
+                String name = step.get("name").getAsString();
+                if (name.trim().isEmpty() || !requestNames.add(name)) {
+                    throw c.failAt(Check.child(Check.item("steps", i), "name"), "요청 이름은 비어 있지 않고 벡터 안에서 유일해야 한다");
+                }
+            }
+            if ("cancel".equals(kind.name())) {
+                boolean byStreamId = step.has("stream_id");
+                boolean byName = step.has("request");
+                if (byStreamId == byName) {
+                    throw c.failAt(
+                            Check.child(Check.item("steps", i), "kind"), "cancel은 stream_id 또는 request 이름 하나로 지정한다");
+                }
+                if (byName && !requestNames.contains(step.get("request").getAsString())) {
+                    throw c.failAt(Check.child(Check.item("steps", i), "request"), "앞에서 선언한 request 이름이어야 한다");
+                }
+            }
             if (kind.name().startsWith("credential_") && (!server || !authGateOpen)) {
                 throw c.failAt(
                         Check.child(Check.item("steps", i), StepKind.TAG), "자격 증명 통지는 서버 역할의 AUTH 관문 통과 뒤에만 쓸 수 있다");

@@ -490,6 +490,8 @@ CLOSE payload
 
 `reason`은 사람이 읽으라고 넣는 설명이다. 받는 쪽은 `reason`의 UTF-8 유효성을 포함해 내용을 검증하지 않으며(MUST NOT)<a id="req-close-reason-no-validate"></a>, 프로그램 동작이 이 값에 기대서는 안 된다.
 
+보내는 쪽은 CLOSE 프레임 전체 크기를 적용되는 프레임 한도 이하로 유지한다(MUST)<a id="req-close-reason-frame-size-limit"></a>. `reason`이 고정 필드를 제외한 공간보다 길면, 그 공간에 들어가는 가장 긴 유효한 UTF-8 접두 부분을 보낸다(MUST)<a id="req-close-reason-truncate-utf8"></a>. 적용되는 한도는 3.2.3절을 따른다.
+
 **형태가 잘못된 CLOSE.** 다음 중 하나에 해당하는 CLOSE는 연결 오류다(모두 MUST, 5.1절).
 * payload가 12바이트 미만이다.<a id="req-close-malformed-payload-length-error"></a>
 * `last_stream_id`가 0이 아니면서 내 번호 공간의 값이 아니다.<a id="req-close-malformed-last-id-own-space-error"></a>
@@ -626,7 +628,7 @@ RESET의 `error_code`에는 CLOSE 전용 코드(2.5.2절의 5\~7)를 쓰지 않�
 | 사건 | 애플리케이션에 넘기는 `status` | 결과 확정성 |
 | --- | --- | --- |
 | 요청 프레임의 쓰기를 시작한 뒤 요청 기한이 지나 내가 `RESET(CANCEL)`을 보냄(4.4.1절) | `DEADLINE_EXCEEDED` | 결과 모름 |
-| 요청 프레임을 한 바이트도 쓰기 전에 내가 요청을 취소함(대기열 요청 포함) | `CANCELLED` | 처리 안 됨 |
+| 요청 프레임을 한 바이트도 쓰기 전에 내가 요청을 취소함(대기열 요청 포함) | `CANCELLED` (MUST)<a id="req-reset-local-cancel-before-write"></a> | 처리 안 됨 |
 | 요청 프레임의 쓰기를 시작한 뒤 그 요청에 내가 RESET을 보냄 (`error_code` 무관) | `CANCELLED` | 결과 모름 |
 | `RESET(CANCEL)`을 받음 | `CANCELLED` | 결과 모름 |
 | `RESET(REFUSED)`를 받음 | `UNAVAILABLE` | 처리 안 됨 |
