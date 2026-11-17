@@ -16,7 +16,6 @@ req-security-alpn-client-offer 관측불가 ALPN 식별자 `strand` 제시는 TL
 req-security-alpn-server-reject 관측불가 ALPN을 제시하지 않은 연결의 거부는 TLS 핸드셰이크 안의 동작이라 입출력으로 관측할 수 없다
 # 형식미지원: #275 잔여. 상황을 만드는 단계나 비교 필드가 형식에 없다. 하나씩 갚을 때마다 그 줄을 지운다.
 req-hello-prehello-frame-size-min 형식미지원 상대 HELLO 전에 보내는 프레임을 16 KiB 상한으로 보는 규칙은 CLOSE reason을 입력할 수도 비교할 수도 없고 넘칠 때의 동작이 규격에 없어 확인할 수 없다(#275)
-req-auth-expiry-close-no-error 형식미지원 자격 증명 만료를 일으키는 트리거 단계가 없고 형식 문서 8.1절 4번 전제가 수명 통지를 막는다(#275)
 req-reset-cancel-finish-frame 형식미지원 요청 프레임의 쓰기를 시작한 뒤 취소하려면 쓰기가 막힌 상태를 만드는 단계가 있어야 하는데 형식에 없다(#275)
 # 형식미지원: #274에서 벡터로 쓰지 못한 항목. 규격이 로컬 처리를 정하지 않아 관측할 이벤트가 없다(#278 댓글).
 req-hello-peer-frame-size-limit 형식미지원 상대가 알린 max_frame_size를 넘는 프레임을 보내려 할 때 규격은 보내지 않는다(MUST)만 정하고 로컬 처리와 이벤트를 정하지 않아 벡터에 쓸 기대 결과가 없다. 규격에 이벤트를 정하는 확장이 있어야 갚는다. 구현은 호출 API가 IllegalArgumentException으로 거부한다(#274, #278 댓글)

@@ -50,6 +50,21 @@ class VectorLoaderTest {
     }
 
     @Test
+    void rejectsCredentialLifetimeForClientRole() {
+        String setup = "{\"role\":\"client\",\"established\":false," + "\"auth\":{\"lifetime_seconds\":5}}";
+
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "x.json",
+                        file(vector(
+                                "client-auth-lifetime",
+                                "[\"req-auth-expiry-close-no-error\"]",
+                                setup,
+                                "[" + STEP + "]"))))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("setup.auth.lifetime_seconds");
+    }
+
+    @Test
     void rejectsCredentialNotificationBeforeTheAuthGateOpens() {
         String setup = "{\"role\":\"server\",\"established\":false}";
         String step = "{\"kind\":\"credential_expired\",\"send\":[],\"events\":[]}";

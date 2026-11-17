@@ -1024,7 +1024,11 @@ public final class Endpoint {
             connectionError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);
             return;
         }
-        send(Frames.control(FrameType.AUTH, Flags.ACK, new byte[0]));
+        Long credentialLifetime = config.credentialLifetimeSeconds();
+        send(
+                credentialLifetime == null
+                        ? Frames.control(FrameType.AUTH, Flags.ACK, new byte[0])
+                        : Frames.authAck(credentialLifetime));
         openAuthGate();
     }
 

@@ -145,7 +145,7 @@
 
 `WEBSOCKET_CLOSE`는 WebSocket Close(`Close Frame 0x08`)를 관측하는 항목이고 `transport`가 `websocket`인 벡터에서만 쓴다. 구현이 `NO_ERROR` CLOSE를 보냈거나 받아 연결을 끝낼 때(규격 1.2절, 3.5절) 마지막 프레임 메시지 뒤에 나온다(받아서 끝나면 보낸 프레임이 없을 수 있다). `NO_ERROR`가 아닌 CLOSE로 끝낼 때의 WebSocket Close와 상태 1000이 아닌 WebSocket Close는 이 형식으로 관측하지 않으며, 러너는 비교에서 뺀다.
 
-`AUTH` 항목에서 `ACK`가 아니면 `mechanism`이 필수이고 `params`를 쓸 수 없다. `ACK`이면 `mechanism`과 `credentials`를 쓸 수 없다. 서버 역할 구현은 적합성 실행 중 자격 증명의 수명을 알 수 없으므로 `AUTH(ACK)`에 `credential_lifetime`을 싣지 않는다(이 문서 8.1절).
+`AUTH` 항목에서 `ACK`가 아니면 `mechanism`이 필수이고 `params`를 쓸 수 없다. `ACK`이면 `mechanism`과 `credentials`를 쓸 수 없다. `setup.auth.lifetime_seconds`를 설정한 서버 역할 벡터는 `AUTH(ACK)`에 같은 값의 `credential_lifetime`을 싣는다.
 
 모든 프레임에서 `length`는 비교하지 않는다. 비교 대상이지만 쓰지 않은 필드는 위 표의 기본값(빈 `flags`, 빈 확장 영역, 빈 `payload`)과 비교한다.
 
@@ -181,7 +181,7 @@
 1. 구현은 자기 번호 공간에서 번호를 `next_stream_id`부터 연속으로 할당한다. 클라이언트는 1, 3, 5, ...(홀수)이고 서버는 2, 4, 6, ...(짝수)이다. 번호 건너뛰기를 허용하는 2.2.5절은 바뀌지 않는다. 이 전제 덕분에 벡터 작성자는 응답을 담은 `recv`의 `stream_id`를 미리 적을 수 있다.
 2. `known_types`가 없으면 구현은 256 이상의 모든 `type`을 아는 것으로 다루고 payload를 해석하지 않은 채 전달한다. 있으면 목록에 없는 `type`은 모르는 것이다(4.1절, 5.1절 5번 (나)).
 3. AUTH 관문(3.3절)이 열리기 전에 `ping` 단계를 쓰는 벡터는 없다. 서버 역할이면 구현이 `AUTH(ACK)`를 보낸 단계부터, 클라이언트 역할이면 `recv`로 `AUTH(ACK)`를 넣은 단계부터 `ping` 단계를 쓸 수 있다.
-4. 서버 역할 구현은 자격 증명의 수명을 알리지 않는다. `AUTH(ACK)`의 payload는 비어 있다.
+4. 서버 역할 구현은 `setup.auth.lifetime_seconds`를 `AUTH(ACK)`의 `credential_lifetime`으로 알린다. 이 값을 설정하지 않으면 항목을 싣지 않는다. 수명은 `AUTH(ACK)`를 보낸 시점부터 가상 시계로 잰다. `advance`가 수명을 지난 뒤 `credential_expired`와 같은 만료 CLOSE를 확인한다. 한도 직전에는 만료 CLOSE가 없어야 한다. 정확히 한도에 닿은 순간의 동작은 요구하지 않는다.
 
 ### 8.2 설정 항목
 
@@ -192,7 +192,7 @@
 | `max_frame_size`, `max_concurrent_streams`, `capabilities` | `local_hello` | 3.2.1절의 파라미터 | 3.2.1절의 기본값 |
 | `ack_timeout_ms` | `config` | HELLO·PING·AUTH를 보내고 `ACK`를 기다리는 시간(확인 대기, 3.3절). 클라이언트 역할 구현의 `AUTH(ACK)` 대기도 이 값을 쓴다. 셋이 같은 값을 쓴다. 규격은 값을 정하지 않으므로 이 기본값은 적합성 실행의 설정일 뿐이다 | 5000 |
 | `auth_timeout_ms` | `config` | 서버 역할 구현이 상대 HELLO에 `ACK`를 보낸 때부터 `AUTH`를 기다리는 시간(AUTH 대기, 3.3절). 규격은 값을 정하지 않으므로 이 기본값은 적합성 실행의 설정일 뿐이다. 확인 대기의 기본값과 달라서 두 대기가 한 `advance` 단계에서 함께 끝나지 않는다 | 10000 |
-| `auth` | `setup` | 클라이언트 역할 구현이 보낼 자격 증명이자 서버 역할 구현이 통과시킬 자격 증명. 서버 인증기의 일시적 실패는 `{"decision": "transient_failure"}`로 설정한다. `decision`은 서버 역할에서만 쓴다 | `{"mechanism": "ANONYMOUS", "credentials": ""}` |
+| `auth` | `setup` | 클라이언트 역할 구현이 보낼 자격 증명이자 서버 역할 구현이 통과시킬 자격 증명. 서버 인증기의 일시적 실패는 `{"decision": "transient_failure"}`로, 가상 수명은 `{"lifetime_seconds": 초}`로 설정한다. 서버 전용 필드는 서버 역할에서만 쓴다 | `{"mechanism": "ANONYMOUS", "credentials": ""}` |
 | `next_stream_id` | `setup` | 구현이 자기 번호 공간에서 다음에 쓸 스트림 번호 | `role`이 `client`이면 1, `server`이면 2 |
 | `known_types` | `setup` | 구현이 아는 애플리케이션 `type`의 목록 | 256 이상의 모든 `type` |
 

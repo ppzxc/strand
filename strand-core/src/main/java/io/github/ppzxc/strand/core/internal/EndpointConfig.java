@@ -40,6 +40,8 @@ public final class EndpointConfig {
     private final byte[] authCredentials;
     /** 서버가 받은 {@code AUTH}를 넘길 애플리케이션. */
     private final Authenticator authenticator;
+    /** 적합성·호스트 인증 환경이 서버 AUTH(ACK)에 알릴 자격 증명 수명(초). */
+    private final @Nullable Long credentialLifetimeSeconds;
 
     private EndpointConfig(ConfigDraft draft) {
         this.maxFrameSize = draft.maxFrameSize;
@@ -54,6 +56,7 @@ public final class EndpointConfig {
         this.authMechanism = draft.authMechanism;
         this.authCredentials = draft.authCredentials;
         this.authenticator = draft.authenticator;
+        this.credentialLifetimeSeconds = draft.credentialLifetimeSeconds;
     }
 
     /** 설정 값의 모음. 복사본을 만들 때 한 필드만 고치는 데 쓴다. 필드를 더해도 생성자 인자 나열은 늘지 않는다. */
@@ -75,6 +78,9 @@ public final class EndpointConfig {
         String authMechanism = ANONYMOUS;
         byte[] authCredentials = new byte[0];
         Authenticator authenticator = EndpointConfig::passesAnonymousOnly;
+
+        @Nullable
+        Long credentialLifetimeSeconds;
     }
 
     private ConfigDraft draft() {
@@ -91,6 +97,7 @@ public final class EndpointConfig {
         draft.authMechanism = authMechanism;
         draft.authCredentials = authCredentials;
         draft.authenticator = authenticator;
+        draft.credentialLifetimeSeconds = credentialLifetimeSeconds;
         return draft;
     }
 
@@ -271,6 +278,16 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
+    /** 서버 {@code AUTH(ACK)}에 알릴 자격 증명 수명을 정한 복사본. 생략하면 수명 항목을 싣지 않는다. */
+    public EndpointConfig credentialLifetimeSeconds(long value) {
+        if (value < 0 || value > 0xFFFF_FFFFL) {
+            throw new IllegalArgumentException("credentialLifetimeSeconds는 부호 없는 32비트 정수여야 한다: " + value);
+        }
+        ConfigDraft draft = draft();
+        draft.credentialLifetimeSeconds = value;
+        return new EndpointConfig(draft);
+    }
+
     /** AUTH 메커니즘 이름의 최대 길이(규격 3.3.1절). */
     static final int MAX_AUTH_MECHANISM_LENGTH = 20;
 
@@ -297,6 +314,11 @@ public final class EndpointConfig {
 
     Authenticator authenticator() {
         return authenticator;
+    }
+
+    @Nullable
+    Long credentialLifetimeSeconds() {
+        return credentialLifetimeSeconds;
     }
 
     boolean isWebSocket() {

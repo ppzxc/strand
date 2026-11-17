@@ -101,7 +101,8 @@ final class VectorSchema {
     static final Shape AUTH_SETUP = Shape.EMPTY
             .allow("mechanism", Check::mechanism)
             .allow("credentials", Check::hex)
-            .allow("decision", FieldCheck.oneOf(Arrays.asList("transient_failure")));
+            .allow("decision", FieldCheck.oneOf(Arrays.asList("transient_failure")))
+            .allow("lifetime_seconds", U32);
 
     static final Shape AUTH_PARAMS = Shape.EMPTY.allow("credential_lifetime", U32);
 
@@ -133,9 +134,12 @@ final class VectorSchema {
     static void setup(Check c, String path, JsonElement element) {
         JsonObject setup = c.object(path, element, SETUP);
         if (setup.has("auth")
-                && setup.getAsJsonObject("auth").has("decision")
+                && (setup.getAsJsonObject("auth").has("decision")
+                        || setup.getAsJsonObject("auth").has("lifetime_seconds"))
                 && "client".equals(setup.get("role").getAsString())) {
-            throw c.failAt(Check.child(Check.child(path, "auth"), "decision"), "서버 역할에서만 쓸 수 있다");
+            JsonObject auth = setup.getAsJsonObject("auth");
+            String field = auth.has("decision") ? "decision" : "lifetime_seconds";
+            throw c.failAt(Check.child(Check.child(path, "auth"), field), "서버 인증 설정은 서버 역할에서만 쓸 수 있다");
         }
         if (setup.has("next_stream_id")) {
             boolean client = "client".equals(setup.get("role").getAsString());

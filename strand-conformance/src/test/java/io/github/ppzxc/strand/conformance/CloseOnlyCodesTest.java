@@ -14,7 +14,7 @@ class CloseOnlyCodesTest {
 
     /**
      * 시계를 흘려보내는 단계(advance)에서 구현이 CLOSE를 보내는 것은 확인 대기 초과(`UNRESPONSIVE`)와, 서버의 AUTH 대기 초과를 다루는
-     * 벡터 하나(`UNAUTHENTICATED`, 규격 3.3절)뿐이다.
+     * 벡터 하나(`UNAUTHENTICATED`, 규격 3.3절)와 자격 증명 만료(`NO_ERROR`, 규격 3.3.1절)뿐이다.
      */
     @Test
     void everyCloseSentWhenTheClockAdvancesIsUnresponsiveOrTheAuthWaitTimeout() {
@@ -29,9 +29,12 @@ class CloseOnlyCodesTest {
                     JsonObject frame = f.getAsJsonObject();
                     if ("CLOSE".equals(frame.get("type").getAsString())) {
                         seen++;
+                        String expected = declaresAuthTimeout(entry.getValue())
+                                ? "UNAUTHENTICATED"
+                                : declaresCredentialExpiry(entry.getValue()) ? "NO_ERROR" : "UNRESPONSIVE";
                         assertThat(frame.get("error_code").getAsString())
                                 .as(entry.getKey())
-                                .isEqualTo(declaresAuthTimeout(entry.getValue()) ? "UNAUTHENTICATED" : "UNRESPONSIVE");
+                                .isEqualTo(expected);
                     }
                 }
             }
@@ -43,6 +46,11 @@ class CloseOnlyCodesTest {
     private static boolean declaresAuthTimeout(JsonObject vector) {
         JsonObject setup = vector.getAsJsonObject("setup");
         return setup.has("config") && setup.getAsJsonObject("config").has("auth_timeout_ms");
+    }
+
+    private static boolean declaresCredentialExpiry(JsonObject vector) {
+        JsonObject setup = vector.getAsJsonObject("setup");
+        return setup.has("auth") && setup.getAsJsonObject("auth").has("lifetime_seconds");
     }
 
     @Test

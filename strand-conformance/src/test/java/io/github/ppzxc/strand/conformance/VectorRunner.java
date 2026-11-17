@@ -37,6 +37,9 @@ final class VectorRunner {
     private final boolean client;
     private final boolean webSocket;
     private final Endpoint endpoint;
+    private Long credentialLifetimeMs;
+    private Long credentialExpiresAtMs;
+    private long nowMs;
 
     VectorRunner(boolean client, boolean webSocket, Endpoint endpoint) {
         this.client = client;
@@ -78,16 +81,27 @@ final class VectorRunner {
         EndpointConfig config = configOf(setup, webSocket, authMechanism, authCredentials);
         VectorRunner runner =
                 new VectorRunner(client, webSocket, client ? Endpoint.client(config) : Endpoint.server(config));
+        if (setup.has("auth") && setup.getAsJsonObject("auth").has("lifetime_seconds")) {
+            runner.credentialLifetimeMs =
+                    setup.getAsJsonObject("auth").get("lifetime_seconds").getAsLong() * 1000;
+        }
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
         List<OutboundMessage> opening = runner.endpoint.drainMessages();
         if (setup.get("established").getAsBoolean()) {
-            runner.establish(opening, setup.getAsJsonObject("peer_hello"), authMechanism, authCredentials);
+            runner.establish(
+                    opening,
+                    setup.getAsJsonObject("peer_hello"),
+                    authMechanism,
+                    authCredentials,
+                    credentialLifetimeSeconds(setup));
+            runner.startCredentialLifetime();
             opening = new ArrayList<>();
         }
         int number = 0;
         for (JsonObject step : vector.steps()) {
             number++;
             runner.apply(step);
+            runner.trackCredentialLifetime(step);
             List<OutboundMessage> sent = new ArrayList<>(opening);
             sent.addAll(runner.endpoint.drainMessages());
             boolean startsWithPreface = !opening.isEmpty();
@@ -163,6 +177,13 @@ final class VectorRunner {
         return auth != null && auth.has("credentials") ? auth.get("credentials").getAsString() : "";
     }
 
+    private static Long credentialLifetimeSeconds(JsonObject setup) {
+        JsonObject auth = setup.has("auth") ? setup.getAsJsonObject("auth") : null;
+        return auth != null && auth.has("lifetime_seconds")
+                ? auth.get("lifetime_seconds").getAsLong()
+                : null;
+    }
+
     private static EndpointConfig configOf(
             JsonObject setup, boolean webSocket, String authMechanism, String authCredentialsHex) {
         Map<String, Long> hello = Protocol.helloParams(setup.getAsJsonObject("local_hello"));
@@ -191,6 +212,10 @@ final class VectorRunner {
                         ? AuthDecision.PASS
                         : AuthDecision.REJECT;
             });
+            if (auth.has("lifetime_seconds")) {
+                config = config.credentialLifetimeSeconds(
+                        auth.get("lifetime_seconds").getAsLong());
+            }
         }
         if (setup.has("known_types")) {
             Set<Integer> known = new HashSet<>();
@@ -206,13 +231,23 @@ final class VectorRunner {
      * 규격 3.3절 표준 수립 순서(HELLO 교환 뒤 AUTH 왕복)를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. 메커니즘과 자격 증명은
      * {@code setup.auth}에서 정했고 없으면 {@code ANONYMOUS}와 빈 자격 증명이다.
      */
-    private void establish(List<OutboundMessage> opening, JsonObject peerHello, String mechanism, String credentials) {
+    private void establish(
+            List<OutboundMessage> opening,
+            JsonObject peerHello,
+            String mechanism,
+            String credentials,
+            Long credentialLifetimeSeconds) {
         JsonObject peerHelloFrame = control("HELLO", false);
         if (peerHello != null) {
             peerHelloFrame.add("params", peerHello);
         }
         JsonObject helloAck = control("HELLO", true);
         JsonObject authAck = control("AUTH", true);
+        if (credentialLifetimeSeconds != null) {
+            JsonObject params = new JsonObject();
+            params.addProperty("credential_lifetime", credentialLifetimeSeconds);
+            authAck.add("params", params);
+        }
         JsonObject auth = control("AUTH", false);
         auth.addProperty("mechanism", mechanism);
         auth.addProperty("credentials", credentials);
@@ -270,6 +305,37 @@ final class VectorRunner {
 
     private void apply(JsonObject step) {
         StepKind.of(step).execute(endpoint, step);
+    }
+
+    private void trackCredentialLifetime(JsonObject step) {
+        if (sendsAuthAck(step)) {
+            startCredentialLifetime();
+        }
+        if ("advance".equals(step.get(StepKind.TAG).getAsString())) {
+            nowMs += step.get("ms").getAsLong();
+            if (credentialExpiresAtMs != null && nowMs > credentialExpiresAtMs) {
+                endpoint.credentialExpired();
+                credentialExpiresAtMs = null;
+            }
+        }
+    }
+
+    private static boolean sendsAuthAck(JsonObject step) {
+        for (JsonElement frame : step.getAsJsonArray("send")) {
+            JsonObject expected = frame.getAsJsonObject();
+            if ("AUTH".equals(expected.get("type").getAsString())
+                    && expected.has("flags")
+                    && expected.getAsJsonArray("flags").contains(new com.google.gson.JsonPrimitive("ACK"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void startCredentialLifetime() {
+        if (credentialLifetimeMs != null) {
+            credentialExpiresAtMs = nowMs + credentialLifetimeMs;
+        }
     }
 
     private static List<String> expectedFrames(JsonObject step) {

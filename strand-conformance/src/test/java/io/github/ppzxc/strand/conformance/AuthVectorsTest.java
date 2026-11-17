@@ -54,7 +54,8 @@ class AuthVectorsTest {
             // WebSocket 위 AUTH 통과
             "auth/websocket-auth-passes",
             "auth/server-auth-transient-failure-closes-internal-error",
-            "auth/server-auth-revoked-closes-unauthenticated");
+            "auth/server-auth-revoked-closes-unauthenticated",
+            "auth/server-auth-expiry-closes-no-error-after-lifetime");
 
     private static JsonObject vector(String key) {
         JsonObject vector = RawVectors.byKey().get(key);

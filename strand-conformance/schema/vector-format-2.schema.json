@@ -113,6 +113,12 @@
         "decision": {
           "description": "서버 인증 판단. 생략하면 기존처럼 메커니즘과 자격 증명을 비교한다.",
           "enum": ["transient_failure"]
+        },
+        "lifetime_seconds": {
+          "description": "서버가 AUTH(ACK)에 알릴 가상 자격 증명 수명(초).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
         }
       }
     },

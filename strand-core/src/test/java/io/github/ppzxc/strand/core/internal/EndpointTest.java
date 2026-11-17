@@ -117,6 +117,19 @@ class EndpointTest {
     }
 
     @Test
+    void serverCanAnnounceCredentialLifetimeInAuthAck() {
+        Endpoint server = serverAfterPreface(EndpointConfig.defaults().credentialLifetimeSeconds(60));
+        server.receive(bytes(HELLO));
+        server.drainMessages();
+        server.receive(bytes(HELLO_ACK));
+        server.drainMessages();
+
+        server.receive(bytes(AUTH_ANONYMOUS));
+
+        assertThat(sent(server)).isEqualTo("000000160005010000000000000000000000000000010000003c");
+    }
+
+    @Test
     void credentialExpiryRequestsGracefulClose() {
         Endpoint server = established();
 

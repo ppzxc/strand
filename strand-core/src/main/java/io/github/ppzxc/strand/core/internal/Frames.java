@@ -86,6 +86,13 @@ final class Frames {
         return control(FrameType.AUTH, 0, payload.toByteArray());
     }
 
+    /** 서버가 알리는 자격 증명 수명(규격 3.3.1절). */
+    static byte[] authAck(long credentialLifetimeSeconds) {
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        writeParam(payload, 0x0001, credentialLifetimeSeconds);
+        return control(FrameType.AUTH, Flags.ACK, payload.toByteArray());
+    }
+
     /** 연결 서문 8바이트(규격 3.1절). */
     static byte[] preface() {
         return new byte[] {(byte) 0xC0, (byte) 0xDE, 0x53, 0x54, 0x52, 0x30, 0x00, 0x00};
