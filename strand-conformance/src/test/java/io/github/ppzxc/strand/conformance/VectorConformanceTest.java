@@ -63,8 +63,11 @@ class VectorConformanceTest {
             }
         }
         ConformanceReport report = ConformanceReport.forPath("core", outcomes);
+        ConformanceReport integrated = ConformanceReport.integrated(
+                java.util.Collections.singletonMap("core", outcomes));
 
         assertThat(report.passes()).as("core 경로 적합성 결과: %s", report.summary()).isTrue();
+        assertThat(integrated.passes()).as("통합 적합성 결과: %s", integrated.summary()).isTrue();
     }
 
     @Test
