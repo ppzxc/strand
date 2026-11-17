@@ -98,8 +98,10 @@ final class VectorSchema {
         return new ArrayList<>(SETUP.names());
     }
 
-    static final Shape AUTH_SETUP =
-            Shape.EMPTY.allow("mechanism", Check::mechanism).allow("credentials", Check::hex);
+    static final Shape AUTH_SETUP = Shape.EMPTY
+            .allow("mechanism", Check::mechanism)
+            .allow("credentials", Check::hex)
+            .allow("decision", FieldCheck.oneOf(Arrays.asList("transient_failure")));
 
     static final Shape AUTH_PARAMS = Shape.EMPTY.allow("credential_lifetime", U32);
 
@@ -130,6 +132,11 @@ final class VectorSchema {
     /** 필드별 검사에 더해, 필드 사이의 관계(next_stream_id의 홀짝)를 본다. */
     static void setup(Check c, String path, JsonElement element) {
         JsonObject setup = c.object(path, element, SETUP);
+        if (setup.has("auth")
+                && setup.getAsJsonObject("auth").has("decision")
+                && "client".equals(setup.get("role").getAsString())) {
+            throw c.failAt(Check.child(Check.child(path, "auth"), "decision"), "서버 역할에서만 쓸 수 있다");
+        }
         if (setup.has("next_stream_id")) {
             boolean client = "client".equals(setup.get("role").getAsString());
             BigInteger next = new BigInteger(setup.get("next_stream_id").getAsString());

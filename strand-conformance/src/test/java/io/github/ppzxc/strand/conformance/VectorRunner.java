@@ -182,11 +182,15 @@ final class VectorRunner {
         }
         if (setup.has("auth")) {
             byte[] expectedCredentials = Bytes.fromHex(authCredentialsHex);
-            config = config.auth(authMechanism, expectedCredentials)
-                    .authenticator((mechanism, credentials) ->
-                            mechanism.equals(authMechanism) && Arrays.equals(credentials, expectedCredentials)
-                                    ? AuthDecision.PASS
-                                    : AuthDecision.REJECT);
+            JsonObject auth = setup.getAsJsonObject("auth");
+            boolean transientFailure =
+                    auth.has("decision") && auth.get("decision").getAsString().equals("transient_failure");
+            config = config.auth(authMechanism, expectedCredentials).authenticator((mechanism, credentials) -> {
+                if (transientFailure) return AuthDecision.TRANSIENT_FAILURE;
+                return mechanism.equals(authMechanism) && Arrays.equals(credentials, expectedCredentials)
+                        ? AuthDecision.PASS
+                        : AuthDecision.REJECT;
+            });
         }
         if (setup.has("known_types")) {
             Set<Integer> known = new HashSet<>();

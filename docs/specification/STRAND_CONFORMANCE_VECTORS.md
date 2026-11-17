@@ -190,7 +190,7 @@
 | `max_frame_size`, `max_concurrent_streams`, `capabilities` | `local_hello` | 3.2.1절의 파라미터 | 3.2.1절의 기본값 |
 | `ack_timeout_ms` | `config` | HELLO·PING·AUTH를 보내고 `ACK`를 기다리는 시간(확인 대기, 3.3절). 클라이언트 역할 구현의 `AUTH(ACK)` 대기도 이 값을 쓴다. 셋이 같은 값을 쓴다. 규격은 값을 정하지 않으므로 이 기본값은 적합성 실행의 설정일 뿐이다 | 5000 |
 | `auth_timeout_ms` | `config` | 서버 역할 구현이 상대 HELLO에 `ACK`를 보낸 때부터 `AUTH`를 기다리는 시간(AUTH 대기, 3.3절). 규격은 값을 정하지 않으므로 이 기본값은 적합성 실행의 설정일 뿐이다. 확인 대기의 기본값과 달라서 두 대기가 한 `advance` 단계에서 함께 끝나지 않는다 | 10000 |
-| `auth` | `setup` | 클라이언트 역할 구현이 보낼 자격 증명이자 서버 역할 구현이 통과시킬 자격 증명 | `{"mechanism": "ANONYMOUS", "credentials": ""}` |
+| `auth` | `setup` | 클라이언트 역할 구현이 보낼 자격 증명이자 서버 역할 구현이 통과시킬 자격 증명. 서버 인증기의 일시적 실패는 `{"decision": "transient_failure"}`로 설정한다. `decision`은 서버 역할에서만 쓴다 | `{"mechanism": "ANONYMOUS", "credentials": ""}` |
 | `next_stream_id` | `setup` | 구현이 자기 번호 공간에서 다음에 쓸 스트림 번호 | `role`이 `client`이면 1, `server`이면 2 |
 | `known_types` | `setup` | 구현이 아는 애플리케이션 `type`의 목록 | 256 이상의 모든 `type` |
 

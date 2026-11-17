@@ -45,6 +45,22 @@ class VectorRunnerTest {
     }
 
     @Test
+    void configuredTransientAuthenticationFailureClosesWithInternalError() {
+        String setup = "{\"role\":\"server\",\"established\":false,\"auth\":{\"decision\":\"transient_failure\"}}";
+        ConformanceVector v = vector(
+                setup,
+                recv("c0de535452300000", "[{\"type\":\"HELLO\"}]", "[]"),
+                recv("0000001000010000000000000000000000000000", "[{\"type\":\"HELLO\",\"flags\":[\"ACK\"]}]", "[]"),
+                recv("0000001000010100000000000000000000000000", "[]", "[]"),
+                recv(
+                        "0000001a0005000000000000000000000000000009414e4f4e594d4f5553",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"INTERNAL_ERROR\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
     void failsWhenAFrameFieldDiffers() {
         ConformanceVector v = vector(ESTABLISHED, recv(PING, String.format(PING_ACK_SEND, "0102030405060709"), "[]"));
 
