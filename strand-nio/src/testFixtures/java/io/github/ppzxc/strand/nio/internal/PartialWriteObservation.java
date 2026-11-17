@@ -5,11 +5,9 @@ import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 /** 실행 경로별 적합성 테스트가 전송 계층의 부분 쓰기를 관찰할 수 있게 한다. */
 public final class PartialWriteObservation {
@@ -43,42 +41,31 @@ public final class PartialWriteObservation {
 
     /** 요청 프레임을 제한된 바이트 수만 쓴 뒤 취소하고, 쓰기를 풀어 완성 프레임을 돌려준다. */
     public static Result cancelAfterPartialWrite(int type, byte[] payload, int initialWriteCapacity) throws Exception {
-        InMemoryPassage.Pair pair = InMemoryPassage.streams();
-        InMemoryPassage clientPassage = pair.first().manualTime();
-        InMemoryPassage serverPassage = pair.second().manualTime();
-        AtomicLong clock = new AtomicLong(1_000_000);
-        List<IncomingRequest> received = new CopyOnWriteArrayList<>();
         ExecutorService handlers = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "partial-write-observer");
             thread.setDaemon(true);
             return thread;
         });
         EndpointConfig config = EndpointConfig.defaults().ackTimeoutMs(1000).idleIntervalMs(3000);
-        ConnectionDriver server = null;
-        ConnectionDriver client = null;
+        InMemoryConnectionPair.Side[] sides = null;
         try {
-            server = ConnectionDriver.server(config, serverPassage)
-                    .handler(handlers, received::add)
-                    .clock(clock::get)
-                    .start();
-            client = ConnectionDriver.client(config, clientPassage)
-                    .handler(handlers, ignored -> {})
-                    .clock(clock::get)
-                    .start();
-            settle(handlers, clientPassage, serverPassage);
+            sides = InMemoryConnectionPair.connected(config, handlers, false);
+            InMemoryConnectionPair.Side clientSide = sides[0];
+            InMemoryConnectionPair.Side serverSide = sides[1];
+            InMemoryPassage clientPassage = clientSide.passage;
 
             int firstWrittenFrame = clientPassage.written().size();
             clientPassage.writeCapacity(initialWriteCapacity);
-            RequestHandle handle = client.request(type, payload);
-            if (!client.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)) {
+            RequestHandle handle = clientSide.driver.request(type, payload);
+            if (!clientSide.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)) {
                 throw new AssertionError("NIO writer did not block after the partial request write");
             }
             handle.cancel();
             RequestResult result = handle.result().get(5, TimeUnit.SECONDS);
-            settle(handlers, clientPassage, serverPassage);
+            InMemoryConnectionPair.settle(handlers, clientSide, serverSide);
             clientPassage.addWriteCapacity(1_000_000);
-            settle(handlers, clientPassage, serverPassage);
-            if (received.size() != 1) {
+            InMemoryConnectionPair.settle(handlers, clientSide, serverSide);
+            if (serverSide.received.size() != 1) {
                 throw new AssertionError("peer did not receive the completed request frame");
             }
             return new Result(
@@ -88,14 +75,11 @@ public final class PartialWriteObservation {
                             .written()
                             .subList(firstWrittenFrame, clientPassage.written().size()));
         } finally {
-            if (client != null) client.close();
-            if (server != null) server.close();
+            if (sides != null) {
+                sides[0].driver.close();
+                sides[1].driver.close();
+            }
             handlers.shutdownNow();
         }
-    }
-
-    private static void settle(ExecutorService handlers, InMemoryPassage... passages) throws Exception {
-        InMemoryPassage.awaitQuiescence(passages);
-        handlers.submit(() -> {}).get(5, TimeUnit.SECONDS);
     }
 }

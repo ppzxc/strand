@@ -24,7 +24,8 @@ final class NioVectorRunner {
 
     static VectorOutcome evaluate(ConformanceVector vector, String vectorId) {
         if (!supports(vector))
-            return VectorOutcome.unsupported(vectorId, Collections.singletonList("NIO transport vector"));
+            return VectorOutcome.unsupported(
+                    vectorId, Collections.singletonList("NIO runner requires request.write_limit_bytes"));
         try {
             runPartialWriteCancellation(vector);
             return VectorOutcome.pass(vectorId);

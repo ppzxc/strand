@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
@@ -49,12 +50,14 @@ class VectorConformanceTest {
     /** 실제 벡터 디렉터리의 각 벡터를 지원하는 실행 경로에서 실행한다. 벡터 목록은 단언하지 않는다. */
     @TestFactory
     Stream<DynamicTest> vectors() {
+        if (!"integrated".equals(executionPath())) return Stream.empty();
         return VectorSuite.dynamicTests(VectorSuite.defaultDirectory());
     }
 
     /** 실제 경로 결과를 합쳐 보고한다. core 미지원 벡터는 지원하는 전송 경로에서 통과해야 한다. */
     @Test
     void integratedExecutionPathReportHasNoFailuresOrUnsupportedVectors() {
+        Assumptions.assumeTrue("integrated".equals(executionPath()));
         List<VectorOutcome> coreOutcomes = new java.util.ArrayList<>();
         List<VectorOutcome> nioOutcomes = new java.util.ArrayList<>();
         for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
@@ -62,9 +65,7 @@ class VectorConformanceTest {
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 String vectorId = fileKey + "/" + vector.id();
                 coreOutcomes.add(VectorRunner.evaluate(vector, vectorId));
-                if (NioVectorRunner.supports(vector)) {
-                    nioOutcomes.add(NioVectorRunner.evaluate(vector, vectorId));
-                }
+                nioOutcomes.add(NioVectorRunner.evaluate(vector, vectorId));
             }
         }
         java.util.Map<String, List<VectorOutcome>> outcomesByPath = new java.util.LinkedHashMap<>();
@@ -77,9 +78,7 @@ class VectorConformanceTest {
         assertThat(coreReport.count(VectorOutcome.Status.FAIL))
                 .as("core 경로 실행 실패: %s", coreReport.summary())
                 .isZero();
-        assertThat(coreReport.count(VectorOutcome.Status.UNSUPPORTED))
-                .as("core 미지원은 다른 경로 실행을 요구한다: %s", coreReport.summary())
-                .isEqualTo(nioOutcomes.size());
+        assertThat(coreReport.count(VectorOutcome.Status.UNSUPPORTED)).isPositive();
         List<String> coreUnsupportedIds = coreOutcomes.stream()
                 .filter(outcome -> outcome.status() == VectorOutcome.Status.UNSUPPORTED)
                 .map(VectorOutcome::vectorId)
@@ -89,12 +88,41 @@ class VectorConformanceTest {
                 .map(VectorOutcome::vectorId)
                 .collect(Collectors.toList());
         assertThat(nioPassedIds).containsExactlyElementsOf(coreUnsupportedIds);
-        assertThat(nioReport.passes())
-                .as("NIO 경로 적합성 결과: %s", nioReport.summary())
-                .isTrue();
+        assertThat(coreReport.passes()).isFalse();
+        assertThat(nioReport.passes()).isFalse();
+        assertThat(nioReport.count(VectorOutcome.Status.UNSUPPORTED))
+                .as("NIO 경로 미지원 결과: %s", nioReport.summary())
+                .isPositive();
         assertThat(integrated.passes())
                 .as("통합 적합성 결과: %s", integrated.summary())
                 .isTrue();
+    }
+
+    /** 별도 경로 명령은 해당 경로의 미지원도 실패로 반환한다. */
+    @Test
+    void selectedExecutionPathReportHasNoFailuresOrUnsupportedVectors() {
+        String path = executionPath();
+        Assumptions.assumeTrue("core".equals(path) || "nio".equals(path));
+        List<VectorOutcome> outcomes = new java.util.ArrayList<>();
+        for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
+            String fileKey = VectorSuite.fileKey(file);
+            for (ConformanceVector vector : VectorLoader.load(file)) {
+                String vectorId = fileKey + "/" + vector.id();
+                outcomes.add(
+                        path.equals("core")
+                                ? VectorRunner.evaluate(vector, vectorId)
+                                : NioVectorRunner.evaluate(vector, vectorId));
+            }
+        }
+        ConformanceReport report = ConformanceReport.forPath(path, outcomes);
+
+        assertThat(report.passes())
+                .as("%s 실행 경로 적합성 결과: %s", path, report.summary())
+                .isTrue();
+    }
+
+    private static String executionPath() {
+        return System.getProperty("strand.conformance.execution.path", "integrated");
     }
 
     @Test
