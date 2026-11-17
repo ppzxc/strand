@@ -52,15 +52,19 @@ final class VectorRunner {
     }
 
     static VectorOutcome evaluate(ConformanceVector vector) {
+        return evaluate(vector, vector.id());
+    }
+
+    static VectorOutcome evaluate(ConformanceVector vector, String vectorId) {
         List<String> unsupported = unsupportedFeatures(vector);
         if (!unsupported.isEmpty()) {
-            return VectorOutcome.unsupported(vector.id(), unsupported);
+            return VectorOutcome.unsupported(vectorId, unsupported);
         }
         try {
             runSupported(vector);
-            return VectorOutcome.pass(vector.id());
+            return VectorOutcome.pass(vectorId);
         } catch (AssertionError | RuntimeException failure) {
-            return VectorOutcome.fail(vector.id(), failure.getMessage());
+            return VectorOutcome.fail(vectorId, failure.getMessage());
         }
     }
 

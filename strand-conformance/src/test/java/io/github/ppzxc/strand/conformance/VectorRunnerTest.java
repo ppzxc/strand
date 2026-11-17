@@ -243,7 +243,7 @@ class VectorRunnerTest {
 
     @Test
     void reportCountsOutcomesAndFailsOnFailureOrUnsupported() {
-        ConformanceReport report = ConformanceReport.of(Arrays.asList(
+        ConformanceReport report = ConformanceReport.forPath("core", Arrays.asList(
                 VectorOutcome.pass("passed"),
                 VectorOutcome.fail("failed", "mismatch"),
                 VectorOutcome.unsupported("skipped", Arrays.asList("setup.future"))));
@@ -253,6 +253,20 @@ class VectorRunnerTest {
         assertThat(report.count(VectorOutcome.Status.UNSUPPORTED)).isEqualTo(1);
         assertThat(report.passes()).isFalse();
         assertThat(report.summary()).contains("failed FAIL", "skipped UNSUPPORTED");
+    }
+
+    @Test
+    void integratedResultPassesIfAnyPathPassesUnlessAnotherPathFails() {
+        java.util.Map<String, List<VectorOutcome>> outcomes = new java.util.LinkedHashMap<>();
+        outcomes.put("core", Arrays.asList(VectorOutcome.pass("v")));
+        outcomes.put("transport", Arrays.asList(VectorOutcome.unsupported("v", Arrays.asList("partial write"))));
+        ConformanceReport passing = ConformanceReport.integrated(outcomes);
+        outcomes.put("transport", Arrays.asList(VectorOutcome.fail("v", "wrong output")));
+        ConformanceReport failing = ConformanceReport.integrated(outcomes);
+
+        assertThat(passing.count(VectorOutcome.Status.PASS)).isEqualTo(1);
+        assertThat(failing.count(VectorOutcome.Status.FAIL)).isEqualTo(1);
+        assertThat(failing.passes()).isFalse();
     }
 
     private static final String WEBSOCKET_ESTABLISHED =

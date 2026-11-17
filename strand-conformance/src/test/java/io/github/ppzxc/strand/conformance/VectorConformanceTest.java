@@ -52,6 +52,21 @@ class VectorConformanceTest {
         return VectorSuite.dynamicTests(VectorSuite.defaultDirectory());
     }
 
+    /** 실행 결과를 경로 단위로 집계한다. 하나라도 실패·미지원이면 명령을 실패시키고 상세 요약을 남긴다. */
+    @Test
+    void coreExecutionPathReportHasNoFailuresOrUnsupportedVectors() {
+        List<VectorOutcome> outcomes = new java.util.ArrayList<>();
+        for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
+            String fileKey = VectorSuite.fileKey(file);
+            for (ConformanceVector vector : VectorLoader.load(file)) {
+                outcomes.add(VectorRunner.evaluate(vector, fileKey + "/" + vector.id()));
+            }
+        }
+        ConformanceReport report = ConformanceReport.forPath("core", outcomes);
+
+        assertThat(report.passes()).as("core 경로 적합성 결과: %s", report.summary()).isTrue();
+    }
+
     @Test
     void defaultDirectoryIsAnAbsolutePathPassedByTheBuild() {
         assertThat(VectorSuite.defaultDirectory()).isAbsolute().isDirectory().hasFileName("vectors");
