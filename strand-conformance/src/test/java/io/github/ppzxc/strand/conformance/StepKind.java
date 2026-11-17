@@ -71,6 +71,7 @@ final class StepKind {
                     "request",
                     BASE.require("type", VectorSchema.APP_TYPE)
                             .allow("name", Check::string)
+                            .allow("hold_output", Check::bool)
                             .allow("extensions", Check::extensions)
                             .allow("payload", Check::hex)
                             .allow("deadline_ms", VectorSchema.POSITIVE_U32),

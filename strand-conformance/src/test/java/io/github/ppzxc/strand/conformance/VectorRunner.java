@@ -104,7 +104,9 @@ final class VectorRunner {
             runner.apply(step, requestTickets);
             runner.trackCredentialLifetime(step);
             List<OutboundMessage> sent = new ArrayList<>(opening);
-            sent.addAll(runner.endpoint.drainMessages());
+            if (!step.has("hold_output") || !step.get("hold_output").getAsBoolean()) {
+                sent.addAll(runner.endpoint.drainMessages());
+            }
             boolean startsWithPreface = !opening.isEmpty();
             opening = new ArrayList<>();
             assertThat(FrameKind.comparable(

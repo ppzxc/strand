@@ -55,6 +55,40 @@
           ]
         }
       ]
+    },
+    {
+      "id": "numbered-request-cancelled-before-output-is-drained",
+      "description": "번호가 배정된 요청도 출력을 전송 계층에 넘기기 전에 취소하면 RESET 없이 CANCELLED와 not_processed를 낸다",
+      "requirements": [
+        "req-reset-local-cancel-before-write"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "name": "unwritten",
+          "hold_output": true,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "cancel",
+          "request": "unwritten",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "CANCELLED",
+              "certainty": "not_processed"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

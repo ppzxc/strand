@@ -111,7 +111,7 @@
 | `recv` | `hex` | `transport`가 `tcp`인 벡터에서만 쓴다. 구현에 바이트를 넣는다. 소문자 hex이고 공백·줄바꿈은 허용하며, 모두 지운 뒤 자릿수가 짝수여야 한다. 프레임 경계와 무관하게 아무 위치에서 잘라도 된다. 형식이 깨진 바이트도 쓸 수 있다 |
 | `recv_message` | `opcode`, `hex` | `transport`가 `websocket`인 벡터에서만 쓴다. WebSocket 메시지 하나를 구현에 넣는다. `opcode`는 `binary` 또는 `text`이고, `hex`는 `recv`의 `hex`와 같은 표기다 |
 | `ping` | `payload` | 애플리케이션이 이 `payload`로 PING을 보내게 한다. `payload`는 공백 없는 16자리 소문자 hex(8바이트)다 |
-| `request` | `type`, `name`, `extensions`, `payload`, `deadline_ms` | 애플리케이션이 요청을 보내게 한다. 선택한 `name`은 벡터 안에서 고유한 취소 대상 이름이다. `type`은 256 이상 정수, `extensions`는 `{tag, value}` 배열(기본값 빈 배열), `payload`는 hex(기본값 빈 값). `deadline_ms`는 이 단계 시점의 가상 시계(이 문서 8.3절)에서 센 로컬 요청 기한(규격 4.4.1절)이고 1 이상 정수다. 쓰지 않으면 기한이 없다 |
+| `request` | `type`, `name`, `hold_output`, `extensions`, `payload`, `deadline_ms` | 애플리케이션이 요청을 보내게 한다. 선택한 `name`은 벡터 안에서 고유한 취소 대상 이름이다. `hold_output`이 참이면 러너는 단계에서 쌓인 출력을 전송 계층에 넘기지 않고 다음 단계까지 보류한다. `type`은 256 이상 정수, `extensions`는 `{tag, value}` 배열(기본값 빈 배열), `payload`는 hex(기본값 빈 값). `deadline_ms`는 이 단계 시점의 가상 시계(이 문서 8.3절)에서 센 로컬 요청 기한(규격 4.4.1절)이고 1 이상 정수다. 쓰지 않으면 기한이 없다 |
 | `respond` | `stream_id`, `status`, `extensions`, `payload` | 애플리케이션이 받은 요청에 응답하게 한다. `status`는 2.5.1절의 이름 |
 | `cancel` | `stream_id`, `request` | 애플리케이션이 자기가 보낸 요청을 취소하게 한다. `stream_id` 또는 앞서 선언한 요청 `name` 가운데 하나를 쓴다 |
 | `close` | `error_code`, `reason` | 애플리케이션이 연결을 닫게 한다. `error_code`는 2.5.2절의 이름이고, 선택적 UTF-8 `reason`은 빠지면 빈 문자열이다. |

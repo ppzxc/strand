@@ -76,6 +76,19 @@ class EndpointCloseReasonTest {
     }
 
     @Test
+    void closeReasonPreservesValuesBelowAndExactlyAtTheNegotiatedLimit() {
+        for (int reasonBytes : new int[] {65_503, 65_504}) {
+            Endpoint server = openServer();
+            StringBuilder reason = new StringBuilder();
+            for (int i = 0; i < reasonBytes; i++) reason.append('a');
+
+            server.close(ErrorCode.NO_ERROR, reason.toString());
+
+            assertThat(server.drainMessages().get(0).bytes()).hasSize(32 + reasonBytes);
+        }
+    }
+
+    @Test
     void closeBeforePeerHelloUsesTheSixteenKiBFrameLimit() {
         Endpoint server = Endpoint.server(EndpointConfig.defaults());
         server.receive(bytes(PREFACE));
