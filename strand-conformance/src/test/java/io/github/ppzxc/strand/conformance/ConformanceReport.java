@@ -40,8 +40,15 @@ final class ConformanceReport {
         List<VectorOutcome> integrated = new ArrayList<>();
         for (String id : ids) {
             List<VectorOutcome> results = new ArrayList<>();
-            for (Map<String, VectorOutcome> path : vectorsByPath.values()) {
-                if (path.containsKey(id)) results.add(path.get(id));
+            for (Map.Entry<String, Map<String, VectorOutcome>> path : vectorsByPath.entrySet()) {
+                if (path.getValue().containsKey(id)) {
+                    VectorOutcome outcome = path.getValue().get(id);
+                    results.add(
+                            outcome.status() == VectorOutcome.Status.FAIL
+                                    ? VectorOutcome.fail(
+                                            id, path.getKey() + ": " + String.join(", ", outcome.details()))
+                                    : outcome);
+                }
             }
             integrated.add(integrate(id, results));
         }
@@ -50,8 +57,15 @@ final class ConformanceReport {
 
     private static VectorOutcome integrate(String id, List<VectorOutcome> results) {
         for (VectorOutcome result : results) {
-            if (result.status() == VectorOutcome.Status.FAIL)
-                return VectorOutcome.fail(id, result.details().toString());
+            if (result.status() == VectorOutcome.Status.FAIL) {
+                List<String> failures = new ArrayList<>();
+                for (VectorOutcome failure : results) {
+                    if (failure.status() == VectorOutcome.Status.FAIL) {
+                        failures.add(failure.details().toString());
+                    }
+                }
+                return VectorOutcome.fail(id, String.join("; ", failures));
+            }
         }
         for (VectorOutcome result : results) {
             if (result.status() == VectorOutcome.Status.PASS) return VectorOutcome.pass(id);

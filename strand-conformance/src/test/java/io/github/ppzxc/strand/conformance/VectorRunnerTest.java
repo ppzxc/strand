@@ -360,6 +360,18 @@ class VectorRunnerTest {
         assertThat(passing.count(VectorOutcome.Status.PASS)).isEqualTo(1);
         assertThat(failing.count(VectorOutcome.Status.FAIL)).isEqualTo(1);
         assertThat(failing.passes()).isFalse();
+        assertThat(failing.summary()).contains("integrated/v FAIL", "transport: wrong output");
+    }
+
+    @Test
+    void integratedResultKeepsEveryPathFailureAndCause() {
+        java.util.Map<String, List<VectorOutcome>> outcomes = new java.util.LinkedHashMap<>();
+        outcomes.put("core", Arrays.asList(VectorOutcome.fail("v", "wrong close")));
+        outcomes.put("nio", Arrays.asList(VectorOutcome.fail("v", "missing reset")));
+
+        ConformanceReport integrated = ConformanceReport.integrated(outcomes);
+
+        assertThat(integrated.summary()).contains("integrated/v FAIL", "core: wrong close", "nio: missing reset");
     }
 
     private static final String WEBSOCKET_ESTABLISHED =
