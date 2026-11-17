@@ -162,6 +162,16 @@ final class ConnectionPhase {
         return ending.exchanged() ? Phase.CLOSING : established;
     }
 
+    /** 수립 진행이 상대 HELLO 처리 뒤에 있는가. 종료 중에도 초기화 진행 상태를 보존한다. */
+    boolean hasPeerHello() {
+        return established == Phase.OWN_HELLO_ACK || established == Phase.AUTH || established == Phase.OPEN;
+    }
+
+    /** 인증 관문을 통과해 OPEN 단계에 도달했는가. */
+    boolean hasPassedAuthGate() {
+        return established == Phase.OPEN;
+    }
+
     // 질의
 
     boolean awaitingPreface() {

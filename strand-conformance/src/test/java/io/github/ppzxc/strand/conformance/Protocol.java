@@ -77,6 +77,22 @@ final class Protocol {
     /** AUTH(ACK) 파라미터 중 이름이 있는 {@code credential_lifetime}의 번호. */
     static final int AUTH_PARAM_CREDENTIAL_LIFETIME = 1;
 
+    static int frameType(byte[] bytes) {
+        return ((bytes[TYPE_AT] & 0xFF) << Byte.SIZE) | (bytes[TYPE_AT + 1] & 0xFF);
+    }
+
+    static int frameFlags(byte[] bytes) {
+        return bytes[FLAGS_AT] & 0xFF;
+    }
+
+    static String streamIdFromFrame(byte[] bytes) {
+        long streamId = 0;
+        for (int i = STREAM_ID_AT; i < STREAM_ID_AT + Long.BYTES; i++) {
+            streamId = (streamId << Byte.SIZE) | (bytes[i] & 0xFFL);
+        }
+        return Long.toUnsignedString(streamId);
+    }
+
     static {
         Map<Integer, String> names = new LinkedHashMap<>();
         Map<String, Long> defaults = new LinkedHashMap<>();

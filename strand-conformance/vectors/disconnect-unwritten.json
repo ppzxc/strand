@@ -6,6 +6,7 @@
       "description": "마지막 요청 바이트를 전송 계층에 넘기기 전 끊기면 UNAVAILABLE/not_processed를 낸다",
       "requirements": [
         "req-close-end-pending-unavailable",
+        "req-close-end-certainty-by-handoff",
         "req-close-end-closed-event"
       ],
       "setup": {

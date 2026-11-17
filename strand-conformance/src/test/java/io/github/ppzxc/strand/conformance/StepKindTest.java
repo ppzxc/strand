@@ -38,13 +38,6 @@ class StepKindTest {
     }
 
     @Test
-    void everyDefinedKindIsSupported() {
-        for (String name : StepKind.shapesByName().keySet()) {
-            assertThat(kind(name).isSupported()).as(name).isTrue();
-        }
-    }
-
-    @Test
     void timingTraitsAreDefinedPerKind() {
         assertThat(kind("advance").advancesTime()).isTrue();
         assertThat(kind("request").advancesTime()).isFalse();

@@ -10,6 +10,10 @@ import java.util.Map;
 /** 실행 경로별 결과와 벡터별 통합 결과를 집계한다. */
 final class ConformanceReport {
 
+    static final String CORE_PATH = "core";
+    static final String NIO_PATH = "nio";
+    static final String INTEGRATED_PATH = "integrated";
+
     private final Map<String, List<VectorOutcome>> byPath;
 
     private ConformanceReport(Map<String, List<VectorOutcome>> byPath) {
@@ -39,39 +43,41 @@ final class ConformanceReport {
         }
         List<VectorOutcome> integrated = new ArrayList<>();
         for (String id : ids) {
-            List<VectorOutcome> results = new ArrayList<>();
-            for (Map.Entry<String, Map<String, VectorOutcome>> path : vectorsByPath.entrySet()) {
-                if (path.getValue().containsKey(id)) {
-                    VectorOutcome outcome = path.getValue().get(id);
-                    results.add(
-                            outcome.status() == VectorOutcome.Status.FAIL
-                                    ? VectorOutcome.fail(
-                                            id, path.getKey() + ": " + String.join(", ", outcome.details()))
-                                    : outcome);
-                }
-            }
-            integrated.add(integrate(id, results));
+            integrated.add(integrate(id, vectorsByPath));
         }
-        return forPath("integrated", integrated);
+        return forPath(INTEGRATED_PATH, integrated);
     }
 
-    private static VectorOutcome integrate(String id, List<VectorOutcome> results) {
-        for (VectorOutcome result : results) {
-            if (result.status() == VectorOutcome.Status.FAIL) {
-                List<String> failures = new ArrayList<>();
-                for (VectorOutcome failure : results) {
-                    if (failure.status() == VectorOutcome.Status.FAIL) {
-                        failures.add(failure.details().toString());
-                    }
-                }
-                return VectorOutcome.fail(id, String.join("; ", failures));
+    static VectorOutcome integratedOutcome(String vectorId, VectorOutcome core, VectorOutcome nio) {
+        Map<String, Map<String, VectorOutcome>> byPath = new LinkedHashMap<>();
+        byPath.put(CORE_PATH, Collections.singletonMap(vectorId, core));
+        byPath.put(NIO_PATH, Collections.singletonMap(vectorId, nio));
+        return integrate(vectorId, byPath);
+    }
+
+    private static VectorOutcome integrate(String id, Map<String, Map<String, VectorOutcome>> vectorsByPath) {
+        List<String> failures = new ArrayList<>();
+        List<String> unsupported = new ArrayList<>();
+        boolean passed = false;
+        for (Map.Entry<String, Map<String, VectorOutcome>> path : vectorsByPath.entrySet()) {
+            VectorOutcome outcome = path.getValue().get(id);
+            if (outcome == null) {
+                continue;
+            }
+            if (outcome.status() == VectorOutcome.Status.FAIL) {
+                failures.add(path.getKey() + ": " + String.join(", ", outcome.details()));
+            } else if (outcome.status() == VectorOutcome.Status.PASS) {
+                passed = true;
+            } else {
+                for (String detail : outcome.details()) unsupported.add(path.getKey() + ": " + detail);
             }
         }
-        for (VectorOutcome result : results) {
-            if (result.status() == VectorOutcome.Status.PASS) return VectorOutcome.pass(id);
+        if (!failures.isEmpty()) {
+            return VectorOutcome.fail(id, String.join("; ", failures));
         }
-        List<String> unsupported = new ArrayList<>();
-        for (VectorOutcome result : results) unsupported.addAll(result.details());
+        if (passed) {
+            return VectorOutcome.pass(id);
+        }
         return VectorOutcome.unsupported(id, unsupported);
     }
 
@@ -79,7 +85,9 @@ final class ConformanceReport {
         int count = 0;
         for (List<VectorOutcome> outcomes : byPath.values()) {
             for (VectorOutcome outcome : outcomes) {
-                if (outcome.status() == status) count++;
+                if (outcome.status() == status) {
+                    count++;
+                }
             }
         }
         return count;

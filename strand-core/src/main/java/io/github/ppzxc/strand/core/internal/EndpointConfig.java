@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
 import java.util.HashSet;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -41,7 +42,7 @@ public final class EndpointConfig {
     /** 서버가 받은 {@code AUTH}를 넘길 애플리케이션. */
     private final Authenticator authenticator;
     /** 적합성·호스트 인증 환경이 서버 AUTH(ACK)에 알릴 자격 증명 수명(초). */
-    private final @Nullable Long credentialLifetimeSeconds;
+    private final OptionalLong credentialLifetimeSeconds;
 
     private EndpointConfig(ConfigDraft draft) {
         this.maxFrameSize = draft.maxFrameSize;
@@ -79,8 +80,7 @@ public final class EndpointConfig {
         byte[] authCredentials = new byte[0];
         Authenticator authenticator = EndpointConfig::passesAnonymousOnly;
 
-        @Nullable
-        Long credentialLifetimeSeconds;
+        OptionalLong credentialLifetimeSeconds = OptionalLong.empty();
     }
 
     private ConfigDraft draft() {
@@ -284,7 +284,7 @@ public final class EndpointConfig {
             throw new IllegalArgumentException("credentialLifetimeSeconds는 부호 없는 32비트 정수여야 한다: " + value);
         }
         ConfigDraft draft = draft();
-        draft.credentialLifetimeSeconds = value;
+        draft.credentialLifetimeSeconds = OptionalLong.of(value);
         return new EndpointConfig(draft);
     }
 
@@ -316,8 +316,7 @@ public final class EndpointConfig {
         return authenticator;
     }
 
-    @Nullable
-    Long credentialLifetimeSeconds() {
+    OptionalLong credentialLifetimeSeconds() {
         return credentialLifetimeSeconds;
     }
 

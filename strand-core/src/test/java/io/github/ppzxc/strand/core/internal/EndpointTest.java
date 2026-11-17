@@ -140,6 +140,15 @@ class EndpointTest {
     }
 
     @Test
+    void credentialNotificationsRequireServerAuthGate() {
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
+
+        assertThatThrownBy(server::credentialExpired).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(client::credentialRevoked).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void credentialRevocationRequestsUnauthenticatedCloseOnlyOnce() {
         Endpoint server = established();
 

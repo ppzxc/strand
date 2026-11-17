@@ -238,5 +238,10 @@ class AuthSpecTest {
                 .contains("\"frame_auth\"")
                 .contains("\"auth\"");
         assertThat(schema).contains("credential_lifetime");
+        assertThat(schema)
+                .contains("\"const\": \"client\"")
+                .contains("\"required\": [\"decision\"]")
+                .contains("\"required\": [\"lifetime_seconds\"]")
+                .contains("\"pattern\": \"\\\\S\"");
     }
 }

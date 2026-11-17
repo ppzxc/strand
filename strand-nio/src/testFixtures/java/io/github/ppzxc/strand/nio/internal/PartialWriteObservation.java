@@ -5,23 +5,32 @@ import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** 실행 경로별 적합성 테스트가 전송 계층의 부분 쓰기를 관찰할 수 있게 한다. */
 public final class PartialWriteObservation {
+
+    private static final long ACK_TIMEOUT_MILLISECONDS = 1_000;
+    private static final long IDLE_INTERVAL_MILLISECONDS = 3_000;
+    private static final long WRITE_WAIT_SECONDS = 5;
+    private static final int RESUME_WRITE_CAPACITY = 1_000_000;
 
     /** 실제 NIO 실행에서 관찰한 결과. */
     public static final class Result {
         private final int status;
         private final Certainty certainty;
         private final List<byte[]> frames;
+        private final int resultDeliveries;
 
-        private Result(int status, Certainty certainty, List<byte[]> frames) {
+        private Result(int status, Certainty certainty, int resultDeliveries, List<byte[]> frames) {
             this.status = status;
             this.certainty = certainty;
             this.frames = Collections.unmodifiableList(new ArrayList<>(frames));
+            this.resultDeliveries = resultDeliveries;
         }
 
         public int status() {
@@ -35,6 +44,10 @@ public final class PartialWriteObservation {
         public List<byte[]> frames() {
             return frames;
         }
+
+        public int resultDeliveries() {
+            return resultDeliveries;
+        }
     }
 
     private PartialWriteObservation() {}
@@ -46,7 +59,9 @@ public final class PartialWriteObservation {
             thread.setDaemon(true);
             return thread;
         });
-        EndpointConfig config = EndpointConfig.defaults().ackTimeoutMs(1000).idleIntervalMs(3000);
+        EndpointConfig config = EndpointConfig.defaults()
+                .ackTimeoutMs(ACK_TIMEOUT_MILLISECONDS)
+                .idleIntervalMs(IDLE_INTERVAL_MILLISECONDS);
         InMemoryConnectionPair.Side[] sides = null;
         try {
             sides = InMemoryConnectionPair.connected(config, handlers, false);
@@ -57,20 +72,28 @@ public final class PartialWriteObservation {
             int firstWrittenFrame = clientPassage.written().size();
             clientPassage.writeCapacity(initialWriteCapacity);
             RequestHandle handle = clientSide.driver.request(type, payload);
-            if (!clientSide.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)) {
+            AtomicInteger resultDeliveries = new AtomicInteger();
+            CompletableFuture<Void> deliveryObserved =
+                    handle.result().thenAccept(ignored -> resultDeliveries.incrementAndGet());
+            if (!clientSide.driver.awaitWriteBlocked(true, WRITE_WAIT_SECONDS, TimeUnit.SECONDS)) {
                 throw new AssertionError("NIO writer did not block after the partial request write");
             }
             handle.cancel();
-            RequestResult result = handle.result().get(5, TimeUnit.SECONDS);
+            RequestResult result = handle.result().get(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
+            deliveryObserved.get(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
             InMemoryConnectionPair.settle(handlers, clientSide, serverSide);
-            clientPassage.addWriteCapacity(1_000_000);
+            clientPassage.addWriteCapacity(RESUME_WRITE_CAPACITY);
             InMemoryConnectionPair.settle(handlers, clientSide, serverSide);
+            if (resultDeliveries.get() != 1) {
+                throw new AssertionError("request result was delivered " + resultDeliveries.get() + " times");
+            }
             if (serverSide.received.size() != 1) {
                 throw new AssertionError("peer did not receive the completed request frame");
             }
             return new Result(
                     result.status(),
                     result.certainty(),
+                    resultDeliveries.get(),
                     clientPassage
                             .written()
                             .subList(firstWrittenFrame, clientPassage.written().size()));

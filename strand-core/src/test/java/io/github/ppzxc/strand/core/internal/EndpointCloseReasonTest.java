@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -59,6 +60,27 @@ class EndpointCloseReasonTest {
 
         assertThat(EndpointTest.hex(server.drainMessages().get(0).bytes()))
                 .isEqualTo("0000001e000300000000000000000000000000000000000000000000000000006869");
+    }
+
+    @Test
+    void closeRejectsANullReasonBeforeChangingConnectionState() {
+        Endpoint server = openServer();
+
+        assertThatThrownBy(() -> server.close(ErrorCode.NO_ERROR, null)).isInstanceOf(NullPointerException.class);
+        assertThat(server.drainMessages()).isEmpty();
+        assertThat(server.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void closeRejectsANullReasonEvenAfterClosingStarted() {
+        Endpoint server = openServer();
+        server.close(ErrorCode.NO_ERROR, "first");
+        server.drainMessages();
+        server.drainEvents();
+
+        assertThatThrownBy(() -> server.close(ErrorCode.NO_ERROR, null)).isInstanceOf(NullPointerException.class);
+        assertThat(server.drainMessages()).isEmpty();
+        assertThat(server.drainEvents()).isEmpty();
     }
 
     @Test

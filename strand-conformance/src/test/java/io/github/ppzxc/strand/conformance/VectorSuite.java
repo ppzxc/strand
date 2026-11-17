@@ -41,11 +41,9 @@ final class VectorSuite {
                 String id = name + "/" + vector.id();
                 tests.add(DynamicTest.dynamicTest(id, () -> {
                     VectorOutcome core = VectorRunner.evaluate(vector, id);
-                    VectorOutcome outcome =
-                            core.status() == VectorOutcome.Status.UNSUPPORTED && NioVectorRunner.supports(vector)
-                                    ? NioVectorRunner.evaluate(vector, id)
-                                    : core;
-                    org.assertj.core.api.Assertions.assertThat(outcome.status())
+                    VectorOutcome nio = NioVectorRunner.evaluate(vector, id);
+                    VectorOutcome outcome = ConformanceReport.integratedOutcome(id, core, nio);
+                    assertThat(outcome.status())
                             .as("벡터 %s (%s): %s", id, outcome.status(), outcome.details())
                             .isEqualTo(VectorOutcome.Status.PASS);
                 }));

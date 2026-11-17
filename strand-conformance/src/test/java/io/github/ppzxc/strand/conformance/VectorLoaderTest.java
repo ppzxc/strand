@@ -95,6 +95,11 @@ class VectorLoaderTest {
                 "[\"req-reset-local-cancel-before-write\"]",
                 setup,
                 "[{\"kind\":\"cancel\",\"request\":\"missing\",\"send\":[],\"events\":[]}]"));
+        String missingSelector = file(vector(
+                "missing-selector",
+                "[\"req-reset-local-cancel-before-write\"]",
+                setup,
+                "[{\"kind\":\"cancel\",\"send\":[],\"events\":[]}]"));
         String ambiguous = file(
                 vector(
                         "ambiguous",
@@ -109,9 +114,49 @@ class VectorLoaderTest {
         assertThatThrownBy(() -> VectorLoader.parse("undeclared.json", undeclared))
                 .isInstanceOf(InvalidVectorException.class)
                 .hasMessageContaining("선언");
+        assertThatThrownBy(() -> VectorLoader.parse("missing-selector.json", missingSelector))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("stream_id 또는 request");
         assertThatThrownBy(() -> VectorLoader.parse("ambiguous.json", ambiguous))
                 .isInstanceOf(InvalidVectorException.class)
                 .hasMessageContaining("stream_id 또는 request");
+    }
+
+    @Test
+    void rejectsWriteLimitThatDoesNotStopInsideRequestFrame() {
+        String setup = "{\"role\":\"client\",\"established\":true}";
+        String step = "{\"kind\":\"request\",\"type\":256,\"payload\":\"abcd\","
+                + "\"write_limit_bytes\":24,\"send\":[],\"events\":[]}";
+
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "write-limit.json",
+                        file(vector("whole-frame-write-limit", "[\"req-write-partial\"]", setup, "[" + step + "]"))))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("write_limit_bytes")
+                .hasMessageContaining("프레임 크기보다 작아야");
+    }
+
+    @Test
+    void writeLimitCountsEncodedRequestExtensionsAsPartOfTheFrame() {
+        String setup = "{\"role\":\"client\",\"established\":true}";
+        String step = "{\"kind\":\"request\",\"type\":256,\"extensions\":["
+                + "{\"tag\":1,\"value\":\"0102\"}],\"write_limit_bytes\":24,\"send\":[],\"events\":[]}";
+
+        assertThatCode(() -> VectorLoader.parse(
+                        "extension-write-limit.json",
+                        file(vector("partial-extension-write", "[\"req-write-partial\"]", setup, "[" + step + "]"))))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsWhitespaceOnlyRequestName() {
+        String setup = "{\"role\":\"client\",\"established\":true}";
+        String step = "{\"kind\":\"request\",\"type\":256,\"name\":\"  \",\"send\":[],\"events\":[]}";
+
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "blank-name.json", file(vector("blank-name", "[\"req-cancel\"]", setup, "[" + step + "]"))))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("name");
     }
 
     /** 유효한 벡터 하나에 단계 하나만 바꿔 넣은 파일. */

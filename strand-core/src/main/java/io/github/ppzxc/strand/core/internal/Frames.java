@@ -2,14 +2,19 @@ package io.github.ppzxc.strand.core.internal;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.OptionalLong;
 
 /** 프레임 바이트 인코딩(규격 2.1절). */
 final class Frames {
+
+    static final int AUTH_PARAM_CREDENTIAL_LIFETIME = 0x0001;
 
     /** {@code length} 필드의 크기(규격 2.2.1절). */
     static final int LENGTH_FIELD_SIZE = 4;
     /** 헤더 크기. 확장 영역과 payload가 모두 비면 프레임은 이 크기다(규격 2.1절). */
     static final int HEADER_SIZE = 20;
+    /** CLOSE payload의 고정 필드 크기(error_code와 last_stream_id). */
+    static final int CLOSE_FIXED_PAYLOAD_SIZE = Integer.BYTES + Long.BYTES;
     /** {@code length}의 최솟값: 헤더에서 {@code length} 필드를 뺀 크기(규격 2.2.1절). */
     static final int MIN_LENGTH = HEADER_SIZE - LENGTH_FIELD_SIZE;
     /** {@code type}이 끝나는 위치. 길이가 어긋난 프레임도 여기까지는 읽어 type을 본다. */
@@ -87,9 +92,12 @@ final class Frames {
     }
 
     /** 서버가 알리는 자격 증명 수명(규격 3.3.1절). */
-    static byte[] authAck(long credentialLifetimeSeconds) {
+    static byte[] authAck(OptionalLong credentialLifetimeSeconds) {
+        if (!credentialLifetimeSeconds.isPresent()) {
+            return control(FrameType.AUTH, Flags.ACK, new byte[0]);
+        }
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
-        writeParam(payload, 0x0001, credentialLifetimeSeconds);
+        writeParam(payload, AUTH_PARAM_CREDENTIAL_LIFETIME, credentialLifetimeSeconds.getAsLong());
         return control(FrameType.AUTH, Flags.ACK, payload.toByteArray());
     }
 

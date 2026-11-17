@@ -11,6 +11,8 @@ import java.util.concurrent.atomic.AtomicLong;
 /** 수동 시계와 메모리 통로로 연결 드라이버 쌍을 실행하는 테스트 도구다. */
 public final class InMemoryConnectionPair {
 
+    private static final long SETTLE_TIMEOUT_SECONDS = 5;
+
     /** 한 연결 끝의 드라이버와 관찰 가능한 상태. */
     public static final class Side {
         public final AtomicLong clock = new AtomicLong(1_000_000);
@@ -56,7 +58,7 @@ public final class InMemoryConnectionPair {
         for (int i = 0; i < sides.length; i++) passages[i] = sides[i].passage;
         InMemoryPassage.awaitQuiescence(passages);
         try {
-            handlers.submit(() -> {}).get(5, TimeUnit.SECONDS);
+            handlers.submit(() -> {}).get(SETTLE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw new IllegalStateException("handler executor did not settle", e);
         }

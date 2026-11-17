@@ -100,6 +100,22 @@ final class VectorSchema {
         return new ArrayList<>(SETUP.names());
     }
 
+    static String hexOrEmpty(JsonObject object, String field) {
+        return object.has(field) ? object.get(field).getAsString() : "";
+    }
+
+    static long requestFrameSize(JsonObject request) {
+        long size = Protocol.HEADER_SIZE + (long) Bytes.fromHex(hexOrEmpty(request, "payload")).length;
+        if (request.has("extensions")) {
+            JsonArray extensions = request.getAsJsonArray("extensions");
+            for (int i = 0; i < extensions.size(); i++) {
+                JsonObject extension = extensions.get(i).getAsJsonObject();
+                size += 4L + Bytes.fromHex(extension.get("value").getAsString()).length;
+            }
+        }
+        return size;
+    }
+
     static final Shape AUTH_SETUP = Shape.EMPTY
             .allow("mechanism", Check::mechanism)
             .allow("credentials", Check::hex)
@@ -166,13 +182,19 @@ final class VectorSchema {
         for (int i = 0; i < steps.size(); i++) {
             JsonObject step = steps.get(i).getAsJsonObject();
             StepKind kind = StepKind.of(step);
-            if ("request".equals(kind.name()) && step.has("name")) {
+            if (StepKind.REQUEST_NAME.equals(kind.name()) && step.has("write_limit_bytes")) {
+                if (step.get("write_limit_bytes").getAsLong() >= requestFrameSize(step)) {
+                    throw c.failAt(
+                            Check.child(Check.item("steps", i), "write_limit_bytes"), "부분 쓰기 한도는 요청 프레임 크기보다 작아야 한다");
+                }
+            }
+            if (StepKind.REQUEST_NAME.equals(kind.name()) && step.has("name")) {
                 String name = step.get("name").getAsString();
                 if (name.trim().isEmpty() || !requestNames.add(name)) {
                     throw c.failAt(Check.child(Check.item("steps", i), "name"), "요청 이름은 비어 있지 않고 벡터 안에서 유일해야 한다");
                 }
             }
-            if ("cancel".equals(kind.name())) {
+            if (StepKind.CANCEL_NAME.equals(kind.name())) {
                 boolean byStreamId = step.has("stream_id");
                 boolean byName = step.has("request");
                 if (byStreamId == byName) {
@@ -183,7 +205,7 @@ final class VectorSchema {
                     throw c.failAt(Check.child(Check.item("steps", i), "request"), "앞에서 선언한 request 이름이어야 한다");
                 }
             }
-            if (kind.name().startsWith("credential_") && (!server || !authGateOpen)) {
+            if (kind.isCredentialNotification() && (!server || !authGateOpen)) {
                 throw c.failAt(
                         Check.child(Check.item("steps", i), StepKind.TAG), "자격 증명 통지는 서버 역할의 AUTH 관문 통과 뒤에만 쓸 수 있다");
             }

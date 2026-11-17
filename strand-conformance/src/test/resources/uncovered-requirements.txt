@@ -1,5 +1,5 @@
 # 벡터로 확인하지 않는 MUST·MUST NOT 요구사항. 형식: `req-… 범주 사유`(한 줄에 식별자 하나).
-# 범주는 둘뿐이다. 관측불가: 엔드포인트의 입출력(바이트와 메시지)으로 볼 수 없다. 형식미지원: 규격상 볼 수 있어야 하는데 지금 벡터 형식에 입력(트리거 단계)·비교 필드·이벤트가 없어 형식(과 필요하면 규격)을 넓혀야 한다(#275, #274).
+# 관측불가: 엔드포인트의 입출력(바이트와 메시지)으로 볼 수 없다. 형식미지원: 벡터 형식에 필요한 입력·비교 필드·이벤트가 없다.
 # 벡터가 요구사항을 가리키기 시작하면 SpecCoverageTest가 실패한다. 그때 이 줄을 지운다. SHOULD·SHOULD NOT은 올리지 않는다.
 #
 # 관측불가: 1.2.1절 WebSocket 하위 프로토콜. WebSocket 핸드셰이크의 헤더 규칙이라 바이트와 메시지로 관측할 수 없다.
@@ -14,8 +14,7 @@ req-security-tls-no-renegotiation 관측불가 TLS 사후 인증과 재협상을
 req-security-tls-no-plaintext-fallback 관측불가 TLS 협상 실패 때 평문으로 바꾸지 않는 것은 전송 계층 연결의 동작이라 벡터의 입출력 모델로 관측할 수 없다
 req-security-alpn-client-offer 관측불가 ALPN 식별자 `strand` 제시는 TLS 핸드셰이크 안의 동작이라 입출력으로 관측할 수 없다
 req-security-alpn-server-reject 관측불가 ALPN을 제시하지 않은 연결의 거부는 TLS 핸드셰이크 안의 동작이라 입출력으로 관측할 수 없다
-# 형식미지원: #274에서 벡터로 쓰지 못한 항목. 규격이 로컬 처리를 정하지 않아 관측할 이벤트가 없다(#278 댓글).
-req-hello-peer-frame-size-limit 형식미지원 상대가 알린 max_frame_size를 넘는 프레임을 보내려 할 때 규격은 보내지 않는다(MUST)만 정하고 로컬 처리와 이벤트를 정하지 않아 벡터에 쓸 기대 결과가 없다. 규격에 이벤트를 정하는 확장이 있어야 갚는다. 구현은 호출 API가 IllegalArgumentException으로 거부한다(#274, #278 댓글)
-# 형식미지원: 앞 티켓들의 채움 중 드러난 누락. 보내지 않는 행동을 일으키는 입력이 형식에 없다.
+# 형식미지원: 보내지 않는 행동을 유발하는 API 입력을 결과로 표현할 방법이 없다.
 req-reset-close-only-code-forbidden 형식미지원 CLOSE 전용 error_code를 RESET에 싣고 싶어지는 상황을 만드는 입력이 형식에 없어, 구현이 그 코드를 쓰지 않는다는 것을 단언할 수 없다
 req-backpressure-no-refuse-after-start 형식미지원 처리를 시작한 요청을 로컬 사유(과부하 등)로 거절하고 싶어지는 상황을 만드는 입력이 형식에 없어 거절하지 않는다는 것을 단언할 수 없다
+req-hello-peer-frame-size-limit 형식미지원 상대가 알린 max_frame_size를 넘는 프레임을 호출 API에 요청했을 때 구현은 보내지 않지만, 로컬 예외나 이벤트를 벡터 결과로 표현할 수 없다

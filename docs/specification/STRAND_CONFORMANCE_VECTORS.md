@@ -12,10 +12,6 @@
 
 이 문서에서 **러너**는 벡터를 읽어 테스트 대상 구현에 입력을 넣고 출력을 기대 결과와 비교하는 프로그램이고, **단계**는 시나리오의 한 항목이다. 두 말은 이 문서 안에서만 쓴다.
 
-러너는 벡터 형식을 검사한 뒤 실행 경로마다 필요한 기능을 실행 전에 검사한다. 유효한 벡터에 필요한 기능이 없으면 그 경로에서 단계를 실행하지 않고 벡터와 미지원 기능을 함께 미지원으로 보고한다. 실행 가능한 벡터의 불일치나 실행 오류, 형식 오류는 실패다. 러너는 경로별 통과·실패·미지원 수와 벡터별 상세를 보고한다. 통합 결과는 어떤 경로에서도 실패하지 않고 적어도 한 경로가 통과한 벡터만 통과로 집계한다. 모든 경로가 미지원인 벡터는 미지원이며, 경로 하나라도 실패하면 통합 결과도 실패다. 경로 결과나 통합 결과에 실패 또는 미지원이 있으면 해당 검사 명령은 실패한다.
-
-이 저장소의 `:strand-conformance:test`는 기본적으로 통합 실행이다. `-Dstrand.conformance.execution.path=core` 또는 `nio`를 주면 해당 경로만 검사한다.
-
 절 번호 표기: "이 문서 n절"은 이 문서의 절이고, 그냥 "n.n절"은 와이어 규격(`STRAND_SPECIFICATION.md`)의 절이다. 벡터의 `requirements` 필드는 절이 아니라 와이어 규격의 요구사항 식별자(앵커 id)로 가리킨다. 식별자가 놓인 절은 규격 본문에서 앵커를 찾아 알아낸다.
 
 ## 1. 모델
@@ -32,6 +28,8 @@
 | CLOSE의 `last_stream_id`로 끝난 요청 | 받는 즉시 그 요청의 `result`(`certainty`가 `not_processed`)가 나오는지, `last_stream_id` 이하인 요청은 대기를 이어 가는지 |
 
 ## 2. 파일 구조와 진화 규칙
+
+JSON 스키마는 객체와 필드의 형태와 역할 제약을 검사한다. 선언된 요청 참조, 인증 관문 통과 뒤의 자격 증명 통지처럼 앞선 단계에 의존하는 조건은 로더가 단계 순서대로 검증한다.
 
 벡터 파일의 최상위는 아래 두 필드다.
 
@@ -95,7 +93,7 @@
 | `peer_hello` | 아니오 | 러너가 상대 **엔드포인트**(`role`과 반대 역할)로서 보내는 HELLO의 파라미터 | 규격 기본값 |
 | `established` | 예 | 연결을 수립한 상태에서 시작하는지 | — |
 | `config` | 아니오 | 설정 항목(이 문서 8.2절) | 항목별 기본값 |
-| `auth` | 아니오 | 연결 인증에 쓰는 메커니즘과 자격 증명. `{mechanism, credentials}`이고 두 필드 모두 생략할 수 있다. `mechanism`은 규격 3.3.1절의 문법(대문자·숫자·하이픈·밑줄 1~20자)을 따르고 `credentials`는 hex다. `role`이 `client`이면 구현이 이것을 `AUTH`로 보내고, `server`이면 구현은 이것과 같은 `AUTH`만 통과시킨다 | `{"mechanism": "ANONYMOUS", "credentials": ""}` |
+| `auth` | 아니오 | 연결 인증에 쓰는 메커니즘과 자격 증명. `{mechanism, credentials}`이고 두 필드 모두 생략할 수 있다. `mechanism`은 규격 3.3.1절의 문법(대문자·숫자·하이픈·밑줄 1~20자)을 따르고 `credentials`는 hex다. `role`이 `client`이면 구현이 이것을 `AUTH`로 보내고, `server`이면 구현은 이것과 같은 `AUTH`만 통과시킨다. `decision`과 `lifetime_seconds`는 서버 역할에서만 쓸 수 있다 | `{"mechanism": "ANONYMOUS", "credentials": ""}` |
 | `transport` | 아니오 | 전송 계층. `tcp` 또는 `websocket`. 바이트를 넣는 단계가 `tcp`에서는 `recv`, `websocket`에서는 `recv_message`로 갈린다(이 문서 5절) | `tcp` |
 | `next_stream_id` | 아니오 | 구현이 자기 번호 공간에서 다음에 쓸 스트림 번호. 1 이상이고 표기는 이 문서 5절을 따르며, `role`이 `client`이면 홀수, `server`이면 짝수 | `role`이 `client`이면 1, `server`이면 2 |
 | `known_types` | 아니오 | 구현이 아는 애플리케이션 `type`의 목록. 256 이상 정수의 배열이고 같은 값을 두 번 쓸 수 없다 | 256 이상의 모든 `type` |
@@ -115,10 +113,10 @@
 | `recv` | `hex` | `transport`가 `tcp`인 벡터에서만 쓴다. 구현에 바이트를 넣는다. 소문자 hex이고 공백·줄바꿈은 허용하며, 모두 지운 뒤 자릿수가 짝수여야 한다. 프레임 경계와 무관하게 아무 위치에서 잘라도 된다. 형식이 깨진 바이트도 쓸 수 있다 |
 | `recv_message` | `opcode`, `hex` | `transport`가 `websocket`인 벡터에서만 쓴다. WebSocket 메시지 하나를 구현에 넣는다. `opcode`는 `binary` 또는 `text`이고, `hex`는 `recv`의 `hex`와 같은 표기다 |
 | `ping` | `payload` | 애플리케이션이 이 `payload`로 PING을 보내게 한다. `payload`는 공백 없는 16자리 소문자 hex(8바이트)다 |
-| `request` | `type`, `name`, `hold_output`, `write_limit_bytes`, `extensions`, `payload`, `deadline_ms` | 애플리케이션이 요청을 보내게 한다. 선택한 `name`은 벡터 안에서 고유한 취소 대상 이름이다. `hold_output`이 참이면 러너는 단계에서 쌓인 출력을 전송 계층에 넘기지 않고 다음 단계까지 보류한다. `write_limit_bytes`는 NIO 실행 경로에서 이 요청 프레임을 부분 쓰기로 멈출 통로 용량이며 1 이상 u32다. 다른 실행 경로는 이 필드가 필요한 벡터를 실행 전에 미지원으로 보고한다. `type`은 256 이상 정수, `extensions`는 `{tag, value}` 배열(기본값 빈 배열), `payload`는 hex(기본값 빈 값). `deadline_ms`는 이 단계 시점의 가상 시계(이 문서 8.3절)에서 센 로컬 요청 기한(규격 4.4.1절)이고 1 이상 정수다. 쓰지 않으면 기한이 없다 |
+| `request` | `type`, `name`, `hold_output`, `write_limit_bytes`, `extensions`, `payload`, `deadline_ms` | 애플리케이션이 요청을 보내게 한다. 선택한 `name`은 공백이 아닌 문자가 하나 이상 있고 벡터 안에서 고유한 취소 대상 이름이며, 생략하면 이름으로 취소할 수 없다. `hold_output`이 참이면 러너는 단계에서 쌓인 출력을 전송 계층에 넘기지 않고 다음 단계까지 보류하며, 생략하면 거짓이다. `write_limit_bytes`는 NIO 실행 경로에서 이 요청 프레임을 부분 쓰기로 멈출 통로 용량이며 1 이상 u32이고, 20바이트 헤더와 payload를 합한 프레임 크기보다 작아야 한다. 생략하면 쓰기 용량 제한이 없다. 다른 실행 경로는 이 필드가 필요한 벡터를 실행 전에 미지원으로 보고한다. `type`은 256 이상 정수, `extensions`는 `{tag, value}` 배열(기본값 빈 배열), `payload`는 hex(기본값 빈 값). `deadline_ms`는 이 단계 시점의 가상 시계(이 문서 8.3절)에서 센 로컬 요청 기한(규격 4.4.1절)이고 1 이상 정수다. 쓰지 않으면 기한이 없다 |
 | `respond` | `stream_id`, `status`, `extensions`, `payload` | 애플리케이션이 받은 요청에 응답하게 한다. `status`는 2.5.1절의 이름 |
-| `cancel` | `stream_id`, `request` | 애플리케이션이 자기가 보낸 요청을 취소하게 한다. `stream_id` 또는 앞서 선언한 요청 `name` 가운데 하나를 쓴다 |
-| `close` | `error_code`, `reason` | 애플리케이션이 연결을 닫게 한다. `error_code`는 2.5.2절의 이름이고, 선택적 UTF-8 `reason`은 빠지면 빈 문자열이다. |
+| `cancel` | `stream_id`, `request` | 애플리케이션이 자기가 보낸 요청을 취소하게 한다. `stream_id` 또는 앞서 선언한 요청 `name` 가운데 하나를 반드시 쓰며 다른 필드는 생략한다 |
+| `close` | `error_code`, `reason` | 애플리케이션이 연결을 닫게 한다. `error_code`는 2.5.2절의 이름이고, 선택적 UTF-8 `reason`은 빠지면 빈 문자열이다 |
 | `credential_expired` | — | 인증기가 자격 증명 만료를 통지한다. 서버 역할에서 인증을 마친 뒤 쓴다 |
 | `credential_revoked` | — | 인증기가 자격 증명 폐기를 통지한다. 서버 역할에서 인증을 마친 뒤 쓴다 |
 | `advance` | `ms` | 가상 시계를 `ms`밀리초 앞으로 보낸다(이 문서 8.3절). 1 이상 정수 |
@@ -149,7 +147,7 @@
 
 `WEBSOCKET_CLOSE`는 WebSocket Close(`Close Frame 0x08`)를 관측하는 항목이고 `transport`가 `websocket`인 벡터에서만 쓴다. 구현이 `NO_ERROR` CLOSE를 보냈거나 받아 연결을 끝낼 때(규격 1.2절, 3.5절) 마지막 프레임 메시지 뒤에 나온다(받아서 끝나면 보낸 프레임이 없을 수 있다). `NO_ERROR`가 아닌 CLOSE로 끝낼 때의 WebSocket Close와 상태 1000이 아닌 WebSocket Close는 이 형식으로 관측하지 않으며, 러너는 비교에서 뺀다.
 
-`AUTH` 항목에서 `ACK`가 아니면 `mechanism`이 필수이고 `params`를 쓸 수 없다. `ACK`이면 `mechanism`과 `credentials`를 쓸 수 없다. `setup.auth.lifetime_seconds`를 설정한 서버 역할 벡터는 `AUTH(ACK)`에 같은 값의 `credential_lifetime`을 싣는다.
+`AUTH` 항목에서 `ACK`가 아니면 `mechanism`이 필수이고 `params`를 쓸 수 없다. `ACK`이면 `mechanism`과 `credentials`를 쓸 수 없다. 이름 있는 `credential_lifetime`의 설정과 수명 측정은 8.1절 4번을 따른다.
 
 모든 프레임에서 `length`는 비교하지 않는다. 비교 대상이지만 쓰지 않은 필드는 위 표의 기본값(빈 `flags`, 빈 확장 영역, 빈 `payload`)과 비교한다.
 
@@ -185,7 +183,7 @@
 1. 구현은 자기 번호 공간에서 번호를 `next_stream_id`부터 연속으로 할당한다. 클라이언트는 1, 3, 5, ...(홀수)이고 서버는 2, 4, 6, ...(짝수)이다. 번호 건너뛰기를 허용하는 2.2.5절은 바뀌지 않는다. 이 전제 덕분에 벡터 작성자는 응답을 담은 `recv`의 `stream_id`를 미리 적을 수 있다.
 2. `known_types`가 없으면 구현은 256 이상의 모든 `type`을 아는 것으로 다루고 payload를 해석하지 않은 채 전달한다. 있으면 목록에 없는 `type`은 모르는 것이다(4.1절, 5.1절 5번 (나)).
 3. AUTH 관문(3.3절)이 열리기 전에 `ping` 단계를 쓰는 벡터는 없다. 서버 역할이면 구현이 `AUTH(ACK)`를 보낸 단계부터, 클라이언트 역할이면 `recv`로 `AUTH(ACK)`를 넣은 단계부터 `ping` 단계를 쓸 수 있다.
-4. 서버 역할 구현은 `setup.auth.lifetime_seconds`를 `AUTH(ACK)`의 `credential_lifetime`으로 알린다. 이 값을 설정하지 않으면 항목을 싣지 않는다. 수명은 `AUTH(ACK)`를 보낸 시점부터 가상 시계로 잰다. `advance`가 수명을 지난 뒤 `credential_expired`와 같은 만료 CLOSE를 확인한다. 한도 직전에는 만료 CLOSE가 없어야 한다. 정확히 한도에 닿은 순간의 동작은 요구하지 않는다.
+4. 서버 역할 구현은 `setup.auth.lifetime_seconds`를 `AUTH(ACK)`의 `credential_lifetime`으로 알린다. 이 값을 설정하지 않으면 항목을 싣지 않는다. 수명은 `AUTH(ACK)`를 보낸 시점부터 가상 시계로 잰다. `advance`가 수명을 지난 뒤 만료 CLOSE를 확인한다. `credential_expired`는 인증기에서 만료 통지를 직접 발생시키는 별도 단계다. 한도 직전에는 만료 CLOSE가 없어야 한다. 정확히 한도에 닿은 순간의 동작은 요구하지 않는다.
 
 ### 8.2 설정 항목
 
@@ -205,6 +203,11 @@
 시간은 `advance` 단계로만 흐른다(MUST). 구현은 시계를 주입받을 수 있어야 하며, 적합성 실행 중에는 실제 시간을 보지 않는다. 시계는 `setup` 시작 시점에 0이다. 표준 수립 순서와 단계 안의 처리는 시간이 걸리지 않는다. 시간 한도에 정확히 닿은 순간의 동작은 규격이 정하지 않았으므로, 벡터는 한도 직전과 한도를 지난 뒤만 쓴다.
 
 ## 9. 검증 범위
+
+러너는 벡터 형식을 검사한 뒤 실행 경로마다 필요한 기능을 실행 전에 검사한다. 유효한 벡터에 필요한 기능이 없으면 그 경로에서 단계를 실행하지 않고 벡터와 미지원 기능을 함께 미지원으로 보고한다. 실행 가능한 벡터의 불일치나 실행 오류, 형식 오류는 실패다. 러너는 경로별 통과·실패·미지원 수와 벡터별 실패·미지원 상세를 각각 보고한다. 통합 결과는 어떤 경로에서도 실패하지 않고 적어도 한 경로가 통과한 벡터만 통과로 집계한다. 모든 경로가 미지원인 벡터는 미지원이며, 경로 하나라도 실패하면 통합 결과도 실패다. 경로 결과나 통합 결과에 실패 또는 미지원이 있으면 해당 검사 명령은 실패한다.
+
+이 저장소의 `:strand-conformance:test`는 기본적으로 통합 실행이며 테스트 결과 보고서에 core, nio, 통합 결과의 수와 실패·미지원 상세를 각각 남긴다. 통합 결과가 모두 통과하면 `전체 적합성 통과`를 표시한다. `-Dstrand.conformance.execution.path=core` 또는 `nio`를 주면 해당 경로만 검사하며, 그 경로에 실패나 미지원이 있으면 검사 명령이 실패한다.
+
 
 벡터는 MUST와 MUST NOT 동작만 검증한다. SHOULD 동작은 다루지 않는다. 예를 들어 `timeout` 초과 시 `DEADLINE_EXCEEDED` 응답은 벡터가 없다. 선택 동작 때문에 적합성 판정이 갈리지 않게 하려는 원칙이다.
 

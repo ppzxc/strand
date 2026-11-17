@@ -7,13 +7,17 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
+import org.junit.jupiter.api.TestReporter;
 import org.junit.jupiter.api.io.TempDir;
 
 /** 벡터 디렉터리의 모든 벡터 파일을 읽어 벡터마다 동적 테스트 하나를 만든다. 이름은 {@code 파일명/id}(파일명의 {@code .json}은 뺀다). */
@@ -56,10 +60,10 @@ class VectorConformanceTest {
 
     /** 실제 경로 결과를 합쳐 보고한다. core 미지원 벡터는 지원하는 전송 경로에서 통과해야 한다. */
     @Test
-    void integratedExecutionPathReportHasNoFailuresOrUnsupportedVectors() {
+    void integratedExecutionPathReportHasNoFailuresOrUnsupportedVectors(TestReporter reporter) {
         Assumptions.assumeTrue("integrated".equals(executionPath()));
-        List<VectorOutcome> coreOutcomes = new java.util.ArrayList<>();
-        List<VectorOutcome> nioOutcomes = new java.util.ArrayList<>();
+        List<VectorOutcome> coreOutcomes = new ArrayList<>();
+        List<VectorOutcome> nioOutcomes = new ArrayList<>();
         for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
             String fileKey = VectorSuite.fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
@@ -68,31 +72,30 @@ class VectorConformanceTest {
                 nioOutcomes.add(NioVectorRunner.evaluate(vector, vectorId));
             }
         }
-        java.util.Map<String, List<VectorOutcome>> outcomesByPath = new java.util.LinkedHashMap<>();
-        outcomesByPath.put("core", coreOutcomes);
-        outcomesByPath.put("nio", nioOutcomes);
-        ConformanceReport coreReport = ConformanceReport.forPath("core", coreOutcomes);
-        ConformanceReport nioReport = ConformanceReport.forPath("nio", nioOutcomes);
+        Map<String, List<VectorOutcome>> outcomesByPath = new LinkedHashMap<>();
+        outcomesByPath.put(ConformanceReport.CORE_PATH, coreOutcomes);
+        outcomesByPath.put(ConformanceReport.NIO_PATH, nioOutcomes);
+        ConformanceReport coreReport = ConformanceReport.forPath(ConformanceReport.CORE_PATH, coreOutcomes);
+        ConformanceReport nioReport = ConformanceReport.forPath(ConformanceReport.NIO_PATH, nioOutcomes);
         ConformanceReport integrated = ConformanceReport.integrated(outcomesByPath);
 
+        reporter.publishEntry(ConformanceReport.CORE_PATH, coreReport.summary());
+        reporter.publishEntry(ConformanceReport.NIO_PATH, nioReport.summary());
+        reporter.publishEntry(
+                ConformanceReport.INTEGRATED_PATH,
+                (integrated.passes() ? "전체 적합성 통과: " : "전체 적합성 실패: ") + integrated.summary());
+
         assertThat(coreReport.count(VectorOutcome.Status.FAIL))
-                .as("core 경로 실행 실패: %s", coreReport.summary())
+                .as("core 경로 결과: %s", coreReport.summary())
                 .isZero();
-        assertThat(coreReport.count(VectorOutcome.Status.UNSUPPORTED)).isPositive();
-        List<String> coreUnsupportedIds = coreOutcomes.stream()
-                .filter(outcome -> outcome.status() == VectorOutcome.Status.UNSUPPORTED)
-                .map(VectorOutcome::vectorId)
-                .collect(Collectors.toList());
-        List<String> nioPassedIds = nioOutcomes.stream()
-                .filter(outcome -> outcome.status() == VectorOutcome.Status.PASS)
-                .map(VectorOutcome::vectorId)
-                .collect(Collectors.toList());
-        assertThat(nioPassedIds).containsExactlyElementsOf(coreUnsupportedIds);
-        assertThat(coreReport.passes()).isFalse();
-        assertThat(nioReport.passes()).isFalse();
-        assertThat(nioReport.count(VectorOutcome.Status.UNSUPPORTED))
-                .as("NIO 경로 미지원 결과: %s", nioReport.summary())
-                .isPositive();
+        assertThat(nioReport.count(VectorOutcome.Status.FAIL))
+                .as("nio 경로 결과: %s", nioReport.summary())
+                .isZero();
+        int vectorCount = VectorSuite.jsonFiles(VectorSuite.defaultDirectory()).stream()
+                .mapToInt(file -> VectorLoader.load(file).size())
+                .sum();
+        assertThat(coreOutcomes).hasSize(vectorCount);
+        assertThat(nioOutcomes).hasSize(vectorCount);
         assertThat(integrated.passes())
                 .as("통합 적합성 결과: %s", integrated.summary())
                 .isTrue();
@@ -100,21 +103,22 @@ class VectorConformanceTest {
 
     /** 별도 경로 명령은 해당 경로의 미지원도 실패로 반환한다. */
     @Test
-    void selectedExecutionPathReportHasNoFailuresOrUnsupportedVectors() {
+    void selectedExecutionPathReportHasNoFailuresOrUnsupportedVectors(TestReporter reporter) {
         String path = executionPath();
-        Assumptions.assumeTrue("core".equals(path) || "nio".equals(path));
-        List<VectorOutcome> outcomes = new java.util.ArrayList<>();
+        Assumptions.assumeTrue(ConformanceReport.CORE_PATH.equals(path) || ConformanceReport.NIO_PATH.equals(path));
+        List<VectorOutcome> outcomes = new ArrayList<>();
         for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
             String fileKey = VectorSuite.fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 String vectorId = fileKey + "/" + vector.id();
                 outcomes.add(
-                        path.equals("core")
+                        path.equals(ConformanceReport.CORE_PATH)
                                 ? VectorRunner.evaluate(vector, vectorId)
                                 : NioVectorRunner.evaluate(vector, vectorId));
             }
         }
         ConformanceReport report = ConformanceReport.forPath(path, outcomes);
+        reporter.publishEntry(path, report.summary());
 
         assertThat(report.passes())
                 .as("%s 실행 경로 적합성 결과: %s", path, report.summary())
@@ -122,7 +126,7 @@ class VectorConformanceTest {
     }
 
     private static String executionPath() {
-        return System.getProperty("strand.conformance.execution.path", "integrated");
+        return System.getProperty("strand.conformance.execution.path", ConformanceReport.INTEGRATED_PATH);
     }
 
     @Test
