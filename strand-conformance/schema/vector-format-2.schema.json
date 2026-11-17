@@ -360,6 +360,7 @@
             "type": { "$ref": "#/$defs/app_type" },
             "name": { "type": "string", "minLength": 1 },
             "hold_output": { "type": "boolean", "description": "러너가 이 단계에서 쌓인 출력을 다음 단계까지 전송 계층에 넘기지 않는다." },
+            "write_limit_bytes": { "type": "integer", "minimum": 1, "maximum": 4294967295, "description": "NIO 실행 경로에서 다음 요청 프레임을 부분 쓰기로 멈출 통로 용량. 다른 실행 경로는 실행 전에 미지원으로 보고한다." },
             "extensions": { "$ref": "#/$defs/extensions" },
             "payload": { "$ref": "#/$defs/hex" },
             "deadline_ms": { "type": "integer", "minimum": 1, "maximum": 4294967295 },

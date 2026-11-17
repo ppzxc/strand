@@ -297,31 +297,14 @@ class ConnectionDriverBlockedWriteTest {
 
     @Test
     void cancellationAfterPartialRequestWriteFinishesFrameThenSendsReset() throws Exception {
-        Side[] sides = connected();
-        Side client = sides[0];
-        Side server = sides[1];
-        client.passage.writeCapacity(10);
-        int writtenBefore = client.passage.written().size();
+        PartialWriteObservation.Result result =
+                PartialWriteObservation.cancelAfterPartialWrite(APPLICATION_TYPE, bytes("partial"), 10);
 
-        RequestHandle handle = client.driver.request(APPLICATION_TYPE, bytes("partial"));
-        assertThat(client.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)).isTrue();
-
-        handle.cancel();
-        settle(client, server);
-        assertThat(handle.result())
-                .isCompletedWithValueMatching(
-                        result -> result.status() == STATUS_CANCELLED && result.certainty() == Certainty.UNKNOWN);
-
-        client.unblockWrites();
-        settle(client, server);
-
-        assertThat(server.received).hasSize(1);
-        List<byte[]> written = client.passage
-                .written()
-                .subList(writtenBefore, client.passage.written().size());
-        assertThat(written).hasSize(2);
-        assertThat(frameType(written.get(0))).isEqualTo(APPLICATION_TYPE);
-        assertThat(frameType(written.get(1))).isEqualTo(4);
+        assertThat(result.status()).isEqualTo(STATUS_CANCELLED);
+        assertThat(result.certainty()).isEqualTo(Certainty.UNKNOWN);
+        assertThat(result.frames()).hasSize(2);
+        assertThat(frameType(result.frames().get(0))).isEqualTo(APPLICATION_TYPE);
+        assertThat(frameType(result.frames().get(1))).isEqualTo(4);
     }
 
     private static int frameType(byte[] frame) {

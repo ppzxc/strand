@@ -313,6 +313,14 @@ class VectorRunnerTest {
     }
 
     @Test
+    void corePreflightReportsTheTransportWriteControlAsUnsupported() {
+        ConformanceVector v =
+                vector(ESTABLISHED, step("request", "\"type\":257,\"write_limit_bytes\":10,", "[]", "[]"));
+
+        assertThat(VectorRunner.unsupportedFeatures(v)).containsExactly("request.write_limit_bytes");
+    }
+
+    @Test
     void unsupportedVectorHasAnUnsupportedOutcomeInsteadOfAnExecutionFailure() {
         ConformanceVector v = vector(
                 "{\"role\":\"server\",\"established\":true,\"future_setup\":true}",
@@ -372,6 +380,19 @@ class VectorRunnerTest {
         ConformanceReport integrated = ConformanceReport.integrated(outcomes);
 
         assertThat(integrated.summary()).contains("integrated/v FAIL", "core: wrong close", "nio: missing reset");
+    }
+
+    @Test
+    void integratedResultIsUnsupportedWhenEveryPathIsUnsupported() {
+        java.util.Map<String, List<VectorOutcome>> outcomes = new java.util.LinkedHashMap<>();
+        outcomes.put("core", Arrays.asList(VectorOutcome.unsupported("v", Arrays.asList("write limit"))));
+        outcomes.put("nio", Arrays.asList(VectorOutcome.unsupported("v", Arrays.asList("websocket"))));
+
+        ConformanceReport integrated = ConformanceReport.integrated(outcomes);
+
+        assertThat(integrated.count(VectorOutcome.Status.UNSUPPORTED)).isEqualTo(1);
+        assertThat(integrated.passes()).isFalse();
+        assertThat(integrated.summary()).contains("write limit", "websocket");
     }
 
     private static final String WEBSOCKET_ESTABLISHED =

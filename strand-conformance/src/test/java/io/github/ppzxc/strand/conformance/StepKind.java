@@ -72,6 +72,7 @@ final class StepKind {
                     BASE.require("type", VectorSchema.APP_TYPE)
                             .allow("name", Check::string)
                             .allow("hold_output", Check::bool)
+                            .allow("write_limit_bytes", VectorSchema.POSITIVE_U32)
                             .allow("extensions", Check::extensions)
                             .allow("payload", Check::hex)
                             .allow("deadline_ms", VectorSchema.POSITIVE_U32),
@@ -87,8 +88,10 @@ final class StepKind {
                             endpoint.request(step.get("type").getAsInt(), payload);
                         }
                     })
-            .unsupportedPart(step ->
-                    step.has("extensions") && step.getAsJsonArray("extensions").size() > 0
+            .unsupportedPart(step -> step.has("write_limit_bytes")
+                    ? "request.write_limit_bytes"
+                    : step.has("extensions")
+                                    && step.getAsJsonArray("extensions").size() > 0
                             ? "request.extensions"
                             : null);
 

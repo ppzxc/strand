@@ -46,27 +46,52 @@ class VectorConformanceTest {
         }
     }
 
-    /** 실제 벡터 디렉터리의 모든 벡터를 core로 실행한다. 모두 통과해야 한다. 벡터 목록은 단언하지 않는다. */
+    /** 실제 벡터 디렉터리의 각 벡터를 지원하는 실행 경로에서 실행한다. 벡터 목록은 단언하지 않는다. */
     @TestFactory
     Stream<DynamicTest> vectors() {
         return VectorSuite.dynamicTests(VectorSuite.defaultDirectory());
     }
 
-    /** 실행 결과를 경로 단위로 집계한다. 하나라도 실패·미지원이면 명령을 실패시키고 상세 요약을 남긴다. */
+    /** 실제 경로 결과를 합쳐 보고한다. core 미지원 벡터는 지원하는 전송 경로에서 통과해야 한다. */
     @Test
-    void coreExecutionPathReportHasNoFailuresOrUnsupportedVectors() {
-        List<VectorOutcome> outcomes = new java.util.ArrayList<>();
+    void integratedExecutionPathReportHasNoFailuresOrUnsupportedVectors() {
+        List<VectorOutcome> coreOutcomes = new java.util.ArrayList<>();
+        List<VectorOutcome> nioOutcomes = new java.util.ArrayList<>();
         for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
             String fileKey = VectorSuite.fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
-                outcomes.add(VectorRunner.evaluate(vector, fileKey + "/" + vector.id()));
+                String vectorId = fileKey + "/" + vector.id();
+                coreOutcomes.add(VectorRunner.evaluate(vector, vectorId));
+                if (NioVectorRunner.supports(vector)) {
+                    nioOutcomes.add(NioVectorRunner.evaluate(vector, vectorId));
+                }
             }
         }
-        ConformanceReport report = ConformanceReport.forPath("core", outcomes);
-        ConformanceReport integrated =
-                ConformanceReport.integrated(java.util.Collections.singletonMap("core", outcomes));
+        java.util.Map<String, List<VectorOutcome>> outcomesByPath = new java.util.LinkedHashMap<>();
+        outcomesByPath.put("core", coreOutcomes);
+        outcomesByPath.put("nio", nioOutcomes);
+        ConformanceReport coreReport = ConformanceReport.forPath("core", coreOutcomes);
+        ConformanceReport nioReport = ConformanceReport.forPath("nio", nioOutcomes);
+        ConformanceReport integrated = ConformanceReport.integrated(outcomesByPath);
 
-        assertThat(report.passes()).as("core 경로 적합성 결과: %s", report.summary()).isTrue();
+        assertThat(coreReport.count(VectorOutcome.Status.FAIL))
+                .as("core 경로 실행 실패: %s", coreReport.summary())
+                .isZero();
+        assertThat(coreReport.count(VectorOutcome.Status.UNSUPPORTED))
+                .as("core 미지원은 다른 경로 실행을 요구한다: %s", coreReport.summary())
+                .isEqualTo(nioOutcomes.size());
+        List<String> coreUnsupportedIds = coreOutcomes.stream()
+                .filter(outcome -> outcome.status() == VectorOutcome.Status.UNSUPPORTED)
+                .map(VectorOutcome::vectorId)
+                .collect(Collectors.toList());
+        List<String> nioPassedIds = nioOutcomes.stream()
+                .filter(outcome -> outcome.status() == VectorOutcome.Status.PASS)
+                .map(VectorOutcome::vectorId)
+                .collect(Collectors.toList());
+        assertThat(nioPassedIds).containsExactlyElementsOf(coreUnsupportedIds);
+        assertThat(nioReport.passes())
+                .as("NIO 경로 적합성 결과: %s", nioReport.summary())
+                .isTrue();
         assertThat(integrated.passes())
                 .as("통합 적합성 결과: %s", integrated.summary())
                 .isTrue();
