@@ -83,7 +83,7 @@ class VectorRunnerTest {
 
     @Test
     void aSecondCredentialNotificationDoesNotSendAnotherCloseOrClosedEvent() {
-        ConformanceVector v = vector(
+        ConformanceVector expiryThenRevocation = vector(
                 ESTABLISHED,
                 step(
                         "credential_expired",
@@ -91,8 +91,17 @@ class VectorRunnerTest {
                         "[{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}]",
                         "[{\"event\":\"closed\"}]"),
                 step("credential_revoked", "", "[]", "[]"));
+        ConformanceVector revocationThenExpiry = vector(
+                ESTABLISHED,
+                step(
+                        "credential_revoked",
+                        "",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"UNAUTHENTICATED\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"),
+                step("credential_expired", "", "[]", "[]"));
 
-        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+        assertThatCode(() -> VectorRunner.run(expiryThenRevocation)).doesNotThrowAnyException();
+        assertThatCode(() -> VectorRunner.run(revocationThenExpiry)).doesNotThrowAnyException();
     }
 
     @Test
