@@ -98,11 +98,16 @@ final class Frames {
         return new byte[] {(byte) 0xC0, (byte) 0xDE, 0x53, 0x54, 0x52, 0x30, 0x00, 0x00};
     }
 
-    /** CLOSE. {@code last_stream_id}는 보내는 순간의 {@code highest_peer_stream_id}다(규격 3.5절). {@code reason}은 비운다. */
+    /** CLOSE. {@code last_stream_id}는 보내는 순간의 {@code highest_peer_stream_id}다(규격 3.5절). */
     static byte[] close(int errorCode, long lastStreamId) {
+        return close(errorCode, lastStreamId, new byte[0]);
+    }
+
+    static byte[] close(int errorCode, long lastStreamId, byte[] reason) {
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
         writeInt(payload, errorCode);
         writeLong(payload, lastStreamId);
+        payload.write(reason, 0, reason.length);
         return control(FrameType.CLOSE, 0, payload.toByteArray());
     }
 

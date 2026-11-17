@@ -397,6 +397,7 @@
           "properties": {
             "kind": { "const": "close" },
             "error_code": { "$ref": "#/$defs/error_code" },
+            "reason": { "type": "string" },
             "send": { "$ref": "#/$defs/expect_send" },
             "events": { "$ref": "#/$defs/expect_events" }
           }

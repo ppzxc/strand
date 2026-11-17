@@ -109,8 +109,10 @@ final class StepKind {
     /** CLOSE를 보낼 뿐 연결은 끝나지 않는다(규격 3.3절). */
     private static final StepKind CLOSE = define(
             "close",
-            BASE.require("error_code", VectorSchema.ERROR_CODE),
-            (endpoint, step) -> endpoint.close(errorCode(step.get("error_code"))));
+            BASE.require("error_code", VectorSchema.ERROR_CODE).allow("reason", Check::string),
+            (endpoint, step) -> endpoint.close(
+                    errorCode(step.get("error_code")),
+                    step.has("reason") ? step.get("reason").getAsString() : ""));
 
     private static final StepKind CREDENTIAL_EXPIRED =
             define("credential_expired", BASE, (endpoint, step) -> endpoint.credentialExpired());

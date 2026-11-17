@@ -51,6 +51,43 @@ class EndpointCloseReasonTest {
         return closedEvent(endpoint).closeReason().orElseThrow(AssertionError::new);
     }
 
+    @Test
+    void applicationCanAttachUtf8ReasonToClose() {
+        Endpoint server = openServer();
+
+        server.close(ErrorCode.NO_ERROR, "hi");
+
+        assertThat(EndpointTest.hex(server.drainMessages().get(0).bytes()))
+                .isEqualTo("0000001e000300000000000000000000000000000000000000000000000000006869");
+    }
+
+    @Test
+    void closeReasonIsTruncatedAtTheFrameLimitOnAValidUtf8Boundary() {
+        Endpoint server = openServer();
+        StringBuilder reason = new StringBuilder();
+        for (int i = 0; i < 21_836; i++) reason.append("가");
+
+        server.close(ErrorCode.NO_ERROR, reason.toString());
+
+        byte[] frame = server.drainMessages().get(0).bytes();
+        assertThat(frame).hasSize(65_534);
+        assertThat(EndpointTest.hex(java.util.Arrays.copyOfRange(frame, frame.length - 3, frame.length)))
+                .isEqualTo("eab080");
+    }
+
+    @Test
+    void closeBeforePeerHelloUsesTheSixteenKiBFrameLimit() {
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        server.receive(bytes(PREFACE));
+        server.drainMessages();
+        StringBuilder reason = new StringBuilder();
+        for (int i = 0; i < 20_000; i++) reason.append('x');
+
+        server.close(ErrorCode.NO_ERROR, reason.toString());
+
+        assertThat(server.drainMessages().get(0).bytes()).hasSize(16_384);
+    }
+
     private static void assertErrorClose(CloseReason reason, int errorCode, CloseReason.Sender sender) {
         assertThat(reason.kind()).isEqualTo(CloseReason.Kind.ERROR_CLOSE);
         assertThat(reason.errorCode()).isEqualTo(errorCode);

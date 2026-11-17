@@ -1,5 +1,8 @@
 package io.github.ppzxc.strand.core.internal;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -98,6 +101,8 @@ public final class Endpoint {
     private final ConnectionPhase phase;
     /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
+
+    private boolean peerHelloReceived;
 
     private long now;
     /** ACK를 기다리는 HELLO, AUTH, PING의 확인 대기, 서버의 AUTH 대기 기한, 유휴 PING 일정(규격 3.3절, 3.4.1절). */
@@ -551,13 +556,20 @@ public final class Endpoint {
      * @param errorCode 규격 2.5.2절의 error_code 값
      */
     public void close(int errorCode) {
+        close(errorCode, "");
+    }
+
+    /** 애플리케이션이 UTF-8 설명과 함께 연결을 닫게 한다. 프레임 상한에 맞춰 reason을 자른다. */
+    public void close(int errorCode, String reason) {
         if (!phase.isActive()) {
             return;
         }
         if (errorCode != ErrorCode.NO_ERROR) {
             refuseUnhandedRequests();
         }
-        send(Frames.close(errorCode, highestPeerStreamId));
+        long maxFrameSize = peerHelloReceived ? peerMaxFrameSize : EndpointConfig.MAX_FRAME_SIZE_LOWER_LIMIT;
+        int reasonCapacity = (int) Math.max(0, maxFrameSize - Frames.HEADER_SIZE - 12);
+        send(Frames.close(errorCode, highestPeerStreamId, utf8Prefix(reason, reasonCapacity)));
         phase.closeSent(errorCode);
         endQueuedRequests();
         conclude();
@@ -956,6 +968,7 @@ public final class Endpoint {
             return;
         }
         phase.peerHelloAcked();
+        peerHelloReceived = true;
         ledger.setPeerMaxConcurrentStreams(peer.maxConcurrentStreams);
         peerMaxFrameSize = peer.maxFrameSize;
         send(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
@@ -973,6 +986,24 @@ public final class Endpoint {
         }
         // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
         sendAwaitingAck(auth, LivenessTimers.Kind.AUTH, null);
+    }
+
+    private static byte[] utf8Prefix(String reason, int maxBytes) {
+        byte[] bytes = reason.getBytes(StandardCharsets.UTF_8);
+        int length = Math.min(bytes.length, maxBytes);
+        while (length > 0) {
+            try {
+                StandardCharsets.UTF_8
+                        .newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(bytes, 0, length));
+                break;
+            } catch (CharacterCodingException invalidPrefix) {
+                length--;
+            }
+        }
+        return Arrays.copyOf(bytes, length);
     }
 
     /**

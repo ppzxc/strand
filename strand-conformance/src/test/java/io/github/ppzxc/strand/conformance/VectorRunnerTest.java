@@ -82,6 +82,19 @@ class VectorRunnerTest {
     }
 
     @Test
+    void closeStepComparesAnApplicationReason() {
+        ConformanceVector v = vector(
+                ESTABLISHED,
+                step(
+                        "close",
+                        "\"error_code\":\"NO_ERROR\",\"reason\":\"hi\",",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"hi\"}]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
     void aSecondCredentialNotificationDoesNotSendAnotherCloseOrClosedEvent() {
         ConformanceVector expiryThenRevocation = vector(
                 ESTABLISHED,

@@ -114,7 +114,7 @@
 | `request` | `type`, `extensions`, `payload`, `deadline_ms` | 애플리케이션이 요청을 보내게 한다. `type`은 256 이상 정수, `extensions`는 `{tag, value}` 배열(기본값 빈 배열), `payload`는 hex(기본값 빈 값). `deadline_ms`는 이 단계 시점의 가상 시계(이 문서 8.3절)에서 센 로컬 요청 기한(규격 4.4.1절)이고 1 이상 정수다. 쓰지 않으면 기한이 없다 |
 | `respond` | `stream_id`, `status`, `extensions`, `payload` | 애플리케이션이 받은 요청에 응답하게 한다. `status`는 2.5.1절의 이름 |
 | `cancel` | `stream_id` | 애플리케이션이 자기가 보낸 요청을 취소하게 한다 |
-| `close` | `error_code` | 애플리케이션이 연결을 닫게 한다. `error_code`는 2.5.2절의 이름 |
+| `close` | `error_code`, `reason` | 애플리케이션이 연결을 닫게 한다. `error_code`는 2.5.2절의 이름이고, 선택적 UTF-8 `reason`은 빠지면 빈 문자열이다. |
 | `credential_expired` | — | 인증기가 자격 증명 만료를 통지한다. 서버 역할에서 인증을 마친 뒤 쓴다 |
 | `credential_revoked` | — | 인증기가 자격 증명 폐기를 통지한다. 서버 역할에서 인증을 마친 뒤 쓴다 |
 | `advance` | `ms` | 가상 시계를 `ms`밀리초 앞으로 보낸다(이 문서 8.3절). 1 이상 정수 |
