@@ -38,6 +38,17 @@ class VectorLoaderTest {
         return "{\"format\":2,\"vectors\":[" + String.join(",", vectors) + "]}";
     }
 
+    @Test
+    void rejectsServerAuthenticationDecisionForClientRole() {
+        String setup = "{\"role\":\"client\",\"established\":false," + "\"auth\":{\"decision\":\"transient_failure\"}}";
+        String invalid = file(vector(
+                "client-auth-decision", "[\"req-auth-transient-failure-close-internal\"]", setup, "[" + STEP + "]"));
+
+        assertThatThrownBy(() -> VectorLoader.parse("x.json", invalid))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("setup.auth.decision");
+    }
+
     /** 유효한 벡터 하나에 단계 하나만 바꿔 넣은 파일. */
     private static String fileWithStep(String stepFields) {
         return file(vector("a", "[\"req-a-b\"]", SETUP, "[{" + stepFields + "}]"));
