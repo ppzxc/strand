@@ -241,6 +241,20 @@ class VectorRunnerTest {
         assertThat(VectorRunner.evaluate(v).status()).isEqualTo(VectorOutcome.Status.FAIL);
     }
 
+    @Test
+    void reportCountsOutcomesAndFailsOnFailureOrUnsupported() {
+        ConformanceReport report = ConformanceReport.of(Arrays.asList(
+                VectorOutcome.pass("passed"),
+                VectorOutcome.fail("failed", "mismatch"),
+                VectorOutcome.unsupported("skipped", Arrays.asList("setup.future"))));
+
+        assertThat(report.count(VectorOutcome.Status.PASS)).isEqualTo(1);
+        assertThat(report.count(VectorOutcome.Status.FAIL)).isEqualTo(1);
+        assertThat(report.count(VectorOutcome.Status.UNSUPPORTED)).isEqualTo(1);
+        assertThat(report.passes()).isFalse();
+        assertThat(report.summary()).contains("failed FAIL", "skipped UNSUPPORTED");
+    }
+
     private static final String WEBSOCKET_ESTABLISHED =
             "{\"role\":\"server\",\"established\":true,\"transport\":\"websocket\"}";
     private static final String WEBSOCKET_CLOSE_1000 = "{\"type\":\"WEBSOCKET_CLOSE\",\"code\":1000}";
