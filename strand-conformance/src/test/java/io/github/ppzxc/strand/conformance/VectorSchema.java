@@ -155,10 +155,14 @@ final class VectorSchema {
         JsonArray steps = vector.getAsJsonArray("steps");
         boolean server = "server".equals(setup.get("role").getAsString());
         boolean[] authAckReceived = AuthGate.ackReceivedThrough(vector);
-        boolean authGateOpen = false;
+        boolean authGateOpen = setup.get("established").getAsBoolean();
         for (int i = 0; i < steps.size(); i++) {
             JsonObject step = steps.get(i).getAsJsonObject();
             StepKind kind = StepKind.of(step);
+            if (kind.name().startsWith("credential_") && (!server || !authGateOpen)) {
+                throw c.failAt(
+                        Check.child(Check.item("steps", i), StepKind.TAG), "자격 증명 통지는 서버 역할의 AUTH 관문 통과 뒤에만 쓸 수 있다");
+            }
             if (kind.onlyOnTransport() != null && !kind.onlyOnTransport().equals(transport)) {
                 throw c.failAt(
                         Check.child(Check.item("steps", i), StepKind.TAG),

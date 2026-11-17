@@ -116,6 +116,27 @@ class EndpointTest {
         return server;
     }
 
+    @Test
+    void credentialExpiryRequestsGracefulClose() {
+        Endpoint server = established();
+
+        server.credentialExpired();
+
+        assertThat(sent(server)).isEqualTo(CLOSE_NO_ERROR);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
+    void credentialRevocationRequestsUnauthenticatedCloseOnlyOnce() {
+        Endpoint server = established();
+
+        server.credentialRevoked();
+        server.credentialRevoked();
+
+        assertThat(sent(server)).contains("0000001c0003000000000000000000000000000000000007" + NO_STREAM);
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+    }
+
     private static Endpoint client() {
         return Endpoint.client(EndpointConfig.defaults());
     }

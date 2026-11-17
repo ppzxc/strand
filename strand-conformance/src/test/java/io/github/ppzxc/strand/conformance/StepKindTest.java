@@ -29,6 +29,8 @@ class StepKindTest {
                         "respond",
                         "cancel",
                         "close",
+                        "credential_expired",
+                        "credential_revoked",
                         "advance",
                         "disconnect");
         assertThat(StepKind.shapesByName().get("advance").names())

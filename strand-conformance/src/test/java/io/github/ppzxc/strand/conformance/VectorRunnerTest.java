@@ -61,6 +61,27 @@ class VectorRunnerTest {
     }
 
     @Test
+    void credentialExpiryAndRevocationStepsProduceTheirRequiredCloseCodes() {
+        ConformanceVector expired = vector(
+                ESTABLISHED,
+                step(
+                        "credential_expired",
+                        "",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"));
+        ConformanceVector revoked = vector(
+                ESTABLISHED,
+                step(
+                        "credential_revoked",
+                        "",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"UNAUTHENTICATED\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThatCode(() -> VectorRunner.run(expired)).doesNotThrowAnyException();
+        assertThatCode(() -> VectorRunner.run(revoked)).doesNotThrowAnyException();
+    }
+
+    @Test
     void failsWhenAFrameFieldDiffers() {
         ConformanceVector v = vector(ESTABLISHED, recv(PING, String.format(PING_ACK_SEND, "0102030405060709"), "[]"));
 

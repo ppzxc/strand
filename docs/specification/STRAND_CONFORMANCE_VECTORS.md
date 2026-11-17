@@ -115,6 +115,8 @@
 | `respond` | `stream_id`, `status`, `extensions`, `payload` | 애플리케이션이 받은 요청에 응답하게 한다. `status`는 2.5.1절의 이름 |
 | `cancel` | `stream_id` | 애플리케이션이 자기가 보낸 요청을 취소하게 한다 |
 | `close` | `error_code` | 애플리케이션이 연결을 닫게 한다. `error_code`는 2.5.2절의 이름 |
+| `credential_expired` | — | 인증기가 자격 증명 만료를 통지한다. 서버 역할에서 인증을 마친 뒤 쓴다 |
+| `credential_revoked` | — | 인증기가 자격 증명 폐기를 통지한다. 서버 역할에서 인증을 마친 뒤 쓴다 |
 | `advance` | `ms` | 가상 시계를 `ms`밀리초 앞으로 보낸다(이 문서 8.3절). 1 이상 정수 |
 | `disconnect` | — | 상대 엔드포인트가 CLOSE 없이 전송 계층을 끊게 한다(TCP EOF·RST, WebSocket close). 필드가 없다 |
 

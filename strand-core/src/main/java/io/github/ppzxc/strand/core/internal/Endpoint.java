@@ -563,6 +563,16 @@ public final class Endpoint {
         conclude();
     }
 
+    /** 인증기가 자격 증명의 만료를 알린다. 재인증 없이 정상 CLOSE로 연결을 마친다(규격 3.3.1절). */
+    public void credentialExpired() {
+        close(ErrorCode.NO_ERROR);
+    }
+
+    /** 인증기가 자격 증명의 폐기를 알린다. 사유 없는 UNAUTHENTICATED CLOSE로 연결을 끝낸다(규격 3.3.1절). */
+    public void credentialRevoked() {
+        close(ErrorCode.UNAUTHENTICATED);
+    }
+
     /**
      * 전송 계층이 CLOSE 없이 끊겼음을 알리는 입력이다(TCP EOF·RST, WebSocket close). 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다.
      * 이미 닫혔다면 아무것도 하지 않는다(규격 3.5절).

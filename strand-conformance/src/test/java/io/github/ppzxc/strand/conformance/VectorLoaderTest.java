@@ -49,6 +49,22 @@ class VectorLoaderTest {
                 .hasMessageContaining("setup.auth.decision");
     }
 
+    @Test
+    void rejectsCredentialNotificationBeforeTheAuthGateOpens() {
+        String setup = "{\"role\":\"server\",\"established\":false}";
+        String step = "{\"kind\":\"credential_expired\",\"send\":[],\"events\":[]}";
+
+        assertThatThrownBy(() -> VectorLoader.parse(
+                        "x.json",
+                        file(vector(
+                                "expiry-before-auth",
+                                "[\"req-auth-expiry-close-no-error\"]",
+                                setup,
+                                "[" + step + "]"))))
+                .isInstanceOf(InvalidVectorException.class)
+                .hasMessageContaining("AUTH 관문 통과 뒤");
+    }
+
     /** 유효한 벡터 하나에 단계 하나만 바꿔 넣은 파일. */
     private static String fileWithStep(String stepFields) {
         return file(vector("a", "[\"req-a-b\"]", SETUP, "[{" + stepFields + "}]"));

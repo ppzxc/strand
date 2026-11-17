@@ -112,6 +112,12 @@ final class StepKind {
             BASE.require("error_code", VectorSchema.ERROR_CODE),
             (endpoint, step) -> endpoint.close(errorCode(step.get("error_code"))));
 
+    private static final StepKind CREDENTIAL_EXPIRED =
+            define("credential_expired", BASE, (endpoint, step) -> endpoint.credentialExpired());
+
+    private static final StepKind CREDENTIAL_REVOKED =
+            define("credential_revoked", BASE, (endpoint, step) -> endpoint.credentialRevoked());
+
     private static final StepKind ADVANCE = define(
                     "advance",
                     BASE.require("ms", VectorSchema.POSITIVE_U32),
