@@ -27,6 +27,7 @@ class ConnectionDriverBlockedWriteTest {
 
     private static final int APPLICATION_TYPE = 256;
     private static final int STATUS_DEADLINE_EXCEEDED = 4;
+    private static final int STATUS_CANCELLED = 1;
     private static final int STATUS_UNAVAILABLE = 14;
     private static final long UNRESPONSIVE_ERROR_CODE = 6;
     private static final long ACK_TIMEOUT_MS = 1000;
@@ -292,6 +293,39 @@ class ConnectionDriverBlockedWriteTest {
 
         // PING 프레임은 28바이트라 10바이트만 받으면 나머지는 쓰기 가능을 기다린다.
         assertThat(client.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    void cancellationAfterPartialRequestWriteFinishesFrameThenSendsReset() throws Exception {
+        Side[] sides = connected();
+        Side client = sides[0];
+        Side server = sides[1];
+        client.passage.writeCapacity(10);
+        int writtenBefore = client.passage.written().size();
+
+        RequestHandle handle = client.driver.request(APPLICATION_TYPE, bytes("partial"));
+        assertThat(client.driver.awaitWriteBlocked(true, 5, TimeUnit.SECONDS)).isTrue();
+
+        handle.cancel();
+        settle(client, server);
+        assertThat(handle.result())
+                .isCompletedWithValueMatching(
+                        result -> result.status() == STATUS_CANCELLED && result.certainty() == Certainty.UNKNOWN);
+
+        client.unblockWrites();
+        settle(client, server);
+
+        assertThat(server.received).hasSize(1);
+        List<byte[]> written = client.passage
+                .written()
+                .subList(writtenBefore, client.passage.written().size());
+        assertThat(written).hasSize(2);
+        assertThat(frameType(written.get(0))).isEqualTo(APPLICATION_TYPE);
+        assertThat(frameType(written.get(1))).isEqualTo(4);
+    }
+
+    private static int frameType(byte[] frame) {
+        return ((frame[4] & 0xff) << 8) | (frame[5] & 0xff);
     }
 
     @Test
