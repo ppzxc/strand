@@ -82,6 +82,20 @@ class VectorRunnerTest {
     }
 
     @Test
+    void aSecondCredentialNotificationDoesNotSendAnotherCloseOrClosedEvent() {
+        ConformanceVector v = vector(
+                ESTABLISHED,
+                step(
+                        "credential_expired",
+                        "",
+                        "[{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"}]",
+                        "[{\"event\":\"closed\"}]"),
+                step("credential_revoked", "", "[]", "[]"));
+
+        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+    }
+
+    @Test
     void failsWhenAFrameFieldDiffers() {
         ConformanceVector v = vector(ESTABLISHED, recv(PING, String.format(PING_ACK_SEND, "0102030405060709"), "[]"));
 
