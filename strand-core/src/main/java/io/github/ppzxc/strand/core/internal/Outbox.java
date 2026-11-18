@@ -120,6 +120,10 @@ final class Outbox {
         }
     }
 
+    int size() {
+        return size;
+    }
+
     boolean isEmpty() {
         return size == 0;
     }

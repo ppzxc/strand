@@ -409,6 +409,11 @@ final class OwnRequestLedger {
         return record == null ? null : record.streamId;
     }
 
+    /** 번호를 받기 전에 AUTH 관문 앞에서 미뤄 둔 내 요청의 수. */
+    int queuedCount() {
+        return queued.size();
+    }
+
     /** 번호를 받아 아직 끝나지 않은 내 요청의 수. */
     int openCount() {
         return byStream.size();

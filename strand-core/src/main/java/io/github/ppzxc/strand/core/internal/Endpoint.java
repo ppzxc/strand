@@ -108,6 +108,8 @@ public final class Endpoint {
     private final LivenessTimers timers;
 
     private final boolean server;
+    /** 한 단위가 만들 수 있는 제어 프레임(HELLO 응답, AUTH, CLOSE 등)의 상한. */
+    private static final int OUTPUT_CONTROL_RESERVE = 4;
     private boolean deferredAuthentication;
     private boolean authenticationPending;
     private boolean handlerReady;
@@ -191,9 +193,23 @@ public final class Endpoint {
         }
     }
 
-    /** 최대 단위 수만큼 입력을 처리하고 소비한 바이트 수를 반환한다. */
+    /** 최대 단위 수만큼 입력을 처리하고 소비한 바이트 수를 반환한다. 수거 공간에는 한도를 두지 않는다. */
     public int receiveBounded(byte[] bytes, int offset, int length, int maximumUnits) {
+        return receiveBounded(bytes, offset, length, maximumUnits, CollectionSpace.UNLIMITED)
+                .consumed();
+    }
+
+    /**
+     * 최대 단위 수만큼, 그리고 한 단위가 만들 수 있는 사건·출력을 넣을 공간이 확보된 만큼만 입력을 처리한다. 단위를 처리하기 전에 최악의 경우 필요한
+     * 공간을 확인하므로 상태가 절반만 바뀌지 않는다. 모자라면 그 단위 앞에서 멈추고 수거가 필요하다고 알린다. 호출자는 사건과 출력을 수거하고 돌려준
+     * 소비 위치부터 다시 입력한다.
+     *
+     * @throws IllegalStateException 수거할 것이 하나도 없는데도 공간이 한 단위를 처리하기에 모자랄 때
+     */
+    public ReceiveProgress receiveBounded(
+            byte[] bytes, int offset, int length, int maximumUnits, CollectionSpace space) {
         Objects.requireNonNull(bytes, "bytes");
+        Objects.requireNonNull(space, "space");
         if (offset < 0 || length < 0 || offset > bytes.length - length || maximumUnits < 0) {
             throw new IllegalArgumentException("유효하지 않은 입력 범위 또는 처리 한도");
         }
@@ -201,14 +217,19 @@ public final class Endpoint {
             throw new IllegalStateException("WebSocket 엔드포인트는 메시지 단위로 입력한다");
         }
         if (maximumUnits == 0 || !enterReceive()) {
-            return 0;
+            return new ReceiveProgress(0, false);
         }
         try {
             int at = offset;
             int end = offset + length;
             int units = 0;
+            boolean collectionRequired = false;
             while (!phase.isEnded() && units < maximumUnits) {
                 if (pendingLength > 0) {
+                    if (!hasSpace(space)) {
+                        collectionRequired = true;
+                        break;
+                    }
                     int consumed = consumeUnit(pending, 0, pendingLength);
                     if (consumed > 0) {
                         releasePending();
@@ -226,6 +247,10 @@ public final class Endpoint {
                 } else if (at == end) {
                     break;
                 } else {
+                    if (!hasSpace(space)) {
+                        collectionRequired = true;
+                        break;
+                    }
                     int consumed = consumeUnit(bytes, at, end - at);
                     if (consumed > 0) {
                         at += consumed;
@@ -239,10 +264,30 @@ public final class Endpoint {
                     }
                 }
             }
-            return at - offset;
+            return new ReceiveProgress(at - offset, collectionRequired);
         } finally {
             receiving = false;
         }
+    }
+
+    /**
+     * 한 단위가 최악의 경우 만들 수 있는 사건·출력을 지금 쌓인 것에 더해도 한도 안인가. 사건은 끝나는 내 요청마다 결과 하나, 종료 하나,
+     * 인증·받은 요청 사건 하나이고, 출력은 미뤄 둔 것을 내보내거나 돌려보내는 프레임마다 하나에 제어 프레임 몇 개다. 넉넉하게 잡은 상한이라 일찍 멈출 수는 있어도 넘치지는 않는다.
+     */
+    private boolean hasSpace(CollectionSpace space) {
+        long eventsNeeded = (long) ledger.openCount() + ledger.queuedCount() + 2;
+        long outputsNeeded = (long) ledger.openCount()
+                + ledger.queuedCount()
+                + deferredPings.size()
+                + peerPendingStreams.size()
+                + OUTPUT_CONTROL_RESERVE;
+        if (events.size() + eventsNeeded <= space.events() && outbox.size() + outputsNeeded <= space.outputs()) {
+            return true;
+        }
+        if (events.isEmpty() && outbox.isEmpty()) {
+            throw new IllegalStateException("수거 공간이 한 단위를 처리하기에 모자라다");
+        }
+        return false;
     }
 
     /**
