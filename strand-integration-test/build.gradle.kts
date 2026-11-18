@@ -8,3 +8,7 @@ dependencies {
   // 통로 시험 도구(PassageContract.writeFully)를 함께 쓴다.
   testImplementation(testFixtures(project(":strand-nio")))
 }
+
+dependencies {
+  testImplementation("io.netty:netty-transport:4.1.101.Final")
+}
