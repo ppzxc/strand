@@ -105,4 +105,22 @@ class ResultCompletionTest {
                 "first",
                 result.toCompletionStage(Runnable::run).toCompletableFuture().join());
     }
+
+    @Test
+    void executorErrorDoesNotChangeResultNorSkipLaterObservers() {
+        ObservationBudget connection = new ObservationBudget(2);
+        ObservationBudget owner = new ObservationBudget(2);
+        ResultCompletion<String> result = new ResultCompletion<>(Runnable::run, connection, owner);
+        Observation first = result.observe(
+                task -> {
+                    throw new AssertionError();
+                },
+                value -> {});
+        Observation second = result.observe(value -> {});
+        assertTrue(result.complete("done"));
+        assertEquals("done", result.resultNow());
+        assertTrue(first.failureNow().get() instanceof Error);
+        assertTrue(second.isDone());
+        assertEquals(0, connection.usage().current());
+    }
 }

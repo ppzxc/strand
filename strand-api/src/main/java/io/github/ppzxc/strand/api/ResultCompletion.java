@@ -47,7 +47,13 @@ public final class ResultCompletion<T> implements Result<T> {
             pending = new ArrayList<>(listeners);
             listeners.clear();
         }
-        for (Consumer<T> listener : pending) listener.accept(result);
+        for (Consumer<T> listener : pending) {
+            try {
+                listener.accept(result);
+            } catch (Throwable ignored) {
+                // a failing listener must not change the retained result or skip later listeners
+            }
+        }
         return true;
     }
 
@@ -100,7 +106,7 @@ public final class ResultCompletion<T> implements Result<T> {
                         release();
                     }
                 });
-            } catch (RuntimeException error) {
+            } catch (Throwable error) {
                 observation.finish(error);
                 release();
             }
@@ -126,7 +132,7 @@ public final class ResultCompletion<T> implements Result<T> {
                         release();
                     }
                 });
-            } catch (RuntimeException error) {
+            } catch (Throwable error) {
                 future.completeExceptionally(error);
                 release();
             }

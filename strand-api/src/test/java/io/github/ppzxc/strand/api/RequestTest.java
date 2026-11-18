@@ -21,4 +21,13 @@ class RequestTest {
         assertEquals(256, Request.of(256, new byte[0]).type());
         assertEquals(65535, Request.of(65535, new byte[0]).type());
     }
+
+    @Test
+    void ownsPayloadCopy() {
+        byte[] body = {1, 2};
+        Request request = Request.of(256, body);
+        body[0] = 9;
+        request.payload()[1] = 9;
+        assertArrayEquals(new byte[] {1, 2}, request.payload());
+    }
 }

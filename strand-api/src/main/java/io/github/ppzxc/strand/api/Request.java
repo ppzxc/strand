@@ -20,7 +20,7 @@ public final class Request {
         }
         return new Request(
                 type,
-                Objects.requireNonNull(payload, "payload"),
+                Objects.requireNonNull(payload, "payload").clone(),
                 Extensions.builder().build());
     }
 
@@ -37,6 +37,6 @@ public final class Request {
     }
 
     public byte[] payload() {
-        return payload;
+        return payload.clone();
     }
 }
