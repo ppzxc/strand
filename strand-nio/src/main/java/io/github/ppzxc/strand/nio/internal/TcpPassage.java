@@ -163,6 +163,18 @@ public final class TcpPassage implements Passage {
     }
 
     @Override
+    public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
+        if (length <= 0) {
+            return 0;
+        }
+        try {
+            return channel.write(ByteBuffer.wrap(bytes, offset, length));
+        } catch (ClosedSelectorException | CancelledKeyException e) {
+            throw new IOException("닫힌 통로", e);
+        }
+    }
+
+    @Override
     public void wakeup() {
         try {
             selector.wakeup();

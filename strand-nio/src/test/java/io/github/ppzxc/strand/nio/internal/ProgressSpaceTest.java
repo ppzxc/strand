@@ -73,9 +73,9 @@ class ProgressSpaceTest {
 
         ProgressSpace space = ProgressSpace.derive(10, 5, MAX_FRAME, sizes);
 
-        // 복호한 평문 한 레코드, 암호문(받는 쪽 한 패킷 + 보내는 쪽 한 패킷), 핸드셰이크·경고 출력 한 패킷.
+        // 복호한 평문 한 레코드, 암호문(받는 쪽 둘 + 보내는 쪽 데이터 하나), 핸드셰이크·경고 출력 한 패킷.
         assertThat(space.tlsPlaintext()).isEqualTo(sizes.applicationBufferSize());
-        assertThat(space.tlsCiphertext()).isEqualTo(2L * sizes.packetBufferSize());
+        assertThat(space.tlsCiphertext()).isEqualTo(3L * sizes.packetBufferSize());
         assertThat(space.tlsControl()).isEqualTo(sizes.packetBufferSize());
         assertThat(sizes.applicationBufferSize()).isGreaterThanOrEqualTo(16_384);
         assertThat(sizes.packetBufferSize()).isGreaterThanOrEqualTo(16_384);

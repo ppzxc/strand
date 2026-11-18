@@ -16,8 +16,9 @@ import org.jspecify.annotations.Nullable;
  *       협상하는 동시 스트림 수(받는 요청 수 한도)가 막는다. 미뤄 둔 PING은 앱 PING이 없어 0이다.
  *   <li>결과 사건: 한 단위가 만드는 사건 수({@link Endpoint#eventsNeeded}) 가운데 응답 본문을 실을 수 있는 것은 응답 프레임 하나이므로 최대
  *       프레임 하나, 나머지는 본문 없는 로컬 결과로 프레임 헤더({@value Endpoint#FRAME_HEADER_SIZE}바이트) 하나 크기로 센다.
- *   <li>TLS 평문: 복호한 레코드 하나({@code getApplicationBufferSize}). 암호문: 받는 쪽 패킷 하나와 보내는 쪽 패킷 하나({@code
- *       getPacketBufferSize} 둘). TLS 제어: 핸드셰이크·경고를 쌓는 패킷 하나. 이 셋은 서로 다른 저장 공간이라 모두 센다.
+ *   <li>TLS 평문: 복호한 레코드 하나({@code getApplicationBufferSize}). 암호문: 받는 쪽 미완성 레코드의 나머지 한 패킷과 한 번에 읽는
+ *       조각 한 패킷, 보내는 쪽 데이터 한 패킷({@code getPacketBufferSize} 셋, {@link TlsPassage}의 구성). TLS 제어: 핸드셰이크·경고를 쌓는 패킷
+ *       하나. 이 셋은 서로 다른 저장 공간이라 모두 센다.
  * </ul>
  *
  * TLS를 쓰지 않는 연결(채널 보안을 TCP 밖에서 보장)은 TLS 공간을 예약하지 않는다. 다만 {@code requireProgress}가 모든 최소치가 양수일 것을
@@ -71,7 +72,7 @@ final class ProgressSpace {
                 control,
                 result,
                 tls.applicationBufferSize(),
-                2L * tls.packetBufferSize(),
+                3L * tls.packetBufferSize(),
                 tls.packetBufferSize());
     }
 
