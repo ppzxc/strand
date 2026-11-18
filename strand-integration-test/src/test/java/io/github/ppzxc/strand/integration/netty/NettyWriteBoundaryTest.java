@@ -93,5 +93,4 @@ class NettyWriteBoundaryTest {
             group.shutdownGracefully().sync();
         }
     }
-
 }
