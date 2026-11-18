@@ -36,4 +36,30 @@ class TlsBoundaryTest {
         assertThat(observed[1]).isPositive();
         assertThat(observed[2]).isEqualTo(1);
     }
+
+    @Test
+    void partialPlaintextConsumptionCanFinishRequestBeforeReset() throws Exception {
+        byte[] request = new byte[32768];
+        java.nio.ByteBuffer.wrap(request)
+                .putInt(request.length - 4)
+                .putShort((short) 0x0101)
+                .put((byte) 0)
+                .put((byte) 0)
+                .putLong(1)
+                .putInt(0);
+        byte[] reset = java.nio.ByteBuffer.allocate(24)
+                .putInt(20)
+                .putShort((short) 4)
+                .put((byte) 0)
+                .put((byte) 0)
+                .putLong(1)
+                .putInt(0)
+                .putInt(4)
+                .array();
+        TlsProbe.Result result = TlsProbe.exchangePartial(request, reset);
+        assertThat(result.plaintextConsumed).isPositive().isLessThan(request.length);
+        byte[] expected = java.util.Arrays.copyOf(request, request.length + reset.length);
+        System.arraycopy(reset, 0, expected, request.length, reset.length);
+        assertThat(result.received).containsExactly(expected);
+    }
 }

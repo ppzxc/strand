@@ -37,14 +37,18 @@ final class TlsProbe {
     }
 
     static Result exchange(byte[] message) throws Exception {
-        return exchange(message, false);
+        return exchange(message, false, null);
     }
 
     static Result exchangeOutbound(byte[] message) throws Exception {
-        return exchange(message, true);
+        return exchange(message, true, null);
     }
 
-    private static Result exchange(byte[] message, boolean outbound) throws Exception {
+    static Result exchangePartial(byte[] message, byte[] reset) throws Exception {
+        return exchange(message, true, reset);
+    }
+
+    private static Result exchange(byte[] message, boolean outbound, byte[] reset) throws Exception {
         SSLContext context = context();
         ExecutorService serverThread = Executors.newSingleThreadExecutor();
         NioEventLoopGroup group = new NioEventLoopGroup(1);
@@ -54,7 +58,7 @@ final class TlsProbe {
             Future<byte[]> received = serverThread.submit(() -> {
                 try (SSLSocket peer = (SSLSocket) server.accept()) {
                     peer.setSoTimeout(10000);
-                    byte[] bytes = new byte[message.length];
+                    byte[] bytes = new byte[message.length + (reset == null ? 0 : reset.length)];
                     new DataInputStream(peer.getInputStream()).readFully(bytes);
                     return bytes;
                 }
@@ -73,7 +77,7 @@ final class TlsProbe {
                 java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelFuture> output =
                         outbound ? new java.util.concurrent.atomic.AtomicReference<>() : null;
                 int[] counts = channel.eventLoop()
-                        .submit(() -> drive(context, channel, message, output))
+                        .submit(() -> drive(context, channel, message, output, reset))
                         .sync()
                         .getNow();
                 if (outbound) {
@@ -153,7 +157,8 @@ final class TlsProbe {
                                 context,
                                 channel,
                                 null,
-                                outbound ? new java.util.concurrent.atomic.AtomicReference<>() : null))
+                                outbound ? new java.util.concurrent.atomic.AtomicReference<>() : null,
+                                null))
                         .sync()
                         .getNow();
                 release.countDown();
@@ -173,7 +178,8 @@ final class TlsProbe {
             SSLContext context,
             BoundaryChannel channel,
             byte[] message,
-            java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelFuture> output)
+            java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelFuture> output,
+            byte[] reset)
             throws Exception {
         SSLEngine engine = context.createSSLEngine("localhost", 0);
         engine.setUseClientMode(true);
@@ -252,6 +258,30 @@ final class TlsProbe {
                 }
             }
             return new int[] {consumed, partial, 0};
+        }
+        if (reset != null) {
+            ByteBuffer request = ByteBuffer.wrap(message);
+            int firstConsumed = 0;
+            while (request.hasRemaining()) {
+                outgoing.clear();
+                SSLEngineResult result = engine.wrap(request, outgoing);
+                if (result.getStatus() != SSLEngineResult.Status.OK || result.bytesConsumed() == 0)
+                    throw new IllegalStateException(result.toString());
+                if (firstConsumed == 0) firstConsumed = result.bytesConsumed();
+                outgoing.flip();
+                io.netty.buffer.ByteBuf ciphertext = io.netty.buffer.Unpooled.directBuffer(outgoing.remaining());
+                ciphertext.writeBytes(outgoing);
+                output.set(((ProgressChannel) channel).send(ciphertext));
+            }
+            outgoing.clear();
+            SSLEngineResult result = engine.wrap(ByteBuffer.wrap(reset), outgoing);
+            if (result.getStatus() != SSLEngineResult.Status.OK || result.bytesConsumed() != reset.length)
+                throw new IllegalStateException(result.toString());
+            outgoing.flip();
+            io.netty.buffer.ByteBuf ciphertext = io.netty.buffer.Unpooled.directBuffer(outgoing.remaining());
+            ciphertext.writeBytes(outgoing);
+            output.set(((ProgressChannel) channel).send(ciphertext));
+            return new int[] {firstConsumed, 0};
         }
         outgoing.clear();
         SSLEngineResult result = engine.wrap(ByteBuffer.wrap(message), outgoing);
