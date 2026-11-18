@@ -42,10 +42,12 @@ class CoreWithdrawalRaceTest {
             java.util.function.Consumer<Runnable> command,
             java.util.function.Consumer<Runnable> enqueue,
             Runnable enqueuePump,
+            java.util.function.BooleanSupplier pending,
             io.github.ppzxc.strand.core.internal.Endpoint endpoint,
-            byte[] payload) {
+            byte[] payload)
+            throws InterruptedException {
         AtomicLong ticket = new AtomicLong();
-        switch (iteration % 3) {
+        switch (iteration % 4) {
             case 0:
                 command.accept(() -> ticket.set(endpoint.request(OpenEndpoint.REQUEST_TYPE, payload)));
                 spin(ThreadLocalRandom.current().nextLong(0, TimeUnit.MICROSECONDS.toNanos(300)));
@@ -55,6 +57,12 @@ class CoreWithdrawalRaceTest {
                 enqueue.accept(() -> ticket.set(endpoint.request(OpenEndpoint.REQUEST_TYPE, payload)));
                 enqueue.accept(() -> endpoint.cancelRequest(ticket.get()));
                 enqueuePump.run();
+                break;
+            case 3:
+                // 프레임이 온전히 나간 뒤의 취소는 결정적으로 전달 뒤 RESET이다.
+                command.accept(() -> ticket.set(endpoint.request(OpenEndpoint.REQUEST_TYPE, payload)));
+                awaitIdle(pending);
+                command.accept(() -> endpoint.cancelRequest(ticket.get()));
                 break;
             default:
                 command.accept(() -> {
@@ -105,20 +113,22 @@ class CoreWithdrawalRaceTest {
                             reader);
                     byte[] payload = new byte[FRAME_PAYLOAD];
                     Arrays.fill(payload, (byte) 3);
-                    issueAndCancel(
-                            i,
-                            fixture.driver::command,
-                            fixture.driver::enqueue,
-                            fixture.driver::enqueuePump,
-                            fixture.endpoint,
-                            payload);
-                    awaitIdle(() -> {
+                    java.util.function.BooleanSupplier pending = () -> {
                         try {
                             return fixture.onLoop(fixture.driver::hasPendingOutput);
                         } catch (Exception e) {
                             throw new IllegalStateException(e);
                         }
-                    });
+                    };
+                    issueAndCancel(
+                            i,
+                            fixture.driver::command,
+                            fixture.driver::enqueue,
+                            fixture.driver::enqueuePump,
+                            pending,
+                            fixture.endpoint,
+                            payload);
+                    awaitIdle(pending);
                     List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
                     fixture.closeAndSettle();
                     int[] outcome = verify(wire.get(10, TimeUnit.SECONDS), events);
@@ -154,21 +164,23 @@ class CoreWithdrawalRaceTest {
                             reader);
                     byte[] payload = new byte[FRAME_PAYLOAD];
                     Arrays.fill(payload, (byte) 3);
-                    issueAndCancel(
-                            i,
-                            fixture.driver::command,
-                            fixture.driver::enqueue,
-                            fixture.driver::enqueuePump,
-                            fixture.endpoint,
-                            payload);
-                    awaitIdle(() -> {
+                    java.util.function.BooleanSupplier pending = () -> {
                         try {
                             return fixture.onLoop(fixture.driver::hasPendingOutput)
                                     || fixture.onLoop(fixture.driver::queuedCiphertextBytes) > 0;
                         } catch (Exception e) {
                             throw new IllegalStateException(e);
                         }
-                    });
+                    };
+                    issueAndCancel(
+                            i,
+                            fixture.driver::command,
+                            fixture.driver::enqueue,
+                            fixture.driver::enqueuePump,
+                            pending,
+                            fixture.endpoint,
+                            payload);
+                    awaitIdle(pending);
                     List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
                     fixture.driver.closeGracefully();
                     int[] outcome = verify(wire.get(10, TimeUnit.SECONDS), events);
