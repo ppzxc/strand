@@ -12,12 +12,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>대기 작업은 호출자가 먼저 예약한 한도(핸들러·관찰·준비 작업 슬롯)가 세므로 이 큐는 그 한도를 넘지 않는다. 뒤받침 실행기가 거절하면 그 작업은 큐에
  * 남기지 않고 예외를 호출자에게 그대로 던진다. 호출자는 그 작업의 예약을 돌려주고 실패를 관찰한다.
  */
-final class SerialExecutor implements Executor {
+public final class SerialExecutor implements Executor {
     private final Executor backing;
     private final ArrayDeque<Runnable> queue = new ArrayDeque<>();
     private boolean scheduled;
 
-    SerialExecutor(Executor backing) {
+    public SerialExecutor(Executor backing) {
         this.backing = Objects.requireNonNull(backing);
     }
 
@@ -72,7 +72,7 @@ final class SerialExecutor implements Executor {
      *
      * @throws IllegalArgumentException 작업이 {@code execute} 안에서 호출 스레드에 실행됐거나 실행기가 확인 작업을 거절할 때
      */
-    static void requireNotDirect(Executor executor) {
+    public static void requireNotDirect(Executor executor) {
         Thread caller = Thread.currentThread();
         AtomicReference<Thread> ranOn = new AtomicReference<>();
         try {

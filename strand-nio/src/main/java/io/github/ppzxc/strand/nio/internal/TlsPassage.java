@@ -27,7 +27,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>{@link #await}와 {@link #writeBytes}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
-final class TlsPassage implements Passage {
+public final class TlsPassage implements Passage {
     private final Passage transport;
     private final SSLEngine engine;
     private final ByteBuffer netIn;
@@ -49,7 +49,7 @@ final class TlsPassage implements Passage {
      * @param sizes 엔진의 버퍼 크기
      * @throws SSLException 핸드셰이크를 시작할 수 없을 때
      */
-    TlsPassage(Passage transport, SSLEngine engine, TlsSizes sizes) throws SSLException {
+    public TlsPassage(Passage transport, SSLEngine engine, TlsSizes sizes) throws SSLException {
         this.transport = transport;
         this.engine = engine;
         int packet = sizes.packetBufferSize();
@@ -72,7 +72,7 @@ final class TlsPassage implements Passage {
      *
      * @return 끝났으면 true
      */
-    boolean handshakeComplete() {
+    public boolean handshakeComplete() {
         return handshakeDone;
     }
 
@@ -159,6 +159,19 @@ final class TlsPassage implements Passage {
     public int write(OutboundMessage message, int offset) throws IOException {
         byte[] bytes = message.bytes();
         return writeBytes(bytes, offset, bytes.length - offset);
+    }
+
+    /**
+     * 핸드셰이크가 확인한 상대 주체. 클라이언트는 서버 인증서의 주체다. 확인하지 못했으면 null이다.
+     *
+     * @return 상대 주체
+     */
+    public java.security.@Nullable Principal peerPrincipal() {
+        try {
+            return engine.getSession().getPeerPrincipal();
+        } catch (SSLException e) {
+            return null;
+        }
     }
 
     @Override

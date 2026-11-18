@@ -11,7 +11,7 @@ import java.util.Map;
  * 연결 하나의 예약 한도. 예약은 연결 범위에서 먼저 하고 소유 객체 범위에서 이어 하며, 뒤쪽이 모자라면 앞쪽 몫을 돌려준다(부분 실패는 확보분을
  * 반환하고 기다리지 않는다).
  */
-final class ConnectionBudgets {
+public final class ConnectionBudgets {
     /** 연결 범위와 소유 객체 범위가 함께 세는 종류. 관찰({@link Resource#OBSERVATIONS})은 {@link ObservationBudget}이 센다. */
     static final Resource[] SHARED = {
         Resource.OUTGOING_REQUESTS,
@@ -41,7 +41,7 @@ final class ConnectionBudgets {
         this.observations = new ObservationBudget(limits.perConnection().get(Resource.OBSERVATIONS));
     }
 
-    boolean tryReserve(Resource resource, long amount) {
+    public boolean tryReserve(Resource resource, long amount) {
         if (!budget(resource).tryAcquire(amount)) {
             return false;
         }
@@ -52,12 +52,12 @@ final class ConnectionBudgets {
         return false;
     }
 
-    void release(Resource resource, long amount) {
+    public void release(Resource resource, long amount) {
         owner.release(resource, amount);
         budget(resource).release(amount);
     }
 
-    ResourceUsage usage(Resource resource) {
+    public ResourceUsage usage(Resource resource) {
         return resource == Resource.OBSERVATIONS
                 ? observations.usage()
                 : budget(resource).usage();
@@ -71,11 +71,11 @@ final class ConnectionBudgets {
         return budget;
     }
 
-    ObservationBudget observationBudget() {
+    public ObservationBudget observationBudget() {
         return observations;
     }
 
-    OwnerBudgets owner() {
+    public OwnerBudgets owner() {
         return owner;
     }
 }

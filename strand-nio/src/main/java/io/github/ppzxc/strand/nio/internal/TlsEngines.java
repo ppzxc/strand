@@ -17,9 +17,9 @@ import org.jspecify.annotations.Nullable;
  * <p>ALPN은 Java 9에서 들어오고 8u252에 이식된 API라 {@code --release 8}로 컴파일하는 이 모듈은 리플렉션으로 쓴다. 런타임이 지원하지 않으면 TLS를
  * 만들 수 없다.
  */
-final class TlsEngines {
+public final class TlsEngines {
     /** strand over TCP의 ALPN 식별자(규격 3.7절). */
-    static final String ALPN_IDENTIFIER = "strand";
+    public static final String ALPN_IDENTIFIER = "strand";
 
     private static final List<String> PREFERRED_PROTOCOLS = Arrays.asList("TLSv1.3", "TLSv1.2");
     private static final @Nullable Method SET_APPLICATION_PROTOCOLS =
@@ -41,7 +41,7 @@ final class TlsEngines {
      *
      * @return 지원하면 true
      */
-    static boolean alpnSupported() {
+    public static boolean alpnSupported() {
         return SET_APPLICATION_PROTOCOLS != null && GET_APPLICATION_PROTOCOL != null;
     }
 
@@ -52,7 +52,7 @@ final class TlsEngines {
      * @param port 서버 포트
      * @throws IllegalStateException 런타임이 ALPN을 지원하지 않을 때
      */
-    static SSLEngine client(SSLContext context, String host, int port) {
+    public static SSLEngine client(SSLContext context, String host, int port) {
         SSLEngine engine = context.createSSLEngine(host, port);
         engine.setUseClientMode(true);
         configure(engine, true);
@@ -64,7 +64,7 @@ final class TlsEngines {
      *
      * @throws IllegalStateException 런타임이 ALPN을 지원하지 않을 때
      */
-    static SSLEngine server(SSLContext context) {
+    public static SSLEngine server(SSLContext context) {
         SSLEngine engine = context.createSSLEngine();
         engine.setUseClientMode(false);
         configure(engine, false);
@@ -100,7 +100,7 @@ final class TlsEngines {
     }
 
     /** 핸드셰이크가 끝난 엔진이 협상한 ALPN 식별자. 협상하지 않았으면 null이다. */
-    static @Nullable String negotiatedProtocol(SSLEngine engine) {
+    public static @Nullable String negotiatedProtocol(SSLEngine engine) {
         Method getter = GET_APPLICATION_PROTOCOL;
         if (getter == null) {
             return null;

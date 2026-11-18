@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
  * TLS를 쓰지 않는 연결(채널 보안을 TCP 밖에서 보장)은 TLS 공간을 예약하지 않는다. 다만 {@code requireProgress}가 모든 최소치가 양수일 것을
  * 요구하므로 그 검사에는 1을 넘긴다.
  */
-final class ProgressSpace {
+public final class ProgressSpace {
     /** 제어 프레임 하나의 크기: 프레임 헤더와 CLOSE의 고정 payload(error_code와 last_stream_id). 우리가 쌓는 가장 큰 제어 프레임이다. */
     static final long CONTROL_OUTPUT_UNIT = Endpoint.FRAME_HEADER_SIZE + Integer.BYTES + Long.BYTES;
 
@@ -58,7 +58,7 @@ final class ProgressSpace {
      * @param maxFrameSize 받을 수 있는 최대 프레임 크기
      * @param tls TLS 엔진 크기. TLS를 쓰지 않으면 null
      */
-    static ProgressSpace derive(
+    public static ProgressSpace derive(
             long outgoingRequests, long incomingRequests, long maxFrameSize, @Nullable TlsSizes tls) {
         long control =
                 Math.multiplyExact(Endpoint.outputsNeeded(outgoingRequests, 0, incomingRequests), CONTROL_OUTPUT_UNIT);
@@ -76,32 +76,32 @@ final class ProgressSpace {
                 tls.packetBufferSize());
     }
 
-    long frameAssembly() {
+    public long frameAssembly() {
         return frameAssembly;
     }
 
-    long controlOutput() {
+    public long controlOutput() {
         return controlOutput;
     }
 
-    long resultEvent() {
+    public long resultEvent() {
         return resultEvent;
     }
 
-    long tlsPlaintext() {
+    public long tlsPlaintext() {
         return tlsPlaintext;
     }
 
-    long tlsCiphertext() {
+    public long tlsCiphertext() {
         return tlsCiphertext;
     }
 
-    long tlsControl() {
+    public long tlsControl() {
         return tlsControl;
     }
 
     /** {@code requireProgress}에 넘기는 최소치: 프레임, 제어, 결과, TLS 평문, 암호문, TLS 제어 순서다. TLS를 쓰지 않으면 TLS 최소치는 1이다. */
-    long[] minimums() {
+    public long[] minimums() {
         return new long[] {
             frameAssembly,
             controlOutput,
@@ -117,19 +117,19 @@ final class ProgressSpace {
      *
      * @throws IllegalArgumentException 어느 범위든 한 종류라도 모자랄 때
      */
-    void require(ResourceLimits limits) {
+    public void require(ResourceLimits limits) {
         long[] minimum = minimums();
         limits.requireProgress(minimum[0], minimum[1], minimum[2], minimum[3], minimum[4], minimum[5]);
     }
 
     /** 결과 사건 공간(바이트)이 담는 사건 수. 첫 칸은 최대 프레임 하나이고 나머지는 헤더 하나 크기다. 모자라도 한 칸은 준다. */
-    static int eventSlots(long resultEventBytes, long maxFrameSize) {
+    public static int eventSlots(long resultEventBytes, long maxFrameSize) {
         long slots = 1 + Math.max(0, resultEventBytes - maxFrameSize) / Endpoint.FRAME_HEADER_SIZE;
         return (int) Math.min(Integer.MAX_VALUE, slots);
     }
 
     /** 제어 출력 공간(바이트)이 담는 출력 수. */
-    static int outputSlots(long controlOutputBytes) {
+    public static int outputSlots(long controlOutputBytes) {
         return (int) Math.min(Integer.MAX_VALUE, controlOutputBytes / CONTROL_OUTPUT_UNIT);
     }
 }

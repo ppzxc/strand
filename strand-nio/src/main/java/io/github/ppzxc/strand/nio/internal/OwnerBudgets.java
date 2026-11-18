@@ -11,7 +11,7 @@ import java.util.Map;
  * 소유 객체(클라이언트·서버) 전체 범위의 예약 한도. 연결마다 {@link #newConnection}으로 연결 범위 한도를 더해 함께 예약한다. 관찰은 공통 API의
  * {@link ObservationBudget}이 예약하므로 여기서 따로 세지 않는다.
  */
-final class OwnerBudgets {
+public final class OwnerBudgets {
     /** 소유 객체 범위에서만 세는 종류. */
     private static final Resource[] OWNER_ONLY = {
         Resource.PREPARING_CONNECTIONS,
@@ -24,7 +24,7 @@ final class OwnerBudgets {
     private final Map<Resource, Budget> budgets = new EnumMap<>(Resource.class);
     private final ObservationBudget observations;
 
-    OwnerBudgets(ResourceLimits limits) {
+    public OwnerBudgets(ResourceLimits limits) {
         for (Resource resource : ConnectionBudgets.SHARED) {
             budgets.put(resource, new Budget(resource, limits.perOwner().get(resource)));
         }
@@ -34,23 +34,23 @@ final class OwnerBudgets {
         this.observations = new ObservationBudget(limits.perOwner().get(Resource.OBSERVATIONS));
     }
 
-    ConnectionBudgets newConnection(ResourceLimits limits) {
+    public ConnectionBudgets newConnection(ResourceLimits limits) {
         return new ConnectionBudgets(this, limits);
     }
 
-    ObservationBudget observationBudget() {
+    public ObservationBudget observationBudget() {
         return observations;
     }
 
-    boolean tryReserve(Resource resource, long amount) {
+    public boolean tryReserve(Resource resource, long amount) {
         return budget(resource).tryAcquire(amount);
     }
 
-    void release(Resource resource, long amount) {
+    public void release(Resource resource, long amount) {
         budget(resource).release(amount);
     }
 
-    ResourceUsage usage(Resource resource) {
+    public ResourceUsage usage(Resource resource) {
         return resource == Resource.OBSERVATIONS
                 ? observations.usage()
                 : budget(resource).usage();
