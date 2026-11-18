@@ -191,6 +191,60 @@ public final class Endpoint {
         }
     }
 
+    /** 최대 단위 수만큼 입력을 처리하고 소비한 바이트 수를 반환한다. */
+    public int receiveBounded(byte[] bytes, int offset, int length, int maximumUnits) {
+        Objects.requireNonNull(bytes, "bytes");
+        if (offset < 0 || length < 0 || offset > bytes.length - length || maximumUnits < 0) {
+            throw new IllegalArgumentException("유효하지 않은 입력 범위 또는 처리 한도");
+        }
+        if (config.isWebSocket()) {
+            throw new IllegalStateException("WebSocket 엔드포인트는 메시지 단위로 입력한다");
+        }
+        if (maximumUnits == 0 || !enterReceive()) {
+            return 0;
+        }
+        try {
+            int at = offset;
+            int end = offset + length;
+            int units = 0;
+            while (!phase.isEnded() && units < maximumUnits) {
+                if (pendingLength > 0) {
+                    int consumed = consumeUnit(pending, 0, pendingLength);
+                    if (consumed > 0) {
+                        releasePending();
+                        units++;
+                    } else if (phase.isEnded() || at == end) {
+                        break;
+                    } else {
+                        int take = Math.min(wantedLength - pendingLength, end - at);
+                        if (take <= 0) {
+                            throw new IllegalStateException("더 필요한 바이트 수가 정해지지 않았다");
+                        }
+                        appendPending(bytes, at, take);
+                        at += take;
+                    }
+                } else if (at == end) {
+                    break;
+                } else {
+                    int consumed = consumeUnit(bytes, at, end - at);
+                    if (consumed > 0) {
+                        at += consumed;
+                        units++;
+                    } else {
+                        if (!phase.isEnded()) {
+                            appendPending(bytes, at, end - at);
+                            at = end;
+                        }
+                        break;
+                    }
+                }
+            }
+            return at - offset;
+        } finally {
+            receiving = false;
+        }
+    }
+
     /**
      * 입력 처리에 들어간다. 이미 처리 중이면(애플리케이션 콜백이 다시 입력함) 상태를 건드리지 않고 던진다. 연결이 끝났으면 입력을 받지 않는다.
      *
