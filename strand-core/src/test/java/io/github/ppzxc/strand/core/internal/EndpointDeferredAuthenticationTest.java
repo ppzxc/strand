@@ -119,4 +119,51 @@ class EndpointDeferredAuthenticationTest {
         server.completeAuthentication(event.authenticationId(), AuthDecision.PASS);
         assertThat(server.drainMessages()).isEmpty();
     }
+
+    private static Endpoint authPending() {
+        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        server.receive(EndpointTest.bytes("c0de535452300000"));
+        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        server.drainMessages();
+        return server;
+    }
+
+    @Test
+    void specInputIsStillProcessedWhileTheHandlerIsPreparing() {
+        Endpoint server = authPending();
+        server.completeAuthentication(1, AuthDecision.PASS);
+        server.drainMessages();
+        server.drainEvents();
+
+        server.receive(EndpointTest.bytes("00000018 0002 00 00 0000000000000000 0000 0000 0102030405060708"));
+
+        assertThat(server.drainMessages())
+                .singleElement()
+                .satisfies(message -> assertThat(message.bytes()[5]).isEqualTo((byte) 2));
+        assertThat(server.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void requestBeforeTheAuthGateOpensIsAProtocolErrorWhileTheDecisionIsPending() {
+        Endpoint server = authPending();
+
+        server.receive(Frames.request(257, 1, new byte[0]));
+
+        assertThat(server.drainEvents())
+                .extracting(Event::kind)
+                .containsExactly(Event.Kind.AUTHENTICATION_REQUIRED, Event.Kind.CLOSED);
+    }
+
+    @Test
+    void failedDecisionSendsNoAcknowledgementAndEndsTheConnection() {
+        Endpoint server = authPending();
+
+        server.completeAuthentication(1, AuthDecision.REJECT);
+
+        assertThat(server.drainEvents()).extracting(Event::kind).contains(Event.Kind.CLOSED);
+        server.completeAuthentication(1, AuthDecision.PASS);
+        assertThat(server.drainMessages()).noneSatisfy(message -> assertThat(message.bytes()).hasSize(20));
+    }
 }

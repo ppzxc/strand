@@ -115,4 +115,44 @@ class EndpointOutputProgressTest {
         client.outputProgress(preface.id(), preface.bytes().length);
         assertThat(client.nextOutput().id()).isNotEqualTo(preface.id());
     }
+
+    @Test
+    void duplicateOrLateRequestCompletionDoesNotProduceASecondResult() {
+        Endpoint server = openServer();
+        long ticket = server.request(257, new byte[0]);
+        server.drainMessages();
+        server.receive(Frames.response(257, 2, 0));
+        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.RESULT);
+
+        server.receive(Frames.response(257, 2, 0));
+        server.cancelRequest(ticket);
+
+        assertThat(server.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void staleOutputIdentifierIsRejectedAfterWithdrawal() {
+        Endpoint server = openServer();
+        long ticket = server.request(257, new byte[0]);
+        EndpointOutput request = server.nextOutput();
+        server.cancelRequest(ticket);
+
+        org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+                .isThrownBy(() -> server.outputProgress(request.id(), 1));
+    }
+
+    @Test
+    void higherPriorityOutputBeforeAnyProgressGetsANewIdentifier() {
+        Endpoint server = openServer();
+        server.request(257, new byte[0]);
+        EndpointOutput request = server.nextOutput();
+        server.ping(new byte[] {1, 2, 3, 4, 5, 6, 7, 8});
+
+        EndpointOutput next = server.nextOutput();
+
+        assertThat(next.id()).isNotEqualTo(request.id());
+        assertThat(next.bytes()[5]).isEqualTo((byte) 2);
+        org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+                .isThrownBy(() -> server.outputProgress(request.id(), 1));
+    }
 }
