@@ -120,8 +120,32 @@ final class Outbox {
         }
     }
 
+    int size() {
+        return size;
+    }
+
     boolean isEmpty() {
         return size == 0;
+    }
+
+    void discard() {
+        head = null;
+        tail = null;
+        lastControl = null;
+        size = 0;
+    }
+
+    @Nullable
+    Node first() {
+        return head;
+    }
+
+    void removeForWriting(Node node) {
+        if (node == lastControl) {
+            lastControl = node.prev;
+        }
+        node.waitId = LivenessTimers.NO_WAIT;
+        remove(node);
     }
 
     /**
