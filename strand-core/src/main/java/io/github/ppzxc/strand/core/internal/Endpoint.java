@@ -422,6 +422,41 @@ public final class Endpoint {
         handle(message, 0, message.length);
     }
 
+    /** 메시지 하나의 조각을 넣는다. */
+    public ReceiveProgress receiveMessageFragment(
+            WebSocketMessageKind kind,
+            boolean start,
+            boolean end,
+            byte[] bytes,
+            int offset,
+            int length,
+            CollectionSpace space) {
+        return new ReceiveProgress(0, false);
+    }
+
+    /** 조립 중인 메시지에 모아 둔 바이트 수. */
+    int messageAssemblyLength() {
+        return 0;
+    }
+
+    /** WebSocket 메시지 하나가 WebSocket 계층에 통째로 접수됐음을 보고한다. */
+    public void outputAccepted(long id) {}
+
+    /** 상대의 WebSocket Close를 받았거나 WebSocket이 닫혔음을 알린다. */
+    public void webSocketClosed(int statusCode) {}
+
+    /** 전송 모듈에 주는 전송 종료 지시. */
+    public enum TransportClose {
+        NONE,
+        AFTER_PENDING_OUTPUT,
+        IMMEDIATE
+    }
+
+    /** 지금의 전송 종료 지시. */
+    public TransportClose transportClose() {
+        return TransportClose.NONE;
+    }
+
     /**
      * 가상 시계를 앞으로 보낸다. 확인 대기 시간이 지나도록 ACK가 없으면 연결 오류로 닫는다.
      *
