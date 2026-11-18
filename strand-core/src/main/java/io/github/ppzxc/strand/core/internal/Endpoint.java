@@ -404,7 +404,7 @@ public final class Endpoint {
             }
             return;
         }
-        if (phase.awaitingFirstFrame() && !checkFirstMessage(kind, message)) {
+        if (phase.awaitingFirstFrame() && !checkFirstMessage(kind, message, message.length)) {
             closeWithoutClose();
             return;
         }
@@ -862,22 +862,32 @@ public final class Endpoint {
             return;
         }
         if (outputWritten == 0) {
-            Outbox.Node node = Objects.requireNonNull(selectedOutput);
-            outputWaitId = node.waitId;
-            ledger.onWriteStarted(node);
-            outbox.removeForWriting(node);
+            startOutput();
         }
         outputWritten += count;
         if (outputWritten == output.length()) {
-            if (outputWaitId != LivenessTimers.NO_WAIT) {
-                timers.started(outputWaitId, now);
-                outputWaitId = LivenessTimers.NO_WAIT;
-            }
-            ledger.onWriteCompleted(Objects.requireNonNull(selectedOutput));
-            outputWritten = 0;
-            selectedOutput = null;
-            currentOutput = null;
+            completeOutput();
         }
+    }
+
+    /** 선택한 출력의 쓰기를 시작한 것으로 한다. 이제 철회할 수 없다. */
+    private void startOutput() {
+        Outbox.Node node = Objects.requireNonNull(selectedOutput);
+        outputWaitId = node.waitId;
+        ledger.onWriteStarted(node);
+        outbox.removeForWriting(node);
+    }
+
+    /** 선택한 출력이 전체 전달된 것으로 한다. */
+    private void completeOutput() {
+        if (outputWaitId != LivenessTimers.NO_WAIT) {
+            timers.started(outputWaitId, now);
+            outputWaitId = LivenessTimers.NO_WAIT;
+        }
+        ledger.onWriteCompleted(Objects.requireNonNull(selectedOutput));
+        outputWritten = 0;
+        selectedOutput = null;
+        currentOutput = null;
     }
 
     /**
@@ -1008,9 +1018,9 @@ public final class Endpoint {
     }
 
     /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 연결 단계에 알린다. */
-    private boolean checkFirstMessage(WebSocketMessageKind kind, byte[] message) {
+    private boolean checkFirstMessage(WebSocketMessageKind kind, byte[] message, int available) {
         boolean valid = kind == WebSocketMessageKind.BINARY
-                && message.length >= Frames.HEADER_SIZE
+                && available >= Frames.HEADER_SIZE
                 && Frames.readUnsignedInt(message, 0) >= Frames.MIN_LENGTH
                 && isFirstFrameHeader(message, 0);
         if (valid) {
