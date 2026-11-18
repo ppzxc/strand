@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,16 @@ import org.junit.jupiter.api.Test;
  * 기한이 처리된다. 기한은 정각이 지나야 처리되므로 조회 값은 기한 다음 밀리초다. 가상 시계는 0에서 시작한다.
  */
 class EndpointNextDeadlineTest {
+
+    @Test
+    void negativeElapsedTimeIsRejectedWithoutChangingTheClock() {
+        Endpoint server = open(quiet());
+        server.advance(100);
+        server.request(257, new byte[0], 500);
+
+        assertThatIllegalArgumentException().isThrownBy(() -> server.advance(-1));
+        assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(601));
+    }
 
     private static final String PREFACE = "c0de535452300000";
     private static final String HELLO = "0000001000010000000000000000000000000000";

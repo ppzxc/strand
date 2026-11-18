@@ -306,9 +306,13 @@ public final class Endpoint {
     /**
      * 가상 시계를 앞으로 보낸다. 확인 대기 시간이 지나도록 ACK가 없으면 연결 오류로 닫는다.
      *
-     * @param ms 밀리초
+     * @param ms 음수가 아닌 경과 밀리초
+     * @throws IllegalArgumentException 경과 시간이 음수일 때
      */
     public void advance(long ms) {
+        if (ms < 0) {
+            throw new IllegalArgumentException("경과 시간은 음수일 수 없다: " + ms);
+        }
         if (phase.isEnded()) {
             return;
         }
