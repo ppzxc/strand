@@ -455,7 +455,7 @@ public final class Endpoint {
         if (deadlineMs < 1) {
             throw new IllegalArgumentException("deadlineMs는 1 이상이어야 한다: " + deadlineMs);
         }
-        return requestUntil(type, payload, now + deadlineMs);
+        return requestUntil(type, payload, Deadlines.plus(now, deadlineMs));
     }
 
     /**

@@ -22,6 +22,17 @@ class EndpointNextDeadlineTest {
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(601));
     }
 
+    @Test
+    void requestDeadlineDoesNotWrapIntoThePast() {
+        Endpoint server = open(quiet());
+        server.advance(100);
+        server.request(257, new byte[0], Long.MAX_VALUE);
+
+        assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(Long.MAX_VALUE));
+        server.advance(1);
+        assertThat(server.drainEvents()).isEmpty();
+    }
+
     private static final String PREFACE = "c0de535452300000";
     private static final String HELLO = "0000001000010000000000000000000000000000";
     private static final String HELLO_ACK = "0000001000010100000000000000000000000000";
