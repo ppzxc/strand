@@ -55,6 +55,7 @@ final class TlsProbe {
         final boolean transportOpenAfterConsumption;
         final boolean tlsClosed;
         final boolean transportClosed;
+
         CloseResult(Result result, boolean[] flags) {
             plaintextConsumed = result.plaintextConsumed;
             peerReceived = result.received;
@@ -120,8 +121,12 @@ final class TlsProbe {
                 channel.close().sync();
                 if (flags != null) {
                     channel.eventLoop().submit(() -> {}).sync();
-                    flags[3] = !channel.isOpen() && channel.eventLoop()
-                            .submit(() -> ((ProgressChannel) channel).retainedCount()).sync().getNow() == 0;
+                    flags[3] = !channel.isOpen()
+                            && channel.eventLoop()
+                                            .submit(() -> ((ProgressChannel) channel).retainedCount())
+                                            .sync()
+                                            .getNow()
+                                    == 0;
                 }
             }
         } finally {
@@ -130,7 +135,7 @@ final class TlsProbe {
         }
     }
 
-    private static SSLContext context() throws Exception {
+    static SSLContext context() throws Exception {
         KeyStore keys = KeyStore.getInstance("PKCS12");
         char[] password = "strandtest".toCharArray();
         try (InputStream in = TlsProbe.class.getResourceAsStream("/netty/localhost.p12")) {

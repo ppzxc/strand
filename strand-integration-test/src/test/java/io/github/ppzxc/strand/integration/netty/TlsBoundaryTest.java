@@ -62,6 +62,7 @@ class TlsBoundaryTest {
         System.arraycopy(reset, 0, expected, request.length, reset.length);
         assertThat(result.received).containsExactly(expected);
     }
+
     @Test
     void plaintextConsumptionPrecedesTlsAndTransportCleanup() throws Exception {
         TlsProbe.CloseResult result = TlsProbe.exchangeAndClose(new byte[] {9, 8, 7});
