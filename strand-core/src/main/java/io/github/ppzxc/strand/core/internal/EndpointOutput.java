@@ -14,6 +14,11 @@ public final class EndpointOutput {
         return id;
     }
 
+    /** 출력의 종류와 내용. 불변이다. */
+    public OutboundMessage message() {
+        return message;
+    }
+
     public byte[] bytes() {
         return message.bytes();
     }
