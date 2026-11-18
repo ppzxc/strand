@@ -64,6 +64,7 @@ class NettyWriteBoundaryTest {
                     .sync()
                     .channel();
             try (Socket peer = listener.accept()) {
+                assertThat(peer.isConnected()).isTrue();
                 int[] progress = channel.eventLoop()
                         .submit(() -> {
                             ByteBuffer frame = ByteBuffer.allocate(1024 * 1024);
