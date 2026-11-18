@@ -134,4 +134,15 @@ class SerialExecutorTest {
             pool.shutdownNow();
         }
     }
+
+    @Test
+    void aBackingExecutorThatRunsTheDrainInlineStillRunsLaterTasks() {
+        SerialExecutor serial = new SerialExecutor(Runnable::run);
+        AtomicInteger ran = new AtomicInteger();
+
+        serial.execute(ran::incrementAndGet);
+        serial.execute(ran::incrementAndGet);
+
+        assertThat(ran).hasValue(2);
+    }
 }

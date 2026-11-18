@@ -28,13 +28,15 @@ public final class SerialExecutor implements Executor {
         synchronized (this) {
             queue.add(task);
             if (!scheduled) {
+                // 뒤받침 실행기가 호출 스레드에서 drain을 바로 돌려도(예: CallerRuns) drain이 끝내며 내린 표시를 덮지 않도록 먼저 올린다.
+                scheduled = true;
                 try {
                     backing.execute(this::drain);
                 } catch (RuntimeException | Error e) {
+                    scheduled = false;
                     queue.remove(task);
                     throw e;
                 }
-                scheduled = true;
             }
         }
     }
