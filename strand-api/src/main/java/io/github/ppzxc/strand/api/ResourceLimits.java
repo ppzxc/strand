@@ -21,6 +21,26 @@ public final class ResourceLimits {
         return owner;
     }
 
+    /** Validate transport-specific progress requirements against both scopes. */
+    public void requireProgress(
+            long frame, long control, long result, long plaintext, long ciphertext, long tlsControl) {
+        connection.requireProgress(frame, control, result, plaintext, ciphertext, tlsControl);
+        Resource[] kinds = {
+            Resource.FRAME_ASSEMBLY_BYTES,
+            Resource.CONTROL_OUTPUT_BYTES,
+            Resource.RESULT_EVENT_BYTES,
+            Resource.TLS_PLAINTEXT_BYTES,
+            Resource.TLS_CIPHERTEXT_BYTES,
+            Resource.TLS_CONTROL_BYTES
+        };
+        long[] minimum = {frame, control, result, plaintext, ciphertext, tlsControl};
+        for (int i = 0; i < kinds.length; i++) {
+            if (owner.get(kinds[i]) < minimum[i]) {
+                throw new IllegalArgumentException("insufficient owner progress space: " + kinds[i]);
+            }
+        }
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -41,20 +61,6 @@ public final class ResourceLimits {
 
         public ResourceLimits build() {
             if (connection == null || owner == null) throw new IllegalStateException("both scopes are required");
-            Resource[] progress = {
-                Resource.FRAME_ASSEMBLY_BYTES,
-                Resource.CONTROL_OUTPUT_BYTES,
-                Resource.RESULT_EVENT_BYTES,
-                Resource.TLS_PLAINTEXT_BYTES,
-                Resource.TLS_CIPHERTEXT_BYTES,
-                Resource.TLS_CONTROL_BYTES
-            };
-            for (Resource resource : progress) {
-                if (owner.get(resource) < connection.get(resource)) {
-                    throw new IllegalArgumentException(
-                            "owner progress space is smaller than one connection: " + resource);
-                }
-            }
             return new ResourceLimits(connection, owner);
         }
     }

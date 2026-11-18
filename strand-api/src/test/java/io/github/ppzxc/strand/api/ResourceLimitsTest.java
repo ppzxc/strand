@@ -22,7 +22,7 @@ class ResourceLimitsTest {
     }
 
     @Test
-    void rejectsOwnerProgressSpaceSmallerThanOneConnection() {
+    void allowsOwnerCapSmallerThanConnectionCapWhenMinimumFits() {
         ConnectionLimits connection = ConnectionLimits.builder()
                 .outgoingRequests(1, 100)
                 .incomingRequests(1, 100)
@@ -44,12 +44,12 @@ class ResourceLimitsTest {
                 .preparationBytes(100)
                 .progressBytes(100, 100, 100, 100, 100, 100)
                 .build();
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> ResourceLimits.builder()
-                        .perConnection(connection)
-                        .perOwner(owner)
-                        .build());
+        ResourceLimits limits = ResourceLimits.builder()
+                .perConnection(connection)
+                .perOwner(owner)
+                .build();
+        limits.requireProgress(100, 100, 100, 100, 100, 100);
+        assertThrows(IllegalArgumentException.class, () -> limits.requireProgress(101, 100, 100, 100, 100, 100));
     }
 
     @Test
