@@ -124,7 +124,7 @@ public final class Event {
         if (kind != Kind.AUTHENTICATION_REQUIRED) {
             throw new IllegalStateException("인증 판단 사건이 아니다");
         }
-        return 1;
+        return Endpoint.AUTHENTICATION_ID;
     }
 
     static Event closed(@Nullable Throwable cause, CloseReason closeReason) {

@@ -38,6 +38,9 @@ public final class Endpoint {
     /** 서버는 짝수, 클라이언트는 홀수 번호를 쓰고 첫 번호는 각각 2와 1이다(규격 2.2.5절). */
     private static final int FIRST_SERVER_STREAM_ID = 2;
 
+    /** 인증 판단 식별자. 한 연결에 인증 판단은 하나뿐이라 값이 하나다. */
+    static final long AUTHENTICATION_ID = 1;
+
     private static final int FIRST_CLIENT_STREAM_ID = 1;
 
     private static final int PING_PAYLOAD_SIZE = 8;
@@ -228,11 +231,14 @@ public final class Endpoint {
             int units = 0;
             boolean collectionRequired = false;
             while (!phase.isEnded() && units < maximumUnits) {
+                if (pendingLength == 0 && at == end) {
+                    break;
+                }
+                if (!hasSpace(space)) {
+                    collectionRequired = true;
+                    break;
+                }
                 if (pendingLength > 0) {
-                    if (!hasSpace(space)) {
-                        collectionRequired = true;
-                        break;
-                    }
                     int consumed = consumeUnit(pending, 0, pendingLength);
                     if (consumed > 0) {
                         releasePending();
@@ -247,13 +253,7 @@ public final class Endpoint {
                         appendPending(bytes, at, take);
                         at += take;
                     }
-                } else if (at == end) {
-                    break;
                 } else {
-                    if (!hasSpace(space)) {
-                        collectionRequired = true;
-                        break;
-                    }
                     int consumed = consumeUnit(bytes, at, end - at);
                     if (consumed > 0) {
                         at += consumed;
@@ -1302,7 +1302,7 @@ public final class Endpoint {
     /** 인증 판단 식별자에 대한 결과를 입력한다. 늦거나 중복된 결과는 무시한다. */
     public void completeAuthentication(long id, AuthDecision decision) {
         Objects.requireNonNull(decision, "decision");
-        if (id != 1 || !authenticationPending || !phase.isActive()) {
+        if (id != AUTHENTICATION_ID || !authenticationPending || !phase.isActive()) {
             return;
         }
         authenticationPending = false;
