@@ -3,11 +3,11 @@ package io.github.ppzxc.strand.core.internal;
 /** 전송 모듈이 쓰는 내부 출력의 식별자와 불변 내용. */
 public final class EndpointOutput {
     private final long id;
-    private final byte[] bytes;
+    private final OutboundMessage message;
 
-    EndpointOutput(long id, byte[] bytes) {
+    EndpointOutput(long id, OutboundMessage message) {
         this.id = id;
-        this.bytes = bytes;
+        this.message = message;
     }
 
     public long id() {
@@ -15,10 +15,10 @@ public final class EndpointOutput {
     }
 
     public byte[] bytes() {
-        return bytes.clone();
+        return message.bytes();
     }
 
     public int length() {
-        return bytes.length;
+        return message.length();
     }
 }

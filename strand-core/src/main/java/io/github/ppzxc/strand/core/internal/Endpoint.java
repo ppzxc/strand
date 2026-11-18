@@ -734,7 +734,7 @@ public final class Endpoint {
         Outbox.Node head = outbox.first();
         if (outputWritten == 0 && selectedOutput != head) {
             selectedOutput = head;
-            currentOutput = head == null ? null : new EndpointOutput(++nextOutputId, head.message.bytes());
+            currentOutput = head == null ? null : new EndpointOutput(++nextOutputId, head.message);
         }
         return currentOutput;
     }
