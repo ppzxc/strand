@@ -9,6 +9,13 @@ dependencies {
   testImplementation(testFixtures(project(":strand-nio")))
 }
 
+// Netty 진행 경계 검증은 릴리스를 -PnettyVersion=<버전>으로 바꿔 반복 실행한다(docs/research/netty-progress-verification.md).
+val nettyVersion = providers.gradleProperty("nettyVersion").orElse("4.1.101.Final")
+
 dependencies {
-  testImplementation("io.netty:netty-transport:4.1.101.Final")
+  testImplementation("io.netty:netty-transport:${nettyVersion.get()}")
+}
+
+tasks.test {
+  systemProperty("strand.nettyVersion", nettyVersion.get())
 }
