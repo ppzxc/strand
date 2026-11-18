@@ -742,7 +742,7 @@ public final class Endpoint {
     /** 선택한 출력에 전송된 바이트 수를 보고한다. */
     public void outputProgress(long id, int count) {
         EndpointOutput output = nextOutput();
-        if (output == null || output.id() != id || count < 0 || count > output.bytes().length - outputWritten) {
+        if (output == null || output.id() != id || count < 0 || count > output.length() - outputWritten) {
             throw new IllegalArgumentException("유효하지 않은 출력 진행");
         }
         if (count == 0) {
@@ -755,7 +755,7 @@ public final class Endpoint {
             outbox.removeForWriting(node);
         }
         outputWritten += count;
-        if (outputWritten == output.bytes().length) {
+        if (outputWritten == output.length()) {
             if (outputWaitId != LivenessTimers.NO_WAIT) {
                 timers.started(outputWaitId, now);
                 outputWaitId = LivenessTimers.NO_WAIT;

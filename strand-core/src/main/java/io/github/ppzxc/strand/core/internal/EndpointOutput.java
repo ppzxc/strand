@@ -17,4 +17,8 @@ public final class EndpointOutput {
     public byte[] bytes() {
         return bytes.clone();
     }
+
+    public int length() {
+        return bytes.length;
+    }
 }
