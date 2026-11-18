@@ -112,6 +112,7 @@ public final class Endpoint {
     private final boolean server;
     /** 한 단위가 만들 수 있는 제어 프레임(HELLO 응답, AUTH, CLOSE 등)의 상한. */
     private static final int OUTPUT_CONTROL_RESERVE = 4;
+
     private boolean deferredAuthentication;
     private boolean authenticationPending;
     private boolean handlerReady;

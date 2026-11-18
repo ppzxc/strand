@@ -164,6 +164,7 @@ class EndpointDeferredAuthenticationTest {
 
         assertThat(server.drainEvents()).extracting(Event::kind).contains(Event.Kind.CLOSED);
         server.completeAuthentication(1, AuthDecision.PASS);
-        assertThat(server.drainMessages()).noneSatisfy(message -> assertThat(message.bytes()).hasSize(20));
+        assertThat(server.drainMessages())
+                .noneSatisfy(message -> assertThat(message.bytes()).hasSize(20));
     }
 }

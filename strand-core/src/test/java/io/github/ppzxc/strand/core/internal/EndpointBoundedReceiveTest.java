@@ -1,7 +1,6 @@
 package io.github.ppzxc.strand.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
-
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import java.io.ByteArrayOutputStream;
@@ -77,8 +76,7 @@ class EndpointBoundedReceiveTest {
         assertThat(second.collectionRequired()).isFalse();
         assertThat(server.drainEvents())
                 .extracting(Event::kind)
-                .containsExactly(
-                        Event.Kind.RESULT, Event.Kind.RESULT, Event.Kind.RESULT, Event.Kind.CLOSED);
+                .containsExactly(Event.Kind.RESULT, Event.Kind.RESULT, Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
     @Test
