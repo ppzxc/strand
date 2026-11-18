@@ -37,17 +37,7 @@ final class TlsProbe {
     }
 
     static Result exchange(byte[] message) throws Exception {
-        KeyStore keys = KeyStore.getInstance("PKCS12");
-        char[] password = "strandtest".toCharArray();
-        try (InputStream in = TlsProbe.class.getResourceAsStream("/netty/localhost.p12")) {
-            keys.load(in, password);
-        }
-        KeyManagerFactory km = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-        km.init(keys, password);
-        TrustManagerFactory tm = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-        tm.init(keys);
-        SSLContext context = SSLContext.getInstance("TLS");
-        context.init(km.getKeyManagers(), tm.getTrustManagers(), null);
+        SSLContext context = context();
         ExecutorService serverThread = Executors.newSingleThreadExecutor();
         NioEventLoopGroup group = new NioEventLoopGroup(1);
         try (SSLServerSocket server = (SSLServerSocket)
@@ -78,6 +68,67 @@ final class TlsProbe {
                         .getNow();
                 return new Result(counts[0], counts[1], received.get(10, TimeUnit.SECONDS));
             } finally {
+                channel.close().sync();
+            }
+        } finally {
+            group.shutdownGracefully().sync();
+            serverThread.shutdownNow();
+        }
+    }
+
+    private static SSLContext context() throws Exception {
+        KeyStore keys = KeyStore.getInstance("PKCS12");
+        char[] password = "strandtest".toCharArray();
+        try (InputStream in = TlsProbe.class.getResourceAsStream("/netty/localhost.p12")) {
+            keys.load(in, password);
+        }
+        KeyManagerFactory km = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        km.init(keys, password);
+        TrustManagerFactory tm = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tm.init(keys);
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(km.getKeyManagers(), tm.getTrustManagers(), null);
+        return context;
+    }
+
+    static int[] pressure() throws Exception {
+        SSLContext context = context();
+        ExecutorService serverThread = Executors.newSingleThreadExecutor();
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        NioEventLoopGroup group = new NioEventLoopGroup(1);
+        try (SSLServerSocket server = (SSLServerSocket)
+                context.getServerSocketFactory().createServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            server.setReceiveBufferSize(4096);
+            server.setEnabledProtocols(new String[] {"TLSv1.2"});
+            Future<?> received = serverThread.submit(() -> {
+                try (SSLSocket peer = (SSLSocket) server.accept()) {
+                    peer.setSoTimeout(10000);
+                    peer.startHandshake();
+                    if (!release.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("release timed out");
+                }
+                return null;
+            });
+            BoundaryChannel channel = (BoundaryChannel) new Bootstrap()
+                    .group(group)
+                    .channel(BoundaryChannel.class)
+                    .option(io.netty.channel.ChannelOption.SO_SNDBUF, 4096)
+                    .handler(new ChannelInitializer<Channel>() {
+                        @Override
+                        protected void initChannel(Channel ch) {}
+                    })
+                    .connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.getLocalPort()))
+                    .sync()
+                    .channel();
+            try {
+                int[] result = channel.eventLoop()
+                        .submit(() -> drive(context, channel, null))
+                        .sync()
+                        .getNow();
+                release.countDown();
+                received.get(10, TimeUnit.SECONDS);
+                return result;
+            } finally {
+                release.countDown();
                 channel.close().sync();
             }
         } finally {
@@ -126,6 +177,26 @@ final class TlsProbe {
                 default:
                     throw new IllegalStateException(engine.getHandshakeStatus().toString());
             }
+        }
+        if (message == null) {
+            int consumed = 0;
+            int partial = 0;
+            ByteBuffer plaintext = ByteBuffer.allocate(16384);
+            for (int frame = 0; frame < 1024; frame++) {
+                plaintext.clear();
+                outgoing.clear();
+                SSLEngineResult result = engine.wrap(plaintext, outgoing);
+                if (result.getStatus() != SSLEngineResult.Status.OK) throw new IllegalStateException(result.toString());
+                consumed += result.bytesConsumed();
+                outgoing.flip();
+                while (outgoing.hasRemaining()) {
+                    int remaining = outgoing.remaining();
+                    int n = channel.writeAttempt(outgoing);
+                    if (n == 0) return new int[] {consumed, partial, 1};
+                    if (n < remaining) partial++;
+                }
+            }
+            return new int[] {consumed, partial, 0};
         }
         outgoing.clear();
         SSLEngineResult result = engine.wrap(ByteBuffer.wrap(message), outgoing);

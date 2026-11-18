@@ -12,4 +12,12 @@ class TlsBoundaryTest {
         assertThat(result.ciphertextWritten).isPositive();
         assertThat(result.received).containsExactly(1, 2, 3, 4);
     }
+
+    @Test
+    void ciphertextSocketProgressCanStopAfterPlaintextConsumption() throws Exception {
+        int[] observed = TlsProbe.pressure();
+        assertThat(observed[0]).isPositive(); // plaintext consumed
+        assertThat(observed[1]).isPositive(); // partial ciphertext write
+        assertThat(observed[2]).isEqualTo(1); // zero ciphertext write
+    }
 }
