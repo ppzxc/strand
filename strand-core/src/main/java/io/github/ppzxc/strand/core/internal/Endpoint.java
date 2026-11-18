@@ -108,6 +108,9 @@ public final class Endpoint {
     private final LivenessTimers timers;
 
     private final boolean server;
+    private boolean deferredAuthentication;
+    private boolean authenticationPending;
+    private boolean handlerReady;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
     private long highestPeerStreamId;
 
@@ -134,6 +137,13 @@ public final class Endpoint {
      */
     public static Endpoint server(EndpointConfig config) {
         return new Endpoint(true, config);
+    }
+
+    /** 사용자 인증 판단을 사건으로 위임하는 내부 서버 엔드포인트. */
+    public static Endpoint serverWithDeferredAuthentication(EndpointConfig config) {
+        Endpoint endpoint = new Endpoint(true, config);
+        endpoint.deferredAuthentication = true;
+        return endpoint;
     }
 
     /**
@@ -904,7 +914,8 @@ public final class Endpoint {
             // CLOSE를 보냈거나 받은 뒤의 새 요청은 끝까지 읽고 조용히 버린다. 어떤 프레임도 보내지 않는다(규격 3.5절).
             return;
         }
-        if (peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
+        if ((deferredAuthentication && !handlerReady)
+                || peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
             send(Frames.reset(streamId, ErrorCode.REFUSED));
         } else if (!config.knows(type)) {
             send(Frames.response(type, streamId, Status.UNIMPLEMENTED));
@@ -1040,6 +1051,10 @@ public final class Endpoint {
     }
 
     private void handleServerAuth(byte[] bytes, int payloadAt, int payloadSize) {
+        if (authenticationPending) {
+            connectionError();
+            return;
+        }
         timers.authWaitEnded();
         int mechanismLength = payloadSize == 0 ? 0 : bytes[payloadAt] & 0xFF;
         if (mechanismLength < 1
@@ -1055,6 +1070,11 @@ public final class Endpoint {
         }
         // 자격 증명은 애플리케이션으로 넘어가므로 복사한다.
         byte[] credentials = Arrays.copyOfRange(bytes, payloadAt + 1 + mechanismLength, payloadAt + payloadSize);
+        if (deferredAuthentication) {
+            authenticationPending = true;
+            events.add(Event.authenticationRequired(mechanism, credentials));
+            return;
+        }
         AuthDecision decision;
         try {
             decision = config.authenticator().authenticate(mechanism, credentials);
@@ -1063,6 +1083,27 @@ public final class Endpoint {
             phase.causedBy(e);
             decision = AuthDecision.TRANSIENT_FAILURE;
         }
+        finishAuthentication(decision);
+    }
+
+    /** 인증 판단 식별자에 대한 결과를 입력한다. 늦거나 중복된 결과는 무시한다. */
+    public void completeAuthentication(long id, AuthDecision decision) {
+        Objects.requireNonNull(decision, "decision");
+        if (id != 1 || !authenticationPending || !phase.isActive()) {
+            return;
+        }
+        authenticationPending = false;
+        finishAuthentication(decision);
+    }
+
+    /** 인증을 마친 연결에서 핸들러 준비가 완료되었음을 알린다. */
+    public void handlerReady() {
+        if (deferredAuthentication && phase.isActive() && phase.hasPassedAuthGate()) {
+            handlerReady = true;
+        }
+    }
+
+    private void finishAuthentication(AuthDecision decision) {
         if (!phase.isActive()) {
             // 콜백 안에서 CLOSE를 보냈거나 연결 오류로 CLOSE 교환으로 쳤거나 연결이 끝났다(isActive는 이 셋을 모두 거짓으로 답한다). 판정과 무관하게
             // CLOSE·CLOSED 뒤 프레임을 쌓지 않는다(규격 3.5절). AUTH 단계에는 대기 중인 스트림이 없어 콜백 안의 close()가 conclude()로 곧바로

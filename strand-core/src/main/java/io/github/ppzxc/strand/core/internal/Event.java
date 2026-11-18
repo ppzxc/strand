@@ -19,7 +19,9 @@ public final class Event {
         /** 상대가 연 스트림의 요청을 받음. */
         REQUEST_RECEIVED,
         /** 클라이언트가 {@code AUTH(ACK)}를 받아 AUTH 관문을 통과함(규격 3.3절). 적합성 벡터에는 나오지 않는다. */
-        AUTHENTICATED
+        AUTHENTICATED,
+        /** 전송 모듈에 인증 판단을 요청한다. */
+        AUTHENTICATION_REQUIRED
     }
 
     /** {@code AUTH(ACK)}가 자격 증명의 수명을 알리지 않았음을 나타내는 값. */
@@ -40,6 +42,7 @@ public final class Event {
     private final @Nullable CloseReason closeReason;
     private final long ticket;
     private final byte[] body;
+    private final @Nullable String authenticationMechanism;
 
     private Event(Kind kind, long streamId, int status, int type, byte[] body) {
         this(kind, streamId, status, type, NO_CREDENTIAL_LIFETIME, null, null, null, NO_TICKET, body);
@@ -56,6 +59,21 @@ public final class Event {
             @Nullable CloseReason closeReason,
             long ticket,
             byte[] body) {
+        this(kind, streamId, status, type, credentialLifetime, certainty, cause, closeReason, ticket, body, null);
+    }
+
+    private Event(
+            Kind kind,
+            long streamId,
+            int status,
+            int type,
+            long credentialLifetime,
+            @Nullable Certainty certainty,
+            @Nullable Throwable cause,
+            @Nullable CloseReason closeReason,
+            long ticket,
+            byte[] body,
+            @Nullable String authenticationMechanism) {
         this.closeReason = closeReason;
         this.certainty = certainty;
         this.cause = cause;
@@ -66,6 +84,7 @@ public final class Event {
         this.credentialLifetime = credentialLifetime;
         this.ticket = ticket;
         this.body = body;
+        this.authenticationMechanism = authenticationMechanism;
     }
 
     static Event authenticated(OptionalLong credentialLifetime) {
@@ -80,6 +99,32 @@ public final class Event {
                 null,
                 NO_TICKET,
                 NO_BODY);
+    }
+
+    static Event authenticationRequired(String mechanism, byte[] credentials) {
+        return new Event(
+                Kind.AUTHENTICATION_REQUIRED,
+                0,
+                0,
+                0,
+                NO_CREDENTIAL_LIFETIME,
+                null,
+                null,
+                null,
+                NO_TICKET,
+                credentials,
+                mechanism);
+    }
+
+    public Optional<String> authenticationMechanism() {
+        return Optional.ofNullable(authenticationMechanism);
+    }
+
+    public long authenticationId() {
+        if (kind != Kind.AUTHENTICATION_REQUIRED) {
+            throw new IllegalStateException("인증 판단 사건이 아니다");
+        }
+        return 1;
     }
 
     static Event closed(@Nullable Throwable cause, CloseReason closeReason) {
