@@ -272,10 +272,6 @@ final class AppFixture implements AutoCloseable {
     }
 
     /**
-     * 팩터리가 있는 서버는 인증을 통과시킨 뒤 팩터리가 끝나기 전에 온 요청을 {@code REFUSED}로 거절한다(처리 안 됨, {@code UNAVAILABLE}). 클라이언트의
-     * connect 성공과 서버의 핸들러 활성화 사이에는 이 짧은 틈이 있으므로, 처리 안 됨 결과는 다시 낸다(규격이 허용하는 재시도).
-     */
-    /**
      * 응답하지 않는 핸들러에 요청을 하나 내고 핸들러가 활성화되어 시작했음을 기다리지 않는다. 팩터리 틈에 거절된 요청은 다시 낸다.
      */
     void requestWhenServed(
@@ -294,6 +290,7 @@ final class AppFixture implements AutoCloseable {
         throw new AssertionError("서버가 핸들러를 활성화하지 않았다");
     }
 
+    /** 팩터리가 있는 서버는 인증 뒤 팩터리가 끝나기 전의 요청을 REFUSED(UNAVAILABLE, 처리 안 됨)로 거절하므로 그 결과는 다시 낸다. */
     io.github.ppzxc.strand.api.RequestResult requestWhenServed(
             NioStrandConnection connection, io.github.ppzxc.strand.api.Request request) throws Exception {
         for (int attempt = 0; attempt < 100; attempt++) {

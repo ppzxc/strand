@@ -155,7 +155,12 @@ public final class NioStrandClient {
                 null,
                 null,
                 common.security.tlsContext() != null);
-        new NioStrandConnection(params).start();
+        try {
+            new NioStrandConnection(params).start();
+        } catch (RuntimeException e) {
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            future.completeExceptionally(e);
+        }
         return future.thenApply(connection -> connection);
     }
 

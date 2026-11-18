@@ -24,22 +24,17 @@ public final class SerialExecutor implements Executor {
     @Override
     public void execute(Runnable task) {
         Objects.requireNonNull(task);
-        boolean schedule;
+        // 큐 추가와 뒤받침 실행기 제출을 한 잠금 안에서 한다. 제출이 거절되면 이 호출이 넣은 작업만 거두므로, 그 사이 다른 호출이 넣은 작업을 잃지 않는다.
         synchronized (this) {
             queue.add(task);
-            schedule = !scheduled;
-            scheduled = true;
-        }
-        if (schedule) {
-            try {
-                backing.execute(this::drain);
-            } catch (RuntimeException | Error e) {
-                synchronized (this) {
-                    // 방금 넣은 작업이 첫 작업이어야 한다. 큐에 남기지 않는다.
-                    queue.clear();
-                    scheduled = false;
+            if (!scheduled) {
+                try {
+                    backing.execute(this::drain);
+                } catch (RuntimeException | Error e) {
+                    queue.remove(task);
+                    throw e;
                 }
-                throw e;
+                scheduled = true;
             }
         }
     }

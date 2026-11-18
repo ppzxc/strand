@@ -213,7 +213,12 @@ public final class NioStrandServer {
                 factory,
                 verifier,
                 common.security.tlsContext() != null);
-        new NioStrandConnection(params).start();
+        try {
+            new NioStrandConnection(params).start();
+        } catch (RuntimeException e) {
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            throw e;
+        }
     }
 
     /** 연결의 직렬 실행기가 아닌 곳(접수 거절)에서 앱용 실행기로 실패를 알린다. 거절되면 버린다. */

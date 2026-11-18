@@ -193,6 +193,13 @@ final class ConnectionEngine {
         return null;
     }
 
+    /** {@link #admit}로 예약했지만 연결을 시작하지 못했을 때 예약을 모두 돌려준다. */
+    static void cancelAdmission(ConnectionBudgets budgets, ProgressSpace space) {
+        releaseProgress(budgets, space, progressKinds().length);
+        budgets.owner().release(Resource.TOTAL_CONNECTIONS, 1);
+        budgets.owner().release(Resource.PREPARING_CONNECTIONS, 1);
+    }
+
     /** 진행 공간 예약 가운데 앞의 {@code count}종류를 돌려준다. 예약 도중 모자라 되돌릴 때와 연결이 끝날 때 쓴다. */
     private static void releaseProgress(ConnectionBudgets budgets, ProgressSpace space, int count) {
         Resource[] kinds = progressKinds();
@@ -450,8 +457,8 @@ final class ConnectionEngine {
 
         @Override
         public void abandon() {
-            result.complete(ResponseAcceptance.requestEnded());
             p.budgets.release(Resource.RESPONSE_BYTES, body.length);
+            result.complete(ResponseAcceptance.requestEnded());
         }
     }
 

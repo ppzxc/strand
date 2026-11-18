@@ -46,7 +46,12 @@ public final class Listener {
             PassageFactory.closeQuietly(accepted);
             return;
         }
-        acceptor.accept(accepted);
+        try {
+            acceptor.accept(accepted);
+        } catch (RuntimeException e) {
+            // 한 연결의 등록 실패가 수락 스레드를 끝내지 않게 한다. 등록하지 못한 소켓은 정리한다.
+            PassageFactory.closeQuietly(accepted);
+        }
     }
 
     /**
