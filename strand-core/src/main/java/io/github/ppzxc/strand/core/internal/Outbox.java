@@ -124,6 +124,26 @@ final class Outbox {
         return size == 0;
     }
 
+    void discard() {
+        head = null;
+        tail = null;
+        lastControl = null;
+        size = 0;
+    }
+
+    @Nullable
+    Node first() {
+        return head;
+    }
+
+    void removeForWriting(Node node) {
+        if (node == lastControl) {
+            lastControl = node.prev;
+        }
+        node.waitId = LivenessTimers.NO_WAIT;
+        remove(node);
+    }
+
     /**
      * 쌓인 메시지를 순서대로 모두 꺼내 대기열을 비운다. 확인 대기가 매인 메시지는 그 대기 식별자를 {@code onWaitingDrained}에 알린다(대기를
      * 시작하는 일은 받는 쪽 몫이다, 규격 3.3절).

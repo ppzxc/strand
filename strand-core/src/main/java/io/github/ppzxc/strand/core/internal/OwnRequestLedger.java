@@ -131,6 +131,8 @@ final class OwnRequestLedger {
         /** 쓰기 대기열 노드와 쓰기 전 연결 리스트에 이어져 있다. {@link #unwrite}를 두 번 불러도 한 번만 거두게 한다. */
         boolean linked;
 
+        boolean delivered;
+
         /** 번호 없는 요청의 연결 리스트(낸 순서). 번호가 없을 때만 이어져 있다. */
         @Nullable
         Record prevQueued;
@@ -337,6 +339,7 @@ final class OwnRequestLedger {
             Record next = record.nextUnwritten;
             highestWrittenStreamId = Math.max(highestWrittenStreamId, record.streamId);
             record.state = RequestState.WRITING_STARTED;
+            record.delivered = true;
             record.linked = false;
             record.node = null;
             record.prevUnwritten = null;
@@ -345,6 +348,29 @@ final class OwnRequestLedger {
         }
         firstUnwritten = null;
         lastUnwritten = null;
+    }
+
+    void onWriteStarted(Outbox.Node node) {
+        for (Record record = firstUnwritten; record != null; record = record.nextUnwritten) {
+            if (record.node == node) {
+                record.node = null;
+                unwrite(record);
+                record.state = RequestState.WRITING_STARTED;
+                record.node = node;
+                highestWrittenStreamId = Math.max(highestWrittenStreamId, record.streamId);
+                return;
+            }
+        }
+    }
+
+    void onWriteCompleted(Outbox.Node node) {
+        for (Record record : byStream.values()) {
+            if (record.node == node) {
+                record.delivered = true;
+                record.node = null;
+                return;
+            }
+        }
     }
 
     /** 번호 없는 요청 가운데 가장 먼저 낸 것의 번호표. 없으면 -1이다. {@link #openQueued}가 지금 처리할 요청이다. */
@@ -520,8 +546,9 @@ final class OwnRequestLedger {
     List<Outcome> onTransportClosed() {
         List<Outcome> outcomes = new ArrayList<>(byStream.size() + queued.size());
         for (Record record : byStream.values()) {
-            outcomes.add(new Outcome(
-                    record.ticket, record.streamId, Status.UNAVAILABLE, endUnfinished(record), false, true));
+            Certainty certainty = record.delivered ? Certainty.UNKNOWN : Certainty.NOT_PROCESSED;
+            unwrite(record);
+            outcomes.add(new Outcome(record.ticket, record.streamId, Status.UNAVAILABLE, certainty, false, true));
         }
         for (Record record = firstQueued; record != null; record = record.nextQueued) {
             outcomes.add(new Outcome(record.ticket, 0, Status.UNAVAILABLE, endUnfinished(record), false, false));

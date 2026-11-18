@@ -111,6 +111,12 @@ public final class Endpoint {
     private boolean deferredAuthentication;
     private boolean authenticationPending;
     private boolean handlerReady;
+    private Outbox.@Nullable Node selectedOutput;
+    private @Nullable EndpointOutput currentOutput;
+    private long nextOutputId;
+    private int outputWritten;
+    private boolean incrementalOutput;
+    private boolean outputDisconnected;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
     private long highestPeerStreamId;
 
@@ -622,6 +628,13 @@ public final class Endpoint {
     public void disconnect() {
         phase.transportDisconnected();
         conclude();
+        outputDisconnected = true;
+        if (incrementalOutput) {
+            selectedOutput = null;
+            currentOutput = null;
+            outputWritten = 0;
+            outbox.discard();
+        }
     }
 
     /**
@@ -646,11 +659,54 @@ public final class Endpoint {
      * @return 보낼 메시지. 없으면 빈 목록
      */
     public List<OutboundMessage> drainMessages() {
+        if (incrementalOutput) {
+            throw new IllegalStateException("진행 보고 방식과 일괄 수거 방식을 섞을 수 없다");
+        }
         // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
         long drainedAt = now;
         List<OutboundMessage> drained = outbox.drain(id -> timers.started(id, drainedAt));
         ledger.onWriteStarted();
         return drained;
+    }
+
+    /** 현재 쓸 출력. 철회 또는 우선순위 변경 뒤에는 새 식별자가 발급된다. */
+    public @Nullable EndpointOutput nextOutput() {
+        incrementalOutput = true;
+        if (outputDisconnected) {
+            return null;
+        }
+        Outbox.Node head = outbox.first();
+        if (outputWritten == 0 && selectedOutput != head) {
+            selectedOutput = head;
+            currentOutput = head == null ? null : new EndpointOutput(++nextOutputId, head.message.bytes());
+        }
+        return currentOutput;
+    }
+
+    /** 선택한 출력에 전송된 바이트 수를 보고한다. */
+    public void outputProgress(long id, int count) {
+        EndpointOutput output = nextOutput();
+        if (output == null || output.id() != id || count < 0 || count > output.bytes().length - outputWritten) {
+            throw new IllegalArgumentException("유효하지 않은 출력 진행");
+        }
+        if (count == 0) {
+            return;
+        }
+        if (outputWritten == 0) {
+            Outbox.Node node = Objects.requireNonNull(selectedOutput);
+            if (node.waitId != LivenessTimers.NO_WAIT) {
+                timers.started(node.waitId, now);
+            }
+            ledger.onWriteStarted(node);
+            outbox.removeForWriting(node);
+        }
+        outputWritten += count;
+        if (outputWritten == output.bytes().length) {
+            ledger.onWriteCompleted(Objects.requireNonNull(selectedOutput));
+            outputWritten = 0;
+            selectedOutput = null;
+            currentOutput = null;
+        }
     }
 
     /**
