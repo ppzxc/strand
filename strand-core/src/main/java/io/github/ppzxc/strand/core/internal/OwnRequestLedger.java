@@ -194,6 +194,8 @@ final class OwnRequestLedger {
     private @Nullable Record lastUnwritten;
     /** 요청 프레임을 전송 계층에 넘긴 내 스트림 가운데 가장 큰 번호. 상대 CLOSE의 {@code last_stream_id} 검사 기준이다(규격 3.5절). */
     private long highestWrittenStreamId;
+
+    private final Map<Outbox.Node, Long> writingStreams = new HashMap<>();
     /** 다음 요청에 줄 번호표(낸 순서, 0부터). */
     private long nextTicket;
     /** 다음 요청에 줄 스트림 번호. 2^63-1을 넘으면 음수로 넘쳐 소진으로 읽힌다. */
@@ -357,13 +359,17 @@ final class OwnRequestLedger {
                 unwrite(record);
                 record.state = RequestState.WRITING_STARTED;
                 record.node = node;
-                highestWrittenStreamId = Math.max(highestWrittenStreamId, record.streamId);
+                writingStreams.put(node, record.streamId);
                 return;
             }
         }
     }
 
     void onWriteCompleted(Outbox.Node node) {
+        Long streamId = writingStreams.remove(node);
+        if (streamId != null) {
+            highestWrittenStreamId = Math.max(highestWrittenStreamId, streamId);
+        }
         for (Record record : byStream.values()) {
             if (record.node == node) {
                 record.delivered = true;
@@ -555,6 +561,7 @@ final class OwnRequestLedger {
         }
         byStream.clear();
         byTicket.clear();
+        writingStreams.clear();
         clearQueued();
         expirations.clear();
         return outcomes;

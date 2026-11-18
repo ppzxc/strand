@@ -6,6 +6,34 @@ import org.junit.jupiter.api.Test;
 
 class EndpointOutputProgressTest {
     @Test
+    void partiallyDeliveredRequestIsNotCountedAsFullySentForPeerClose() {
+        Endpoint server = openServer();
+        server.request(257, new byte[0]);
+        EndpointOutput request = server.nextOutput();
+        server.outputProgress(request.id(), 1);
+        server.receive(Frames.close(ErrorCode.NO_ERROR, 2, new byte[0]));
+        assertThat(server.drainEvents())
+                .last()
+                .satisfies(event -> assertThat(event.closeReason())
+                        .get()
+                        .extracting(CloseReason::kind)
+                        .isEqualTo(CloseReason.Kind.ERROR_CLOSE));
+    }
+
+    @Test
+    void cancelledPartiallyWrittenRequestStillCountsOnceFullyDelivered() {
+        Endpoint server = openServer();
+        long ticket = server.request(257, new byte[0]);
+        EndpointOutput request = server.nextOutput();
+        server.outputProgress(request.id(), 1);
+        server.cancelRequest(ticket);
+        server.drainEvents();
+        server.outputProgress(request.id(), request.bytes().length - 1);
+        server.receive(Frames.close(ErrorCode.NO_ERROR, 2, new byte[0]));
+        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+    }
+
+    @Test
     void acknowledgementTimeoutStartsAfterFullOutputDelivery() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
         EndpointOutput preface = client.nextOutput();
