@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,86 @@ import org.junit.jupiter.api.Test;
  * 기한이 처리된다. 기한은 정각이 지나야 처리되므로 조회 값은 기한 다음 밀리초다. 가상 시계는 0에서 시작한다.
  */
 class EndpointNextDeadlineTest {
+
+    @Test
+    void negativeElapsedTimeIsRejectedWithoutChangingTheClock() {
+        Endpoint server = open(quiet());
+        server.advance(100);
+        server.request(257, new byte[0], 500);
+
+        assertThatIllegalArgumentException().isThrownBy(() -> server.advance(-1));
+        assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(601));
+    }
+
+    @Test
+    void requestDeadlineDoesNotWrapIntoThePast() {
+        Endpoint server = open(quiet());
+        server.advance(100);
+        server.request(257, new byte[0], Long.MAX_VALUE);
+
+        assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(Long.MAX_VALUE));
+        server.advance(1);
+        assertThat(server.drainEvents()).isEmpty();
+    }
+
+    @Test
+    void elapsedClockDoesNotWrapIntoThePast() {
+        Endpoint server = open(quiet());
+        server.advance(Long.MAX_VALUE - 1);
+        server.advance(2);
+        server.request(257, new byte[0], 10);
+
+        assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(Long.MAX_VALUE));
+    }
+
+    @Test
+    void elapsedNanosAdvanceTheClockToAnAbsoluteInstant() {
+        Endpoint server = open(quiet());
+        server.advanceTo(100_000_000L);
+        server.request(257, new byte[0], 500);
+        server.drainMessages();
+
+        assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(601_000_000L));
+        server.advanceTo(600_999_999L);
+        assertThat(server.drainEvents()).isEmpty();
+        server.advanceTo(601_000_000L);
+        assertThat(server.drainEvents()).hasSize(1);
+        assertThat(server.nextDeadlineNanos()).isEmpty();
+    }
+
+    @Test
+    void theSameInstantIsAcceptedAndChangesNothing() {
+        Endpoint server = open(quiet());
+        server.advanceTo(5_000_000L);
+        server.request(257, new byte[0], 10);
+
+        server.advanceTo(5_000_000L);
+
+        assertThat(server.drainEvents()).isEmpty();
+        assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(16_000_000L));
+    }
+
+    @Test
+    void negativeOrRegressingInstantsAreRejectedWithoutChangingState() {
+        Endpoint server = open(quiet());
+        server.advanceTo(5_000_000L);
+        server.request(257, new byte[0], 10);
+
+        assertThatIllegalArgumentException().isThrownBy(() -> server.advanceTo(-1));
+        assertThatIllegalArgumentException().isThrownBy(() -> server.advanceTo(4_999_999L));
+
+        assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(16_000_000L));
+        server.advanceTo(5_000_000L);
+    }
+
+    @Test
+    void maximumElapsedNanosDoNotOverflowTheDeadline() {
+        Endpoint server = open(quiet());
+        server.advanceTo(Long.MAX_VALUE);
+        server.request(257, new byte[0], Long.MAX_VALUE);
+
+        assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(Long.MAX_VALUE));
+    }
 
     private static final String PREFACE = "c0de535452300000";
     private static final String HELLO = "0000001000010000000000000000000000000000";
