@@ -23,13 +23,31 @@ public final class ProgressChannel extends NioSocketChannel {
     private final java.util.Set<ByteBuf> started =
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<ByteBuf, Boolean>());
 
+    private final java.util.Set<ByteBuf> pending =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<ByteBuf, Boolean>());
+
+    io.netty.channel.ChannelFuture send(ByteBuf frame) {
+        if (!frame.isDirect()) throw new IllegalArgumentException("direct buffer required");
+        io.netty.channel.ChannelPromise promise = newPromise();
+        eventLoop().execute(() -> {
+            pending.add(frame);
+            promise.addListener(future -> {
+                pending.remove(frame);
+                started.remove(frame);
+                withdrawn.remove(frame);
+            });
+            writeAndFlush(frame, promise);
+        });
+        return promise;
+    }
+
     int retainedCount() {
-        return started.size() + withdrawn.size();
+        return pending.size() + started.size() + withdrawn.size();
     }
 
     void withdraw(ByteBuf frame) {
         if (!eventLoop().inEventLoop()) throw new IllegalStateException("event loop required");
-        if (!started.contains(frame)) withdrawn.add(frame);
+        if (pending.contains(frame) && !started.contains(frame)) withdrawn.add(frame);
     }
 
     @Override
@@ -37,6 +55,7 @@ public final class ProgressChannel extends NioSocketChannel {
         try {
             super.doClose();
         } finally {
+            pending.clear();
             started.clear();
             withdrawn.clear();
         }

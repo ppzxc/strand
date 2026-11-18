@@ -31,14 +31,20 @@ class NettyOutboundBoundaryTest {
                     .sync()
                     .channel();
             try (Socket peer = listener.accept()) {
-                ByteBuf frame = Unpooled.wrappedBuffer(new byte[] {1, 2, 3});
-                channel.writeAndFlush(frame).sync();
+                ByteBuf frame = Unpooled.directBuffer(3).writeBytes(new byte[] {1, 2, 3});
+                channel.send(frame).sync();
                 byte[] received = new byte[3];
                 new java.io.DataInputStream(peer.getInputStream()).readFully(received);
                 assertThat(received).containsExactly(1, 2, 3);
                 assertThat(channel.progress()).isEqualTo(Arrays.asList(3));
                 assertThat(channel.bufferReferenceCountsAtReport()).isEqualTo(Arrays.asList(1));
                 assertThat(frame.refCnt()).isZero();
+                channel.eventLoop().submit(() -> channel.withdraw(frame)).sync();
+                assertThat(channel.eventLoop()
+                                .submit(channel::retainedCount)
+                                .sync()
+                                .getNow())
+                        .isZero();
             } finally {
                 channel.close().sync();
             }
@@ -69,15 +75,15 @@ class NettyOutboundBoundaryTest {
                 ByteBuf prefix = Unpooled.directBuffer(filler.length).writeBytes(filler);
                 ByteBuf withdrawn = Unpooled.directBuffer(1).writeByte(42);
                 ByteBuf sentinel = Unpooled.directBuffer(1).writeByte(99);
-                channel.writeAndFlush(prefix);
-                channel.writeAndFlush(withdrawn);
+                channel.send(prefix);
+                channel.send(withdrawn);
                 assertThat(channel.eventLoop()
                                 .submit(channel::zeroWrites)
                                 .sync()
                                 .getNow())
                         .isPositive();
                 channel.eventLoop().submit(() -> channel.withdraw(withdrawn)).sync();
-                channel.writeAndFlush(sentinel);
+                channel.send(sentinel);
                 byte[] actual = new byte[filler.length];
                 new java.io.DataInputStream(peer.getInputStream()).readFully(actual);
                 assertThat(actual).containsExactly(filler);
@@ -112,7 +118,7 @@ class NettyOutboundBoundaryTest {
                 byte[] payload = new byte[1024 * 1024];
                 Arrays.fill(payload, (byte) 7);
                 ByteBuf frame = Unpooled.directBuffer(payload.length).writeBytes(payload);
-                channel.writeAndFlush(frame);
+                channel.send(frame);
                 assertThat(channel.eventLoop()
                                 .submit(channel::zeroWrites)
                                 .sync()
@@ -121,7 +127,7 @@ class NettyOutboundBoundaryTest {
                 assertThat(channel.eventLoop().submit(channel::progress).sync().getNow())
                         .isNotEmpty();
                 channel.eventLoop().submit(() -> channel.withdraw(frame)).sync();
-                channel.writeAndFlush(Unpooled.directBuffer(1).writeByte(99));
+                channel.send(Unpooled.directBuffer(1).writeByte(99));
                 byte[] actual = new byte[payload.length];
                 new java.io.DataInputStream(peer.getInputStream()).readFully(actual);
                 assertThat(actual).containsExactly(payload);
@@ -154,7 +160,7 @@ class NettyOutboundBoundaryTest {
             try (Socket peer = listener.accept()) {
                 assertThat(peer.isConnected()).isTrue();
                 ByteBuf pending = Unpooled.directBuffer(1024 * 1024).writeZero(1024 * 1024);
-                channel.writeAndFlush(pending);
+                channel.send(pending);
                 assertThat(channel.eventLoop()
                                 .submit(channel::zeroWrites)
                                 .sync()
