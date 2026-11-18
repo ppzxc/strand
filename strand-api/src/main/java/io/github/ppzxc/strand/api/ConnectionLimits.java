@@ -16,7 +16,10 @@ public final class ConnectionLimits {
         return Objects.requireNonNull(values.get(resource), "resource is not connection-scoped");
     }
 
-    /** Validate transport-specific minimums once the frame and TLS configuration is known. */
+    /**
+     * Validate transport-specific minimums once the frame and TLS configuration is known. The caller (a transport
+     * builder, see #316 and #322) computes the result-event and TLS minimums; this method never invents them.
+     */
     public void requireProgress(
             long frame, long control, long result, long plaintext, long ciphertext, long tlsControl) {
         Resource[] kinds = {
