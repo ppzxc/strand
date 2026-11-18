@@ -112,6 +112,14 @@ final class TlsProbe {
     }
 
     static int[] pressure() throws Exception {
+        return pressure(false);
+    }
+
+    static int[] pressureOutbound() throws Exception {
+        return pressure(true);
+    }
+
+    private static int[] pressure(boolean outbound) throws Exception {
         SSLContext context = context();
         ExecutorService serverThread = Executors.newSingleThreadExecutor();
         java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
@@ -130,7 +138,7 @@ final class TlsProbe {
             });
             BoundaryChannel channel = (BoundaryChannel) new Bootstrap()
                     .group(group)
-                    .channel(BoundaryChannel.class)
+                    .channel(outbound ? ProgressChannel.class : BoundaryChannel.class)
                     .option(io.netty.channel.ChannelOption.SO_SNDBUF, 4096)
                     .handler(new ChannelInitializer<Channel>() {
                         @Override
@@ -141,7 +149,11 @@ final class TlsProbe {
                     .channel();
             try {
                 int[] result = channel.eventLoop()
-                        .submit(() -> drive(context, channel, null, null))
+                        .submit(() -> drive(
+                                context,
+                                channel,
+                                null,
+                                outbound ? new java.util.concurrent.atomic.AtomicReference<>() : null))
                         .sync()
                         .getNow();
                 release.countDown();
@@ -214,6 +226,24 @@ final class TlsProbe {
                 if (result.getStatus() != SSLEngineResult.Status.OK) throw new IllegalStateException(result.toString());
                 consumed += result.bytesConsumed();
                 outgoing.flip();
+                if (output != null) {
+                    ProgressChannel progressChannel = (ProgressChannel) channel;
+                    int before = progressChannel.progress().stream()
+                            .mapToInt(Integer::intValue)
+                            .sum();
+                    int length = outgoing.remaining();
+                    io.netty.buffer.ByteBuf ciphertext = io.netty.buffer.Unpooled.directBuffer(length);
+                    ciphertext.writeBytes(outgoing);
+                    io.netty.channel.ChannelFuture write = progressChannel.send(ciphertext);
+                    int after = progressChannel.progress().stream()
+                            .mapToInt(Integer::intValue)
+                            .sum();
+                    if (after - before > 0 && after - before < length) partial++;
+                    if (progressChannel.zeroWrites() > 0) return new int[] {consumed, partial, 1};
+                    if (!write.isDone() || !write.isSuccess())
+                        throw new IllegalStateException("unexpected pending write");
+                    continue;
+                }
                 while (outgoing.hasRemaining()) {
                     int remaining = outgoing.remaining();
                     int n = channel.writeAttempt(outgoing);

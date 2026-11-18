@@ -28,16 +28,18 @@ public final class ProgressChannel extends BoundaryChannel {
     io.netty.channel.ChannelFuture send(ByteBuf frame) {
         if (!frame.isDirect()) throw new IllegalArgumentException("direct buffer required");
         io.netty.channel.ChannelPromise promise = newPromise();
-        try {
-            eventLoop().execute(() -> {
-                pending.add(frame);
-                promise.addListener(future -> {
-                    pending.remove(frame);
-                    started.remove(frame);
-                    withdrawn.remove(frame);
-                });
-                writeAndFlush(frame, promise);
+        Runnable task = () -> {
+            pending.add(frame);
+            promise.addListener(future -> {
+                pending.remove(frame);
+                started.remove(frame);
+                withdrawn.remove(frame);
             });
+            writeAndFlush(frame, promise);
+        };
+        try {
+            if (eventLoop().inEventLoop()) task.run();
+            else eventLoop().execute(task);
         } catch (java.util.concurrent.RejectedExecutionException rejected) {
             frame.release();
             promise.tryFailure(rejected);

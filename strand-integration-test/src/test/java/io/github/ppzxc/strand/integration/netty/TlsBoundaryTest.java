@@ -28,4 +28,12 @@ class TlsBoundaryTest {
         assertThat(result.ciphertextWritten).isPositive();
         assertThat(result.received).containsExactly(5, 6, 7);
     }
+
+    @Test
+    void nettyOutboundReportsTlsCiphertextBackpressureAfterPlaintextConsumption() throws Exception {
+        int[] observed = TlsProbe.pressureOutbound();
+        assertThat(observed[0]).isPositive();
+        assertThat(observed[1]).isPositive();
+        assertThat(observed[2]).isEqualTo(1);
+    }
 }
