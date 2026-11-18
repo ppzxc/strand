@@ -18,7 +18,7 @@ public final class ConnectionLimits {
 
     /**
      * Validate transport-specific minimums once the frame and TLS configuration is known. The caller (a transport
-     * builder, see #316 and #322) computes the result-event and TLS minimums; this method never invents them.
+     * builder: NIO in #316, Netty in #322) computes the result-event and TLS minimums; this method never invents them.
      */
     public void requireProgress(
             long frame, long control, long result, long plaintext, long ciphertext, long tlsControl) {

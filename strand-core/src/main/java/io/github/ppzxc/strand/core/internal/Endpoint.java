@@ -291,16 +291,37 @@ public final class Endpoint {
     }
 
     /**
+     * 한 단위가 최악의 경우 만들 수 있는 사건 수. 끝나는 내 요청마다 결과 하나에 종료 하나, 인증·받은 요청 사건 하나다. 전송 모듈이 수거 공간의 최소
+     * 크기를 셈할 때도 이 값을 쓴다.
+     *
+     * @param ownRequests 열린 내 요청과 미뤄 둔 내 요청의 수
+     * @return 최악의 사건 수
+     */
+    public static long eventsNeeded(long ownRequests) {
+        return ownRequests + 2;
+    }
+
+    /**
+     * 한 단위가 최악의 경우 만들 수 있는 출력 수. 미뤄 둔 것을 내보내거나 돌려보내는 프레임마다 하나에 제어 프레임 몇 개({@value
+     * #OUTPUT_CONTROL_RESERVE})다. 전송 모듈이 수거 공간의 최소 크기를 셈할 때도 이 값을 쓴다.
+     *
+     * @param ownRequests 열린 내 요청과 미뤄 둔 내 요청의 수
+     * @param deferredPings 미뤄 둔 PING 수
+     * @param peerPendingRequests 응답을 기다리는 상대 요청 수
+     * @return 최악의 출력 수
+     */
+    public static long outputsNeeded(long ownRequests, long deferredPings, long peerPendingRequests) {
+        return ownRequests + deferredPings + peerPendingRequests + OUTPUT_CONTROL_RESERVE;
+    }
+
+    /**
      * 한 단위가 최악의 경우 만들 수 있는 사건·출력을 지금 쌓인 것에 더해도 한도 안인가. 사건은 끝나는 내 요청마다 결과 하나, 종료 하나,
      * 인증·받은 요청 사건 하나이고, 출력은 미뤄 둔 것을 내보내거나 돌려보내는 프레임마다 하나에 제어 프레임 몇 개다. 넉넉하게 잡은 상한이라 일찍 멈출 수는 있어도 넘치지는 않는다.
      */
     private boolean hasSpace(CollectionSpace space) {
-        long eventsNeeded = (long) ledger.openCount() + ledger.queuedCount() + 2;
-        long outputsNeeded = (long) ledger.openCount()
-                + ledger.queuedCount()
-                + deferredPings.size()
-                + peerPendingStreams.size()
-                + OUTPUT_CONTROL_RESERVE;
+        long ownRequests = (long) ledger.openCount() + ledger.queuedCount();
+        long eventsNeeded = eventsNeeded(ownRequests);
+        long outputsNeeded = outputsNeeded(ownRequests, deferredPings.size(), peerPendingStreams.size());
         if (events.size() + eventsNeeded <= space.events() && outbox.size() + outputsNeeded <= space.outputs()) {
             return true;
         }
@@ -819,10 +840,35 @@ public final class Endpoint {
         return requestUntil(type, payload, null);
     }
 
+    /**
+     * 요청 확장 영역(규격 2.4절)이 있는 요청을 보낸다. 그 밖의 동작은 {@link #request(int, byte[])}, {@link #request(int, byte[], long)}와
+     * 같다. 확장 영역은 프레임 크기 검사에 포함된다.
+     *
+     * @param extensions 항목(tag 2바이트, length 2바이트, value)이 이어진 확장 영역. 없으면 빈 배열
+     * @param deadlineMs 지금부터 센 기한(밀리초). 0이면 기한이 없다
+     * @return 요청 번호표
+     * @throws IllegalArgumentException 확장 영역이 형식이나 알려진 항목의 값 규칙(규격 2.4절)을 어기거나 8192바이트를 넘을 때, 또는 {@code
+     *     deadlineMs}가 음수일 때. 아무 상태도 바꾸지 않고 번호표도 쓰지 않는다
+     */
+    public long request(int type, byte[] extensions, byte[] payload, long deadlineMs) {
+        if (deadlineMs < 0) {
+            throw new IllegalArgumentException("deadlineMs는 음수일 수 없다: " + deadlineMs);
+        }
+        if (extensions.length > MAX_EXTENSIONS_LENGTH
+                || scanExtensions(extensions, 0, extensions.length, 0) != Extensions.VALID) {
+            throw new IllegalArgumentException("요청 확장 영역이 규격 2.4절을 어긴다");
+        }
+        return requestUntil(type, extensions, payload, deadlineMs == 0 ? null : Deadlines.plus(now, deadlineMs));
+    }
+
     private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
+        return requestUntil(type, NO_BYTES, payload, deadlineAt);
+    }
+
+    private long requestUntil(int type, byte[] extensions, byte[] payload, @Nullable Long deadlineAt) {
         ConnectionPhase.ApplicationSend send = phase.applicationSend();
         if (send == ConnectionPhase.ApplicationSend.DEFER) {
-            return ledger.queue(type, payload, deadlineAt);
+            return ledger.queue(type, extensions, payload, deadlineAt);
         }
         if (!phase.isActive()) {
             long ticket = ledger.issueTicket();
@@ -831,7 +877,7 @@ public final class Endpoint {
         }
         // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
         long ticket = ledger.nextTicket();
-        if (refuseLocally(ticket, ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
+        if (refuseLocally(ticket, ledger.open(type, extensions, payload, deadlineAt, peerMaxFrameSize))
                 == OwnRequestLedger.Admission.OVERSIZE) {
             throw oversizeFrame("요청");
         }
@@ -894,13 +940,14 @@ public final class Endpoint {
      * @param streamId 상대가 연 스트림 번호
      * @param status 규격 2.5.1절의 status 값
      * @param payload 본문
+     * @return 응답을 쌓았으면 true. 대기 중인 스트림이 아니어서(이미 응답했거나, 상대가 RESET했거나, 연결이 끝나서) 아무것도 하지 않았으면 false
      * @throws IllegalArgumentException 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런 프레임을 보내지 못하게 하고
      *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
-    public void respond(long streamId, int status, byte[] payload) {
+    public boolean respond(long streamId, int status, byte[] payload) {
         Integer type = peerPendingStreams.get(streamId);
         if (type == null) {
-            return;
+            return false;
         }
         byte[] frame = Frames.response(type, streamId, status, payload);
         if (exceedsPeerFrameSize(frame)) {
@@ -908,6 +955,21 @@ public final class Endpoint {
         }
         peerPendingStreams.remove(streamId);
         send(frame);
+        conclude();
+        return true;
+    }
+
+    /**
+     * 애플리케이션이 받은 요청을 핸들러 시작 전에 거절하게 한다. {@code RESET(REFUSED)}를 보내고 스트림을 끝낸다(규격 4.5절). 대기 중이 아닌
+     * 스트림이면 아무것도 하지 않는다. 끝낸 스트림에는 응답할 수 없다.
+     *
+     * @param streamId 상대가 연 스트림 번호
+     */
+    public void refuseRequest(long streamId) {
+        if (peerPendingStreams.remove(streamId) == null) {
+            return;
+        }
+        send(Frames.reset(streamId, ErrorCode.REFUSED));
         conclude();
     }
 
@@ -1072,6 +1134,17 @@ public final class Endpoint {
         List<OutboundMessage> drained = outbox.drain(id -> timers.started(id, drainedAt));
         ledger.onWriteStarted();
         return drained;
+    }
+
+    /**
+     * 아직 상대에게 다 내보내지 못한 출력의 바이트 합. 쓰기 대기열에 든 것과 쓰기를 시작해 남은 부분을 더한다. 진행 보고 방식에서 전송 모듈이 읽기를
+     * 멈출지 판단할 때 쓴다.
+     *
+     * @return 남은 출력 바이트
+     */
+    public long pendingOutputBytes() {
+        long writing = currentOutput != null && outputWritten > 0 ? currentOutput.length() - outputWritten : 0;
+        return outbox.bytes() + writing;
     }
 
     /** 현재 쓸 출력. 철회 또는 우선순위 변경 뒤에는 새 식별자가 발급된다. */
@@ -1421,7 +1494,12 @@ public final class Endpoint {
         } else {
             // 대기 중인 요청은 항상 REQUEST_RECEIVED 이벤트와 함께 생긴다. refuseUnhandedRequests가 이 짝에 기댄다.
             peerPendingStreams.put(streamId, type);
-            events.add(Event.requestReceived(streamId, type, bodyOf(bytes, off, size, extensionsLength)));
+            int extensionsAt = off + Frames.HEADER_SIZE;
+            events.add(Event.requestReceived(
+                    streamId,
+                    type,
+                    Arrays.copyOfRange(bytes, extensionsAt, extensionsAt + extensionsLength),
+                    bodyOf(bytes, off, size, extensionsLength)));
         }
     }
 
@@ -1437,9 +1515,14 @@ public final class Endpoint {
      * 2.4.2절)은 timeout이 4바이트, idempotency-key가 1~64바이트인 것이다.
      */
     private static Extensions scanExtensions(byte[] bytes, int off, int extensionsLength) {
+        return scanExtensions(bytes, off, extensionsLength, Frames.HEADER_SIZE);
+    }
+
+    /** {@code headerSize}는 {@code off}에서 확장 영역이 시작하는 곳까지의 거리다. 확장 영역만 든 배열은 0이다. */
+    private static Extensions scanExtensions(byte[] bytes, int off, int extensionsLength, int headerSize) {
         Set<Integer> tags = new HashSet<>();
         boolean valuesValid = true;
-        int at = off + Frames.HEADER_SIZE;
+        int at = off + headerSize;
         int end = at + extensionsLength;
         while (at < end) {
             if (end - at < TLV_HEADER_SIZE) {

@@ -120,9 +120,14 @@ val verifyDependencies = tasks.register<VerifyDependencyAllowlist>("verifyDepend
   compileComponents.set(resolved("compileClasspath"))
   val jspecify = catalog.library("jspecify").get()
   allowedCompile.add("${jspecify.module.group}:${jspecify.module.name}:${jspecify.versionConstraint.requiredVersion}")
-  // 전송 모듈(strand-nio)은 core에만 의존하고 core와 함께 배포한다. 같은 저장소의 core 프로젝트만 허용한다.
+  // 전송 모듈(strand-nio)은 core와 공통 앱 API(strand-api)에만 의존하고 함께 배포한다. 같은 저장소의 두 프로젝트만 허용한다.
   allowedRuntime.add("project ':strand-core'")
   allowedCompile.add("project ':strand-core'")
+  // core는 공통 앱 API에 의존하지 않는다(#312). strand-api 의존은 전송 모듈에만 허용한다.
+  if (project.path == ":strand-nio") {
+    allowedRuntime.add("project ':strand-api'")
+    allowedCompile.add("project ':strand-api'")
+  }
   passedMarker.set(layout.buildDirectory.file("verifyDependencies/ok"))
 }
 

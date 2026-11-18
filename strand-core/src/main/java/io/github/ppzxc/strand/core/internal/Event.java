@@ -42,11 +42,8 @@ public final class Event {
     private final @Nullable CloseReason closeReason;
     private final long ticket;
     private final byte[] body;
+    private final byte[] extensions;
     private final @Nullable String authenticationMechanism;
-
-    private Event(Kind kind, long streamId, int status, int type, byte[] body) {
-        this(kind, streamId, status, type, NO_CREDENTIAL_LIFETIME, null, null, null, NO_TICKET, body);
-    }
 
     private Event(
             Kind kind,
@@ -74,6 +71,34 @@ public final class Event {
             long ticket,
             byte[] body,
             @Nullable String authenticationMechanism) {
+        this(
+                kind,
+                streamId,
+                status,
+                type,
+                credentialLifetime,
+                certainty,
+                cause,
+                closeReason,
+                ticket,
+                body,
+                NO_BODY,
+                authenticationMechanism);
+    }
+
+    private Event(
+            Kind kind,
+            long streamId,
+            int status,
+            int type,
+            long credentialLifetime,
+            @Nullable Certainty certainty,
+            @Nullable Throwable cause,
+            @Nullable CloseReason closeReason,
+            long ticket,
+            byte[] body,
+            byte[] extensions,
+            @Nullable String authenticationMechanism) {
         this.closeReason = closeReason;
         this.certainty = certainty;
         this.cause = cause;
@@ -84,6 +109,7 @@ public final class Event {
         this.credentialLifetime = credentialLifetime;
         this.ticket = ticket;
         this.body = body;
+        this.extensions = extensions;
         this.authenticationMechanism = authenticationMechanism;
     }
 
@@ -153,7 +179,27 @@ public final class Event {
 
     /** @param body 요청 본문. 호출자가 이후 바꾸지 않는 배열이어야 한다(복사해서 넘긴다). */
     static Event requestReceived(long streamId, int type, byte[] body) {
-        return new Event(Kind.REQUEST_RECEIVED, streamId, 0, type, body);
+        return requestReceived(streamId, type, NO_BODY, body);
+    }
+
+    /**
+     * @param extensions 요청 확장 영역(항목으로 인코딩된 바이트). 호출자가 이후 바꾸지 않는 배열이어야 한다(복사해서 넘긴다).
+     * @param body 요청 본문. 호출자가 이후 바꾸지 않는 배열이어야 한다(복사해서 넘긴다).
+     */
+    static Event requestReceived(long streamId, int type, byte[] extensions, byte[] body) {
+        return new Event(
+                Kind.REQUEST_RECEIVED,
+                streamId,
+                0,
+                type,
+                NO_CREDENTIAL_LIFETIME,
+                null,
+                null,
+                null,
+                NO_TICKET,
+                body,
+                extensions,
+                null);
     }
 
     /**
@@ -252,5 +298,15 @@ public final class Event {
      */
     public byte[] body() {
         return body.clone();
+    }
+
+    /**
+     * {@link Kind#REQUEST_RECEIVED}의 요청 확장 영역(규격 2.4절). 항목(tag 2바이트, length 2바이트, value)이 이어진 바이트이고 없으면 빈 배열이다.
+     * 다른 종류에서는 빈 배열이다. 부를 때마다 복사본을 돌려준다.
+     *
+     * @return 확장 영역의 복사본
+     */
+    public byte[] extensions() {
+        return extensions.clone();
     }
 }

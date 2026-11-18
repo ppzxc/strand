@@ -28,9 +28,9 @@ public final class ResourceLimits {
      * budgets can hold it. It deliberately does not derive the minimums: the result-event reservation is the
      * conservative Endpoint bound defined by #313 (open requests plus deferred requests plus a fixed margin), and
      * the TLS plaintext, ciphertext and control minimums depend on the negotiated TLS configuration. A transport
-     * builder must compute those values and pass them here; wiring that is the condition of follow-up tickets
-     * #316 and #322. The builder-time floor in {@code progressBytes} is therefore only a lower sanity bound, not a
-     * progress guarantee.
+     * builder must compute those values and pass them here. The NIO builder does so from the core Endpoint
+     * reservation bounds and the SSLEngine buffer sizes (#316); the Netty builder is still pending (#322). The
+     * builder-time floor in {@code progressBytes} is therefore only a lower sanity bound, not a progress guarantee.
      */
     public void requireProgress(
             long frame, long control, long result, long plaintext, long ciphertext, long tlsControl) {

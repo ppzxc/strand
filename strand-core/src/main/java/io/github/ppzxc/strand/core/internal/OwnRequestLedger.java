@@ -111,6 +111,8 @@ final class OwnRequestLedger {
     private static final class Record {
         final long ticket;
         final int type;
+        /** 요청 확장 영역(인코딩된 항목들). 없으면 빈 배열. */
+        final byte[] extensions;
         /** 번호를 받기 전의 본문. 번호를 받으면 프레임이 되므로 비운다. */
         byte @Nullable [] payload;
         /** 기한 색인 항목. 기한이 없으면 null. */
@@ -141,9 +143,10 @@ final class OwnRequestLedger {
         @Nullable
         Record nextQueued;
 
-        Record(long ticket, int type, byte @Nullable [] payload, @Nullable Long deadlineAt) {
+        Record(long ticket, int type, byte[] extensions, byte @Nullable [] payload, @Nullable Long deadlineAt) {
             this.ticket = ticket;
             this.type = type;
+            this.extensions = extensions;
             this.payload = payload;
             this.expiry = deadlineAt == null ? null : new Expiry(deadlineAt, ticket, this);
         }
@@ -248,7 +251,12 @@ final class OwnRequestLedger {
      * @param peerMaxFrameSize 상대가 알린 {@code max_frame_size}
      */
     Admission open(int type, byte[] payload, @Nullable Long deadlineAt, long peerMaxFrameSize) {
-        Record record = new Record(nextTicket, type, null, deadlineAt);
+        return open(type, NO_BODY, payload, deadlineAt, peerMaxFrameSize);
+    }
+
+    /** {@link #open(int, byte[], Long, long)}에 요청 확장 영역을 더한 것. 확장 영역은 프레임 크기 검사에 포함된다. */
+    Admission open(int type, byte[] extensions, byte[] payload, @Nullable Long deadlineAt, long peerMaxFrameSize) {
+        Record record = new Record(nextTicket, type, extensions, null, deadlineAt);
         Admission admission = number(record, payload, peerMaxFrameSize);
         if (admission != Admission.OVERSIZE) {
             nextTicket++;
@@ -266,7 +274,12 @@ final class OwnRequestLedger {
      * @return 번호표
      */
     long queue(int type, byte[] payload, @Nullable Long deadlineAt) {
-        Record record = new Record(nextTicket++, type, payload.clone(), deadlineAt);
+        return queue(type, NO_BODY, payload, deadlineAt);
+    }
+
+    /** {@link #queue(int, byte[], Long)}에 요청 확장 영역을 더한 것. */
+    long queue(int type, byte[] extensions, byte[] payload, @Nullable Long deadlineAt) {
+        Record record = new Record(nextTicket++, type, extensions.clone(), payload.clone(), deadlineAt);
         queued.put(record.ticket, record);
         record.prevQueued = lastQueued;
         if (lastQueued == null) {
@@ -319,7 +332,7 @@ final class OwnRequestLedger {
             return Admission.STREAM_LIMIT;
         }
         long streamId = nextStreamId;
-        byte[] frame = Frames.request(record.type, streamId, payload);
+        byte[] frame = Frames.request(record.type, streamId, record.extensions, payload);
         if (frame.length > peerMaxFrameSize) {
             return Admission.OVERSIZE;
         }

@@ -1,7 +1,7 @@
 import net.ltgt.gradle.errorprone.errorprone
 import net.ltgt.gradle.nullaway.nullaway
 
-// 전송 모듈. core에만 의존하고 core와 함께 배포한다. 의존성 0 검사는 같은 저장소의 strand-core만 예외로 둔다.
+// 전송 모듈. core와 공통 앱 API(strand-api)에만 의존하고 함께 배포한다. 의존성 0 검사는 같은 저장소의 strand-core만 예외로 둔다.
 plugins {
   id("strand.library-conventions")
   `java-test-fixtures`
@@ -12,6 +12,8 @@ description = "strand: strand-core 규격을 TCP 위에서 주고받는 NIO 전�
 
 dependencies {
   api(project(":strand-core"))
+  // 앱 공개 API(NioStrandServer 등)가 공통 요청·결과 타입(strand-api)을 그대로 노출한다.
+  api(project(":strand-api"))
   testFixturesApi(project(":strand-core"))
   testFixturesCompileOnly(libsCatalog.library("jspecify"))
   // Passage 계약 테스트(PassageContract)를 다른 통로 구현이 상속해 쓰게 fixtures로 낸다.

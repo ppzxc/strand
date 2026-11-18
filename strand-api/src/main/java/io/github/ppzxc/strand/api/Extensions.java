@@ -18,6 +18,50 @@ public final class Extensions {
         return new Builder();
     }
 
+    /**
+     * Encodes the items as wire extension bytes (2-byte tag, 2-byte length, value) in ascending tag order. An empty
+     * set encodes to an empty array.
+     */
+    public byte[] toWire() {
+        java.util.TreeMap<Integer, byte[]> sorted = new java.util.TreeMap<>(values);
+        int size = 0;
+        for (byte[] value : sorted.values()) size += 4 + value.length;
+        byte[] out = new byte[size];
+        int at = 0;
+        for (Map.Entry<Integer, byte[]> entry : sorted.entrySet()) {
+            byte[] value = entry.getValue();
+            out[at++] = (byte) (entry.getKey() >>> 8);
+            out[at++] = (byte) (int) entry.getKey();
+            out[at++] = (byte) (value.length >>> 8);
+            out[at++] = (byte) value.length;
+            System.arraycopy(value, 0, out, at, value.length);
+            at += value.length;
+        }
+        return out;
+    }
+
+    /**
+     * Parses wire extension bytes. The bytes were already validated by the core when received, but this applies the
+     * same builder rules, so malformed bytes or an invalid known value fail with {@link IllegalArgumentException}.
+     */
+    public static Extensions fromWire(byte[] wire) {
+        Objects.requireNonNull(wire, "wire");
+        Builder builder = builder();
+        Map<Integer, Boolean> seen = new HashMap<>();
+        int at = 0;
+        while (at < wire.length) {
+            if (wire.length - at < 4) throw new IllegalArgumentException("truncated extension header");
+            int tag = ((wire[at] & 0xff) << 8) | (wire[at + 1] & 0xff);
+            int length = ((wire[at + 2] & 0xff) << 8) | (wire[at + 3] & 0xff);
+            at += 4;
+            if (length > wire.length - at) throw new IllegalArgumentException("truncated extension value");
+            if (seen.put(tag, Boolean.TRUE) != null) throw new IllegalArgumentException("duplicate extension tag");
+            builder.put(tag, java.util.Arrays.copyOfRange(wire, at, at + length));
+            at += length;
+        }
+        return builder.build();
+    }
+
     public Optional<byte[]> get(int tag) {
         byte[] value = values.get(tag);
         return value == null ? Optional.empty() : Optional.of(value.clone());
