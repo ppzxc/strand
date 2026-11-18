@@ -593,7 +593,9 @@ public final class Endpoint {
         int needed = messageLength + length;
         if (needed > messageBuffer.length) {
             int grown = Math.max(PENDING_MIN_CAPACITY, messageBuffer.length * 2);
-            messageBuffer = Arrays.copyOf(messageBuffer, Math.max(needed, grown));
+            // 조립 공간은 프레임 크기 상한을 넘기지 않는다.
+            int cap = (int) Math.min(config.maxFrameSize(), Integer.MAX_VALUE);
+            messageBuffer = Arrays.copyOf(messageBuffer, Math.max(needed, Math.min(grown, cap)));
         }
         System.arraycopy(bytes, at, messageBuffer, messageLength, length);
         messageLength = needed;
@@ -664,7 +666,6 @@ public final class Endpoint {
         }
         disconnect();
         dropMessage();
-        messageBuffer = NO_BYTES;
     }
 
     /** 전송 모듈이 연결을 어떻게 닫아야 하는지에 대한 core의 지시. Strand CLOSE·WebSocket Close 메시지와는 별개다. */
