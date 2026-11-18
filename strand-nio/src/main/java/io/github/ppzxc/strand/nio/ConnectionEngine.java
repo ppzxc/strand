@@ -21,6 +21,7 @@ import io.github.ppzxc.strand.core.internal.CollectionSpace;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointOutput;
 import io.github.ppzxc.strand.core.internal.Event;
+import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.core.internal.ReceiveProgress;
 import io.github.ppzxc.strand.nio.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.nio.internal.ConnectionDriver;
@@ -31,6 +32,7 @@ import io.github.ppzxc.strand.nio.internal.ProgressSpace;
 import io.github.ppzxc.strand.nio.internal.TlsPassage;
 import java.io.EOFException;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,10 +68,28 @@ final class ConnectionEngine {
     /** 한 번에 처리하는 입력 단위의 상한. 넘으면 시계와 명령 처리를 먼저 한다. */
     static final int MAX_UNITS_PER_STEP = 64;
 
-    private static final int MAX_OUTPUTS_PER_STEP = 64;
     private static final long NANOS_PER_MILLI = 1_000_000L;
     private static final byte[] EMPTY = new byte[0];
     private static final long NO_DEADLINE = Long.MIN_VALUE;
+
+    /** 통로를 열기 전의 자리. 깨우거나 닫아도 할 일이 없다. */
+    private static final Passage NOT_OPENED = new Passage() {
+        @Override
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) {
+            return Inbound.none();
+        }
+
+        @Override
+        public int write(OutboundMessage message, int offset) {
+            return 0;
+        }
+
+        @Override
+        public void wakeup() {}
+
+        @Override
+        public void close() {}
+    };
 
     private final NioStrandConnection facade;
     private final ConnectionParams p;
@@ -80,17 +100,16 @@ final class ConnectionEngine {
     private final AtomicBoolean closeSubmitted = new AtomicBoolean();
     private volatile boolean abortRequested;
     private volatile boolean stopped;
-    private volatile @Nullable Passage openedPassage;
+    private volatile Passage openedPassage = NOT_OPENED;
     private volatile @Nullable RequestHandler activeHandler;
 
     // 전송 스레드에서만 읽고 쓰는 상태. 처음 쓰는 곳 외에는 {@link #thread}에서만 접근한다.
     private PreparationStage stage;
     private boolean preparing = true;
     private boolean preparingSlotHeld = true;
-    private boolean slotsReleased;
     private final Map<Long, OutgoingEntry> pending = new HashMap<>();
     private final Map<Long, IncomingRequest> incoming = new HashMap<>();
-    private @Nullable CloseNotice finalNotice;
+    private CloseNotice finalNotice = CloseNotice.disconnected(null);
 
     ConnectionEngine(NioStrandConnection facade, ConnectionParams params) {
         this.facade = facade;
@@ -167,25 +186,24 @@ final class ConnectionEngine {
         long[] amounts = progressAmounts(space);
         for (int i = 0; i < kinds.length; i++) {
             if (!budgets.tryReserve(kinds[i], amounts[i])) {
-                for (int j = 0; j < i; j++) {
-                    budgets.release(kinds[j], amounts[j]);
-                }
+                releaseProgress(budgets, space, i);
                 return kinds[i];
             }
         }
         return null;
     }
 
-    private void releaseSlots() {
-        if (slotsReleased) {
-            return;
-        }
-        slotsReleased = true;
+    /** 진행 공간 예약 가운데 앞의 {@code count}종류를 돌려준다. 예약 도중 모자라 되돌릴 때와 연결이 끝날 때 쓴다. */
+    private static void releaseProgress(ConnectionBudgets budgets, ProgressSpace space, int count) {
         Resource[] kinds = progressKinds();
-        long[] amounts = progressAmounts(p.space);
-        for (int i = 0; i < kinds.length; i++) {
-            p.budgets.release(kinds[i], amounts[i]);
+        long[] amounts = progressAmounts(space);
+        for (int i = 0; i < count; i++) {
+            budgets.release(kinds[i], amounts[i]);
         }
+    }
+
+    private void releaseSlots() {
+        releaseProgress(p.budgets, p.space, progressKinds().length);
         p.budgets.owner().release(Resource.TOTAL_CONNECTIONS, 1);
         releasePreparingSlot();
     }
@@ -251,14 +269,13 @@ final class ConnectionEngine {
     }
 
     private long deadlineAfter(java.time.Duration duration) {
-        long now = p.nanoClock.getAsLong();
         long nanos;
         try {
             nanos = duration.toNanos();
         } catch (ArithmeticException e) {
-            return Long.MAX_VALUE;
+            nanos = Long.MAX_VALUE;
         }
-        return nanos > Long.MAX_VALUE - now ? Long.MAX_VALUE : now + nanos;
+        return Saturating.add(p.nanoClock.getAsLong(), nanos);
     }
 
     /** 송신 요청 수와 바이트를 연결·소유 객체 범위에 함께 예약한다. 하나라도 모자라면 확보한 것을 돌려준다. */
@@ -353,7 +370,8 @@ final class ConnectionEngine {
                     entry.finish(Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED, EMPTY);
                     return;
                 }
-                remainingMs = remaining / NANOS_PER_MILLI + (remaining % NANOS_PER_MILLI == 0 ? 0 : 1);
+                // 올림이 아니라 항상 1밀리초를 더해 기한이 앞서 지나지 않게 한다.
+                remainingMs = remaining / NANOS_PER_MILLI + 1;
             }
             try {
                 long ticket = loop.endpoint.request(entry.type, entry.extensions, entry.payload, remainingMs);
@@ -380,9 +398,8 @@ final class ConnectionEngine {
 
         @Override
         public void execute(Loop loop) {
-            if (entry.ticket != OutgoingEntry.NO_TICKET && !entry.finished) {
-                loop.endpoint.cancelRequest(entry.ticket);
-            }
+            // 끝난 요청이나 번호표를 받지 못한 요청(로컬에서 이미 끝남)의 취소는 core가 무시한다.
+            loop.endpoint.cancelRequest(entry.ticket);
         }
 
         @Override
@@ -404,25 +421,30 @@ final class ConnectionEngine {
 
         @Override
         public void execute(Loop loop) {
+            ResponseAcceptance acceptance;
+            boolean accepted = false;
             try {
-                if (state.ended.isDone()) {
-                    result.complete(ResponseAcceptance.requestEnded());
-                } else if (state.responded) {
-                    result.complete(ResponseAcceptance.alreadyResponded());
+                if (state.responded) {
+                    // 응답을 접수한 요청은 그 응답 때문에 끝난 것이다. 뒤따르는 응답은 이미 응답한 것으로 알린다.
+                    acceptance = ResponseAcceptance.alreadyResponded();
                 } else if (loop.endpoint.respond(state.streamId, status, body)) {
                     state.responded = true;
-                    result.complete(ResponseAcceptance.accepted());
-                    finishIncoming(state, RequestEnd.responseAccepted());
+                    accepted = true;
+                    acceptance = ResponseAcceptance.accepted();
                 } else {
-                    // 상대가 이미 RESET한 스트림이다. 응답은 접수하지 않았다.
-                    result.complete(ResponseAcceptance.requestEnded());
+                    // 상대가 RESET했거나 연결이 끝난 스트림이다. 응답은 접수하지 않았다.
+                    acceptance = ResponseAcceptance.requestEnded();
                     releaseIncoming(state);
                 }
             } catch (IllegalArgumentException e) {
                 // 협상한 프레임 크기를 넘는 응답. 본문을 보관하지 않고 응답 권한도 소비하지 않는다.
-                result.complete(ResponseAcceptance.resourceExhausted(Resource.PEER_FRAME_SIZE));
-            } finally {
-                p.budgets.release(Resource.RESPONSE_BYTES, body.length);
+                acceptance = ResponseAcceptance.resourceExhausted(Resource.PEER_FRAME_SIZE);
+            }
+            // 예약을 돌려준 뒤에 결과를 보존해, 결과를 본 앱이 곧바로 다시 응답해도 예약이 이미 돌아와 있다.
+            p.budgets.release(Resource.RESPONSE_BYTES, body.length);
+            result.complete(acceptance);
+            if (accepted) {
+                finishIncoming(state, RequestEnd.responseAccepted());
             }
         }
 
@@ -488,9 +510,8 @@ final class ConnectionEngine {
             if (handler == null) {
                 p.budgets.owner().release(Resource.FACTORY_TASKS, 1);
                 Throwable cause = failure == null ? new IllegalStateException("팩터리가 핸들러를 돌려주지 않았다") : failure;
-                if (failPreparation(PreparationStage.HANDLER_FACTORY, cause)) {
-                    loop.endpoint.close(INTERNAL_ERROR);
-                }
+                failPreparation(PreparationStage.HANDLER_FACTORY, cause);
+                loop.endpoint.close(INTERNAL_ERROR);
                 return;
             }
             if (!preparing || loop.closedSeen) {
@@ -545,33 +566,27 @@ final class ConnectionEngine {
     }
 
     private void wake() {
-        Passage passage = openedPassage;
-        if (passage != null) {
-            passage.wakeup();
-        }
+        openedPassage.wakeup();
     }
 
     // ---------------------------------------------------------------- 준비
 
-    /** 준비 결과를 실패로 확정한다. 처음 한 번만 알리고 준비 슬롯을 돌려준다. 이미 확정됐으면 false. */
-    private boolean failPreparation(PreparationStage at, Throwable cause) {
-        if (!preparing) {
-            return false;
+    /** 준비 결과를 실패로 확정한다. 처음 한 번만 알리고 준비 슬롯을 돌려준다. 이미 확정됐으면 아무 일도 하지 않는다. */
+    private void failPreparation(PreparationStage at, Throwable cause) {
+        if (preparing) {
+            preparing = false;
+            releasePreparingSlot();
+            PreparationFailure failure = new PreparationFailure(p.remoteAddress, at, cause);
+            notifyPreparation(() -> p.observer.failed(failure));
         }
-        preparing = false;
-        releasePreparingSlot();
-        PreparationFailure failure = new PreparationFailure(p.remoteAddress, at, cause);
-        notifyPreparation(() -> p.observer.failed(failure));
-        return true;
     }
 
     private void becomeReady() {
-        if (!preparing) {
-            return;
+        if (preparing) {
+            preparing = false;
+            releasePreparingSlot();
+            notifyPreparation(() -> p.observer.ready(facade));
         }
-        preparing = false;
-        releasePreparingSlot();
-        notifyPreparation(() -> p.observer.ready(facade));
     }
 
     /**
@@ -602,19 +617,16 @@ final class ConnectionEngine {
         }
         stage = PreparationStage.HANDLER_FACTORY;
         if (!p.budgets.owner().tryReserve(Resource.FACTORY_TASKS, 1)) {
-            if (failPreparation(
-                    PreparationStage.HANDLER_FACTORY, new ResourceExhaustedException(Resource.FACTORY_TASKS))) {
-                loop.endpoint.close(INTERNAL_ERROR);
-            }
+            failPreparation(PreparationStage.HANDLER_FACTORY, new ResourceExhaustedException(Resource.FACTORY_TASKS));
+            loop.endpoint.close(INTERNAL_ERROR);
             return;
         }
         try {
             p.executor.execute(() -> runFactory(factory));
         } catch (RuntimeException | Error e) {
             p.budgets.owner().release(Resource.FACTORY_TASKS, 1);
-            if (failPreparation(PreparationStage.HANDLER_FACTORY, e)) {
-                loop.endpoint.close(INTERNAL_ERROR);
-            }
+            failPreparation(PreparationStage.HANDLER_FACTORY, e);
+            loop.endpoint.close(INTERNAL_ERROR);
         }
     }
 
@@ -704,8 +716,8 @@ final class ConnectionEngine {
 
     private void finishIncoming(IncomingState state, RequestEnd end) {
         incoming.remove(state.streamId);
-        state.ended.complete(end);
         releaseIncoming(state);
+        state.ended.complete(end);
     }
 
     /** 앱용 실행기에서 도는 핸들러 호출. 실행 대기 중 끝난 요청은 시작하지 않는다. */
@@ -735,7 +747,8 @@ final class ConnectionEngine {
             loop.drive();
         } catch (IOException e) {
             failedToOpen(e);
-        } catch (RuntimeException | Error e) {
+        } catch (RuntimeException e) {
+            // 예기치 못한 오류. 연결을 끊어 core가 내는 결과로 요청을 끝내고 원인을 보존한다. Error는 그대로 전파한다.
             fatal = e;
             if (loop != null) {
                 loop.abort(e);
@@ -744,9 +757,6 @@ final class ConnectionEngine {
             }
         } finally {
             teardown(fatal);
-        }
-        if (fatal instanceof Error) {
-            throw (Error) fatal;
         }
     }
 
@@ -764,11 +774,8 @@ final class ConnectionEngine {
 
     /** 전송 스레드가 끝나기 전의 마무리: 실제 통로 정리, 남은 결과·요청 확정, 예약 반환, 종료 알림 보존. */
     private void teardown(@Nullable Throwable fatal) {
-        Passage passage = openedPassage;
         try {
-            if (passage != null) {
-                passage.close();
-            }
+            openedPassage.close();
         } finally {
             stopped = true;
             try {
@@ -776,21 +783,17 @@ final class ConnectionEngine {
                 failLeftovers();
                 failPreparation(stage, fatal != null ? fatal : new IllegalStateException("연결이 준비 중에 끝났다"));
             } finally {
-                CloseNotice notice = finalNotice != null ? finalNotice : CloseNotice.disconnected(fatal);
                 releaseSlots();
-                closed.complete(notice);
+                closed.complete(finalNotice);
             }
         }
     }
 
     private void failLeftovers() {
-        for (OutgoingEntry entry : pending.values()) {
-            entry.finish(Status.UNAVAILABLE, Certainty.UNKNOWN, EMPTY);
-        }
+        pending.values().forEach(entry -> entry.finish(Status.UNAVAILABLE, Certainty.UNKNOWN, EMPTY));
         pending.clear();
-        for (IncomingRequest request : incoming.values().toArray(new IncomingRequest[0])) {
-            finishIncoming(request.state(), RequestEnd.connectionEnd());
-        }
+        new ArrayList<>(incoming.values())
+                .forEach(request -> finishIncoming(request.state(), RequestEnd.connectionEnd()));
     }
 
     /** 전송 스레드 안에서만 쓰는 상태. */
@@ -837,7 +840,7 @@ final class ConnectionEngine {
             advanceClock();
             runCommands();
             if (abortRequested) {
-                disconnect();
+                endpoint.disconnect();
                 finished = true;
             }
             checkPreparation();
@@ -849,13 +852,6 @@ final class ConnectionEngine {
             }
             collectEvents();
             finishClosing();
-        }
-
-        /** 연결을 끊는다. 이미 CLOSED를 낸 뒤면 core에 알릴 것이 없다. */
-        private void disconnect() {
-            if (!closedSeen) {
-                endpoint.disconnect();
-            }
         }
 
         void advanceClock() {
@@ -904,12 +900,10 @@ final class ConnectionEngine {
 
         /** 받은 입력을 유한 단위로 처리한다. 수거 공간이 모자라 멈추면 사건을 수거하고 쓰기를 진행한 뒤 소비 위치부터 다시 입력한다. */
         private void processInput() throws IOException {
-            int units = 0;
-            while (inputPos < input.length && units < MAX_UNITS_PER_STEP && !transportGone) {
+            while (inputPos < input.length && !transportGone) {
                 ReceiveProgress progress = endpoint.receiveBounded(
-                        input, inputPos, input.length - inputPos, MAX_UNITS_PER_STEP - units, collectionSpace);
+                        input, inputPos, input.length - inputPos, MAX_UNITS_PER_STEP, collectionSpace);
                 inputPos += progress.consumed();
-                units++;
                 collectEvents();
                 if (progress.collectionRequired()) {
                     boolean progressed = writeOutputs();
@@ -933,7 +927,7 @@ final class ConnectionEngine {
             if (preparing) {
                 limitNanos = Math.min(limitNanos, p.preparationDeadlineAtNanos - p.nanoClock.getAsLong());
             }
-            if (closedSeen && !finished) {
+            if (closedSeen) {
                 limitNanos = Math.min(limitNanos, finishDeadline - p.nanoClock.getAsLong());
             }
             if (limitNanos == Long.MAX_VALUE) {
@@ -942,7 +936,7 @@ final class ConnectionEngine {
             if (limitNanos <= 0) {
                 return 0;
             }
-            long millis = limitNanos / NANOS_PER_MILLI + (limitNanos % NANOS_PER_MILLI == 0 ? 0 : 1);
+            long millis = limitNanos / NANOS_PER_MILLI + 1;
             return Math.min(millis, Integer.MAX_VALUE);
         }
 
@@ -953,7 +947,7 @@ final class ConnectionEngine {
          */
         private boolean writeOutputs() throws IOException {
             boolean progressed = false;
-            for (int i = 0; i < MAX_OUTPUTS_PER_STEP; i++) {
+            for (; ; ) {
                 EndpointOutput output = endpoint.nextOutput();
                 if (output == null) {
                     writing = null;
@@ -978,7 +972,6 @@ final class ConnectionEngine {
                     return progressed;
                 }
             }
-            return true;
         }
 
         private void collectEvents() {
@@ -1016,29 +1009,21 @@ final class ConnectionEngine {
         }
 
         private void onResult(Event event) {
-            OutgoingEntry entry = pending.remove(event.ticket().getAsLong());
-            if (entry != null) {
-                entry.finish(event.status(), map(event.certainty().get()), event.body());
-            }
+            Optional.ofNullable(pending.remove(event.ticket().getAsLong()))
+                    .ifPresent(entry ->
+                            entry.finish(event.status(), map(event.certainty().get()), event.body()));
         }
 
         private void onClientAuthenticated() {
-            if (p.role != ConnectionParams.Role.CLIENT) {
-                return;
-            }
             Object principal = principalOf();
             facade.authenticated(new AuthenticatedPeer(principal, p.remoteAddress));
             activate(this, p.handler);
         }
 
         private Object principalOf() {
-            if (passage instanceof TlsPassage) {
-                java.security.Principal principal = ((TlsPassage) passage).peerPrincipal();
-                if (principal != null) {
-                    return principal;
-                }
-            }
-            return p.remoteAddress;
+            return passage instanceof TlsPassage
+                    ? ((TlsPassage) passage).peerPrincipalOr(p.remoteAddress)
+                    : p.remoteAddress;
         }
 
         private void onAuthenticationRequired(Event event) {
@@ -1069,10 +1054,7 @@ final class ConnectionEngine {
                     : endCause != null ? endCause : event.cause().orElse(null);
             CloseNotice notice = notice(reason, cause);
             finalNotice = notice;
-            if (!closedSeen) {
-                long now = p.nanoClock.getAsLong();
-                finishDeadline = now > Long.MAX_VALUE - p.closeFinishNanos ? Long.MAX_VALUE : now + p.closeFinishNanos;
-            }
+            finishDeadline = Saturating.add(p.nanoClock.getAsLong(), p.closeFinishNanos);
             closedSeen = true;
             if (preparing) {
                 PreparationStage at = isAuthenticationEnd(reason) ? PreparationStage.AUTHENTICATION : stage;
@@ -1091,10 +1073,7 @@ final class ConnectionEngine {
             if (reason.errorCode() == UNAUTHENTICATED) {
                 return true;
             }
-            return p.role == ConnectionParams.Role.CLIENT
-                    && reason.errorCode() == INTERNAL_ERROR
-                    && reason.sender().isPresent()
-                    && reason.sender().get() == CloseReason.Sender.PEER;
+            return p.role == ConnectionParams.Role.CLIENT && reason.errorCode() == INTERNAL_ERROR && peerSent(reason);
         }
 
         private CloseNotice notice(CloseReason reason, @Nullable Throwable cause) {
@@ -1108,11 +1087,12 @@ final class ConnectionEngine {
             }
         }
 
+        private boolean peerSent(CloseReason reason) {
+            return reason.sender().equals(Optional.of(CloseReason.Sender.PEER));
+        }
+
         private CloseNotice.Sender sender(CloseReason reason) {
-            Optional<CloseReason.Sender> sender = reason.sender();
-            return sender.isPresent() && sender.get() == CloseReason.Sender.PEER
-                    ? CloseNotice.Sender.PEER
-                    : CloseNotice.Sender.LOCAL;
+            return peerSent(reason) ? CloseNotice.Sender.PEER : CloseNotice.Sender.LOCAL;
         }
 
         /** 통로가 끊겼다. 연결이 아직 끝나지 않았다면 CLOSE 없이 끊긴 것으로 core에 알린다. */
@@ -1122,7 +1102,7 @@ final class ConnectionEngine {
                 finished = true;
                 return;
             }
-            if (ioFailure == null && !abortRequested) {
+            if (ioFailure == null) {
                 ioFailure = cause;
             }
             endpoint.disconnect();
@@ -1132,12 +1112,12 @@ final class ConnectionEngine {
             if (!preparing) {
                 return;
             }
-            if (stage == PreparationStage.SECURITY
-                    && passage instanceof TlsPassage
-                    && ((TlsPassage) passage).handshakeComplete()) {
+            // 단계가 SECURITY인 것은 TLS 통로뿐이다.
+            if (stage == PreparationStage.SECURITY && ((TlsPassage) passage).handshakeComplete()) {
                 stage = PreparationStage.HELLO;
             }
-            if (p.nanoClock.getAsLong() - p.preparationDeadlineAtNanos >= 0 && !closedSeen) {
+            // 준비 중에는 CLOSED를 내지 않았다(CLOSED는 준비 결과를 먼저 확정한다).
+            if (p.nanoClock.getAsLong() - p.preparationDeadlineAtNanos >= 0) {
                 PreparationDeadlineExceededException deadline = new PreparationDeadlineExceededException();
                 endCause = deadline;
                 failPreparation(stage, deadline);
@@ -1164,7 +1144,7 @@ final class ConnectionEngine {
         void abort(Throwable original) {
             endCause = original;
             try {
-                disconnect();
+                endpoint.disconnect();
                 collectEvents();
             } catch (RuntimeException e) {
                 original.addSuppressed(e);
@@ -1198,7 +1178,6 @@ final class ConnectionEngine {
         /** 전송 스레드에서만 읽고 쓴다. */
         long ticket = NO_TICKET;
 
-        boolean finished;
         boolean reserved;
 
         OutgoingEntry(
@@ -1216,33 +1195,26 @@ final class ConnectionEngine {
             this.deadlineAtNanos = deadlineAtNanos;
         }
 
-        /** 결과를 한 번 확정하고 예약을 돌려준다. */
+        /** 결과를 확정하고 예약을 돌려준다. 결과는 한 번만 확정된다({@code ResultCompletion}이 두 번째를 무시한다). */
         void finish(int status, Certainty certainty, byte[] body) {
-            if (finished) {
-                return;
-            }
-            finished = true;
-            if (reserved) {
-                reserved = false;
-                releaseOutgoing(bytes);
-            }
+            returnReservation();
             result.complete(new RequestResult(status, certainty, body));
         }
 
         /** core를 거치지 않은 로컬 결과. {@code exhausted}가 있으면 RESOURCE_EXHAUSTED(처리 안 됨), 아니면 주어진 status와 확정성이다. */
         void finishLocally(int status, @Nullable Certainty certainty, @Nullable Resource exhausted) {
-            if (finished) {
-                return;
-            }
-            finished = true;
-            if (reserved) {
-                reserved = false;
-                releaseOutgoing(bytes);
-            }
+            returnReservation();
             result.complete(
                     exhausted != null
                             ? RequestResult.resourceExhausted(exhausted)
                             : new RequestResult(status, Objects.requireNonNull(certainty), EMPTY));
+        }
+
+        private void returnReservation() {
+            if (reserved) {
+                reserved = false;
+                releaseOutgoing(bytes);
+            }
         }
     }
 }

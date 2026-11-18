@@ -41,9 +41,7 @@ final class Budget {
         }
         // 더하기가 넘치지 않게 남은 공간과 비교한다.
         if (amount > limit - current) {
-            if (rejections < Long.MAX_VALUE) {
-                rejections++;
-            }
+            rejections++;
             return false;
         }
         current += amount;

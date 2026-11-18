@@ -356,12 +356,36 @@ class NioStrandPreparationFailureTest {
     }
 
     @Test
-    void theSharedPreparationDeadlineEndsAPreparationStuckInAuthentication() throws Exception {
+    void theClientPreparationDeadlineCountsFromTheConnectCallAndEndsAStuckAuthentication() throws Exception {
+        AppFixture fixture = fixture(false);
+        CountDownLatch never = new CountDownLatch(1);
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(credentials -> {
+                    never.await();
+                    return AuthenticationResult.accepted("late");
+                })
+                .handler(r -> {})
+                .build();
+        Listener listener = listen(server);
+        NioStrandClient client = fixture.clientBuilder()
+                .preparationDeadline(Duration.ofMillis(300))
+                .build();
+
+        PreparationFailure clientFailure =
+                failureOf(client.connect(AppFixture.loopback(listener)).toCompletableFuture());
+
+        assertThat(clientFailure.cause()).isInstanceOf(PreparationDeadlineExceededException.class);
+        awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
+        never.countDown();
+    }
+
+    @Test
+    void theServerPreparationDeadlineCountsFromTheTcpAcceptAndEndsAStuckAuthentication() throws Exception {
         AppFixture fixture = fixture(false);
         CountDownLatch never = new CountDownLatch(1);
         BlockingQueue<PreparationFailure> serverFailures = new LinkedBlockingQueue<>();
         NioStrandServer server = fixture.serverBuilder()
-                .preparationDeadline(Duration.ofMillis(400))
+                .preparationDeadline(Duration.ofMillis(300))
                 .authenticate(credentials -> {
                     never.await();
                     return AuthenticationResult.accepted("late");
@@ -370,21 +394,20 @@ class NioStrandPreparationFailureTest {
                 .onConnectionFailure(serverFailures::add)
                 .build();
         Listener listener = listen(server);
-        NioStrandClient client = fixture.clientBuilder()
-                .preparationDeadline(Duration.ofMillis(400))
-                .build();
+        NioStrandClient client = fixture.clientBuilder().build();
 
-        PreparationFailure clientFailure =
-                failureOf(client.connect(AppFixture.loopback(listener)).toCompletableFuture());
+        CompletableFuture<NioStrandConnection> attempt =
+                client.connect(AppFixture.loopback(listener)).toCompletableFuture();
         PreparationFailure serverFailure = serverFailures.poll(15, TimeUnit.SECONDS);
 
-        assertThat(clientFailure.cause()).isInstanceOf(PreparationDeadlineExceededException.class);
         assertThat(serverFailure).isNotNull();
         assertThat(serverFailure.stage()).isEqualTo(PreparationStage.AUTHENTICATION);
         assertThat(serverFailure.cause()).isInstanceOf(PreparationDeadlineExceededException.class);
+        // 반환하지 않는 인증이 있어도 기한 실패는 관찰되고, 연결 슬롯은 돌아온다.
         awaitTrue(() -> server.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
         never.countDown();
         awaitTrue(() -> server.resourceUsage(Resource.AUTHENTICATION_TASKS).current() == 0);
+        assertThat(failureOf(attempt).cause()).isNotNull();
     }
 
     @Test
@@ -518,5 +541,64 @@ class NioStrandPreparationFailureTest {
                 fixture.result(connection.request(Request.of(TYPE, bytes("x"))).result());
 
         assertThat(rejected.status()).isEqualTo(Status.UNAVAILABLE);
+    }
+
+    @Test
+    void aPreparationDeadlineThatHasAlreadyPassedFailsAtTheConnectionStage() throws Exception {
+        AppFixture fixture = fixture(false);
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(c -> AuthenticationResult.accepted("p"))
+                .handler(r -> {})
+                .build();
+        Listener listener = listen(server);
+        NioStrandClient client =
+                fixture.clientBuilder().preparationDeadline(Duration.ofNanos(1)).build();
+
+        PreparationFailure failure =
+                failureOf(client.connect(AppFixture.loopback(listener)).toCompletableFuture());
+
+        assertThat(failure.stage()).isEqualTo(PreparationStage.CONNECTION);
+        assertThat(failure.cause()).isInstanceOf(java.net.SocketTimeoutException.class);
+        awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
+    }
+
+    @Test
+    void aFactoryThatReturnsNothingIsAFactoryStageFailure() throws Exception {
+        AppFixture fixture = fixture(false);
+        BlockingQueue<PreparationFailure> serverFailures = new LinkedBlockingQueue<>();
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(c -> AuthenticationResult.accepted("p"))
+                .handlerFactory(connection -> null)
+                .onConnectionFailure(serverFailures::add)
+                .build();
+        Listener listener = listen(server);
+
+        AppFixture.get(fixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
+        PreparationFailure failure = serverFailures.poll(15, TimeUnit.SECONDS);
+
+        assertThat(failure).isNotNull();
+        assertThat(failure.stage()).isEqualTo(PreparationStage.HANDLER_FACTORY);
+        assertThat(failure.cause()).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void thePeerEndedDuringPreparationIsKeptAsTheCloseNotice() throws Exception {
+        AppFixture fixture = fixture(false);
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(credentials -> AuthenticationResult.rejected())
+                .handler(r -> {})
+                .build();
+        Listener listener = listen(server);
+
+        PreparationFailure failure = failureOf(fixture.clientBuilder()
+                .build()
+                .connect(AppFixture.loopback(listener))
+                .toCompletableFuture());
+
+        assertThat(failure.cause()).isInstanceOf(ConnectionEndedException.class);
+        io.github.ppzxc.strand.api.CloseNotice notice = ((ConnectionEndedException) failure.cause()).notice();
+        assertThat(notice.kind()).isEqualTo(io.github.ppzxc.strand.api.CloseNotice.Kind.ERROR_CLOSE);
+        assertThat(notice.errorCode()).isEqualTo(7);
+        assertThat(notice.sender()).hasValue(io.github.ppzxc.strand.api.CloseNotice.Sender.PEER);
     }
 }

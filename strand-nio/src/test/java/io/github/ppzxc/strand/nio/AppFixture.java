@@ -23,10 +23,32 @@ final class AppFixture implements AutoCloseable {
     static final int TYPE = 0x0100;
     static final long WAIT_SECONDS = 15;
 
-    final ExecutorService executor;
+    /** 테스트가 앱 실행기의 거절을 켜고 끌 수 있다. 처음 {@code acceptRemaining}개만 받고 나머지를 거절하게도 한다. */
+    static final class ToggleExecutor implements java.util.concurrent.Executor {
+        private final java.util.concurrent.Executor delegate;
+        volatile boolean rejecting;
+        final java.util.concurrent.atomic.AtomicInteger acceptRemaining =
+                new java.util.concurrent.atomic.AtomicInteger(Integer.MAX_VALUE);
+
+        ToggleExecutor(java.util.concurrent.Executor delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void execute(Runnable task) {
+            if (rejecting || acceptRemaining.getAndDecrement() <= 0) {
+                throw new java.util.concurrent.RejectedExecutionException("테스트가 거절한다");
+            }
+            delegate.execute(task);
+        }
+    }
+
+    final ExecutorService pool;
+    final ToggleExecutor executor;
     final NioSecurity serverSecurity;
     final NioSecurity clientSecurity;
     final boolean tls;
+    long maxFrameSize = EndpointConfig.DEFAULT_MAX_FRAME_SIZE;
     final ResourceLimits limits;
 
     private AppFixture(boolean tls, ResourceLimits limits, NioSecurity serverSecurity, NioSecurity clientSecurity) {
@@ -40,7 +62,8 @@ final class AppFixture implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         };
-        this.executor = Executors.newCachedThreadPool(factory);
+        this.pool = Executors.newCachedThreadPool(factory);
+        this.executor = new ToggleExecutor(pool);
     }
 
     static AppFixture plain() {
@@ -61,42 +84,152 @@ final class AppFixture implements AutoCloseable {
                 true, limits(8, 8, 4, sizes), NioSecurity.tls(TestTls.server()), NioSecurity.tls(TestTls.client()));
     }
 
-    /**
-     * 진행 공간은 도출한 최소치를 그대로 쓰고(연결 범위), 소유 객체 전체는 최대 연결 수만큼 곱한다. 나머지는 테스트가 넉넉하게 정한 한도다.
-     */
+    /** 테스트가 고치는 한도의 사양. 기본은 넉넉하고, 진행 공간만 도출한 최소치다. */
+    static final class Spec {
+        long perConnection = 8;
+        long owner = 8;
+        long connections = 4;
+        long preparing = -1;
+        long authTasks = -1;
+        long factoryTasks = -1;
+        long ownerIncomingCount = -1;
+        long ownerIncomingBytes = 1 << 24;
+        long ownerOutgoingBytes = 1 << 24;
+        long ownerResponseBytes = 1 << 24;
+        long ownerHandlerTasks = -1;
+        long ownerProgressConnections = -1;
+        long perConnectionObservations = 64;
+        long maxFrameSize = EndpointConfig.DEFAULT_MAX_FRAME_SIZE;
+        long bodyBytes = 1 << 20;
+        long ownerObservations = -1;
+
+        Spec perConnection(long value) {
+            this.perConnection = value;
+            return this;
+        }
+
+        Spec maxFrameSize(long value) {
+            this.maxFrameSize = value;
+            return this;
+        }
+
+        /** 연결·소유 객체 범위의 송수신·응답 바이트 한도. */
+        Spec bodyBytes(long value) {
+            this.bodyBytes = value;
+            this.ownerIncomingBytes = value * 8;
+            this.ownerOutgoingBytes = value * 8;
+            this.ownerResponseBytes = value * 8;
+            return this;
+        }
+
+        Spec connections(long value) {
+            this.connections = value;
+            return this;
+        }
+
+        Spec preparing(long value) {
+            this.preparing = value;
+            return this;
+        }
+
+        Spec preparationTasks(long auth, long factory) {
+            this.authTasks = auth;
+            this.factoryTasks = factory;
+            return this;
+        }
+
+        Spec ownerIncoming(long count, long bytes) {
+            this.ownerIncomingCount = count;
+            this.ownerIncomingBytes = bytes;
+            return this;
+        }
+
+        Spec ownerHandlerTasks(long value) {
+            this.ownerHandlerTasks = value;
+            return this;
+        }
+
+        Spec ownerOutgoingBytes(long value) {
+            this.ownerOutgoingBytes = value;
+            return this;
+        }
+
+        Spec ownerResponseBytes(long value) {
+            this.ownerResponseBytes = value;
+            return this;
+        }
+
+        Spec ownerProgressConnections(long value) {
+            this.ownerProgressConnections = value;
+            return this;
+        }
+
+        Spec observations(long perConnection, long owner) {
+            this.perConnectionObservations = perConnection;
+            this.ownerObservations = owner;
+            return this;
+        }
+
+        AppFixture plain() {
+            AppFixture fixture = new AppFixture(
+                    false, build(null), NioSecurity.externallySecured(), NioSecurity.externallySecured());
+            fixture.maxFrameSize = maxFrameSize;
+            return fixture;
+        }
+
+        AppFixture tls() throws Exception {
+            TlsSizes sizes = TlsSizes.of(TestTls.client());
+            AppFixture fixture = new AppFixture(
+                    true, build(sizes), NioSecurity.tls(TestTls.server()), NioSecurity.tls(TestTls.client()));
+            fixture.maxFrameSize = maxFrameSize;
+            return fixture;
+        }
+
+        ResourceLimits build(TlsSizes sizes) {
+            ProgressSpace space = ProgressSpace.derive(perConnection, perConnection, maxFrameSize, sizes);
+            long[] min = space.minimums();
+            long progressConnections = ownerProgressConnections < 0 ? connections : ownerProgressConnections;
+            return ResourceLimits.builder()
+                    .perConnection(ConnectionLimits.builder()
+                            .outgoingRequests(perConnection, bodyBytes)
+                            .incomingRequests(perConnection, bodyBytes)
+                            .responseBytes(bodyBytes)
+                            .handlerTasks(perConnection)
+                            .observations(perConnectionObservations)
+                            .preparationBytes(1 << 16)
+                            .progressBytes(min[0], min[1], min[2], min[3], min[4], min[5])
+                            .build())
+                    .perOwner(OwnerLimits.builder()
+                            .preparingConnections(preparing < 0 ? connections : preparing)
+                            .totalConnections(connections)
+                            .preparationTasks(
+                                    connections,
+                                    authTasks < 0 ? connections : authTasks,
+                                    factoryTasks < 0 ? connections : factoryTasks)
+                            .outgoingRequests(owner * connections, ownerOutgoingBytes)
+                            .incomingRequests(
+                                    ownerIncomingCount < 0 ? owner * connections : ownerIncomingCount,
+                                    ownerIncomingBytes)
+                            .responseBytes(ownerResponseBytes)
+                            .handlerTasks(ownerHandlerTasks < 0 ? owner * connections : ownerHandlerTasks)
+                            .observations(ownerObservations < 0 ? 64 * connections : ownerObservations)
+                            .preparationBytes(1 << 20)
+                            .progressBytes(
+                                    min[0] * progressConnections,
+                                    min[1] * progressConnections,
+                                    min[2] * progressConnections,
+                                    min[3] * progressConnections,
+                                    min[4] * progressConnections,
+                                    min[5] * progressConnections)
+                            .build())
+                    .build();
+        }
+    }
+
     static ResourceLimits limits(long perConnection, long owner, long connections, TlsSizes sizes) {
-        ProgressSpace space =
-                ProgressSpace.derive(perConnection, perConnection, EndpointConfig.DEFAULT_MAX_FRAME_SIZE, sizes);
-        long[] min = space.minimums();
-        return ResourceLimits.builder()
-                .perConnection(ConnectionLimits.builder()
-                        .outgoingRequests(perConnection, 1 << 20)
-                        .incomingRequests(perConnection, 1 << 20)
-                        .responseBytes(1 << 20)
-                        .handlerTasks(perConnection)
-                        .observations(64)
-                        .preparationBytes(1 << 16)
-                        .progressBytes(min[0], min[1], min[2], min[3], min[4], min[5])
-                        .build())
-                .perOwner(OwnerLimits.builder()
-                        .preparingConnections(connections)
-                        .totalConnections(connections)
-                        .preparationTasks(connections, connections, connections)
-                        .outgoingRequests(owner * connections, 1 << 24)
-                        .incomingRequests(owner * connections, 1 << 24)
-                        .responseBytes(1 << 24)
-                        .handlerTasks(owner * connections)
-                        .observations(64 * connections)
-                        .preparationBytes(1 << 20)
-                        .progressBytes(
-                                min[0] * connections,
-                                min[1] * connections,
-                                min[2] * connections,
-                                min[3] * connections,
-                                min[4] * connections,
-                                min[5] * connections)
-                        .build())
-                .build();
+        Spec spec = new Spec().perConnection(perConnection).connections(connections);
+        spec.owner = owner;
+        return spec.build(sizes);
     }
 
     NioStrandServer.Builder serverBuilder() {
@@ -106,6 +239,7 @@ final class AppFixture implements AutoCloseable {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
+                .maxFrameSize(maxFrameSize)
                 .security(serverSecurity);
     }
 
@@ -116,6 +250,7 @@ final class AppFixture implements AutoCloseable {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
+                .maxFrameSize(maxFrameSize)
                 .security(clientSecurity);
     }
 
@@ -133,13 +268,32 @@ final class AppFixture implements AutoCloseable {
     }
 
     <T> T result(Result<T> result) throws Exception {
-        return result.toCompletionStage(executor).toCompletableFuture().get(WAIT_SECONDS, TimeUnit.SECONDS);
+        return result.toCompletionStage(pool).toCompletableFuture().get(WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
     /**
      * 팩터리가 있는 서버는 인증을 통과시킨 뒤 팩터리가 끝나기 전에 온 요청을 {@code REFUSED}로 거절한다(처리 안 됨, {@code UNAVAILABLE}). 클라이언트의
      * connect 성공과 서버의 핸들러 활성화 사이에는 이 짧은 틈이 있으므로, 처리 안 됨 결과는 다시 낸다(규격이 허용하는 재시도).
      */
+    /**
+     * 응답하지 않는 핸들러에 요청을 하나 내고 핸들러가 활성화되어 시작했음을 기다리지 않는다. 팩터리 틈에 거절된 요청은 다시 낸다.
+     */
+    void requestWhenServed(
+            NioStrandConnection connection, io.github.ppzxc.strand.api.Request request, boolean unanswered)
+            throws Exception {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            io.github.ppzxc.strand.api.RequestHandle handle = connection.request(request);
+            Thread.sleep(50);
+            if (!handle.result().isDone()) {
+                return;
+            }
+            if (handle.result().resultNow().status() != io.github.ppzxc.strand.api.Status.UNAVAILABLE) {
+                return;
+            }
+        }
+        throw new AssertionError("서버가 핸들러를 활성화하지 않았다");
+    }
+
     io.github.ppzxc.strand.api.RequestResult requestWhenServed(
             NioStrandConnection connection, io.github.ppzxc.strand.api.Request request) throws Exception {
         for (int attempt = 0; attempt < 100; attempt++) {
@@ -155,6 +309,6 @@ final class AppFixture implements AutoCloseable {
 
     @Override
     public void close() {
-        executor.shutdownNow();
+        pool.shutdownNow();
     }
 }

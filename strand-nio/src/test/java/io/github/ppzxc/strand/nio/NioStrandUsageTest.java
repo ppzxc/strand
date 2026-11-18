@@ -308,7 +308,7 @@ class NioStrandUsageTest {
                 .isZero();
         // close 뒤 abort는 무해하고, 앱이 준 실행기는 종료하지 않는다.
         connection.abort();
-        assertThat(fixture.executor.isShutdown()).isFalse();
+        assertThat(fixture.pool.isShutdown()).isFalse();
         assertThat(fixture.result(connection.closed())).isSameAs(notice);
     }
 
@@ -388,6 +388,9 @@ class NioStrandUsageTest {
 
         RequestResult result = fixture.result(handle.result());
         assertThat(result.status()).isEqualTo(Status.CANCELLED);
+        assertThat(fixture.result(handle.result())).isSameAs(result);
+        // 끝난 요청의 취소는 아무 일도 하지 않는다.
+        handle.cancel();
         assertThat(fixture.result(handle.result())).isSameAs(result);
     }
 

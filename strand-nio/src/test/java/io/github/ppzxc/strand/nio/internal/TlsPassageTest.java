@@ -272,4 +272,43 @@ class TlsPassageTest {
 
         assertThat(client.await(0).kind()).isEqualTo(Inbound.Kind.NONE);
     }
+
+    @Test
+    void waitingOnlyForWriteReturnsAtOnceWhenThePassageCanTakePlaintextAndZeroLengthWritesNothing() throws Exception {
+        openPair();
+        CompletableFuture<byte[]> serverDone = drive(server, new byte[0], 0);
+        drive(client, new byte[0], 0).get(25, TimeUnit.SECONDS);
+        serverDone.get(25, TimeUnit.SECONDS);
+
+        long start = System.nanoTime();
+        Inbound inbound = client.await(5_000, false, true);
+
+        assertThat(inbound.kind()).isEqualTo(Inbound.Kind.NONE);
+        assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)).isLessThan(2_000);
+        assertThat(client.writeBytes(new byte[4], 0, 0)).isZero();
+    }
+
+    @Test
+    void ciphertextThePeerDoesNotReadStaysPendingAndFurtherPlaintextIsNotConsumed() throws Exception {
+        openPair();
+        CompletableFuture<byte[]> serverDone = drive(server, new byte[0], 0);
+        drive(client, new byte[0], 0).get(25, TimeUnit.SECONDS);
+        serverDone.get(25, TimeUnit.SECONDS);
+        byte[] chunk = new byte[1 << 20];
+        long consumed = 0;
+        boolean blocked = false;
+        for (int i = 0; i < 400 && !blocked; i++) {
+            int count = client.writeBytes(chunk, 0, chunk.length);
+            consumed += count;
+            // 상대 서버 통로는 읽지 않는다. 소켓 버퍼가 차면 암호문이 남고 평문 소비가 멈춘다.
+            blocked = count == 0 && client.pendingOutput();
+            if (count > 0) {
+                client.await(0, false, false);
+            }
+        }
+
+        assertThat(blocked).isTrue();
+        assertThat(consumed).isPositive();
+        assertThat(client.writeBytes(chunk, 0, chunk.length)).isZero();
+    }
 }

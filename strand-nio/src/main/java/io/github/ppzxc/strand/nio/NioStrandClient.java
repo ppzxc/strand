@@ -165,8 +165,8 @@ public final class NioStrandClient {
             long remainingNanos)
             throws IOException {
         InetSocketAddress target = resolve(budgets, address);
-        long millis = remainingNanos / 1_000_000L + (remainingNanos % 1_000_000L == 0 ? 0 : 1);
-        if (millis <= 0) {
+        long millis = remainingNanos / 1_000_000L + 1;
+        if (remainingNanos <= 0) {
             throw new SocketTimeoutException("준비 기한 안에 연결하지 못했다");
         }
         SocketChannel channel = SocketChannel.open();

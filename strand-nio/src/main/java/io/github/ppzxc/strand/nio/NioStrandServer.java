@@ -143,23 +143,28 @@ public final class NioStrandServer {
     public CompletionStage<Listener> listen(SocketAddress address) {
         Objects.requireNonNull(address, "address");
         CompletableFuture<Listener> future = new CompletableFuture<>();
-        ServerSocketChannel server = null;
         try {
-            server = ServerSocketChannel.open();
-            server.setOption(StandardSocketOptions.SO_REUSEADDR, true);
-            server.bind(address);
-            future.complete(new Listener(server, server.getLocalAddress(), this::admit));
-        } catch (IOException | RuntimeException e) {
-            if (server != null) {
-                try {
-                    server.close();
-                } catch (IOException ignored) {
-                    // 닫는 중의 오류는 할 수 있는 일이 없다.
-                }
+            ServerSocketChannel server = ServerSocketChannel.open();
+            try {
+                server.setOption(StandardSocketOptions.SO_REUSEADDR, true);
+                server.bind(address);
+                future.complete(new Listener(server, server.getLocalAddress(), this::admit));
+            } catch (IOException | RuntimeException e) {
+                closeQuietly(server);
+                throw e;
             }
+        } catch (IOException | RuntimeException e) {
             future.completeExceptionally(e);
         }
         return future.thenApply(listener -> listener);
+    }
+
+    private static void closeQuietly(ServerSocketChannel server) {
+        try {
+            server.close();
+        } catch (IOException ignored) {
+            // 닫는 중의 오류는 할 수 있는 일이 없다.
+        }
     }
 
     /** 수락한 소켓을 연결로 등록한다. 슬롯과 필수 진행 공간을 수락 직후 예약하고 모자라면 소켓을 즉시 닫는다. */
@@ -167,13 +172,10 @@ public final class NioStrandServer {
         long now = common.nanoClock.getAsLong();
         SocketAddress remote;
         try {
-            remote = channel.getRemoteAddress();
+            // 수락한 소켓은 이미 맺어져 있으므로 상대 주소가 있다. 이미 끊겼으면 읽을 수 없다.
+            remote = Objects.requireNonNull(channel.getRemoteAddress());
             channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
         } catch (IOException e) {
-            PassageFactory.closeQuietly(channel);
-            return;
-        }
-        if (remote == null) {
             PassageFactory.closeQuietly(channel);
             return;
         }

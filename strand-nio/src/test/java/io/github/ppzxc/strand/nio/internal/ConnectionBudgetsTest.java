@@ -95,4 +95,17 @@ class ConnectionBudgetsTest {
         assertThat(connection.usage(Resource.OBSERVATIONS).limit()).isEqualTo(2);
         assertThat(owner.usage(Resource.OBSERVATIONS).limit()).isEqualTo(3);
     }
+
+    @Test
+    void resourcesOutsideTheScopeAreRejectedAsProgrammingErrors() {
+        OwnerBudgets owner = new OwnerBudgets(limits(2, 3));
+        ConnectionBudgets connection = owner.newConnection(limits(2, 3));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> owner.tryReserve(Resource.PEER_FRAME_SIZE, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> connection.usage(Resource.PREPARING_CONNECTIONS))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> connection.tryReserve(Resource.TOTAL_CONNECTIONS, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

@@ -147,9 +147,7 @@ public final class TlsPassage implements Passage {
         } finally {
             dataOut.flip();
         }
-        if (dataOut.hasRemaining()) {
-            outQueue.add(dataOut);
-        }
+        outQueue.add(dataOut);
         afterResult(result);
         flush();
         return result.bytesConsumed();
@@ -162,15 +160,16 @@ public final class TlsPassage implements Passage {
     }
 
     /**
-     * 핸드셰이크가 확인한 상대 주체. 클라이언트는 서버 인증서의 주체다. 확인하지 못했으면 null이다.
+     * 핸드셰이크가 확인한 상대 주체. 클라이언트는 서버 인증서의 주체다. 확인하지 못했으면 {@code fallback}이다.
      *
-     * @return 상대 주체
+     * @param fallback 확인한 주체가 없을 때 돌려줄 값
+     * @return 상대 주체 또는 {@code fallback}
      */
-    public java.security.@Nullable Principal peerPrincipal() {
+    public Object peerPrincipalOr(Object fallback) {
         try {
             return engine.getSession().getPeerPrincipal();
         } catch (SSLException e) {
-            return null;
+            return fallback;
         }
     }
 
@@ -181,9 +180,7 @@ public final class TlsPassage implements Passage {
 
     /** 평문을 wrap해도 되는가: 핸드셰이크가 끝났고 데이터용 암호문 공간이 비어 있다. */
     private boolean canWrapData() {
-        return handshakeDone
-                && !outQueue.contains(dataOut)
-                && engine.getHandshakeStatus() == HandshakeStatus.NOT_HANDSHAKING;
+        return handshakeDone && !outQueue.contains(dataOut);
     }
 
     /** 핸드셰이크를 진행하고, 받아 둔 암호문을 평문으로 풀고, 보낼 암호문을 내보낸다. 더 할 일이 없을 때까지 돈다. */
@@ -229,11 +226,9 @@ public final class TlsPassage implements Passage {
         } finally {
             controlOut.flip();
         }
-        if (controlOut.hasRemaining()) {
-            outQueue.add(controlOut);
-        }
+        outQueue.add(controlOut);
         afterResult(result);
-        return controlOut.hasRemaining() || result.getHandshakeStatus() != HandshakeStatus.NEED_WRAP;
+        return result.bytesProduced() > 0 || result.getHandshakeStatus() != HandshakeStatus.NEED_WRAP;
     }
 
     /** 받아 둔 암호문을 풀어 평문을 모은다. 무엇이든 소비하거나 만들었으면 true. */
@@ -291,7 +286,6 @@ public final class TlsPassage implements Passage {
     private void requireNoRenegotiation() throws SSLException {
         if (handshakeDone
                 && engine.getHandshakeStatus() != HandshakeStatus.NOT_HANDSHAKING
-                && engine.getHandshakeStatus() != HandshakeStatus.FINISHED
                 && !"TLSv1.3".equals(engine.getSession().getProtocol())
                 && !closeNotified
                 && !peerEnded) {

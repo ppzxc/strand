@@ -6,6 +6,7 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 
 /**
@@ -14,6 +15,8 @@ import java.util.function.Consumer;
 public final class Listener {
     private final ServerSocketChannel server;
     private final SocketAddress localAddress;
+    private static final long RETRY_PAUSE_NANOS = 10_000_000L;
+
     private final AtomicBoolean closed = new AtomicBoolean();
 
     Listener(ServerSocketChannel server, SocketAddress localAddress, Consumer<SocketChannel> acceptor) {
@@ -26,28 +29,24 @@ public final class Listener {
 
     private void acceptLoop(Consumer<SocketChannel> acceptor) {
         while (!closed.get()) {
-            SocketChannel accepted;
             try {
-                accepted = server.accept();
+                handleAccepted(server.accept(), acceptor);
             } catch (ClosedChannelException e) {
                 return;
             } catch (IOException e) {
-                // 일시적인 수락 실패(예: 파일 기술자 부족)는 다음 수락을 시도한다. 닫혔으면 끝낸다.
-                if (closed.get() || !server.isOpen()) {
-                    return;
-                }
-                continue;
+                // 일시적인 수락 실패(예: 파일 기술자 부족)는 잠시 쉬고 다음 수락을 시도한다.
+                LockSupport.parkNanos(RETRY_PAUSE_NANOS);
             }
-            if (accepted == null) {
-                continue;
-            }
-            if (closed.get()) {
-                // 닫기와 경합해 수락된 소켓은 정리한다.
-                PassageFactory.closeQuietly(accepted);
-                return;
-            }
-            acceptor.accept(accepted);
         }
+    }
+
+    /** 수락한 소켓을 등록한다. 닫기와 경합해 수락된 소켓은 등록하지 않고 정리한다. */
+    void handleAccepted(SocketChannel accepted, Consumer<SocketChannel> acceptor) {
+        if (closed.get()) {
+            PassageFactory.closeQuietly(accepted);
+            return;
+        }
+        acceptor.accept(accepted);
     }
 
     /**

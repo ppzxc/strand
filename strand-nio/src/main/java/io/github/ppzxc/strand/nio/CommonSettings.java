@@ -289,7 +289,7 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         }
 
         long deadlineAt(long now) {
-            return preparationNanos > Long.MAX_VALUE - now ? Long.MAX_VALUE : now + preparationNanos;
+            return Saturating.add(now, preparationNanos);
         }
     }
 }

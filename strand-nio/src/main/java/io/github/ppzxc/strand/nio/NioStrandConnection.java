@@ -75,14 +75,10 @@ public final class NioStrandConnection {
      * 인증된 상대. 서버 연결에서는 연결 인증을 통과한 뒤(팩터리가 불리기 전)부터, 클라이언트 연결에서는 준비가 끝난 뒤부터 조회된다.
      *
      * @return 인증된 상대
-     * @throws IllegalStateException 아직 인증되지 않았을 때
      */
     public AuthenticatedPeer authenticatedPeer() {
-        AuthenticatedPeer current = peer;
-        if (current == null) {
-            throw new IllegalStateException("아직 인증되지 않은 연결이다");
-        }
-        return current;
+        // 연결은 인증이 끝난 뒤에만 앱에 보인다(서버는 팩터리가 불리기 전, 클라이언트는 connect 성공 전에 설정한다).
+        return Objects.requireNonNull(peer, "인증되지 않은 연결은 앱에 보이지 않는다");
     }
 
     /**
