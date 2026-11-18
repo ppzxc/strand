@@ -20,4 +20,12 @@ class TlsBoundaryTest {
         assertThat(observed[1]).isPositive(); // partial ciphertext write
         assertThat(observed[2]).isEqualTo(1); // zero ciphertext write
     }
+
+    @Test
+    void ciphertextTravelsThroughTheExperimentalNettyOutboundPath() throws Exception {
+        TlsProbe.Result result = TlsProbe.exchangeOutbound(new byte[] {5, 6, 7});
+        assertThat(result.plaintextConsumed).isEqualTo(3);
+        assertThat(result.ciphertextWritten).isPositive();
+        assertThat(result.received).containsExactly(5, 6, 7);
+    }
 }

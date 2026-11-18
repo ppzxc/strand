@@ -2,13 +2,12 @@ package io.github.ppzxc.strand.integration.netty;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelOutboundBuffer;
-import io.netty.channel.socket.nio.NioSocketChannel;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Experimental ByteBuf-only outbound path, not a production channel. */
-public final class ProgressChannel extends NioSocketChannel {
+public final class ProgressChannel extends BoundaryChannel {
     private int zeroWrites;
 
     int zeroWrites() {

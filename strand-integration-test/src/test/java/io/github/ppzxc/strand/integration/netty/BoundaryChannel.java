@@ -5,7 +5,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /** Experimental channel for examining actual socket progress on the event loop. */
-public final class BoundaryChannel extends NioSocketChannel {
+public class BoundaryChannel extends NioSocketChannel {
     public int readAttempt(ByteBuffer bytes) throws IOException {
         if (!eventLoop().inEventLoop()) {
             throw new IllegalStateException("read must run on event loop");

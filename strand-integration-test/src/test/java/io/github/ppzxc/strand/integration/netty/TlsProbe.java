@@ -37,6 +37,14 @@ final class TlsProbe {
     }
 
     static Result exchange(byte[] message) throws Exception {
+        return exchange(message, false);
+    }
+
+    static Result exchangeOutbound(byte[] message) throws Exception {
+        return exchange(message, true);
+    }
+
+    private static Result exchange(byte[] message, boolean outbound) throws Exception {
         SSLContext context = context();
         ExecutorService serverThread = Executors.newSingleThreadExecutor();
         NioEventLoopGroup group = new NioEventLoopGroup(1);
@@ -53,7 +61,7 @@ final class TlsProbe {
             });
             BoundaryChannel channel = (BoundaryChannel) new Bootstrap()
                     .group(group)
-                    .channel(BoundaryChannel.class)
+                    .channel(outbound ? ProgressChannel.class : BoundaryChannel.class)
                     .handler(new ChannelInitializer<Channel>() {
                         @Override
                         protected void initChannel(Channel ch) {}
@@ -62,10 +70,22 @@ final class TlsProbe {
                     .sync()
                     .channel();
             try {
+                java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelFuture> output =
+                        outbound ? new java.util.concurrent.atomic.AtomicReference<>() : null;
                 int[] counts = channel.eventLoop()
-                        .submit(() -> drive(context, channel, message))
+                        .submit(() -> drive(context, channel, message, output))
                         .sync()
                         .getNow();
+                if (outbound) {
+                    output.get().sync();
+                    counts[1] = channel.eventLoop()
+                            .submit(() -> ((ProgressChannel) channel)
+                                    .progress().stream()
+                                            .mapToInt(Integer::intValue)
+                                            .sum())
+                            .sync()
+                            .getNow();
+                }
                 return new Result(counts[0], counts[1], received.get(10, TimeUnit.SECONDS));
             } finally {
                 channel.close().sync();
@@ -121,7 +141,7 @@ final class TlsProbe {
                     .channel();
             try {
                 int[] result = channel.eventLoop()
-                        .submit(() -> drive(context, channel, null))
+                        .submit(() -> drive(context, channel, null, null))
                         .sync()
                         .getNow();
                 release.countDown();
@@ -137,7 +157,12 @@ final class TlsProbe {
         }
     }
 
-    private static int[] drive(SSLContext context, BoundaryChannel channel, byte[] message) throws Exception {
+    private static int[] drive(
+            SSLContext context,
+            BoundaryChannel channel,
+            byte[] message,
+            java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelFuture> output)
+            throws Exception {
         SSLEngine engine = context.createSSLEngine("localhost", 0);
         engine.setUseClientMode(true);
         engine.setEnabledProtocols(new String[] {"TLSv1.2"});
@@ -202,6 +227,12 @@ final class TlsProbe {
         SSLEngineResult result = engine.wrap(ByteBuffer.wrap(message), outgoing);
         if (result.getStatus() != SSLEngineResult.Status.OK) throw new IllegalStateException(result.toString());
         outgoing.flip();
+        if (output != null) {
+            io.netty.buffer.ByteBuf ciphertext = io.netty.buffer.Unpooled.directBuffer(outgoing.remaining());
+            ciphertext.writeBytes(outgoing);
+            output.set(((ProgressChannel) channel).send(ciphertext));
+            return new int[] {result.bytesConsumed(), 0};
+        }
         int written = writeFully(channel, outgoing, deadline);
         return new int[] {result.bytesConsumed(), written};
     }
