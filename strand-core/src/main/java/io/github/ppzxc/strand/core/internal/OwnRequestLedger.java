@@ -24,8 +24,9 @@ import org.jspecify.annotations.Nullable;
  * <p>스트림 번호와 번호표의 발급, 내 번호 공간의 홀짝, 번호를 줄 수 없는 경우(CLOSE 뒤, 번호 소진, 상대 {@code max_concurrent_streams} 도달,
  * 규격 2.2.5절, 3.2.1절, 3.5절)의 판정도 여기에 있다.
  *
- * <p>결과 확정성 판정(규격 3.5절, 4.4절, 4.4.1절)은 이 클래스에만 있다. 응답이나 RESET 없이 끝나는 경우(취소, 기한, 전송 계층 닫힘)는
- * {@link #unfinishedCertainty} 한 자리가 정한다: 쓰기를 시작했으면 결과 모름, 아니면(번호 없음, 쓰기 전) 처리 안 됨이다. 나머지 사건은 사건
+ * <p>결과 확정성 판정(규격 3.5절, 4.4절, 4.4.1절)은 이 클래스에만 있다. 응답이나 RESET 없이 끝나는 경우 가운데 취소와 기한은
+ * {@link #unfinishedCertainty} 한 자리가 정한다: 쓰기를 시작했으면 결과 모름, 아니면(번호 없음, 쓰기 전) 처리 안 됨이다. 전송 계층 닫힘은 규격 3.5절에
+ * 따라 마지막 바이트를 전송 계층에 넘겼는지로 정한다({@link #onTransportClosed}): 일부만 쓰고 닫히면 처리 안 됨이다. 나머지 사건은 사건
  * 자체가 확정성을 정한다: 응답은 {@link Certainty#RESPONSE}({@link #onResponse}), 거절(REFUSED) RESET은 쓰기를 시작했어도 처리 안 됨, 그 밖의
  * RESET은 결과 모름({@link #onReset}), CLOSE를 보내거나 받아 끝나는 번호 없는 요청과 CLOSE {@code last_stream_id} 뒤의 요청은 처리 안 됨({@link
  * #onClosing}, {@link #endAfter})이다.
@@ -589,7 +590,7 @@ final class OwnRequestLedger {
     }
 
     /**
-     * 응답이나 RESET을 받지 못한 채 끝나는 요청(취소, 기한, 전송 계층 닫힘)의 확정성을 정하는 유일한 자리(규격 3.5절, 4.4절, 4.4.1절). 쓰기를
+     * 응답이나 RESET을 받지 못한 채 끝나는 요청(취소, 기한, 전송 계층 닫힘 전의 번호 없는 요청)의 확정성을 정하는 유일한 자리(규격 3.5절, 4.4절, 4.4.1절). 쓰기를
      * 시작했으면 프레임을 이미 끊을 수 없어 결과 모름이다. 번호가 없거나 쓰기 전이면 처리 안 됨이다. 요청의 상태만 보고 아무것도 바꾸지 않는다.
      */
     private static Certainty unfinishedCertainty(Record record) {
