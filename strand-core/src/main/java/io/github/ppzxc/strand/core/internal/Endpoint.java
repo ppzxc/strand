@@ -669,13 +669,14 @@ public final class Endpoint {
      * @param streamId 상대가 연 스트림 번호
      * @param status 규격 2.5.1절의 status 값
      * @param payload 본문
+     * @return 응답을 쌓았으면 true. 대기 중인 스트림이 아니어서(이미 응답했거나, 상대가 RESET했거나, 연결이 끝나서) 아무것도 하지 않았으면 false
      * @throws IllegalArgumentException 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런 프레임을 보내지 못하게 하고
      *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
-    public void respond(long streamId, int status, byte[] payload) {
+    public boolean respond(long streamId, int status, byte[] payload) {
         Integer type = peerPendingStreams.get(streamId);
         if (type == null) {
-            return;
+            return false;
         }
         byte[] frame = Frames.response(type, streamId, status, payload);
         if (exceedsPeerFrameSize(frame)) {
@@ -684,6 +685,7 @@ public final class Endpoint {
         peerPendingStreams.remove(streamId);
         send(frame);
         conclude();
+        return true;
     }
 
     /**

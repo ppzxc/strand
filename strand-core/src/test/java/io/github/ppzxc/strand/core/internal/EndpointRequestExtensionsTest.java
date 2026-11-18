@@ -166,4 +166,28 @@ class EndpointRequestExtensionsTest {
         List<OutboundMessage> sent = endpoint.drainMessages();
         return sent.get(sent.size() - 1).bytes();
     }
+
+    @Test
+    void respondReportsWhetherTheResponseWasAccepted() {
+        Endpoint server = establishedServer();
+        server.receive(Frames.request(TYPE, 1, NO_BYTES));
+        server.drainEvents();
+        server.drainMessages();
+
+        assertThat(server.respond(1, 0, NO_BYTES)).isTrue();
+        assertThat(server.respond(1, 0, NO_BYTES)).isFalse();
+        assertThat(server.respond(99, 0, NO_BYTES)).isFalse();
+    }
+
+    @Test
+    void respondToARequestThePeerResetIsNotAccepted() {
+        Endpoint server = establishedServer();
+        server.receive(Frames.request(TYPE, 1, NO_BYTES));
+        server.drainEvents();
+        server.receive(Frames.reset(1, ErrorCode.CANCEL));
+        server.drainMessages();
+
+        assertThat(server.respond(1, 0, NO_BYTES)).isFalse();
+        assertThat(server.drainMessages()).isEmpty();
+    }
 }
