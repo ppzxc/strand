@@ -181,4 +181,34 @@ class NettyOutboundBoundaryTest {
             group.shutdownGracefully().sync();
         }
     }
+
+    @Test
+    void rejectedEventLoopSubmissionReleasesFrame() throws Exception {
+        NioEventLoopGroup group = new NioEventLoopGroup(1);
+        try (ServerSocket listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            ProgressChannel channel = (ProgressChannel) new Bootstrap()
+                    .group(group)
+                    .channel(ProgressChannel.class)
+                    .handler(new ChannelInitializer<Channel>() {
+                        @Override
+                        protected void initChannel(Channel ch) {}
+                    })
+                    .connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), listener.getLocalPort()))
+                    .sync()
+                    .channel();
+            try (Socket peer = listener.accept()) {
+                assertThat(peer.isConnected()).isTrue();
+                channel.close().sync();
+                group.shutdownGracefully(0, 0, java.util.concurrent.TimeUnit.SECONDS)
+                        .sync();
+                ByteBuf frame = Unpooled.directBuffer(1).writeByte(1);
+                io.netty.channel.ChannelFuture result = channel.send(frame);
+                assertThat(result.awaitUninterruptibly().isSuccess()).isFalse();
+                assertThat(frame.refCnt()).isZero();
+            }
+        } finally {
+            group.shutdownGracefully(0, 0, java.util.concurrent.TimeUnit.SECONDS)
+                    .sync();
+        }
+    }
 }
