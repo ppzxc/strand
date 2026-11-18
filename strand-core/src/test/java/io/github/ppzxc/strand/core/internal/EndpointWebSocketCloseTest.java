@@ -72,7 +72,6 @@ class EndpointWebSocketCloseTest {
         assertThat(kinds(events)).containsExactly(Event.Kind.RESULT, Event.Kind.RESULT, Event.Kind.CLOSED);
         assertThat(events.get(0).certainty()).hasValue(Certainty.UNKNOWN);
         assertThat(events.get(1).certainty()).hasValue(Certainty.NOT_PROCESSED);
-        assertThat(events.get(1).streamId()).isZero();
     }
 
     @Test

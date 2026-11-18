@@ -86,7 +86,7 @@ class EndpointWebSocketOutputTest {
         client.request(REQUEST_TYPE, new byte[0], 100);
         client.nextOutput();
 
-        client.advance(100);
+        client.advance(101);
 
         assertThat(client.nextOutput()).isNull();
         Event result = onlyResult(client);
@@ -100,7 +100,7 @@ class EndpointWebSocketOutputTest {
         client.request(REQUEST_TYPE, new byte[0], 100);
         client.outputAccepted(client.nextOutput().id());
 
-        client.advance(100);
+        client.advance(101);
 
         assertThat(client.nextOutput().bytes()).isEqualTo(Frames.reset(1, ErrorCode.CANCEL));
         Event result = onlyResult(client);

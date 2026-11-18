@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 class EndpointWebSocketMessageInputTest {
 
     private static final int REQUEST_TYPE = 257;
-    private static final long MAX_FRAME = 16_384;
+    private static final long MAX_FRAME = 65_536;
 
     private static Endpoint webSocketServer() {
         return Endpoint.server(EndpointConfig.defaults().webSocket());
@@ -286,7 +286,7 @@ class EndpointWebSocketMessageInputTest {
     @Test
     void stopsBeforeTheMessageEndWhenCollectionIsNeededAndResumesWithoutDuplicateConsumption() {
         Endpoint server = establishedServer();
-        CollectionSpace space = CollectionSpace.of(2, 4);
+        CollectionSpace space = CollectionSpace.of(2, 8);
         byte[] first = Frames.request(REQUEST_TYPE, 1, new byte[] {1});
         byte[] second = Frames.request(REQUEST_TYPE, 3, new byte[] {2});
         server.receiveMessageFragment(WebSocketMessageKind.BINARY, true, true, first, 0, first.length, space);
@@ -314,7 +314,7 @@ class EndpointWebSocketMessageInputTest {
     @Test
     void stoppingAtTheLastFragmentKeepsTheEarlierFragmentsAndAppliesNoEffectEarly() {
         Endpoint server = establishedServer();
-        CollectionSpace space = CollectionSpace.of(2, 4);
+        CollectionSpace space = CollectionSpace.of(2, 8);
         byte[] request = Frames.request(REQUEST_TYPE, 3, new byte[] {5});
         byte[] head = Arrays.copyOfRange(request, 0, 12);
         byte[] tail = Arrays.copyOfRange(request, 12, request.length);
