@@ -548,10 +548,35 @@ public final class Endpoint {
         return requestUntil(type, payload, null);
     }
 
+    /**
+     * 요청 확장 영역(규격 2.4절)이 있는 요청을 보낸다. 그 밖의 동작은 {@link #request(int, byte[])}, {@link #request(int, byte[], long)}와
+     * 같다. 확장 영역은 프레임 크기 검사에 포함된다.
+     *
+     * @param extensions 항목(tag 2바이트, length 2바이트, value)이 이어진 확장 영역. 없으면 빈 배열
+     * @param deadlineMs 지금부터 센 기한(밀리초). 0이면 기한이 없다
+     * @return 요청 번호표
+     * @throws IllegalArgumentException 확장 영역이 형식이나 알려진 항목의 값 규칙(규격 2.4절)을 어기거나 8192바이트를 넘을 때, 또는 {@code
+     *     deadlineMs}가 음수일 때. 아무 상태도 바꾸지 않고 번호표도 쓰지 않는다
+     */
+    public long request(int type, byte[] extensions, byte[] payload, long deadlineMs) {
+        if (deadlineMs < 0) {
+            throw new IllegalArgumentException("deadlineMs는 음수일 수 없다: " + deadlineMs);
+        }
+        if (extensions.length > MAX_EXTENSIONS_LENGTH
+                || scanExtensions(extensions, 0, extensions.length, 0) != Extensions.VALID) {
+            throw new IllegalArgumentException("요청 확장 영역이 규격 2.4절을 어긴다");
+        }
+        return requestUntil(type, extensions, payload, deadlineMs == 0 ? null : Deadlines.plus(now, deadlineMs));
+    }
+
     private long requestUntil(int type, byte[] payload, @Nullable Long deadlineAt) {
+        return requestUntil(type, NO_BYTES, payload, deadlineAt);
+    }
+
+    private long requestUntil(int type, byte[] extensions, byte[] payload, @Nullable Long deadlineAt) {
         ConnectionPhase.ApplicationSend send = phase.applicationSend();
         if (send == ConnectionPhase.ApplicationSend.DEFER) {
-            return ledger.queue(type, payload, deadlineAt);
+            return ledger.queue(type, extensions, payload, deadlineAt);
         }
         if (!phase.isActive()) {
             long ticket = ledger.issueTicket();
@@ -560,7 +585,7 @@ public final class Endpoint {
         }
         // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
         long ticket = ledger.nextTicket();
-        if (refuseLocally(ticket, ledger.open(type, payload, deadlineAt, peerMaxFrameSize))
+        if (refuseLocally(ticket, ledger.open(type, extensions, payload, deadlineAt, peerMaxFrameSize))
                 == OwnRequestLedger.Admission.OVERSIZE) {
             throw oversizeFrame("요청");
         }
@@ -637,6 +662,20 @@ public final class Endpoint {
         }
         peerPendingStreams.remove(streamId);
         send(frame);
+        conclude();
+    }
+
+    /**
+     * 애플리케이션이 받은 요청을 핸들러 시작 전에 거절하게 한다. {@code RESET(REFUSED)}를 보내고 스트림을 끝낸다(규격 4.5절). 대기 중이 아닌
+     * 스트림이면 아무것도 하지 않는다. 끝낸 스트림에는 응답할 수 없다.
+     *
+     * @param streamId 상대가 연 스트림 번호
+     */
+    public void refuseRequest(long streamId) {
+        if (peerPendingStreams.remove(streamId) == null) {
+            return;
+        }
+        send(Frames.reset(streamId, ErrorCode.REFUSED));
         conclude();
     }
 
@@ -1137,7 +1176,12 @@ public final class Endpoint {
         } else {
             // 대기 중인 요청은 항상 REQUEST_RECEIVED 이벤트와 함께 생긴다. refuseUnhandedRequests가 이 짝에 기댄다.
             peerPendingStreams.put(streamId, type);
-            events.add(Event.requestReceived(streamId, type, bodyOf(bytes, off, size, extensionsLength)));
+            int extensionsAt = off + Frames.HEADER_SIZE;
+            events.add(Event.requestReceived(
+                    streamId,
+                    type,
+                    Arrays.copyOfRange(bytes, extensionsAt, extensionsAt + extensionsLength),
+                    bodyOf(bytes, off, size, extensionsLength)));
         }
     }
 
@@ -1153,9 +1197,14 @@ public final class Endpoint {
      * 2.4.2절)은 timeout이 4바이트, idempotency-key가 1~64바이트인 것이다.
      */
     private static Extensions scanExtensions(byte[] bytes, int off, int extensionsLength) {
+        return scanExtensions(bytes, off, extensionsLength, Frames.HEADER_SIZE);
+    }
+
+    /** {@code headerSize}는 {@code off}에서 확장 영역이 시작하는 곳까지의 거리다. 확장 영역만 든 배열은 0이다. */
+    private static Extensions scanExtensions(byte[] bytes, int off, int extensionsLength, int headerSize) {
         Set<Integer> tags = new HashSet<>();
         boolean valuesValid = true;
-        int at = off + Frames.HEADER_SIZE;
+        int at = off + headerSize;
         int end = at + extensionsLength;
         while (at < end) {
             if (end - at < TLV_HEADER_SIZE) {
