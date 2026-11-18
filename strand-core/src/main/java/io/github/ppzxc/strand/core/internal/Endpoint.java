@@ -316,7 +316,7 @@ public final class Endpoint {
         if (phase.isEnded()) {
             return;
         }
-        now += ms;
+        now = Deadlines.plus(now, ms);
         LivenessTimers.Expiry expiry = timers.expiry(now);
         if (expiry == LivenessTimers.Expiry.UNAUTHENTICATED) {
             connectionError(ErrorCode.UNAUTHENTICATED);

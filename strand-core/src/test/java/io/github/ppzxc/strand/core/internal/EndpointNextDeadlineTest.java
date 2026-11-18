@@ -33,6 +33,16 @@ class EndpointNextDeadlineTest {
         assertThat(server.drainEvents()).isEmpty();
     }
 
+    @Test
+    void elapsedClockDoesNotWrapIntoThePast() {
+        Endpoint server = open(quiet());
+        server.advance(Long.MAX_VALUE - 1);
+        server.advance(2);
+        server.request(257, new byte[0], 10);
+
+        assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(Long.MAX_VALUE));
+    }
+
     private static final String PREFACE = "c0de535452300000";
     private static final String HELLO = "0000001000010000000000000000000000000000";
     private static final String HELLO_ACK = "0000001000010100000000000000000000000000";
