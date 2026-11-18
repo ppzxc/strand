@@ -37,18 +37,41 @@ final class TlsProbe {
     }
 
     static Result exchange(byte[] message) throws Exception {
-        return exchange(message, false, null);
+        return exchange(message, false, null, null);
     }
 
     static Result exchangeOutbound(byte[] message) throws Exception {
-        return exchange(message, true, null);
+        return exchange(message, true, null, null);
     }
 
     static Result exchangePartial(byte[] message, byte[] reset) throws Exception {
-        return exchange(message, true, reset);
+        return exchange(message, true, reset, null);
     }
 
-    private static Result exchange(byte[] message, boolean outbound, byte[] reset) throws Exception {
+    static final class CloseResult {
+        final int plaintextConsumed;
+        final byte[] peerReceived;
+        final boolean tlsOpenAfterConsumption;
+        final boolean transportOpenAfterConsumption;
+        final boolean tlsClosed;
+        final boolean transportClosed;
+        CloseResult(Result result, boolean[] flags) {
+            plaintextConsumed = result.plaintextConsumed;
+            peerReceived = result.received;
+            tlsOpenAfterConsumption = flags[0];
+            transportOpenAfterConsumption = flags[1];
+            tlsClosed = flags[2];
+            transportClosed = flags[3];
+        }
+    }
+
+    static CloseResult exchangeAndClose(byte[] message) throws Exception {
+        boolean[] flags = new boolean[4];
+        Result result = exchange(message, true, null, flags);
+        return new CloseResult(result, flags);
+    }
+
+    private static Result exchange(byte[] message, boolean outbound, byte[] reset, boolean[] flags) throws Exception {
         SSLContext context = context();
         ExecutorService serverThread = Executors.newSingleThreadExecutor();
         NioEventLoopGroup group = new NioEventLoopGroup(1);
@@ -60,6 +83,8 @@ final class TlsProbe {
                     peer.setSoTimeout(10000);
                     byte[] bytes = new byte[message.length + (reset == null ? 0 : reset.length)];
                     new DataInputStream(peer.getInputStream()).readFully(bytes);
+                    if (flags != null && peer.getInputStream().read() != -1)
+                        throw new IllegalStateException("expected TLS close notify");
                     return bytes;
                 }
             });
@@ -77,7 +102,7 @@ final class TlsProbe {
                 java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelFuture> output =
                         outbound ? new java.util.concurrent.atomic.AtomicReference<>() : null;
                 int[] counts = channel.eventLoop()
-                        .submit(() -> drive(context, channel, message, output, reset))
+                        .submit(() -> drive(context, channel, message, output, reset, flags))
                         .sync()
                         .getNow();
                 if (outbound) {
@@ -93,6 +118,11 @@ final class TlsProbe {
                 return new Result(counts[0], counts[1], received.get(10, TimeUnit.SECONDS));
             } finally {
                 channel.close().sync();
+                if (flags != null) {
+                    channel.eventLoop().submit(() -> {}).sync();
+                    flags[3] = !channel.isOpen() && channel.eventLoop()
+                            .submit(() -> ((ProgressChannel) channel).retainedCount()).sync().getNow() == 0;
+                }
             }
         } finally {
             group.shutdownGracefully().sync();
@@ -158,6 +188,7 @@ final class TlsProbe {
                                 channel,
                                 null,
                                 outbound ? new java.util.concurrent.atomic.AtomicReference<>() : null,
+                                null,
                                 null))
                         .sync()
                         .getNow();
@@ -179,7 +210,8 @@ final class TlsProbe {
             BoundaryChannel channel,
             byte[] message,
             java.util.concurrent.atomic.AtomicReference<io.netty.channel.ChannelFuture> output,
-            byte[] reset)
+            byte[] reset,
+            boolean[] flags)
             throws Exception {
         SSLEngine engine = context.createSSLEngine("localhost", 0);
         engine.setUseClientMode(true);
@@ -291,6 +323,35 @@ final class TlsProbe {
             io.netty.buffer.ByteBuf ciphertext = io.netty.buffer.Unpooled.directBuffer(outgoing.remaining());
             ciphertext.writeBytes(outgoing);
             output.set(((ProgressChannel) channel).send(ciphertext));
+            if (flags != null) {
+                flags[0] = !engine.isOutboundDone() && !engine.isInboundDone();
+                flags[1] = channel.isOpen();
+                engine.closeOutbound();
+                outgoing.clear();
+                SSLEngineResult closing = engine.wrap(empty, outgoing);
+                if (closing.getStatus() != SSLEngineResult.Status.CLOSED)
+                    throw new IllegalStateException(closing.toString());
+                outgoing.flip();
+                io.netty.buffer.ByteBuf closeNotify = io.netty.buffer.Unpooled.directBuffer(outgoing.remaining());
+                closeNotify.writeBytes(outgoing);
+                output.set(((ProgressChannel) channel).send(closeNotify));
+                if (!output.get().isDone() || !output.get().isSuccess())
+                    throw new IllegalStateException("close notify still pending");
+                while (!engine.isInboundDone()) {
+                    if (System.nanoTime() > deadline) throw new IllegalStateException("TLS close timed out");
+                    int n = channel.readAttempt(incoming);
+                    if (n < 0) throw new IllegalStateException("socket closed before TLS close notify");
+                    incoming.flip();
+                    SSLEngineResult unwrapped = engine.unwrap(incoming, application);
+                    incoming.compact();
+                    if (unwrapped.getStatus() != SSLEngineResult.Status.OK
+                            && unwrapped.getStatus() != SSLEngineResult.Status.CLOSED
+                            && unwrapped.getStatus() != SSLEngineResult.Status.BUFFER_UNDERFLOW)
+                        throw new IllegalStateException(unwrapped.toString());
+                    if (n == 0) Thread.yield();
+                }
+                flags[2] = engine.isInboundDone() && engine.isOutboundDone();
+            }
             return new int[] {result.bytesConsumed(), 0};
         }
         int written = writeFully(channel, outgoing, deadline);
