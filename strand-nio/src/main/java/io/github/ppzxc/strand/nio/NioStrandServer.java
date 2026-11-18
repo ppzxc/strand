@@ -190,6 +190,7 @@ public final class NioStrandServer {
                 remaining -> PassageFactory.open(channel, common.security.tlsContext(), null, 0),
                 remote,
                 new SerialExecutor(common.executor),
+                common.executor,
                 budgets,
                 common.space,
                 common.maxFrameSize,

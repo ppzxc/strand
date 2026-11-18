@@ -574,10 +574,13 @@ final class ConnectionEngine {
         notifyPreparation(() -> p.observer.ready(facade));
     }
 
-    /** 준비 결과 알림은 앱용 실행기에서 한다. 실행기가 거절해도 연결 시도가 끝나지 않고 남지 않게 별도 스레드로 알린다. */
+    /**
+     * 준비 결과 알림은 앱용 실행기에서 한다. 같은 연결의 인증·팩터리가 반환하지 않아도 알릴 수 있도록 연결별 직렬 실행을 거치지 않는다. 실행기가
+     * 거절해도 연결 시도가 끝나지 않고 남지 않게 별도 스레드로 알린다.
+     */
     private void notifyPreparation(Runnable notification) {
         try {
-            p.executor.execute(notification);
+            p.appExecutor.execute(notification);
         } catch (RuntimeException | Error e) {
             Thread notifier = new Thread(notification, "strand-nio-notify");
             notifier.setDaemon(true);
@@ -1072,12 +1075,26 @@ final class ConnectionEngine {
             }
             closedSeen = true;
             if (preparing) {
-                PreparationStage at = reason.errorCode() == UNAUTHENTICATED ? PreparationStage.AUTHENTICATION : stage;
+                PreparationStage at = isAuthenticationEnd(reason) ? PreparationStage.AUTHENTICATION : stage;
                 failPreparation(at, cause != null ? cause : new ConnectionEndedException(notice));
             }
             if (transportGone || reason.kind() == CloseReason.Kind.DISCONNECTED) {
                 finished = true;
             }
+        }
+
+        /**
+         * 준비 중 CLOSE가 연결 인증의 결과인가. 인증 실패는 {@code CLOSE(UNAUTHENTICATED)}, 일시적 실패는 {@code CLOSE(INTERNAL_ERROR)}다(규격
+         * 3.3.1절). 클라이언트는 AUTH(ACK)를 받기 전에 상대가 보낸 INTERNAL_ERROR를 인증 단계의 실패로 본다.
+         */
+        private boolean isAuthenticationEnd(CloseReason reason) {
+            if (reason.errorCode() == UNAUTHENTICATED) {
+                return true;
+            }
+            return p.role == ConnectionParams.Role.CLIENT
+                    && reason.errorCode() == INTERNAL_ERROR
+                    && reason.sender().isPresent()
+                    && reason.sender().get() == CloseReason.Sender.PEER;
         }
 
         private CloseNotice notice(CloseReason reason, @Nullable Throwable cause) {

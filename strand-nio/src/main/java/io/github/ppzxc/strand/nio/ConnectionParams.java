@@ -41,6 +41,9 @@ final class ConnectionParams {
     final PassageOpener opener;
     final SocketAddress remoteAddress;
     final SerialExecutor executor;
+    /** 앱이 준 실행기. 준비 결과 알림은 연결별 직렬 실행을 거치지 않는다(반환하지 않는 사용자 작업 뒤에 막히지 않게). */
+    final java.util.concurrent.Executor appExecutor;
+
     final ConnectionBudgets budgets;
     final ProgressSpace space;
     final long maxFrameSize;
@@ -62,6 +65,7 @@ final class ConnectionParams {
             PassageOpener opener,
             SocketAddress remoteAddress,
             SerialExecutor executor,
+            java.util.concurrent.Executor appExecutor,
             ConnectionBudgets budgets,
             ProgressSpace space,
             long maxFrameSize,
@@ -79,6 +83,7 @@ final class ConnectionParams {
         this.opener = opener;
         this.remoteAddress = remoteAddress;
         this.executor = executor;
+        this.appExecutor = appExecutor;
         this.budgets = budgets;
         this.space = space;
         this.maxFrameSize = maxFrameSize;

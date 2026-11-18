@@ -132,6 +132,7 @@ public final class NioStrandClient {
                 remaining -> openChannel(budgets, target, remaining),
                 target,
                 new SerialExecutor(common.executor),
+                common.executor,
                 budgets,
                 common.space,
                 common.maxFrameSize,
