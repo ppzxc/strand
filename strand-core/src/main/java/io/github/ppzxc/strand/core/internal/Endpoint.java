@@ -104,6 +104,8 @@ public final class Endpoint {
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
 
     private long now;
+    /** 지금까지 받은 가장 큰 경과 나노초. 역행을 막는 기준이다. */
+    private long elapsedNanos;
     /** ACK를 기다리는 HELLO, AUTH, PING의 확인 대기, 서버의 AUTH 대기 기한, 유휴 PING 일정(규격 3.3절, 3.4.1절). */
     private final LivenessTimers timers;
 
@@ -433,6 +435,7 @@ public final class Endpoint {
             return;
         }
         now = Deadlines.plus(now, ms);
+        elapsedNanos = Math.max(elapsedNanos, Deadlines.millisToNanos(now));
         LivenessTimers.Expiry expiry = timers.expiry(now);
         if (expiry == LivenessTimers.Expiry.UNAUTHENTICATED) {
             connectionError(ErrorCode.UNAUTHENTICATED);
@@ -447,6 +450,35 @@ public final class Endpoint {
         if (idlePing != null) {
             sendPing(idlePing);
         }
+    }
+
+    /**
+     * 연결을 시작한 때부터 흐른 나노초로 시계를 옮긴다. 같은 값은 허용하고 처리할 것이 없으면 아무 일도 하지 않는다. 시계는 밀리초 단위로 처리하므로
+     * 밀리초 미만은 버린다.
+     *
+     * @param elapsedNanos 연결을 시작한 때부터 흐른, 이전 값보다 작지 않은 나노초
+     * @throws IllegalArgumentException 음수이거나 이전에 준 값보다 작을 때. 상태를 바꾸지 않는다
+     */
+    public void advanceTo(long elapsedNanos) {
+        if (elapsedNanos < 0 || elapsedNanos < this.elapsedNanos) {
+            throw new IllegalArgumentException("경과 나노초는 음수이거나 이전 값보다 작을 수 없다: " + elapsedNanos);
+        }
+        long target = elapsedNanos / Deadlines.NANOS_PER_MILLI;
+        long delta = target - now;
+        this.elapsedNanos = elapsedNanos;
+        if (delta > 0) {
+            advance(delta);
+        }
+    }
+
+    /**
+     * {@link #nextDeadline()}를 경과 나노초로 돌려준다. 넘치면 {@link Long#MAX_VALUE}에서 멈춘다. 기한이 없으면 비어 있다.
+     *
+     * @return 시계를 옮겨야 하는 가장 이른 경과 나노초
+     */
+    public OptionalLong nextDeadlineNanos() {
+        OptionalLong millis = nextDeadline();
+        return millis.isPresent() ? OptionalLong.of(Deadlines.millisToNanos(millis.getAsLong())) : millis;
     }
 
     /**

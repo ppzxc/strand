@@ -43,6 +43,55 @@ class EndpointNextDeadlineTest {
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(Long.MAX_VALUE));
     }
 
+    @Test
+    void elapsedNanosAdvanceTheClockToAnAbsoluteInstant() {
+        Endpoint server = open(quiet());
+        server.advanceTo(100_000_000L);
+        server.request(257, new byte[0], 500);
+        server.drainMessages();
+
+        assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(601_000_000L));
+        server.advanceTo(600_999_999L);
+        assertThat(server.drainEvents()).isEmpty();
+        server.advanceTo(601_000_000L);
+        assertThat(server.drainEvents()).hasSize(1);
+        assertThat(server.nextDeadlineNanos()).isEmpty();
+    }
+
+    @Test
+    void theSameInstantIsAcceptedAndChangesNothing() {
+        Endpoint server = open(quiet());
+        server.advanceTo(5_000_000L);
+        server.request(257, new byte[0], 10);
+
+        server.advanceTo(5_000_000L);
+
+        assertThat(server.drainEvents()).isEmpty();
+        assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(16_000_000L));
+    }
+
+    @Test
+    void negativeOrRegressingInstantsAreRejectedWithoutChangingState() {
+        Endpoint server = open(quiet());
+        server.advanceTo(5_000_000L);
+        server.request(257, new byte[0], 10);
+
+        assertThatIllegalArgumentException().isThrownBy(() -> server.advanceTo(-1));
+        assertThatIllegalArgumentException().isThrownBy(() -> server.advanceTo(4_999_999L));
+
+        assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(16_000_000L));
+        server.advanceTo(5_000_000L);
+    }
+
+    @Test
+    void maximumElapsedNanosDoNotOverflowTheDeadline() {
+        Endpoint server = open(quiet());
+        server.advanceTo(Long.MAX_VALUE);
+        server.request(257, new byte[0], Long.MAX_VALUE);
+
+        assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(Long.MAX_VALUE));
+    }
+
     private static final String PREFACE = "c0de535452300000";
     private static final String HELLO = "0000001000010000000000000000000000000000";
     private static final String HELLO_ACK = "0000001000010100000000000000000000000000";
