@@ -274,16 +274,37 @@ public final class Endpoint {
     }
 
     /**
+     * 한 단위가 최악의 경우 만들 수 있는 사건 수. 끝나는 내 요청마다 결과 하나에 종료 하나, 인증·받은 요청 사건 하나다. 전송 모듈이 수거 공간의 최소
+     * 크기를 셈할 때도 이 값을 쓴다.
+     *
+     * @param ownRequests 열린 내 요청과 미뤄 둔 내 요청의 수
+     * @return 최악의 사건 수
+     */
+    public static long eventsNeeded(long ownRequests) {
+        return ownRequests + 2;
+    }
+
+    /**
+     * 한 단위가 최악의 경우 만들 수 있는 출력 수. 미뤄 둔 것을 내보내거나 돌려보내는 프레임마다 하나에 제어 프레임 몇 개({@value
+     * #OUTPUT_CONTROL_RESERVE})다. 전송 모듈이 수거 공간의 최소 크기를 셈할 때도 이 값을 쓴다.
+     *
+     * @param ownRequests 열린 내 요청과 미뤄 둔 내 요청의 수
+     * @param deferredPings 미뤄 둔 PING 수
+     * @param peerPendingRequests 응답을 기다리는 상대 요청 수
+     * @return 최악의 출력 수
+     */
+    public static long outputsNeeded(long ownRequests, long deferredPings, long peerPendingRequests) {
+        return ownRequests + deferredPings + peerPendingRequests + OUTPUT_CONTROL_RESERVE;
+    }
+
+    /**
      * 한 단위가 최악의 경우 만들 수 있는 사건·출력을 지금 쌓인 것에 더해도 한도 안인가. 사건은 끝나는 내 요청마다 결과 하나, 종료 하나,
      * 인증·받은 요청 사건 하나이고, 출력은 미뤄 둔 것을 내보내거나 돌려보내는 프레임마다 하나에 제어 프레임 몇 개다. 넉넉하게 잡은 상한이라 일찍 멈출 수는 있어도 넘치지는 않는다.
      */
     private boolean hasSpace(CollectionSpace space) {
-        long eventsNeeded = (long) ledger.openCount() + ledger.queuedCount() + 2;
-        long outputsNeeded = (long) ledger.openCount()
-                + ledger.queuedCount()
-                + deferredPings.size()
-                + peerPendingStreams.size()
-                + OUTPUT_CONTROL_RESERVE;
+        long ownRequests = (long) ledger.openCount() + ledger.queuedCount();
+        long eventsNeeded = eventsNeeded(ownRequests);
+        long outputsNeeded = outputsNeeded(ownRequests, deferredPings.size(), peerPendingStreams.size());
         if (events.size() + eventsNeeded <= space.events() && outbox.size() + outputsNeeded <= space.outputs()) {
             return true;
         }
@@ -840,6 +861,17 @@ public final class Endpoint {
         List<OutboundMessage> drained = outbox.drain(id -> timers.started(id, drainedAt));
         ledger.onWriteStarted();
         return drained;
+    }
+
+    /**
+     * 아직 상대에게 다 내보내지 못한 출력의 바이트 합. 쓰기 대기열에 든 것과 쓰기를 시작해 남은 부분을 더한다. 진행 보고 방식에서 전송 모듈이 읽기를
+     * 멈출지 판단할 때 쓴다.
+     *
+     * @return 남은 출력 바이트
+     */
+    public long pendingOutputBytes() {
+        long writing = currentOutput != null && outputWritten > 0 ? currentOutput.length() - outputWritten : 0;
+        return outbox.bytes() + writing;
     }
 
     /** 현재 쓸 출력. 철회 또는 우선순위 변경 뒤에는 새 식별자가 발급된다. */
