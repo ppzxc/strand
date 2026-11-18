@@ -46,7 +46,7 @@ abstract class LimitBuilder<B extends LimitBuilder<B>> {
     }
 
     public B progressBytes(long frame, long control, long result, long plain, long cipher, long tlsControl) {
-        if (frame < 20 || control < 20)
+        if (frame < 20 || control < 32)
             throw new IllegalArgumentException("progress space cannot hold a minimal Strand frame");
         put(Resource.FRAME_ASSEMBLY_BYTES, frame);
         put(Resource.CONTROL_OUTPUT_BYTES, control);

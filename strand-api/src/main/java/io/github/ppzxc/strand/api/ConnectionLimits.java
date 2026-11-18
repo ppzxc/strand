@@ -16,6 +16,25 @@ public final class ConnectionLimits {
         return Objects.requireNonNull(values.get(resource), "resource is not connection-scoped");
     }
 
+    /** Validate transport-specific minimums once the frame and TLS configuration is known. */
+    public void requireProgress(
+            long frame, long control, long result, long plaintext, long ciphertext, long tlsControl) {
+        Resource[] kinds = {
+            Resource.FRAME_ASSEMBLY_BYTES,
+            Resource.CONTROL_OUTPUT_BYTES,
+            Resource.RESULT_EVENT_BYTES,
+            Resource.TLS_PLAINTEXT_BYTES,
+            Resource.TLS_CIPHERTEXT_BYTES,
+            Resource.TLS_CONTROL_BYTES
+        };
+        long[] minimum = {frame, control, result, plaintext, ciphertext, tlsControl};
+        for (int i = 0; i < kinds.length; i++) {
+            if (minimum[i] <= 0 || get(kinds[i]) < minimum[i]) {
+                throw new IllegalArgumentException("insufficient progress space: " + kinds[i]);
+            }
+        }
+    }
+
     public static Builder builder() {
         return new Builder();
     }

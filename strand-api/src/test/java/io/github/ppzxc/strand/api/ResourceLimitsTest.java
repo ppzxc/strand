@@ -6,6 +6,22 @@ import org.junit.jupiter.api.Test;
 
 class ResourceLimitsTest {
     @Test
+    void validatesRuntimeProgressRequirements() {
+        ConnectionLimits limits = ConnectionLimits.builder()
+                .outgoingRequests(1, 100)
+                .incomingRequests(1, 100)
+                .responseBytes(100)
+                .handlerTasks(1)
+                .observations(1)
+                .preparationBytes(100)
+                .progressBytes(100, 100, 100, 100, 100, 100)
+                .build();
+        assertThrows(IllegalArgumentException.class, () -> limits.requireProgress(101, 100, 100, 100, 100, 100));
+        assertThrows(IllegalArgumentException.class, () -> limits.requireProgress(100, 100, 100, 100, 101, 100));
+        limits.requireProgress(100, 100, 100, 100, 100, 100);
+    }
+
+    @Test
     void rejectsOwnerProgressSpaceSmallerThanOneConnection() {
         ConnectionLimits connection = ConnectionLimits.builder()
                 .outgoingRequests(1, 100)
@@ -38,6 +54,9 @@ class ResourceLimitsTest {
 
     @Test
     void rejectsInsufficientProgressSpace() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ConnectionLimits.builder().progressBytes(100, 31, 100, 100, 100, 100));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> ConnectionLimits.builder()
