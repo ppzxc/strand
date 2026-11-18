@@ -676,6 +676,27 @@ public final class Endpoint {
         return drained;
     }
 
+    /** 최대 개수만큼 사건을 순서대로 수거한다. */
+    public List<Event> drainEvents(int maximum) {
+        if (maximum < 0) {
+            throw new IllegalArgumentException("사건 수거 한도는 음수일 수 없다");
+        }
+        List<Event> drained = new ArrayList<>();
+        int consumed = 0;
+        while (consumed < events.size() && drained.size() < maximum) {
+            Event event = events.get(consumed++);
+            if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
+                if (refusedRequests.remove(event.streamId())) {
+                    continue;
+                }
+                drainedPeerStreamId = Math.max(drainedPeerStreamId, event.streamId());
+            }
+            drained.add(event);
+        }
+        events.subList(0, consumed).clear();
+        return drained;
+    }
+
     /**
      * {@code off}에서 시작하는 {@code available}바이트에서 한 단위(서문 또는 프레임)를 처리한다. 처리했으면 소비한 바이트 수를 돌려준다.
      * 모자라면 0을 돌려주고 {@link #wantedLength}에 진행하려면 있어야 하는 총 바이트 수를 둔다. 판정이 나서 닫았으면 0을 돌려준다. 도착 단위에

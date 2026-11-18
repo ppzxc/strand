@@ -6,6 +6,43 @@ import org.junit.jupiter.api.Test;
 
 class EndpointDeferredAuthenticationTest {
     @Test
+    void partialEventCollectionLeavesLaterRequestsEligibleForRefusal() {
+        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        server.receive(EndpointTest.bytes("c0de535452300000"));
+        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        server.completeAuthentication(server.drainEvents().get(0).authenticationId(), AuthDecision.PASS);
+        server.handlerReady();
+        server.drainMessages();
+        server.receive(Frames.request(257, 1, new byte[0]));
+        server.receive(Frames.request(257, 3, new byte[0]));
+
+        assertThat(server.drainEvents(1))
+                .singleElement()
+                .satisfies(e -> assertThat(e.streamId()).isEqualTo(1));
+        server.close(ErrorCode.INTERNAL_ERROR);
+        assertThat(server.drainEvents(1)).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        assertThat(server.drainMessages())
+                .anySatisfy(message -> assertThat(message.bytes()).isEqualTo(Frames.reset(3, ErrorCode.REFUSED)));
+    }
+
+    @Test
+    void boundedEventCollectionPreservesRemainingEventsInOrder() {
+        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        server.receive(EndpointTest.bytes("c0de535452300000"));
+        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        byte[] auth = EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553");
+        server.receive(auth);
+        server.receive(auth);
+
+        assertThat(server.drainEvents(1)).extracting(Event::kind).containsExactly(Event.Kind.AUTHENTICATION_REQUIRED);
+        assertThat(server.drainEvents(1)).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        assertThat(server.drainEvents(1)).isEmpty();
+    }
+
+    @Test
     void requestBeforeHandlerReadyIsRefused() {
         Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
         server.receive(EndpointTest.bytes("c0de535452300000"));
