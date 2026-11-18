@@ -48,7 +48,7 @@ class CoreWithdrawalRaceTest {
         switch (iteration % 3) {
             case 0:
                 command.accept(() -> ticket.set(endpoint.request(OpenEndpoint.REQUEST_TYPE, payload)));
-                spin(ThreadLocalRandom.current().nextLong(0, TimeUnit.MILLISECONDS.toNanos(3)));
+                spin(ThreadLocalRandom.current().nextLong(0, TimeUnit.MICROSECONDS.toNanos(300)));
                 command.accept(() -> endpoint.cancelRequest(ticket.get()));
                 break;
             case 1:
@@ -131,6 +131,8 @@ class CoreWithdrawalRaceTest {
             reader.shutdownNow();
         }
         System.out.println("tcp race outcomes: withdrawn=" + withdrawn + " deliveredThenReset=" + delivered);
+        assertThat(withdrawn).as("쓰기 전에 취소가 처리된 순서").isPositive();
+        assertThat(delivered).as("프레임이 먼저 전달된 순서").isPositive();
     }
 
     @Test
@@ -181,5 +183,7 @@ class CoreWithdrawalRaceTest {
             reader.shutdownNow();
         }
         System.out.println("tls race outcomes: withdrawn=" + withdrawn + " deliveredThenReset=" + delivered);
+        assertThat(withdrawn).as("평문 소비 전에 취소가 처리된 순서").isPositive();
+        assertThat(delivered).as("프레임이 먼저 전달된 순서").isPositive();
     }
 }

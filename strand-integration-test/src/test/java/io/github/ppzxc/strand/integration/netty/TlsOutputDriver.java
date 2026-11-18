@@ -35,6 +35,7 @@ final class TlsOutputDriver {
     private ByteBuffer plaintext;
     private long plaintextId = -1;
     private int zeroCiphertextWrites;
+    private int partialCiphertextWrites;
     private int budgetBlocks;
     private boolean retryScheduled;
     private boolean closeAfterFlush;
@@ -165,6 +166,7 @@ final class TlsOutputDriver {
                 zeroCiphertextWrites++;
                 return;
             }
+            if (count < head.readableBytes()) partialCiphertextWrites++;
             head.skipBytes(count);
             if (!head.isReadable()) {
                 ciphertext.removeFirst();
@@ -242,6 +244,11 @@ final class TlsOutputDriver {
 
     int zeroCiphertextWrites() {
         return zeroCiphertextWrites;
+    }
+
+    /** 대기 중인 암호문 조각보다 적게 실제로 쓴 횟수. */
+    int partialCiphertextWrites() {
+        return partialCiphertextWrites;
     }
 
     int budgetBlocks() {

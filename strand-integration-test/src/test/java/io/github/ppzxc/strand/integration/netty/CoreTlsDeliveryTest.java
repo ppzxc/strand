@@ -94,6 +94,9 @@ class CoreTlsDeliveryTest {
             List<Integer> plain = fixture.onLoop(fixture.driver::plaintextReports);
             assertThat(fixture.onLoop(fixture.driver::budgetBlocks)).isPositive();
             assertThat(fixture.onLoop(fixture.driver::zeroCiphertextWrites)).isPositive();
+            assertThat(fixture.onLoop(fixture.driver::partialCiphertextWrites))
+                    .as("암호문이 일부만 실제로 쓰인 적이 있다")
+                    .isPositive();
             assertThat(sum(plain)).isPositive().isLessThan(frameLength);
 
             fixture.driver.command(() -> fixture.endpoint.cancelRequest(ticket.get()));
