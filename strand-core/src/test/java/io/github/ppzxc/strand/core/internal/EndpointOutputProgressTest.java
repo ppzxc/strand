@@ -5,6 +5,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class EndpointOutputProgressTest {
+    @Test
+    void acknowledgementTimeoutStartsAfterFullOutputDelivery() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
+        EndpointOutput preface = client.nextOutput();
+        client.outputProgress(preface.id(), preface.bytes().length);
+        EndpointOutput hello = client.nextOutput();
+        client.outputProgress(hello.id(), 1);
+        client.advance(6000);
+        assertThat(client.drainEvents()).isEmpty();
+        client.outputProgress(hello.id(), hello.bytes().length - 1);
+        client.advance(5001);
+        assertThat(client.drainEvents()).extracting(Event::kind).contains(Event.Kind.CLOSED);
+    }
+
     private Endpoint openServer() {
         Endpoint server = Endpoint.server(EndpointConfig.defaults());
         server.receive(EndpointTest.bytes("c0de535452300000"));

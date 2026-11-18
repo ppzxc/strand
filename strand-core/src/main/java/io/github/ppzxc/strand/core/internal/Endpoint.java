@@ -115,6 +115,7 @@ public final class Endpoint {
     private @Nullable EndpointOutput currentOutput;
     private long nextOutputId;
     private int outputWritten;
+    private long outputWaitId = LivenessTimers.NO_WAIT;
     private boolean incrementalOutput;
     private boolean outputDisconnected;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
@@ -633,6 +634,7 @@ public final class Endpoint {
             selectedOutput = null;
             currentOutput = null;
             outputWritten = 0;
+            outputWaitId = LivenessTimers.NO_WAIT;
             outbox.discard();
         }
     }
@@ -694,14 +696,16 @@ public final class Endpoint {
         }
         if (outputWritten == 0) {
             Outbox.Node node = Objects.requireNonNull(selectedOutput);
-            if (node.waitId != LivenessTimers.NO_WAIT) {
-                timers.started(node.waitId, now);
-            }
+            outputWaitId = node.waitId;
             ledger.onWriteStarted(node);
             outbox.removeForWriting(node);
         }
         outputWritten += count;
         if (outputWritten == output.bytes().length) {
+            if (outputWaitId != LivenessTimers.NO_WAIT) {
+                timers.started(outputWaitId, now);
+                outputWaitId = LivenessTimers.NO_WAIT;
+            }
             ledger.onWriteCompleted(Objects.requireNonNull(selectedOutput));
             outputWritten = 0;
             selectedOutput = null;
