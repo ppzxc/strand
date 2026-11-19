@@ -99,8 +99,11 @@ final class EventKind {
     }
 
     /** 실제 이벤트를 같은 표기로. 벡터 형식에 없는 이벤트(AUTHENTICATED, REQUEST_RESET)는 null이다. 정의도 없고 제외로 정해지지도 않은 종류는 오류다. */
+    private static final java.util.Set<Event.Kind> NOT_IN_VECTOR_FORMAT =
+            java.util.EnumSet.of(Event.Kind.AUTHENTICATED, Event.Kind.REQUEST_RESET);
+
     static String actual(Event event) {
-        if (event.kind() == Event.Kind.AUTHENTICATED || event.kind() == Event.Kind.REQUEST_RESET) {
+        if (NOT_IN_VECTOR_FORMAT.contains(event.kind())) {
             return null;
         }
         for (EventKind kind : ALL) {
