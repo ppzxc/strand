@@ -186,4 +186,58 @@ class ResultCompletionTest {
         assertEquals("done", result.resultNow());
         assertEquals(0, connection.usage().current());
     }
+
+    @Test
+    void aDedicatedSlotLetsTheFirstObservationThroughWhileGeneralBudgetsAreFull() {
+        ObservationBudget connection = new ObservationBudget(1);
+        ObservationBudget owner = new ObservationBudget(1);
+        ObservationBudget dedicated = new ObservationBudget(1);
+        ResultCompletion<String> filler = new ResultCompletion<>(Runnable::run, connection, owner);
+        filler.observe(value -> {});
+        ResultCompletion<String> result = new ResultCompletion<>(Runnable::run, connection, owner, dedicated);
+
+        Observation first = result.observe(value -> {});
+        Observation second = result.observe(value -> fail("must not run"));
+
+        assertFalse(first.isDone());
+        assertTrue(second.failureNow().get() instanceof ResourceExhaustedException);
+        // 별도 자리를 쓴 관찰은 일반 한도의 현재량을 늘리지 않는다.
+        assertEquals(1, connection.usage().current());
+        assertEquals(1, dedicated.usage().current());
+        result.complete("done");
+        assertTrue(first.isDone());
+        assertEquals(0, dedicated.usage().current());
+        assertEquals(1, connection.usage().current());
+    }
+
+    @Test
+    void aDedicatedSlotIsReusableAfterItsObservationFinishesAndNeverReleasesTheGeneralBudgets() {
+        ObservationBudget connection = new ObservationBudget(1);
+        ObservationBudget owner = new ObservationBudget(1);
+        ObservationBudget dedicated = new ObservationBudget(1);
+        ResultCompletion<String> result = new ResultCompletion<>(Runnable::run, connection, owner, dedicated);
+        result.complete("done");
+
+        assertTrue(result.observe(value -> {}).isDone());
+        assertTrue(result.observe(value -> {}).isDone());
+        assertEquals(0, connection.usage().current());
+        assertEquals(0, owner.usage().current());
+        assertEquals(0, dedicated.usage().current());
+        assertEquals(0, connection.usage().highWater());
+    }
+
+    @Test
+    void aDedicatedSlotAlsoCoversAConversionAndIsReturnedWhenItIsCancelled() {
+        ObservationBudget connection = new ObservationBudget(1);
+        ObservationBudget owner = new ObservationBudget(1);
+        ObservationBudget dedicated = new ObservationBudget(1);
+        ResultCompletion<String> result = new ResultCompletion<>(Runnable::run, connection, owner, dedicated);
+
+        java.util.concurrent.CompletableFuture<String> stage =
+                result.toCompletionStage(Runnable::run).toCompletableFuture();
+        assertEquals(1, dedicated.usage().current());
+        assertEquals(0, connection.usage().current());
+        assertTrue(stage.cancel(false));
+        assertEquals(0, dedicated.usage().current());
+    }
 }

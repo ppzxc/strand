@@ -118,7 +118,11 @@ final class EngineRig implements AutoCloseable {
     final NioStrandConnection connection;
     boolean peerSawEnd;
 
-    private EngineRig(ConnectionParams.Role role, RequestHandler handler, InMemoryPassage.Pair pair) {
+    private EngineRig(
+            ConnectionParams.Role role,
+            RequestHandler handler,
+            InMemoryPassage.Pair pair,
+            java.util.concurrent.Executor appExecutor) {
         InMemoryPassage clientEnd = pair.first();
         this.peerEnd = pair.second();
         clientEnd.manualTime();
@@ -137,13 +141,14 @@ final class EngineRig implements AutoCloseable {
         if (ConnectionEngine.admit(budgets, space) != null) {
             throw new AssertionError("예약하지 못했다");
         }
+        java.util.concurrent.Executor executor = appExecutor == null ? fixture.executor : appExecutor;
         ConnectionParams params = new ConnectionParams(
                 role,
                 config,
                 remaining -> gate,
                 new InetSocketAddress("127.0.0.1", 1),
-                new SerialExecutor(fixture.executor),
-                fixture.executor,
+                new SerialExecutor(executor),
+                executor,
                 budgets,
                 space,
                 EndpointConfig.DEFAULT_MAX_FRAME_SIZE,
@@ -171,14 +176,19 @@ final class EngineRig implements AutoCloseable {
 
     /** 엔진이 클라이언트이고 상대(코어 서버)가 요청에 응답하는 연결. 준비가 끝난 상태로 돌려준다. */
     static EngineRig client() throws Exception {
-        EngineRig rig = new EngineRig(ConnectionParams.Role.CLIENT, null, InMemoryPassage.streams());
+        EngineRig rig = new EngineRig(ConnectionParams.Role.CLIENT, null, InMemoryPassage.streams(), null);
         rig.start();
         return rig;
     }
 
     /** 엔진이 서버이고 상대(코어 클라이언트)가 요청을 보내는 연결. 준비가 끝난 상태로 돌려준다. */
     static EngineRig server(RequestHandler handler) throws Exception {
-        EngineRig rig = new EngineRig(ConnectionParams.Role.SERVER, handler, InMemoryPassage.streams());
+        return server(handler, null);
+    }
+
+    /** 앱용 실행기를 직접 정한다. 실행하지 않는 실행기처럼 앱 쪽 작업의 진행을 시험이 쥐어야 할 때 쓴다. */
+    static EngineRig server(RequestHandler handler, java.util.concurrent.Executor appExecutor) throws Exception {
+        EngineRig rig = new EngineRig(ConnectionParams.Role.SERVER, handler, InMemoryPassage.streams(), appExecutor);
         rig.start();
         return rig;
     }

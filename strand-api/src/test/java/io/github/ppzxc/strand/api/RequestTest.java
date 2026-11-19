@@ -30,4 +30,10 @@ class RequestTest {
         request.payload()[1] = 9;
         assertArrayEquals(new byte[] {1, 2}, request.payload());
     }
+
+    @Test
+    void reportsPayloadLengthWithoutCopyingThePayload() {
+        assertEquals(3, Request.of(256, new byte[3]).payloadLength());
+        assertEquals(0, Request.of(256, new byte[0]).payloadLength());
+    }
 }
