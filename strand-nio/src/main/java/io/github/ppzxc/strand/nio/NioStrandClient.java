@@ -20,9 +20,17 @@ public final class NioStrandClient {
     private final CommonSettings.Common common;
     private final EndpointConfigSource configSource;
     private final @Nullable RequestHandler handler;
+    private final TcpConnector.Resolver resolver;
+    private final long credentialBytes;
 
     private NioStrandClient(
-            CommonSettings.Common common, EndpointConfigSource configSource, @Nullable RequestHandler handler) {
+            CommonSettings.Common common,
+            EndpointConfigSource configSource,
+            @Nullable RequestHandler handler,
+            TcpConnector.Resolver resolver,
+            long credentialBytes) {
+        this.resolver = resolver;
+        this.credentialBytes = credentialBytes;
         this.common = common;
         this.configSource = configSource;
         this.handler = handler;
@@ -46,8 +54,15 @@ public final class NioStrandClient {
     public static final class Builder extends CommonSettings<Builder> {
         private @Nullable Credentials credentials;
         private @Nullable RequestHandler handler;
+        private TcpConnector.Resolver resolver = java.net.InetAddress::getAllByName;
 
         private Builder() {}
+
+        /** 테스트가 주소 해석을 제어하려고 바꾼다. */
+        Builder resolver(TcpConnector.Resolver value) {
+            this.resolver = Objects.requireNonNull(value, "resolver");
+            return this;
+        }
 
         @Override
         Builder self() {
@@ -95,7 +110,9 @@ public final class NioStrandClient {
                         io.github.ppzxc.strand.core.internal.EndpointConfig config = common.endpointConfig();
                         return auth == null ? config : config.auth(auth.mechanism(), auth.secret());
                     },
-                    handler);
+                    handler,
+                    resolver,
+                    auth == null ? 0 : auth.mechanism().length() + auth.secret().length);
         }
     }
 
@@ -108,23 +125,54 @@ public final class NioStrandClient {
      * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
      */
     public CompletionStage<NioStrandConnection> connect(SocketAddress address) {
+        return connectAttempt(address).result();
+    }
+
+    /**
+     * 취소할 수 있는 연결 시도를 시작한다. {@link #connect}와 같은 준비를 하며 {@link NioConnectAttempt}로 결과 관찰·취소·통로 정리 관찰을 따로 한다.
+     * 호출 스레드는 막히지 않는다.
+     *
+     * @param address 서버 주소({@link InetSocketAddress})
+     * @return 연결 시도
+     * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
+     */
+    public NioConnectAttempt connectAttempt(SocketAddress address) {
         if (!(Objects.requireNonNull(address, "address") instanceof InetSocketAddress)) {
             throw new IllegalArgumentException("TCP 주소(InetSocketAddress)여야 한다");
         }
         InetSocketAddress target = (InetSocketAddress) address;
         CompletableFuture<NioStrandConnection> future = new CompletableFuture<>();
+        CompletableFuture<Void> released = new CompletableFuture<>();
+        ConnectAttemptState state = new ConnectAttemptState();
+        // 앱이 받는 Stage는 내부 결과와 따로 둔다. 앱이 이 Stage를 취소해도 연결 시도에는 영향이 없다.
+        NioConnectAttempt attempt = new NioConnectAttempt(
+                future.thenApply(connection -> connection), released.thenApply(done -> null), state);
         long now = common.nanoClock.getAsLong();
         io.github.ppzxc.strand.nio.internal.ConnectionBudgets budgets = common.owner.newConnection(common.limits);
         Resource denied = ConnectionEngine.admit(budgets, common.space);
         if (denied != null) {
-            future.completeExceptionally(new PreparationFailedException(new PreparationFailure(
-                    target, PreparationStage.CONNECTION, new ResourceExhaustedException(denied))));
-            return future.thenApply(connection -> connection);
+            fail(future, released, target, denied);
+            return attempt;
+        }
+        // 주소 해석·명령 대기 전에 보관할 입력(주소 이름·자격 증명)의 바이트를 예약한다.
+        PreparationBytes preparationBytes = new PreparationBytes(budgets);
+        if (!preparationBytes.tryReserve(retainedInputBytes(target))) {
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            fail(future, released, target, Resource.PREPARATION_BYTES);
+            return attempt;
         }
         ConnectionParams params = new ConnectionParams(
                 ConnectionParams.Role.CLIENT,
                 configSource.create(),
-                new TcpConnector(budgets, target, common.security.tlsContext()),
+                new TcpConnector(
+                        budgets,
+                        target,
+                        common.security.tlsContext(),
+                        resolver,
+                        common.executor,
+                        state,
+                        preparationBytes,
+                        common.nanoClock),
                 target,
                 new SerialExecutor(common.executor),
                 common.executor,
@@ -150,13 +198,35 @@ public final class NioStrandClient {
                 null,
                 null,
                 common.security.tlsContext() != null);
+        params.attempt = state;
+        params.preparationBytes = preparationBytes;
+        params.released = released;
         try {
             new NioStrandConnection(params).start();
         } catch (RuntimeException | Error e) {
+            preparationBytes.releaseAll();
             ConnectionEngine.cancelAdmission(budgets, common.space);
             future.completeExceptionally(e);
+            released.complete(null);
         }
-        return future.thenApply(connection -> connection);
+        return attempt;
+    }
+
+    /** 연결을 시작하지 못한 시도의 실패를 확정한다. 아직 통로를 만들지 않았으므로 정리할 것이 없다. */
+    private static void fail(
+            CompletableFuture<NioStrandConnection> future,
+            CompletableFuture<Void> released,
+            InetSocketAddress target,
+            Resource denied) {
+        future.completeExceptionally(new PreparationFailedException(
+                new PreparationFailure(target, PreparationStage.CONNECTION, new ResourceExhaustedException(denied))));
+        released.complete(null);
+    }
+
+    /** 이 시도가 라이브러리 안에 복사·보관하는 입력: 주소 이름과 자격 증명(방식 이름과 비밀). */
+    private long retainedInputBytes(InetSocketAddress target) {
+        long bytes = target.getHostString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        return bytes + credentialBytes;
     }
 
     /**
