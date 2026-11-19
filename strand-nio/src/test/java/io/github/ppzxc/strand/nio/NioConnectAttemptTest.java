@@ -383,6 +383,42 @@ class NioConnectAttemptTest {
         awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
     }
 
+    @Test
+    void aResolverThatThrowsFailsTheConnectionStageWithThatCauseAndReturnsTheSlot() throws Exception {
+        AppFixture fixture = track(AppFixture.plain());
+        IllegalStateException boom = new IllegalStateException("resolver bug");
+        NioStrandClient client = fixture.clientBuilder()
+                .resolver(host -> {
+                    throw boom;
+                })
+                .build();
+
+        PreparationFailure failure = failureOf(
+                client.connect(InetSocketAddress.createUnresolved("h", 9)).toCompletableFuture());
+
+        assertThat(failure.stage()).isEqualTo(PreparationStage.CONNECTION);
+        assertThat(failure.cause()).isSameAs(boom);
+        awaitTrue(() -> client.resourceUsage(Resource.RESOLVE_TASKS).current() == 0);
+    }
+
+    @Test
+    void resolvedAddressesAreReservedAsPreparationBytesBeforeTheyAreKept() throws Exception {
+        // 주소 이름("h") 1바이트는 들어가지만 해석된 IPv4 주소 4바이트까지는 들어가지 않는다.
+        AppFixture fixture = track(new AppFixture.Spec().preparationBytes(4, 4).plain());
+        NioStrandClient client = fixture.clientBuilder()
+                .resolver(host -> new InetAddress[] {InetAddress.getByName("127.0.0.1")})
+                .build();
+
+        PreparationFailure failure = failureOf(
+                client.connect(InetSocketAddress.createUnresolved("h", 9)).toCompletableFuture());
+
+        assertThat(failure.stage()).isEqualTo(PreparationStage.CONNECTION);
+        assertThat(failure.cause()).isInstanceOf(ResourceExhaustedException.class);
+        assertThat(((ResourceExhaustedException) failure.cause()).resource()).isEqualTo(Resource.PREPARATION_BYTES);
+        awaitTrue(() -> client.resourceUsage(Resource.PREPARATION_BYTES).current() == 0);
+        awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
+    }
+
     private static List<Throwable> rootCauses(Throwable failure) {
         List<Throwable> chain = new java.util.ArrayList<>();
         for (Throwable t = failure; t != null; t = t.getCause()) {
