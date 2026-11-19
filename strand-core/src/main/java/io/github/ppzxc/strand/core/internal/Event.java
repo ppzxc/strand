@@ -21,7 +21,9 @@ public final class Event {
         /** 클라이언트가 {@code AUTH(ACK)}를 받아 AUTH 관문을 통과함(규격 3.3절). 적합성 벡터에는 나오지 않는다. */
         AUTHENTICATED,
         /** 전송 모듈에 인증 판단을 요청한다. */
-        AUTHENTICATION_REQUIRED
+        AUTHENTICATION_REQUIRED,
+        /** 상대가 애플리케이션에 넘긴 요청의 스트림을 RESET했음(규격 4.4절). 같은 요청의 {@link #REQUEST_RECEIVED} 뒤에 나온다. */
+        REQUEST_RESET
     }
 
     /** {@code AUTH(ACK)}가 자격 증명의 수명을 알리지 않았음을 나타내는 값. */
@@ -29,6 +31,9 @@ public final class Event {
 
     /** {@link Kind#RESULT}가 아니어서 번호표가 없음을 나타내는 값. 실제 번호표는 0 이상이다. */
     private static final long NO_TICKET = -1;
+
+    /** {@link Kind#REQUEST_RESET}가 아니어서 RESET의 오류 코드가 없음을 나타내는 값. 실제 오류 코드는 0 이상이다. */
+    private static final long NO_RESET_ERROR_CODE = -1;
 
     private static final byte[] NO_BODY = new byte[0];
 
@@ -44,6 +49,7 @@ public final class Event {
     private final byte[] body;
     private final byte[] extensions;
     private final @Nullable String authenticationMechanism;
+    private final long resetErrorCode;
 
     private Event(
             Kind kind,
@@ -99,6 +105,37 @@ public final class Event {
             byte[] body,
             byte[] extensions,
             @Nullable String authenticationMechanism) {
+        this(
+                kind,
+                streamId,
+                status,
+                type,
+                credentialLifetime,
+                certainty,
+                cause,
+                closeReason,
+                ticket,
+                body,
+                extensions,
+                authenticationMechanism,
+                NO_RESET_ERROR_CODE);
+    }
+
+    private Event(
+            Kind kind,
+            long streamId,
+            int status,
+            int type,
+            long credentialLifetime,
+            @Nullable Certainty certainty,
+            @Nullable Throwable cause,
+            @Nullable CloseReason closeReason,
+            long ticket,
+            byte[] body,
+            byte[] extensions,
+            @Nullable String authenticationMechanism,
+            long resetErrorCode) {
+        this.resetErrorCode = resetErrorCode;
         this.closeReason = closeReason;
         this.certainty = certainty;
         this.cause = cause;
@@ -151,6 +188,24 @@ public final class Event {
             throw new IllegalStateException("인증 판단 사건이 아니다");
         }
         return Endpoint.AUTHENTICATION_ID;
+    }
+
+    /** @param errorCode 받은 RESET의 {@code error_code}(부호 없는 32비트 값) */
+    static Event requestReset(long streamId, long errorCode) {
+        return new Event(
+                Kind.REQUEST_RESET,
+                streamId,
+                0,
+                0,
+                NO_CREDENTIAL_LIFETIME,
+                null,
+                null,
+                null,
+                NO_TICKET,
+                NO_BODY,
+                NO_BODY,
+                null,
+                errorCode);
     }
 
     static Event closed(@Nullable Throwable cause, CloseReason closeReason) {
@@ -212,7 +267,17 @@ public final class Event {
     }
 
     /**
-     * {@link Kind#RESULT}와 {@link Kind#REQUEST_RECEIVED}의 스트림 번호. 다른 종류에서는 0이다. 스트림을 열기 전에 로컬에서 실패한
+     * {@link Kind#REQUEST_RESET}이 담은 받은 RESET의 {@code error_code}. 닫기 전용 코드나 정의하지 않은 코드도 받은 값 그대로다. 다른 종류에서는 비어
+     * 있다.
+     *
+     * @return 오류 코드(부호 없는 32비트 값)
+     */
+    public OptionalLong resetErrorCode() {
+        return resetErrorCode == NO_RESET_ERROR_CODE ? OptionalLong.empty() : OptionalLong.of(resetErrorCode);
+    }
+
+    /**
+     * {@link Kind#RESULT}, {@link Kind#REQUEST_RECEIVED}, {@link Kind#REQUEST_RESET}의 스트림 번호. 다른 종류에서는 0이다. 스트림을 열기 전에 로컬에서 실패한
      * 요청의 {@link Kind#RESULT}도 0이다. 실제 스트림 번호는 0이 될 수 없다.
      *
      * @return 스트림 번호

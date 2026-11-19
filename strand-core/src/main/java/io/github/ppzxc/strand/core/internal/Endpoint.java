@@ -1427,8 +1427,9 @@ public final class Endpoint {
             if (outcome != null) {
                 applyOutcome(outcome);
             }
-        } else {
-            peerPendingStreams.remove(streamId);
+        } else if (peerPendingStreams.remove(streamId) != null) {
+            // 애플리케이션에 넘겼거나 넘길 요청이다. 처리를 멈출 수 있게 알린다(규격 4.4절). 같은 요청의 REQUEST_RECEIVED가 이 사건보다 앞선다.
+            events.add(Event.requestReset(streamId, Frames.readUnsignedInt(bytes, payloadAt)));
         }
     }
 
