@@ -101,6 +101,14 @@ public final class NioStrandConnection {
         return engine.usage(resource);
     }
 
+    void shutdownClose() {
+        engine.shutdownClose();
+    }
+
+    void shutdownAbort() {
+        engine.shutdownAbort();
+    }
+
     void authenticated(AuthenticatedPeer value) {
         this.peer = value;
     }

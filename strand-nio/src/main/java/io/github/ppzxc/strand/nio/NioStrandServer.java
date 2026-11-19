@@ -3,6 +3,8 @@ package io.github.ppzxc.strand.nio;
 import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.ResourceExhaustedException;
 import io.github.ppzxc.strand.api.ResourceUsage;
+import io.github.ppzxc.strand.api.Result;
+import io.github.ppzxc.strand.api.ShutdownResult;
 import io.github.ppzxc.strand.nio.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.nio.internal.SerialExecutor;
 import java.io.IOException;
@@ -28,6 +30,7 @@ public final class NioStrandServer {
     private final @Nullable ConnectionHandlerFactory factory;
     private final @Nullable Consumer<PreparationFailure> failureListener;
     private final UnreleasedHandlers unreleased = new UnreleasedHandlers();
+    private final OwnerShutdown lifecycle;
 
     private NioStrandServer(
             CommonSettings.Common common,
@@ -40,6 +43,7 @@ public final class NioStrandServer {
         this.handler = handler;
         this.factory = factory;
         this.failureListener = failureListener;
+        this.lifecycle = new OwnerShutdown(common, unreleased);
     }
 
     /**
@@ -144,12 +148,23 @@ public final class NioStrandServer {
     public CompletionStage<Listener> listen(SocketAddress address) {
         Objects.requireNonNull(address, "address");
         CompletableFuture<Listener> future = new CompletableFuture<>();
+        if (!lifecycle.accepting()) {
+            future.completeExceptionally(new IllegalStateException("전체 종료를 시작해 새 리스닝을 받지 않는다"));
+            return future.thenApply(listener -> listener);
+        }
         try {
             ServerSocketChannel server = ServerSocketChannel.open();
             try {
                 server.setOption(StandardSocketOptions.SO_REUSEADDR, true);
                 server.bind(address);
-                future.complete(new Listener(server, server.getLocalAddress(), this::admit, common.executor));
+                Listener listener = new Listener(server, server.getLocalAddress(), this::admit, common.executor);
+                if (lifecycle.register(listener)) {
+                    future.complete(listener);
+                } else {
+                    // 바인딩하는 사이 전체 종료가 시작됐다. 리스닝을 닫고 실패시킨다.
+                    listener.close();
+                    future.completeExceptionally(new IllegalStateException("전체 종료를 시작해 새 리스닝을 받지 않는다"));
+                }
             } catch (IOException | RuntimeException e) {
                 closeQuietly(server);
                 throw e;
@@ -220,9 +235,18 @@ public final class NioStrandServer {
                 verifier,
                 common.security.tlsContext() != null);
         params.unreleased = unreleased;
+        NioStrandConnection connection = new NioStrandConnection(params);
+        if (!lifecycle.register(connection)) {
+            // 전체 종료가 시작됐다. 새 접수를 받지 않으므로 예약을 돌려주고 소켓을 닫는다.
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            PassageFactory.closeQuietly(channel);
+            return;
+        }
+        params.terminated = () -> lifecycle.unregister(connection);
         try {
-            new NioStrandConnection(params).start();
+            connection.start();
         } catch (RuntimeException | Error e) {
+            lifecycle.unregister(connection);
             ConnectionEngine.cancelAdmission(budgets, common.space);
             throw e;
         }
@@ -267,5 +291,35 @@ public final class NioStrandServer {
      */
     public ResourceUsage resourceUsage(Resource resource) {
         return common.owner.usage(resource);
+    }
+
+    /**
+     * 소유 객체 전체를 종료한다. 새 접수를 막고, 진행 중인 시도와 리스닝을 정리하고, 연결에 CLOSE를 시작하고, {@code shutdownGrace}가 끝나면 남은 연결을
+     * 끊고, 내부 실행 자원을 종료한다. 기한은 첫 호출 시각부터 센다. 반복 호출은 같은 결과를 돌려주며 기한을 늘리지 않는다. 앱이 준 실행기는 종료하지 않는다.
+     *
+     * @return 모든 내부 자원이 {@code shutdownDeadline} 안에 정리되면 성공, 아니면 {@link
+     *     io.github.ppzxc.strand.api.ShutdownDeadlineExceededException}으로 실패하는 결과
+     */
+    public CompletionStage<Void> shutdown() {
+        return lifecycle.shutdown();
+    }
+
+    /**
+     * 전체 종료 결과의 보존된 관찰. {@code COMPLETED} 또는 {@code DEADLINE_EXCEEDED}와 기한 시점에 정리되지 않은 자원을 담는다. 확정한 결과는 바꾸지 않는다.
+     *
+     * @return 종료 결과
+     */
+    public Result<ShutdownResult> shutdownResult() {
+        return lifecycle.result();
+    }
+
+    /**
+     * 실제 내부 자원(연결·리스닝)과 잔존 작업(핸들러·팩터리·인증·주소 해석)과 미정리 결과가 모두 해결되면 완료한다. 종료 기한 초과 뒤에도 정리가 계속되며, 그때 완료한다.
+     * 앱이 준 실행기 자체의 종료는 기다리지 않는다.
+     *
+     * @return 실제 정리 완료
+     */
+    public CompletionStage<Void> resourcesTerminated() {
+        return lifecycle.terminated();
     }
 }
