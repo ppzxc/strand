@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.nio;
 import io.github.ppzxc.strand.api.Certainty;
 import io.github.ppzxc.strand.api.CloseNotice;
 import io.github.ppzxc.strand.api.Extensions;
+import io.github.ppzxc.strand.api.ObservationBudget;
 import io.github.ppzxc.strand.api.Request;
 import io.github.ppzxc.strand.api.RequestEnd;
 import io.github.ppzxc.strand.api.RequestHandle;
@@ -70,6 +71,9 @@ final class ConnectionEngine {
     /** 한 번에 처리하는 입력 단위의 상한. 넘으면 시계와 명령 처리를 먼저 한다. */
     static final int MAX_UNITS_PER_STEP = 64;
 
+    /** 연결 생성 때 별도로 확보하는 기본 종료 알림의 자리 수(결정 #307: 한 건). */
+    private static final long DEFAULT_CLOSE_NOTICE_SLOTS = 1;
+
     /** 핸들러 예외 같은 로컬 진단의 기록처. 상대에게 보내는 것이 아니다. */
     private static final Logger LOGGER = Logger.getLogger("io.github.ppzxc.strand.nio");
 
@@ -130,10 +134,12 @@ final class ConnectionEngine {
         this.collectionSpace = CollectionSpace.of(
                 ProgressSpace.eventSlots(usageLimit(Resource.RESULT_EVENT_BYTES), params.maxFrameSize),
                 ProgressSpace.outputSlots(usageLimit(Resource.CONTROL_OUTPUT_BYTES)));
+        // 기본 종료 알림 한 건의 자리를 연결을 만들 때 일반 관찰 한도와 별도로 확보한다. 일반 관찰이 포화여도 종료 알림은 등록된다.
         this.closed = new ResultCompletion<>(
                 params.executor,
                 params.budgets.observationBudget(),
-                params.budgets.owner().observationBudget());
+                params.budgets.owner().observationBudget(),
+                new ObservationBudget(DEFAULT_CLOSE_NOTICE_SLOTS));
         this.thread = new Thread(this::run, "strand-nio-connection");
         this.thread.setDaemon(true);
     }
@@ -300,35 +306,32 @@ final class ConnectionEngine {
     }
 
     RequestHandle request(Request request, RequestOptions options) {
-        byte[] payload = request.payload();
         byte[] extensions = request.extensions().toWire();
-        long bytes = (long) payload.length + extensions.length;
+        long bytes = (long) request.payloadLength() + extensions.length;
         long deadlineAt = options.deadline().isPresent()
                 ? deadlineAfter(options.deadline().get())
                 : NO_DEADLINE;
-        OutgoingEntry entry = new OutgoingEntry(
-                new ResultCompletion<>(
-                        p.executor,
-                        p.budgets.observationBudget(),
-                        p.budgets.owner().observationBudget()),
-                request.type(),
-                extensions,
-                payload,
-                bytes,
-                deadlineAt);
-        RequestHandle handle = new Handle(entry);
+        ResultCompletion<RequestResult> result = new ResultCompletion<>(
+                p.executor,
+                p.budgets.observationBudget(),
+                p.budgets.owner().observationBudget());
         if (stopped) {
-            entry.finishLocally(Status.UNAVAILABLE, Certainty.NOT_PROCESSED, null);
-            return handle;
+            OutgoingEntry rejected = new OutgoingEntry(result, request.type(), EMPTY, EMPTY, bytes, deadlineAt);
+            rejected.finishLocally(Status.UNAVAILABLE, Certainty.NOT_PROCESSED, null);
+            return new Handle(rejected);
         }
+        // 본문을 복사하기 전에 연결·소유 객체 범위의 예약을 확보한다. 모자라면 복사하지 않고 처리 안 됨으로 끝낸다.
         Resource exhausted = reserveOutgoing(bytes);
         if (exhausted != null) {
-            entry.finishLocally(0, null, exhausted);
-            return handle;
+            OutgoingEntry rejected = new OutgoingEntry(result, request.type(), EMPTY, EMPTY, bytes, deadlineAt);
+            rejected.finishLocally(0, null, exhausted);
+            return new Handle(rejected);
         }
+        OutgoingEntry entry =
+                new OutgoingEntry(result, request.type(), extensions, request.payload(), bytes, deadlineAt);
         entry.reserved = true;
         submit(new RequestCommand(entry));
-        return handle;
+        return new Handle(entry);
     }
 
     private long deadlineAfter(java.time.Duration duration) {
@@ -464,6 +467,7 @@ final class ConnectionEngine {
             }
             try {
                 long ticket = loop.endpoint.request(entry.type, entry.extensions, entry.payload, remainingMs);
+                entry.releaseBody();
                 entry.ticket = ticket;
                 pending.put(ticket, entry);
             } catch (IllegalArgumentException e) {
@@ -1403,8 +1407,10 @@ final class ConnectionEngine {
 
         final ResultCompletion<RequestResult> result;
         final int type;
-        final byte[] extensions;
-        final byte[] payload;
+        /** core가 가져간 뒤에는 비운다(내부 참조를 놓는다). 전송 스레드에서만 쓴다. */
+        byte[] extensions;
+
+        byte[] payload;
         final long bytes;
         final long deadlineAtNanos;
         /** 전송 스레드에서만 읽고 쓴다. */
@@ -1438,6 +1444,7 @@ final class ConnectionEngine {
          * @param heldStreamId 이 요청의 프레임이 일부만 나간 채 출력에 남아 있을 때 그 스트림 번호, 아니면 {@link #NO_STREAM}
          */
         void finish(int status, Certainty certainty, byte[] body, long heldStreamId) {
+            releaseBody();
             if (heldStreamId != NO_STREAM && reserved) {
                 reserved = false;
                 p.budgets.release(Resource.OUTGOING_REQUESTS, 1);
@@ -1450,11 +1457,18 @@ final class ConnectionEngine {
 
         /** core를 거치지 않은 로컬 결과. {@code exhausted}가 있으면 RESOURCE_EXHAUSTED(처리 안 됨), 아니면 주어진 status와 확정성이다. */
         void finishLocally(int status, @Nullable Certainty certainty, @Nullable Resource exhausted) {
+            releaseBody();
             returnReservation();
             result.complete(
                     exhausted != null
                             ? RequestResult.resourceExhausted(exhausted)
                             : new RequestResult(status, Objects.requireNonNull(certainty), EMPTY));
+        }
+
+        /** core가 본문을 가져갔다. 이 객체가 쥔 본문 참조를 놓는다. */
+        void releaseBody() {
+            extensions = EMPTY;
+            payload = EMPTY;
         }
 
         private void returnReservation() {
