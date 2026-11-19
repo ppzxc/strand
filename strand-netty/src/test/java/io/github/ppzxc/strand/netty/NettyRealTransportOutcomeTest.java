@@ -92,6 +92,18 @@ class NettyRealTransportOutcomeTest {
         }
         NettyRealRig.awaitTrue(
                 () -> rig.server.resourceUsage(Resource.INCOMING_REQUESTS).current() == 0);
+        assertTheConnectionStillCarriesRequests();
+    }
+
+    /**
+     * RESET이 프레임을 끊거나 연결을 깨지 않았음을 확인한다: 그 뒤에 낸 요청을 서버가 받아 응답하고 클라이언트가 응답을 받는다. 프레임 도중 RESET이 끼어들었다면 스트림이
+     * 어긋나 이 요청은 끝나지 못한다.
+     */
+    private void assertTheConnectionStillCarriesRequests() throws Exception {
+        RequestHandle probe = send(SMALL);
+        IncomingRequest request = takeReceived();
+        request.respond(Status.OK, new byte[0]);
+        assertOutcome(probe, Status.OK, Certainty.RESPONSE);
     }
 
     private static void awaitEnded(IncomingRequest request) throws Exception {

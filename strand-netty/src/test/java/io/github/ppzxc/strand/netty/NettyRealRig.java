@@ -29,6 +29,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 
 /**
  * 실제 TCP(또는 TLS) 연결 위에서 요청 개시자의 쓰기 진행을 결정적으로 막는 시험대. 클라이언트와 서버 사이에 중계기를 두고, 중계기가 클라이언트의 쓰기를 읽지 않으면
@@ -157,23 +158,33 @@ final class NettyRealRig implements AutoCloseable {
         }
     }
 
-    final AppFixture fixture;
+    AppFixture fixture;
     final BlockingQueue<IncomingRequest> received = new LinkedBlockingQueue<>();
-    final NettyStrandServer server;
-    final Listener listener;
-    final PausableRelay relay;
+    NettyStrandServer server;
+    Listener listener;
+    PausableRelay relay;
     final RecordingChannel recording = new RecordingChannel();
-    final NettyStrandConnection connection;
+    NettyStrandConnection connection;
 
     NettyRealRig(boolean tls) throws Exception {
+        try {
+            start(tls);
+        } catch (Exception | Error e) {
+            // 준비에 실패하면 시험이 rig를 받지 못하므로 여기서 정리한다.
+            close();
+            throw e;
+        }
+    }
+
+    private void start(boolean tls) throws Exception {
         AppFixture.Spec spec = new AppFixture.Spec().maxFrameSize(1L << 20).bodyBytes(1 << 20);
-        this.fixture = tls ? spec.tls() : spec.plain();
-        this.server = fixture.serverBuilder()
+        fixture = tls ? spec.tls() : spec.plain();
+        server = fixture.serverBuilder()
                 .authenticate(credentials -> AuthenticationResult.accepted("peer"))
                 .handler(received::add)
                 .build();
-        this.listener = AppFixture.get(server.listen(AppFixture.anyLoopback()));
-        this.relay = new PausableRelay(((InetSocketAddress) listener.localAddress()).getPort());
+        listener = AppFixture.get(server.listen(AppFixture.anyLoopback()));
+        relay = new PausableRelay(((InetSocketAddress) listener.localAddress()).getPort());
         InetSocketAddress relayAddress = new InetSocketAddress(InetAddress.getLoopbackAddress(), relay.port());
         OwnerBudgets owner = new OwnerBudgets(fixture.limits);
         ConnectionBudgets budgets = owner.newConnection(fixture.limits);
@@ -220,7 +231,7 @@ final class NettyRealRig implements AutoCloseable {
         recording.config().setTcpNoDelay(true);
         NettyStrandConnection created = new NettyStrandConnection(params, recording);
         created.startClient(relayAddress);
-        this.connection = ready.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+        connection = ready.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
         awaitServerHandler();
     }
 
@@ -252,7 +263,7 @@ final class NettyRealRig implements AutoCloseable {
         awaitTrue(() -> recording.stalls.get() >= count);
     }
 
-    static void awaitTrue(java.util.function.BooleanSupplier condition) throws Exception {
+    static void awaitTrue(BooleanSupplier condition) throws Exception {
         NettyRig.awaitTrue(condition);
     }
 
@@ -262,13 +273,21 @@ final class NettyRealRig implements AutoCloseable {
 
     @Override
     public void close() {
-        connection.abort();
-        relay.close();
+        if (connection != null) {
+            connection.abort();
+        }
+        if (relay != null) {
+            relay.close();
+        }
         try {
-            listener.close();
+            if (listener != null) {
+                listener.close();
+            }
         } catch (Exception ignored) {
             // 정리 중의 오류는 할 수 있는 일이 없다.
         }
-        fixture.close();
+        if (fixture != null) {
+            fixture.close();
+        }
     }
 }

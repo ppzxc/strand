@@ -31,6 +31,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 
 /**
  * 연결 엔진 하나(클라이언트)를 수동 시계와 쓰기량을 제한하는 실제 채널에 꽂고, 맞은편 실제 소켓에서 core {@link Endpoint}를 {@link PeerLink}로 굴린다. 채널의 쓰기
@@ -75,14 +76,16 @@ final class NettyRig implements AutoCloseable {
     final AtomicLong clock = new AtomicLong(TimeUnit.SECONDS.toNanos(1_000));
     final LimitedChannel channel = new LimitedChannel();
     final EventLoop loop = fixture.group.next();
-    final PeerLink peer;
-    final NettyStrandConnection connection;
-    private final ServerSocket listener;
+    PeerLink peer;
+    NettyStrandConnection connection;
+    private ServerSocket listener;
     private final Set<Long> sentinelStreams = Collections.synchronizedSet(new HashSet<>());
     private CountDownLatch gateEntered;
     private CountDownLatch gateRelease;
 
-    private NettyRig() throws Exception {
+    private NettyRig() {}
+
+    private void start() throws Exception {
         EndpointConfig config = EndpointConfig.defaults()
                 .knownTypes(Collections.singleton(TYPE))
                 .maxConcurrentStreams(8)
@@ -94,7 +97,7 @@ final class NettyRig implements AutoCloseable {
         if (ConnectionEngine.admit(budgets, space) != null) {
             throw new AssertionError("예약하지 못했다");
         }
-        this.listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+        listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
         InetSocketAddress target = new InetSocketAddress(InetAddress.getLoopbackAddress(), listener.getLocalPort());
         CompletableFuture<NettyStrandConnection> ready = new CompletableFuture<>();
         ConnectionParams params = new ConnectionParams(
@@ -128,17 +131,25 @@ final class NettyRig implements AutoCloseable {
                 null,
                 ByteBufAllocator.DEFAULT);
         channel.config().setTcpNoDelay(true);
-        this.connection = new NettyStrandConnection(params, channel);
+        connection = new NettyStrandConnection(params, channel);
         connection.startClient(target);
         listener.setSoTimeout((int) TimeUnit.SECONDS.toMillis(AppFixture.WAIT_SECONDS));
         Socket accepted = listener.accept();
-        this.peer = new PeerLink(Endpoint.server(config), accepted);
+        peer = new PeerLink(Endpoint.server(config), accepted);
         ready.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
     /** 엔진이 클라이언트이고 상대(코어 서버)가 요청에 응답하는 연결. 준비가 끝난 상태로 돌려준다. */
     static NettyRig client() throws Exception {
-        return new NettyRig();
+        NettyRig rig = new NettyRig();
+        try {
+            rig.start();
+        } catch (Exception | Error e) {
+            // 준비에 실패하면 시험이 rig를 받지 못하므로 여기서 정리한다.
+            rig.close();
+            throw e;
+        }
+        return rig;
     }
 
     // ---------------------------------------------------------------- 시계, 문, 같은 걸음
@@ -268,7 +279,7 @@ final class NettyRig implements AutoCloseable {
         return connection.resourceUsage(resource).current();
     }
 
-    static void awaitTrue(java.util.function.BooleanSupplier condition) throws Exception {
+    static void awaitTrue(BooleanSupplier condition) throws Exception {
         long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(AppFixture.WAIT_SECONDS);
         while (!condition.getAsBoolean()) {
             if (System.nanoTime() > limit) {
@@ -281,10 +292,16 @@ final class NettyRig implements AutoCloseable {
     @Override
     public void close() {
         openGate();
-        connection.abort();
-        peer.close();
+        if (connection != null) {
+            connection.abort();
+        }
+        if (peer != null) {
+            peer.close();
+        }
         try {
-            listener.close();
+            if (listener != null) {
+                listener.close();
+            }
         } catch (IOException ignored) {
             // 정리 중의 오류는 할 수 있는 일이 없다.
         }
