@@ -5,6 +5,7 @@ import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.Result;
 import io.github.ppzxc.strand.api.ResultCompletion;
 import io.github.ppzxc.strand.api.ShutdownDeadlineExceededException;
+import io.github.ppzxc.strand.api.ShutdownKind;
 import io.github.ppzxc.strand.api.ShutdownResult;
 import io.github.ppzxc.strand.nio.internal.OwnerBudgets;
 import java.util.ArrayList;
@@ -128,7 +129,6 @@ final class OwnerShutdown {
      * @return 종료 결과. 성공은 {@code COMPLETED}, 기한 초과는 {@link ShutdownDeadlineExceededException}
      */
     CompletionStage<Void> shutdown() {
-        long now = clock.getAsLong();
         List<NioStrandConnection> toClose = new ArrayList<>();
         List<Listener> toStop = new ArrayList<>();
         boolean first;
@@ -136,7 +136,8 @@ final class OwnerShutdown {
             first = !shuttingDown;
             if (first) {
                 shuttingDown = true;
-                startedAt = now;
+                // 기한의 시작은 처음 호출이 잠금을 얻은 순간이다. 동시 첫 호출이 서로 다른 시각을 기준으로 삼지 않게 잠금 안에서 읽는다.
+                startedAt = clock.getAsLong();
                 toClose.addAll(connections);
                 toStop.addAll(listeners);
             }
@@ -207,7 +208,11 @@ final class OwnerShutdown {
             }
             if (done) {
                 // 결과를 먼저 보존했다. 이제 실제 정리 완료를 알린다.
-                dispatch(() -> terminated.complete(null));
+                // 종료 결과 완료를 먼저 알린 뒤 실제 정리 완료를 알린다(다중 스레드 실행기에서도 이 순서가 바뀌지 않는다).
+                dispatch(() -> {
+                    completeStopped();
+                    terminated.complete(null);
+                });
                 break;
             }
         }
@@ -234,10 +239,16 @@ final class OwnerShutdown {
     /** 종료 결과를 한 번 확정해 보존하고, 보존한 뒤에 앱이 관찰하는 완료를 알린다. */
     private void publish(ShutdownResult fixed) {
         result.complete(fixed);
-        if (fixed.kind() == io.github.ppzxc.strand.api.ShutdownKind.COMPLETED) {
-            dispatch(() -> stopped.complete(null));
+        dispatch(this::completeStopped);
+    }
+
+    /** 보존된 종료 결과대로 앱이 관찰하는 종료 완료를 알린다. 여러 번 불려도 한 번만 효과가 있다. */
+    private void completeStopped() {
+        ShutdownResult fixed = result.resultNow();
+        if (fixed.kind() == ShutdownKind.COMPLETED) {
+            stopped.complete(null);
         } else {
-            dispatch(() -> stopped.completeExceptionally(new ShutdownDeadlineExceededException(fixed)));
+            stopped.completeExceptionally(new ShutdownDeadlineExceededException(fixed));
         }
     }
 
