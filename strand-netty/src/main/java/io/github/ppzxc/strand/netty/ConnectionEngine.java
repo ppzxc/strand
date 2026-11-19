@@ -1121,7 +1121,11 @@ final class ConnectionEngine {
 
         /** 읽기를 켜고 끈다: 처리하지 못한 입력이 남았거나 core 출력이 상한을 넘으면 멈춘다. */
         private void updateRead() {
-            boolean want = !transportGone && inputQueue.isEmpty() && inputPos >= input.length && !backlogged();
+            boolean want = !transportGone
+                    && inputQueue.isEmpty()
+                    && inputPos >= input.length
+                    && (tls == null || tls.canAcceptRead())
+                    && !backlogged();
             if (want != reading) {
                 reading = want;
                 channel.config().setAutoRead(want);
@@ -1256,7 +1260,8 @@ final class ConnectionEngine {
                         releaseWriting();
                     }
                 }
-                if (count < remaining) {
+                // TCP는 남기고 못 쓴 것이 막힘이다. TLS는 레코드 하나씩 소비하므로 0일 때(암호문 공간이 차거나 핸드셰이크 전)만 막힘이다.
+                if (count == 0 || (tls == null && count < remaining)) {
                     return progressed;
                 }
             }

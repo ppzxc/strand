@@ -74,6 +74,11 @@ public final class TlsPipe {
         return handshakeDone;
     }
 
+    /** 다음 읽기 조각(암호문 패킷 하나)을 받을 공간이 있는가. 미완성 레코드 하나가 남은 것은 정상이고, 그 이상 쌓였을 때만 읽기를 멈춘다. */
+    public boolean canAcceptRead() {
+        return netIn.remaining() <= packetSize;
+    }
+
     /** 상대가 close_notify로 TLS를 끝냈는가. */
     public boolean peerEnded() {
         return peerEnded;

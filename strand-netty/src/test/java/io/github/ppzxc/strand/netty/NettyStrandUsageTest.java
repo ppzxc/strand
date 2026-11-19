@@ -136,7 +136,11 @@ class NettyStrandUsageTest {
 
         NettyStrandConnection connection = connect(client, listener);
 
-        // connect가 성공한 시점에 서버의 팩터리는 이미 끝나 있고, 요청은 곧바로 쓸 수 있다.
+        // 서버의 AUTH(ACK)는 팩터리 실행 전에 나가므로 팩터리 완료는 기다려 확인한다. 클라이언트 쪽은 connect 성공 때 이미 준비돼 요청을 곧바로 쓸 수 있다.
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (factoryPeer.get() == null && System.nanoTime() < limit) {
+            Thread.sleep(10);
+        }
         assertThat(factoryPeer.get()).isEqualTo("user-BEARER");
         assertThat(seenMechanism.get()).containsExactly("BEARER", "opaque");
         assertThat(connection.authenticatedPeer().remoteAddress()).isEqualTo(AppFixture.loopback(listener));

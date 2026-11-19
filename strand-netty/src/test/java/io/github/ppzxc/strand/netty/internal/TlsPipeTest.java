@@ -94,6 +94,7 @@ class TlsPipeTest {
         assertThat(server.pollPlain()).isEqualTo(HELLO);
         assertThat(server.pollPlain()).isNull();
         assertThat(client.pendingOutput()).isFalse();
+        assertThat(server.canAcceptRead()).isTrue();
     }
 
     @Test
