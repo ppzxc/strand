@@ -231,4 +231,41 @@ class TlsPipeTest {
         assertThat(client.pendingOutput()).isTrue();
         assertThatThrownBy(() -> client.writePlain(HELLO, 0, HELLO.length)).isInstanceOf(IOException.class);
     }
+
+    @Test
+    void readingStopsOnceMoreThanOnePacketOfAnUnfinishedRecordIsHeld() throws Exception {
+        pipes();
+        assertThat(client.canAcceptRead()).isTrue();
+        // 18000바이트 핸드셰이크 레코드를 선언하고 그 앞부분만 준다. 레코드가 끝나지 않아 풀 수 없고 그대로 쌓인다.
+        byte[] first = new byte[sizes.packetBufferSize()];
+        first[0] = 22;
+        first[1] = 3;
+        first[2] = 3;
+        first[3] = (byte) (18000 >> 8);
+        first[4] = (byte) 18000;
+        client.feed(first);
+        assertThat(client.canAcceptRead()).isTrue();
+
+        client.feed(new byte[100]);
+
+        assertThat(client.canAcceptRead()).isFalse();
+    }
+
+    @Test
+    void aHandshakeMessageWaitsWhileTheChannelHoldsTheEarlierOneAndIsSentOnceItDrains() throws Exception {
+        pipes();
+        client.pump();
+        toClient.budget = 0;
+
+        // 서버는 ClientHello를 받고 응답 여러 레코드를 wrap해야 하지만, 채널이 첫 레코드를 받아 주지 않아 제어용 암호문 공간이 찬 채로 멈춘다.
+        deliver(toServer, server);
+        server.pump();
+
+        assertThat(server.pendingOutput()).isTrue();
+        toClient.budget = Integer.MAX_VALUE;
+        server.pump();
+        assertThat(server.pendingOutput()).isFalse();
+        handshake();
+        assertThat(client.handshakeComplete()).isTrue();
+    }
 }

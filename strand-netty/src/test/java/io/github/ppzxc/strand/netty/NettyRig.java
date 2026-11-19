@@ -85,22 +85,37 @@ final class NettyRig implements AutoCloseable {
 
     private NettyRig() {}
 
+    OwnerBudgets owner;
+
+    InetSocketAddress target;
+    final CompletableFuture<NettyStrandConnection> ready = new CompletableFuture<>();
+    private EndpointConfig config;
+    ConnectionParams params;
+
     private void start() throws Exception {
-        EndpointConfig config = EndpointConfig.defaults()
+        prepare();
+        connection.startClient(target);
+        listener.setSoTimeout((int) TimeUnit.SECONDS.toMillis(AppFixture.WAIT_SECONDS));
+        Socket accepted = listener.accept();
+        peer = new PeerLink(Endpoint.server(config), accepted);
+        ready.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+    }
+
+    private void prepare() throws Exception {
+        config = EndpointConfig.defaults()
                 .knownTypes(Collections.singleton(TYPE))
                 .maxConcurrentStreams(8)
                 .ackTimeoutMs(HOUR_MS)
                 .idleIntervalMs(HOUR_MS * 24);
-        OwnerBudgets owner = new OwnerBudgets(fixture.limits);
+        owner = new OwnerBudgets(fixture.limits);
         ConnectionBudgets budgets = owner.newConnection(fixture.limits);
         ProgressSpace space = ProgressSpace.derive(8, 8, EndpointConfig.DEFAULT_MAX_FRAME_SIZE, null);
         if (ConnectionEngine.admit(budgets, space) != null) {
             throw new AssertionError("예약하지 못했다");
         }
         listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
-        InetSocketAddress target = new InetSocketAddress(InetAddress.getLoopbackAddress(), listener.getLocalPort());
-        CompletableFuture<NettyStrandConnection> ready = new CompletableFuture<>();
-        ConnectionParams params = new ConnectionParams(
+        target = new InetSocketAddress(InetAddress.getLoopbackAddress(), listener.getLocalPort());
+        params = new ConnectionParams(
                 ConnectionParams.Role.CLIENT,
                 config,
                 target,
@@ -132,11 +147,18 @@ final class NettyRig implements AutoCloseable {
                 ByteBufAllocator.DEFAULT);
         channel.config().setTcpNoDelay(true);
         connection = new NettyStrandConnection(params, channel);
-        connection.startClient(target);
-        listener.setSoTimeout((int) TimeUnit.SECONDS.toMillis(AppFixture.WAIT_SECONDS));
-        Socket accepted = listener.accept();
-        peer = new PeerLink(Endpoint.server(config), accepted);
-        ready.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+    }
+
+    /** 시작하지 않은 엔진. 상대 소켓은 연결을 받지 않는다(수락 대기열에만 쌓인다). */
+    static NettyRig idle() throws Exception {
+        NettyRig rig = new NettyRig();
+        try {
+            rig.prepare();
+        } catch (Exception | Error e) {
+            rig.close();
+            throw e;
+        }
+        return rig;
     }
 
     /** 엔진이 클라이언트이고 상대(코어 서버)가 요청에 응답하는 연결. 준비가 끝난 상태로 돌려준다. */
@@ -202,6 +224,25 @@ final class NettyRig implements AutoCloseable {
             }
         });
         done.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+    }
+
+    /** 이벤트 루프에서 작업을 실행하고 끝나기를 기다린다. */
+    void onLoop(Runnable task) throws Exception {
+        CompletableFuture<Void> done = new CompletableFuture<>();
+        loop.execute(() -> {
+            try {
+                task.run();
+                done.complete(null);
+            } catch (RuntimeException | Error e) {
+                done.completeExceptionally(e);
+            }
+        });
+        done.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+    }
+
+    /** 이벤트 루프가 지금까지 맡은 작업을 다 돌 때까지 기다린다. */
+    void settleLoop() throws Exception {
+        onLoop(() -> {});
     }
 
     // ---------------------------------------------------------------- 쓰기 통로
