@@ -24,12 +24,20 @@ public final class NettyStrandClient {
     private final CommonSettings.Common common;
     private final EndpointConfigSource configSource;
     private final @Nullable RequestHandler handler;
+    private final HostResolver resolver;
+    private final long credentialBytes;
 
     private NettyStrandClient(
-            CommonSettings.Common common, EndpointConfigSource configSource, @Nullable RequestHandler handler) {
+            CommonSettings.Common common,
+            EndpointConfigSource configSource,
+            @Nullable RequestHandler handler,
+            HostResolver resolver,
+            long credentialBytes) {
+        this.credentialBytes = credentialBytes;
         this.common = common;
         this.configSource = configSource;
         this.handler = handler;
+        this.resolver = resolver;
     }
 
     /** 연결마다 쓸 core 설정(자격 증명 포함)을 만든다. */
@@ -50,8 +58,15 @@ public final class NettyStrandClient {
     public static final class Builder extends CommonSettings<Builder> {
         private @Nullable Credentials credentials;
         private @Nullable RequestHandler handler;
+        private HostResolver resolver = HostResolver.SYSTEM;
 
         private Builder() {}
+
+        /** 테스트가 주소 해석을 제어하려고 바꾼다. */
+        Builder resolver(HostResolver value) {
+            this.resolver = Objects.requireNonNull(value, "resolver");
+            return this;
+        }
 
         @Override
         Builder self() {
@@ -99,32 +114,63 @@ public final class NettyStrandClient {
                         EndpointConfig config = common.endpointConfig();
                         return auth == null ? config : config.auth(auth.mechanism(), auth.secret());
                     },
-                    handler);
+                    handler,
+                    resolver,
+                    auth == null ? 0 : auth.mechanism().length() + auth.secret().length);
         }
     }
 
     /**
-     * 서버에 연결한다. 성공은 TCP 연결·채널 보안·HELLO·연결 인증·핸들러 등록이 모두 끝났다는 뜻이다. 실패는 {@link PreparationFailedException}이고 단계와
-     * 원인을 알린다. 반환된 Future를 취소해도 연결 시도는 취소되지 않는다. Future는 연결 채널의 EventLoop에서 완료된다.
+     * 서버에 연결한다. {@link #connectAttempt}의 {@link NettyConnectAttempt#result()}와 같다. 성공은 TCP 연결·채널 보안·HELLO·연결 인증·핸들러
+     * 등록이 모두 끝났다는 뜻이다. 실패는 {@link PreparationFailedException}이고 단계와 원인을 알린다. 반환된 Future는 취소할 수 없고 연결 시도를 취소하는 길은
+     * {@link #connectAttempt}의 {@link NettyConnectAttempt#cancel()}뿐이다. Future는 연결 채널의 EventLoop에서 완료된다.
      *
      * @param address 서버 주소({@link InetSocketAddress})
      * @return 연결 결과
      * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
      */
     public Future<NettyStrandConnection> connect(SocketAddress address) {
+        return connectAttempt(address).result();
+    }
+
+    /**
+     * 취소할 수 있는 연결 시도를 시작한다. {@link #connect}와 같은 준비를 하며 {@link NettyConnectAttempt}로 결과 관찰·취소·채널 정리 관찰을 따로 한다. 호출
+     * 스레드는 막히지 않는다. 주소 해석이 필요하면 앱용 실행기에서 하고, 해석된 주소는 하나씩 순서대로 연결하며 모든 시도가 처음 정한 준비 기한을 공유한다.
+     *
+     * @param address 서버 주소({@link InetSocketAddress})
+     * @return 연결 시도
+     * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
+     */
+    public NettyConnectAttempt connectAttempt(SocketAddress address) {
         if (!(Objects.requireNonNull(address, "address") instanceof InetSocketAddress)) {
             throw new IllegalArgumentException("TCP 주소(InetSocketAddress)여야 한다");
         }
         InetSocketAddress target = (InetSocketAddress) address;
         EventLoop loop = common.group.next();
+        // 앱이 받는 Future는 취소할 수 없게 한다. 취소를 받아들이면 성공한 연결이 주인 없이 남는다.
         Promise<NettyStrandConnection> promise = loop.newPromise();
+        promise.setUncancellable();
+        Promise<Void> released = loop.newPromise();
+        released.setUncancellable();
+        ConnectAttemptState state = new ConnectAttemptState();
+        NettyConnectAttempt attempt = new NettyConnectAttempt(promise, released, state);
         long now = common.nanoClock.getAsLong();
         ConnectionBudgets budgets = common.owner.newConnection(common.limits);
         Resource denied = ConnectionEngine.admit(budgets, common.space);
         if (denied != null) {
             promise.tryFailure(new PreparationFailedException(new PreparationFailure(
                     target, PreparationStage.CONNECTION, new ResourceExhaustedException(denied))));
-            return promise;
+            released.trySuccess(null);
+            return attempt;
+        }
+        // 주소 해석·명령 대기 전에 보관할 입력(주소 이름·자격 증명)의 바이트를 예약한다.
+        PreparationBytes preparationBytes = new PreparationBytes(budgets);
+        if (!preparationBytes.tryReserve(retainedInputBytes(target))) {
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            promise.tryFailure(new PreparationFailedException(new PreparationFailure(
+                    target, PreparationStage.CONNECTION, new ResourceExhaustedException(Resource.PREPARATION_BYTES))));
+            released.trySuccess(null);
+            return attempt;
         }
         ConnectionParams params = new ConnectionParams(
                 ConnectionParams.Role.CLIENT,
@@ -156,15 +202,27 @@ public final class NettyStrandClient {
                 null,
                 common.tls(target.getHostString(), target.getPort()),
                 common.allocator);
+        params.attempt = state;
+        params.released = released;
+        params.preparationBytes = preparationBytes;
+        params.resolver = resolver;
         try {
             StrandChannel channel = new StrandChannel();
             channel.config().setTcpNoDelay(true);
             new NettyStrandConnection(params, channel).startClient(target);
         } catch (RuntimeException | Error e) {
+            preparationBytes.releaseAll();
             ConnectionEngine.cancelAdmission(budgets, common.space);
             promise.tryFailure(e);
+            released.trySuccess(null);
         }
-        return promise;
+        return attempt;
+    }
+
+    /** 이 시도가 라이브러리 안에 복사·보관하는 입력: 주소 이름과 자격 증명(방식 이름과 비밀). */
+    private long retainedInputBytes(InetSocketAddress target) {
+        long bytes = target.getHostString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        return bytes + credentialBytes;
     }
 
     /**

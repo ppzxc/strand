@@ -366,7 +366,7 @@ class NettyStrandReservationTest {
     }
 
     @Test
-    void whenTheAppExecutorRejectsEverythingConnectStillCompletesAndResultsStayObservable() throws Exception {
+    void whenTheAppExecutorRejectsEverythingAfterConnectResultsAreRetainedAndOnlyObservationsFail() throws Exception {
         AppFixture server = track(AppFixture.plain());
         AppFixture clientFixture = track(AppFixture.plain());
         NettyStrandServer app = acceptingServer(server)
@@ -374,10 +374,10 @@ class NettyStrandReservationTest {
                 .build();
         Listener listener = listen(app);
         NettyStrandClient client = clientFixture.clientBuilder().build();
-        // 확인 작업(build)이 끝난 뒤에는 어떤 작업도 받지 않는다.
-        clientFixture.executor.rejecting = true;
 
         NettyStrandConnection connection = AppFixture.get(client.connect(AppFixture.loopback(listener)));
+        // 연결이 준비된 뒤에는 어떤 작업도 받지 않는다. 결과는 보존되고 관찰만 거절된다.
+        clientFixture.executor.rejecting = true;
         RequestHandle handle = connection.request(Request.of(TYPE, bytes("x")));
         awaitTrue(() -> handle.result().isDone());
         Observation rejected = handle.result().observe(result -> {});
@@ -400,7 +400,8 @@ class NettyStrandReservationTest {
                 .onConnectionFailure(failures::add)
                 .build();
         Listener listener = listen(app);
-        server.executor.rejecting = true;
+        // 인증 작업만 거절한다. 실패 알림은 받는다.
+        server.executor.rejectTaskNumber(2);
 
         CompletableFuture<NettyStrandConnection> stage =
                 AppFixture.cf(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
@@ -423,8 +424,8 @@ class NettyStrandReservationTest {
                 .onConnectionFailure(failures::add)
                 .build();
         Listener listener = listen(app);
-        // 인증 작업만 받고 팩터리 작업부터 거절한다.
-        server.executor.acceptRemaining.set(1);
+        // 인증 작업은 받고 팩터리 작업만 거절한다. 실패 알림은 받는다.
+        server.executor.rejectTaskNumber(3);
 
         AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
         PreparationFailure failure = failures.poll(15, TimeUnit.SECONDS);

@@ -9,6 +9,7 @@ import java.util.Objects;
 public final class PreparedHandler {
     private final RequestHandler handler;
     private final Runnable disposal;
+    private final java.util.concurrent.atomic.AtomicBoolean disposed = new java.util.concurrent.atomic.AtomicBoolean();
 
     private PreparedHandler(RequestHandler handler, Runnable disposal) {
         this.handler = handler;
@@ -37,11 +38,19 @@ public final class PreparedHandler {
         return of(handler, () -> {});
     }
 
-    RequestHandler handler() {
+    /**
+     * 핸들러.
+     *
+     * @return 핸들러
+     */
+    public RequestHandler handler() {
         return handler;
     }
 
-    void dispose() {
-        disposal.run();
+    /** 폐기 동작을 실행한다. 한 번만 실행되고 반복 호출은 아무 일도 하지 않는다. */
+    public void dispose() {
+        if (disposed.compareAndSet(false, true)) {
+            disposal.run();
+        }
     }
 }

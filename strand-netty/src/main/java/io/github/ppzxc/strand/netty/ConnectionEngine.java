@@ -38,6 +38,7 @@ import io.netty.channel.FixedRecvByteBufAllocator;
 import io.netty.util.ReferenceCountUtil;
 import java.io.EOFException;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayDeque;
@@ -98,7 +99,7 @@ final class ConnectionEngine {
 
     private final NettyStrandConnection facade;
     private final ConnectionParams p;
-    private final StrandChannel channel;
+    private volatile StrandChannel channel;
     private final EventLoop loop;
     private final CollectionSpace collectionSpace;
     private final Queue<Command> commands = new ConcurrentLinkedQueue<>();
@@ -115,6 +116,9 @@ final class ConnectionEngine {
     private PreparationStage stage;
     private boolean preparing = true;
     private boolean preparingSlotHeld = true;
+    private boolean releasedNotified;
+    private long resolvedBytes;
+    private final ArrayDeque<InetSocketAddress> pendingTargets = new ArrayDeque<>();
     private final Map<Long, OutgoingEntry> pending = new HashMap<>();
     private final Map<Long, IncomingRequest> incoming = new HashMap<>();
     private CloseNotice finalNotice = CloseNotice.disconnected(null);
@@ -134,12 +138,21 @@ final class ConnectionEngine {
                 params.executor,
                 params.budgets.observationBudget(),
                 params.budgets.owner().observationBudget());
+        installChannel(channel);
+    }
+
+    /** 채널에 읽기 조각 설정과 연결 핸들러를 달고, 채널이 정리되면 연결 정리를 시작하게 한다. */
+    private void installChannel(StrandChannel installed) {
         // 읽기 조각은 TLS 암호문 패킷 하나(받는 암호문 공간이 그 두 배) 또는 TCP 기본 조각이다. 한 번의 읽기 루프에서 한 조각만 받는다.
-        int chunk = params.tls == null ? TCP_READ_CHUNK_BYTES : params.tls.sizes.packetBufferSize();
-        channel.config().setAllocator(params.allocator);
-        channel.config().setRecvByteBufAllocator(new FixedRecvByteBufAllocator(chunk));
-        channel.pipeline().addLast(new Handler());
-        channel.closeFuture().addListener(future -> onChannelClosed());
+        int chunk = p.tls == null ? TCP_READ_CHUNK_BYTES : p.tls.sizes.packetBufferSize();
+        installed.config().setAllocator(p.allocator);
+        installed.config().setRecvByteBufAllocator(new FixedRecvByteBufAllocator(chunk));
+        installed.pipeline().addLast(new Handler());
+        installed.closeFuture().addListener(future -> {
+            if (installed.equals(channel)) {
+                onChannelClosed();
+            }
+        });
     }
 
     private long usageLimit(Resource resource) {
@@ -148,11 +161,17 @@ final class ConnectionEngine {
 
     // ---------------------------------------------------------------- 시작
 
-    /** 클라이언트: 준비 기한 타이머를 시작하고, 필요하면 주소를 앱 실행기에서 해석한 뒤 채널을 등록해 연결한다. */
+    /**
+     * 클라이언트: 준비 기한 타이머를 시작하고, 필요하면 주소를 앱 실행기에서 해석한 뒤 주소를 하나씩 순서대로 연결한다. 모든 시도가 처음 정한 준비 기한을
+     * 공유한다.
+     */
     void startClient(InetSocketAddress target) {
+        if (p.attempt != null) {
+            p.attempt.bind(this);
+        }
         armPreparationTimer();
         if (!target.isUnresolved()) {
-            register(target);
+            runOnLoop(() -> connectTo(java.util.Collections.singletonList(target), 0));
             return;
         }
         if (!p.budgets.owner().tryReserve(Resource.RESOLVE_TASKS, 1)) {
@@ -160,39 +179,119 @@ final class ConnectionEngine {
             return;
         }
         try {
-            p.appExecutor.execute(() -> resolveThenRegister(target));
+            p.appExecutor.execute(() -> resolveThenConnect(target));
         } catch (RuntimeException | Error e) {
             p.budgets.owner().release(Resource.RESOLVE_TASKS, 1);
             setupFailed(e);
         }
     }
 
-    private void resolveThenRegister(InetSocketAddress target) {
-        InetSocketAddress resolved = new InetSocketAddress(target.getHostString(), target.getPort());
-        p.budgets.owner().release(Resource.RESOLVE_TASKS, 1);
-        if (resolved.isUnresolved()) {
-            setupFailed(new UnknownHostException(target.getHostString()));
-        } else {
-            register(resolved);
+    /** 앱용 실행기에서 이름을 해석한다. 슬롯은 해석이 실제로 반환할 때까지 유지하고, 늦게 반환해도 이미 끝난 시도로는 연결하지 않는다. */
+    private void resolveThenConnect(InetSocketAddress target) {
+        InetAddress[] addresses = null;
+        Throwable failure = null;
+        try {
+            addresses = p.resolver.resolve(target.getHostString());
+        } catch (Throwable t) {
+            failure = t;
+        } finally {
+            p.budgets.owner().release(Resource.RESOLVE_TASKS, 1);
         }
+        if (failure != null) {
+            setupFailed(failure);
+            return;
+        }
+        List<InetSocketAddress> targets = new ArrayList<>();
+        for (InetAddress each : addresses == null ? new InetAddress[0] : addresses) {
+            targets.add(new InetSocketAddress(each, target.getPort()));
+        }
+        if (targets.isEmpty()) {
+            setupFailed(new UnknownHostException(target.getHostString()));
+            return;
+        }
+        long bytes = 0;
+        for (InetSocketAddress each : targets) {
+            bytes += each.getAddress().getAddress().length;
+        }
+        long reserve = bytes;
+        runOnLoop(() -> connectTo(targets, reserve));
+    }
+
+    /** 시도가 이미 취소·기한·종료로 끝났는가. 끝난 시도는 새 소켓을 열지 않는다. */
+    private boolean attemptEnded() {
+        return connectFailure != null || tornDown.get();
+    }
+
+    /** 이벤트 루프: 해석한 주소의 바이트를 보관하기 전에 예약하고, 첫 주소부터 연결한다. */
+    private void connectTo(List<InetSocketAddress> targets, long bytes) {
+        if (attemptEnded()) {
+            return;
+        }
+        PreparationBytes preparationBytes = p.preparationBytes;
+        if (preparationBytes != null) {
+            if (!preparationBytes.tryReserve(bytes)) {
+                setupFailed(new ResourceExhaustedException(Resource.PREPARATION_BYTES));
+                return;
+            }
+            resolvedBytes = bytes;
+        }
+        pendingTargets.addAll(targets);
+        connectNext();
+    }
+
+    /** 이벤트 루프: 다음 주소 하나에 연결한다. 남은 준비 기한이 없으면 기한 초과로 끝낸다. */
+    private void connectNext() {
+        InetSocketAddress target = pendingTargets.remove();
+        long remaining = p.preparationDeadlineAtNanos - p.nanoClock.getAsLong();
+        if (remaining <= 0) {
+            setupFailed(new PreparationDeadlineExceededException());
+            return;
+        }
+        StrandChannel current = channel;
+        current.config().setConnectTimeoutMillis((int) Math.min(remaining / NANOS_PER_MILLI + 1, Integer.MAX_VALUE));
+        ChannelFuture registration;
+        try {
+            registration = loop.register(current);
+        } catch (RuntimeException e) {
+            setupFailed(e);
+            return;
+        }
+        registration.addListener((ChannelFutureListener) future -> {
+            if (!future.isSuccess()) {
+                setupFailed(future.cause());
+            } else {
+                current.connect(target).addListener((ChannelFutureListener) connected -> {
+                    if (!connected.isSuccess()) {
+                        connectFailed(current, connected.cause());
+                    }
+                });
+            }
+        });
+    }
+
+    /** 이벤트 루프: 한 주소의 연결이 실패했다. 남은 주소가 있고 시도가 끝나지 않았으면 새 채널로 다음 주소를 연결하고, 아니면 이 실패로 끝낸다. */
+    @SuppressWarnings("FutureReturnValueIgnored") // 실패한 채널의 정리 완료는 관찰할 것이 없다.
+    private void connectFailed(StrandChannel failed, Throwable cause) {
+        if (attemptEnded()) {
+            // 취소·기한이 먼저 끝냈다.
+            return;
+        }
+        if (pendingTargets.isEmpty()) {
+            setupFailed(cause);
+            return;
+        }
+        StrandChannel next = new StrandChannel();
+        next.config().setTcpNoDelay(true);
+        // 교체를 먼저 한다. 실패한 채널의 정리가 연결 정리로 번지지 않는다.
+        channel = next;
+        installChannel(next);
+        failed.close();
+        connectNext();
     }
 
     /** 서버: 수락한 채널을 등록한다. 준비 기한은 수락부터 센다. */
     void startServer() {
         armPreparationTimer();
-        register(null);
-    }
-
-    private void register(@Nullable InetSocketAddress target) {
-        long remaining = p.preparationDeadlineAtNanos - p.nanoClock.getAsLong();
-        if (target != null) {
-            if (remaining <= 0) {
-                setupFailed(new PreparationDeadlineExceededException());
-                return;
-            }
-            channel.config()
-                    .setConnectTimeoutMillis((int) Math.min(remaining / NANOS_PER_MILLI + 1, Integer.MAX_VALUE));
-        }
         ChannelFuture registration;
         try {
             registration = loop.register(channel);
@@ -203,12 +302,6 @@ final class ConnectionEngine {
         registration.addListener((ChannelFutureListener) future -> {
             if (!future.isSuccess()) {
                 setupFailed(future.cause());
-            } else if (target != null) {
-                channel.connect(target).addListener((ChannelFutureListener) connected -> {
-                    if (!connected.isSuccess()) {
-                        setupFailed(connected.cause());
-                    }
-                });
             }
         });
     }
@@ -290,7 +383,10 @@ final class ConnectionEngine {
 
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-            onException(cause);
+            // 주소를 하나씩 시도하며 교체한 채널의 오류는 이 연결의 것이 아니다.
+            if (ctx.channel().equals(channel)) {
+                onException(cause);
+            }
         }
     }
 
@@ -298,6 +394,9 @@ final class ConnectionEngine {
         if (stopped || active != null) {
             return;
         }
+        // 연결이 맺어졌으므로 해석한 주소 목록은 더 쓰지 않는다.
+        pendingTargets.clear();
+        releaseResolvedBytes();
         try {
             stage = p.tls != null ? PreparationStage.SECURITY : PreparationStage.HELLO;
             Loop created = new Loop();
@@ -359,6 +458,7 @@ final class ConnectionEngine {
 
     private void complete() {
         releaseSlots();
+        completeReleased();
         closed.complete(finalNotice);
     }
 
@@ -443,7 +543,18 @@ final class ConnectionEngine {
         }
     }
 
+    private void releaseResolvedBytes() {
+        PreparationBytes preparationBytes = p.preparationBytes;
+        if (preparationBytes != null && resolvedBytes > 0) {
+            preparationBytes.release(resolvedBytes);
+            resolvedBytes = 0;
+        }
+    }
+
     private void releaseSlots() {
+        if (p.preparationBytes != null) {
+            p.preparationBytes.releaseAll();
+        }
         releaseProgress(p.budgets, p.space, progressKinds().length);
         p.budgets.owner().release(Resource.TOTAL_CONNECTIONS, 1);
         releasePreparingSlot();
@@ -475,6 +586,23 @@ final class ConnectionEngine {
     void abort() {
         abortRequested = true;
         wake();
+    }
+
+    /**
+     * 연결 시도 취소를 EventLoop에 넘긴다. 성공과 취소 가운데 이기는 쪽은 EventLoop가 처리하는 순서가 정한다. 채널이 활성화되기 전(주소 해석·연결 중)이면 곧바로 채널을
+     * 정리하고, 활성화된 뒤에는 연결 루프의 명령으로 준비를 취소로 확정한다.
+     */
+    void cancelAttempt() {
+        runOnLoop(() -> {
+            if (!preparing) {
+                return;
+            }
+            if (active == null) {
+                setupFailed(new ConnectionAttemptCancelledException());
+            } else {
+                submit(new CancelAttemptCommand());
+            }
+        });
     }
 
     RequestHandle request(Request request, RequestOptions options) {
@@ -698,6 +826,21 @@ final class ConnectionEngine {
         }
     }
 
+    private final class CancelAttemptCommand implements Command {
+        @Override
+        public void execute(Loop loop) {
+            if (preparing) {
+                ConnectionAttemptCancelledException cancelled = new ConnectionAttemptCancelledException();
+                loop.endCause = cancelled;
+                failPreparation(stage, cancelled);
+                loop.endpoint.disconnect();
+            }
+        }
+
+        @Override
+        public void abandon() {}
+    }
+
     private final class AuthenticationCompleteCommand implements Command {
         private final long id;
         private final AuthenticationResult result;
@@ -777,9 +920,13 @@ final class ConnectionEngine {
         }
     }
 
+    /**
+     * 활성화되지 못한 결과의 폐기를 앱용 실행기에 넘긴다. 폐기는 이 연결의 직렬 실행을 거치지 않는다: 같은 연결의 반환하지 않는 사용자 작업 뒤에서 폐기가 막히지
+     * 않고, 연결이 이미 끝났어도 실행된다.
+     */
     private void dispose(PreparedHandler handler) {
         try {
-            p.executor.execute(() -> {
+            p.appExecutor.execute(() -> {
                 try {
                     handler.dispose();
                 } finally {
@@ -787,8 +934,10 @@ final class ConnectionEngine {
                 }
             });
         } catch (RuntimeException | Error e) {
-            // 폐기 실행이 거절됐다. 폐기 동작을 전송 스레드에서 대신 실행하지 않는다. 앱 회수 경로는 후속 티켓(#319)이 맡는다.
-            p.budgets.owner().release(Resource.FACTORY_TASKS, 1);
+            // 폐기 실행이 거절됐다. 폐기 동작을 EventLoop에서 대신 실행하지 않고 앱이 조회·회수하도록 보존한다. 예약은 앱이 인수할 때까지 유지한다.
+            UnreleasedHandlers registry = Objects.requireNonNull(p.unreleased);
+            registry.add(new UnreleasedHandler(
+                    handler, registry, () -> p.budgets.owner().release(Resource.FACTORY_TASKS, 1)));
         }
     }
 
@@ -834,31 +983,73 @@ final class ConnectionEngine {
     private void failPreparation(PreparationStage at, Throwable cause) {
         if (preparing) {
             preparing = false;
+            confirmAttempt();
             releasePreparingSlot();
             PreparationFailure failure = new PreparationFailure(p.remoteAddress, at, cause);
-            notifyPreparation(() -> p.observer.failed(failure));
+            notifyFailed(failure);
         }
     }
 
     private void becomeReady() {
         if (preparing) {
             preparing = false;
+            confirmAttempt();
             releasePreparingSlot();
-            notifyPreparation(() -> p.observer.ready(facade));
+            // 성공한 시도는 채널을 연결에 넘겼으므로 시도가 정리할 것이 없다.
+            completeReleased();
+            notifyReady();
+        }
+    }
+
+    private void confirmAttempt() {
+        if (p.attempt != null) {
+            p.attempt.confirm();
         }
     }
 
     /**
-     * 준비 결과 알림은 앱용 실행기에서 한다. 같은 연결의 인증·팩터리가 반환하지 않아도 알릴 수 있도록 연결별 직렬 실행을 거치지 않는다. 실행기가
-     * 거절해도 연결 시도가 끝나지 않고 남지 않게 별도 스레드로 알린다.
+     * 시도가 소유한 채널 정리 완료를 알린다. 알림은 앱용 실행기를 거치며, 거절되면 실행기 없이 확정한다(Netty Future의 리스너는 어차피 EventLoop에서 실행된다).
      */
-    private void notifyPreparation(Runnable notification) {
+    private void completeReleased() {
+        io.netty.util.concurrent.Promise<Void> released = p.released;
+        if (released == null || releasedNotified) {
+            return;
+        }
+        releasedNotified = true;
         try {
-            p.appExecutor.execute(notification);
+            p.appExecutor.execute(() -> released.trySuccess(null));
         } catch (RuntimeException | Error e) {
-            Thread notifier = new Thread(notification, "strand-netty-notify");
-            notifier.setDaemon(true);
-            notifier.start();
+            released.trySuccess(null);
+        }
+    }
+
+    /**
+     * 준비 성공 알림은 앱용 실행기에서 한다. 같은 연결의 인증·팩터리가 반환하지 않아도 알릴 수 있도록 연결별 직렬 실행을 거치지 않는다. 실행기가 거절하면
+     * 알림을 대신할 스레드를 만들지 않고, 앱이 받을 수 없는 연결이므로 끊고 시도를 거절 원인으로 실패시킨다. 서버는 성공을 알릴 앱 관찰자가 없어 거절돼도 연결을 유지한다.
+     */
+    private void notifyReady() {
+        try {
+            p.appExecutor.execute(() -> p.observer.ready(facade));
+        } catch (RuntimeException | Error e) {
+            if (p.role == ConnectionParams.Role.CLIENT) {
+                abortRequested = true;
+                wake();
+                p.observer.rejected(new PreparationFailure(p.remoteAddress, stage, e));
+            }
+        }
+    }
+
+    /** 준비 실패 알림도 앱용 실행기에서 한다. 거절되면 원래 실패에 거절을 덧붙여 확정한다(Netty Future의 리스너는 EventLoop에서 실행된다). */
+    private void notifyFailed(PreparationFailure failure) {
+        try {
+            p.appExecutor.execute(() -> p.observer.failed(failure));
+        } catch (RuntimeException | Error e) {
+            try {
+                failure.cause().addSuppressed(e);
+            } catch (IllegalArgumentException sameAsCause) {
+                // 거절 예외가 원인과 같은 객체면 덧붙일 것이 없다.
+            }
+            p.observer.rejected(failure);
         }
     }
 
@@ -900,7 +1091,7 @@ final class ConnectionEngine {
         submit(new FactoryCompleteCommand(prepared, failure));
     }
 
-    private void runAuthentication(long id, Credentials credentials, CredentialVerifier verifier) {
+    private void runAuthentication(long id, Credentials credentials, CredentialVerifier verifier, long retained) {
         AuthenticationResult result = null;
         Throwable failure = null;
         try {
@@ -909,6 +1100,7 @@ final class ConnectionEngine {
             failure = t;
         } finally {
             p.budgets.owner().release(Resource.AUTHENTICATION_TASKS, 1);
+            p.budgets.release(Resource.PREPARATION_BYTES, retained);
         }
         submit(new AuthenticationCompleteCommand(id, result, failure));
     }
@@ -1353,21 +1545,31 @@ final class ConnectionEngine {
             stage = PreparationStage.AUTHENTICATION;
             CredentialVerifier verifier = Objects.requireNonNull(p.verifier);
             long id = event.authenticationId();
+            // 자격 증명 복사본(방식 이름과 비밀)은 보관하기 전에 바이트를 예약한다. 사용자 함수가 반환하면 돌려준다.
+            long retained = (long) event.authenticationMechanism().get().length() + event.body().length;
+            if (!p.budgets.tryReserve(Resource.PREPARATION_BYTES, retained)) {
+                rejectAuthentication(id, new ResourceExhaustedException(Resource.PREPARATION_BYTES));
+                return;
+            }
             Credentials credentials =
                     Credentials.of(event.authenticationMechanism().get(), event.body());
             if (!p.budgets.owner().tryReserve(Resource.AUTHENTICATION_TASKS, 1)) {
-                endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
-                failPreparation(
-                        PreparationStage.AUTHENTICATION, new ResourceExhaustedException(Resource.AUTHENTICATION_TASKS));
+                p.budgets.release(Resource.PREPARATION_BYTES, retained);
+                rejectAuthentication(id, new ResourceExhaustedException(Resource.AUTHENTICATION_TASKS));
                 return;
             }
             try {
-                p.executor.execute(() -> runAuthentication(id, credentials, verifier));
+                p.executor.execute(() -> runAuthentication(id, credentials, verifier, retained));
             } catch (RuntimeException | Error e) {
                 p.budgets.owner().release(Resource.AUTHENTICATION_TASKS, 1);
-                endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
-                failPreparation(PreparationStage.AUTHENTICATION, e);
+                p.budgets.release(Resource.PREPARATION_BYTES, retained);
+                rejectAuthentication(id, e);
             }
+        }
+
+        private void rejectAuthentication(long id, Throwable cause) {
+            endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
+            failPreparation(PreparationStage.AUTHENTICATION, cause);
         }
 
         private void onClosed(Event event) {
