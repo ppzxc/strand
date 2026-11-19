@@ -124,9 +124,13 @@ val verifyDependencies = tasks.register<VerifyDependencyAllowlist>("verifyDepend
   allowedRuntime.add("project ':strand-core'")
   allowedCompile.add("project ':strand-core'")
   // core는 공통 앱 API에 의존하지 않는다(#312). strand-api 의존은 전송 모듈에만 허용한다.
-  if (project.path == ":strand-nio") {
+  if (project.path == ":strand-nio" || project.path == ":strand-netty") {
     allowedRuntime.add("project ':strand-api'")
     allowedCompile.add("project ':strand-api'")
+  }
+  // Netty 전송 모듈은 앱이 제공하는 Netty를 컴파일에만 쓴다(compileOnlyApi). 런타임 의존성은 여전히 허용하지 않는다.
+  if (project.path == ":strand-netty") {
+    allowedCompile.addAll(resolved("compileClasspath").map { components -> components.filter { it.startsWith("io.netty:") }.toSet() })
   }
   passedMarker.set(layout.buildDirectory.file("verifyDependencies/ok"))
 }
