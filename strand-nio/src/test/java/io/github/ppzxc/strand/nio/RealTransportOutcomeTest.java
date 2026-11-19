@@ -8,6 +8,7 @@ import io.github.ppzxc.strand.api.Request;
 import io.github.ppzxc.strand.api.RequestHandle;
 import io.github.ppzxc.strand.api.RequestOptions;
 import io.github.ppzxc.strand.api.RequestResult;
+import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.Status;
 import java.time.Duration;
 import java.util.OptionalLong;
@@ -75,6 +76,24 @@ class RealTransportOutcomeTest {
         return request;
     }
 
+    /**
+     * 서버가 요청 프레임 전체를 받은 뒤(받은 요청 바이트 예약의 최고량이 본문 크기 이상) RESET으로 끝난다. RESET이 핸들러 시작보다 먼저 처리되면 핸들러는
+     * 시작하지 않으므로, 핸들러가 요청을 받았다면 그 {@code ended()}가 취소 코드의 상대 RESET인지, 아니면 받은 요청 예약이 돌아왔는지로 확인한다.
+     */
+    private void assertServerGotTheWholeFrameThenTheCancelReset() throws Exception {
+        RealRig.awaitTrue(
+                () -> rig.server.resourceUsage(Resource.INCOMING_BYTES).highWater() >= BIG.length);
+        IncomingRequest request = rig.received.poll(1, TimeUnit.SECONDS);
+        if (request != null) {
+            assertThat(request.payload()).hasSize(BIG.length);
+            awaitEnded(request);
+            assertThat(request.ended().resultNow().isPeerReset()).isTrue();
+            assertThat(request.ended().resultNow().errorCode()).isEqualTo(OptionalLong.of(CANCEL_CODE));
+        }
+        RealRig.awaitTrue(
+                () -> rig.server.resourceUsage(Resource.INCOMING_REQUESTS).current() == 0);
+    }
+
     private static void awaitEnded(IncomingRequest request) throws Exception {
         RealRig.awaitTrue(() -> request.ended().isDone());
     }
@@ -90,11 +109,7 @@ class RealTransportOutcomeTest {
         assertOutcome(big, Status.CANCELLED, Certainty.UNKNOWN);
         rig.relay.resume();
 
-        IncomingRequest request = takeReceived();
-        assertThat(request.payload()).hasSize(BIG.length);
-        awaitEnded(request);
-        assertThat(request.ended().resultNow().isPeerReset()).isTrue();
-        assertThat(request.ended().resultNow().errorCode()).isEqualTo(OptionalLong.of(CANCEL_CODE));
+        assertServerGotTheWholeFrameThenTheCancelReset();
     }
 
     @ParameterizedTest
@@ -126,10 +141,7 @@ class RealTransportOutcomeTest {
         assertOutcome(big, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
         rig.relay.resume();
 
-        IncomingRequest request = takeReceived();
-        assertThat(request.payload()).hasSize(BIG.length);
-        awaitEnded(request);
-        assertThat(request.ended().resultNow().errorCode()).isEqualTo(OptionalLong.of(CANCEL_CODE));
+        assertServerGotTheWholeFrameThenTheCancelReset();
     }
 
     @ParameterizedTest
