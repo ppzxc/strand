@@ -92,8 +92,7 @@ public final class TcpPassage implements Passage {
             if (timeoutMs == 0) {
                 return Inbound.none();
             }
-            int interest =
-                    (waitForRead && !ended ? SelectionKey.OP_READ : 0) | (waitForWrite ? SelectionKey.OP_WRITE : 0);
+            int interest = (waitForRead ? SelectionKey.OP_READ : 0) | (waitForWrite ? SelectionKey.OP_WRITE : 0);
             key.interestOps(interest);
             if (timeoutMs < 0) {
                 selector.select();
