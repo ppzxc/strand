@@ -269,7 +269,12 @@ final class RealRig implements AutoCloseable {
         for (int attempt = 0; attempt < 100; attempt++) {
             io.github.ppzxc.strand.api.RequestHandle probe =
                     connection.request(io.github.ppzxc.strand.api.Request.of(AppFixture.TYPE, new byte[0]));
-            IncomingRequest request = received.poll(100, TimeUnit.MILLISECONDS);
+            // 프로브는 서버 핸들러가 받거나(응답) 거절되어 끝난다. 둘 가운데 먼저 일어나는 것을 기다려 늦게 도착한 프로브가 남지 않게 한다.
+            IncomingRequest request = null;
+            long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(AppFixture.WAIT_SECONDS);
+            while (request == null && !probe.result().isDone() && System.nanoTime() < limit) {
+                request = received.poll(5, TimeUnit.MILLISECONDS);
+            }
             if (request != null) {
                 request.respond(io.github.ppzxc.strand.api.Status.OK, new byte[0]);
             }
