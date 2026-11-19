@@ -18,7 +18,6 @@ final class ConnectAttemptState {
      * @return 확정되기 전이라 접수했으면 true
      */
     boolean cancel() {
-        Runnable abort;
         ConnectionEngine target;
         synchronized (this) {
             if (confirmed) {
@@ -28,11 +27,11 @@ final class ConnectAttemptState {
                 return true;
             }
             cancelRequested = true;
-            abort = inProgress;
             target = engine;
-        }
-        if (abort != null) {
-            abort.run();
+            // 잠금 안에서 끊는다. 통로 열기가 끝나 등록을 해제한 뒤에는 끊기가 이미 끝났거나 아예 일어나지 않아, 연결에 넘어간 통로를 닫지 않는다.
+            if (inProgress != null) {
+                inProgress.run();
+            }
         }
         if (target != null) {
             target.cancelAttempt();
@@ -64,14 +63,12 @@ final class ConnectAttemptState {
     /**
      * 취소하면 끊어야 할 진행 중인 작업을 등록하거나(null이면 해제) 한다. 이미 취소가 접수됐다면 등록 즉시 끊는다.
      */
-    void setInProgress(@Nullable Runnable abort) {
-        Runnable abortNow;
+    void registerAbort(@Nullable Runnable abort) {
         synchronized (this) {
             inProgress = abort;
-            abortNow = cancelRequested ? abort : null;
-        }
-        if (abortNow != null) {
-            abortNow.run();
+            if (abort != null && cancelRequested) {
+                abort.run();
+            }
         }
     }
 }

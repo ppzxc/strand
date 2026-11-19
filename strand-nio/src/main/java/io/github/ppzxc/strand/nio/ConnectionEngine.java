@@ -643,7 +643,7 @@ final class ConnectionEngine {
         }
     }
 
-    /** 시도가 소유한 통로 정리 완료를 알린다. 알림은 앱용 실행기를 거치며, 거절돼도 완료 자체는 사용자 코드 없이 확정한다. */
+    /** 시도가 소유한 통로 정리 완료를 알린다. 알림은 앱용 실행기를 거치며, 거절되면 실행기 없이 확정한다(앱이 붙인 의존 단계는 이 스레드에서 실행될 수 있다. 공통 API의 변환 Stage가 거절을 실패로 확정하는 것과 같다). */
     private void completeReleased() {
         java.util.concurrent.CompletableFuture<Void> released = p.released;
         if (released == null || releasedNotified) {
@@ -674,7 +674,7 @@ final class ConnectionEngine {
         }
     }
 
-    /** 준비 실패 알림도 앱용 실행기에서 한다. 거절되면 원래 실패에 거절을 덧붙여 전송 스레드에서 사용자 코드 없이 확정한다. */
+    /** 준비 실패 알림도 앱용 실행기에서 한다. 거절되면 원래 실패에 거절을 덧붙여 전송 스레드에서 확정한다(앱이 붙인 의존 단계는 이 스레드에서 실행될 수 있다). */
     private void notifyFailed(PreparationFailure failure) {
         try {
             p.appExecutor.execute(() -> p.observer.failed(failure));

@@ -21,6 +21,14 @@ final class PreparationBytes {
         return true;
     }
 
+    /** 예약한 것 가운데 {@code bytes}를 돌려준다. */
+    synchronized void release(long bytes) {
+        if (bytes > 0) {
+            budgets.release(Resource.PREPARATION_BYTES, bytes);
+            held -= bytes;
+        }
+    }
+
     /** 예약한 전부를 돌려준다. 반복해도 한 번만 돌려준다. */
     synchronized void releaseAll() {
         if (held > 0) {

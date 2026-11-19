@@ -65,8 +65,18 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
     @Override
     public Passage open(long remainingNanos) throws IOException {
         long deadline = Saturating.add(nanoClock.getAsLong(), remainingNanos);
+        long[] resolvedBytes = new long[1];
+        try {
+            return open(deadline, resolvedBytes);
+        } finally {
+            // 해석한 주소 목록은 열기가 끝나면 버리므로 그 바이트를 돌려준다.
+            preparationBytes.release(resolvedBytes[0]);
+        }
+    }
+
+    private Passage open(long deadline, long[] resolvedBytes) throws IOException {
         IOException last = null;
-        for (InetSocketAddress target : targets(deadline)) {
+        for (InetSocketAddress target : targets(deadline, resolvedBytes)) {
             long remaining = deadline - nanoClock.getAsLong();
             if (remaining <= 0) {
                 throw new SocketTimeoutException("준비 기한 안에 연결하지 못했다");
@@ -85,7 +95,7 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
 
     private Passage connect(InetSocketAddress target, long remainingNanos) throws IOException {
         SocketChannel channel = SocketChannel.open();
-        state.setInProgress(() -> PassageFactory.closeQuietly(channel));
+        state.registerAbort(() -> PassageFactory.closeQuietly(channel));
         try {
             channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
             channel.socket().connect(target, (int) Math.min(remainingNanos / 1_000_000L + 1, Integer.MAX_VALUE));
@@ -93,13 +103,13 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
             PassageFactory.closeQuietly(channel);
             throw e;
         } finally {
-            state.setInProgress(null);
+            state.registerAbort(null);
         }
         return PassageFactory.open(channel, tlsContext, target.getHostString(), target.getPort());
     }
 
     /** 해석하지 않은 주소는 해석 작업 슬롯을 예약해 앱용 실행기에서 해석한다. 해석한 주소는 보관 바이트를 예약한 뒤 보관한다. */
-    private List<InetSocketAddress> targets(long deadline) throws IOException {
+    private List<InetSocketAddress> targets(long deadline, long[] resolvedBytes) throws IOException {
         List<InetSocketAddress> targets = new ArrayList<>();
         if (!address.isUnresolved()) {
             targets.add(address);
@@ -109,7 +119,7 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
             throw new IOException(new ResourceExhaustedException(Resource.RESOLVE_TASKS));
         }
         CompletableFuture<InetAddress[]> resolved = new CompletableFuture<>();
-        state.setInProgress(() -> resolved.completeExceptionally(new InterruptedIOException("연결 시도가 취소됐다")));
+        state.registerAbort(() -> resolved.completeExceptionally(new InterruptedIOException("연결 시도가 취소됐다")));
         try {
             executor.execute(() -> {
                 try {
@@ -122,7 +132,7 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
                 }
             });
         } catch (RuntimeException | Error e) {
-            state.setInProgress(null);
+            state.registerAbort(null);
             budgets.owner().release(Resource.RESOLVE_TASKS, 1);
             throw e;
         }
@@ -134,6 +144,7 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
         if (!preparationBytes.tryReserve(bytes)) {
             throw new ResourceExhaustedException(Resource.PREPARATION_BYTES);
         }
+        resolvedBytes[0] = bytes;
         for (InetAddress each : addresses) {
             targets.add(new InetSocketAddress(each, address.getPort()));
         }
@@ -165,7 +176,7 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
             }
             throw new IOException(cause);
         } finally {
-            state.setInProgress(null);
+            state.registerAbort(null);
         }
     }
 }
