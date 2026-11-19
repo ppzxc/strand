@@ -123,4 +123,67 @@ class ResultCompletionTest {
         assertTrue(second.isDone());
         assertEquals(0, connection.usage().current());
     }
+
+    @Test
+    void listenRunsOnTheCompletingPathWithoutExecutorAndReleasesAfterRun() {
+        ObservationBudget connection = new ObservationBudget(1);
+        ObservationBudget owner = new ObservationBudget(1);
+        ResultCompletion<String> result =
+                new ResultCompletion<>(command -> fail("must not use the executor"), connection, owner);
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        result.listen(seen::add);
+        assertEquals(1, connection.usage().current());
+        result.complete("done");
+        assertEquals(java.util.Collections.singletonList("done"), seen);
+        assertEquals(0, connection.usage().current());
+        assertEquals(0, owner.usage().current());
+    }
+
+    @Test
+    void listenOnCompletedResultRunsImmediately() {
+        ResultCompletion<String> result =
+                new ResultCompletion<>(Runnable::run, new ObservationBudget(1), new ObservationBudget(1));
+        result.complete("done");
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        result.listen(seen::add);
+        assertEquals(java.util.Collections.singletonList("done"), seen);
+    }
+
+    @Test
+    void listenFailsWhenSaturatedAndKeepsTheResult() {
+        ObservationBudget connection = new ObservationBudget(1);
+        ResultCompletion<String> result = new ResultCompletion<>(Runnable::run, connection, new ObservationBudget(1));
+        result.listen(value -> {});
+        ResourceExhaustedException error =
+                assertThrows(ResourceExhaustedException.class, () -> result.listen(value -> fail("must not run")));
+        assertEquals(Resource.OBSERVATIONS, error.resource());
+        result.complete("kept");
+        assertEquals("kept", result.resultNow());
+    }
+
+    @Test
+    void cancellingAListeningReleasesTheReservationOnceAndLeavesTheResult() {
+        ObservationBudget connection = new ObservationBudget(1);
+        ObservationBudget owner = new ObservationBudget(1);
+        ResultCompletion<String> result = new ResultCompletion<>(Runnable::run, connection, owner);
+        ResultCompletion.Listening listening = result.listen(value -> fail("cancelled"));
+        listening.cancel();
+        listening.cancel();
+        assertEquals(0, connection.usage().current());
+        assertEquals(0, owner.usage().current());
+        result.complete("done");
+        assertEquals("done", result.resultNow());
+    }
+
+    @Test
+    void aFailingListenerDoesNotChangeTheResultAndStillReleases() {
+        ObservationBudget connection = new ObservationBudget(1);
+        ResultCompletion<String> result = new ResultCompletion<>(Runnable::run, connection, new ObservationBudget(1));
+        result.listen(value -> {
+            throw new IllegalStateException("boom");
+        });
+        result.complete("done");
+        assertEquals("done", result.resultNow());
+        assertEquals(0, connection.usage().current());
+    }
 }
