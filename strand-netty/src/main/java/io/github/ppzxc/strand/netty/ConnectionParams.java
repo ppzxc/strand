@@ -89,7 +89,7 @@ final class ConnectionParams {
     @Nullable
     UnreleasedHandlers unreleased;
     /** 클라이언트가 호스트 이름을 주소 목록으로 해석하는 방법. */
-    HostResolver resolver = java.net.InetAddress::getAllByName;
+    HostResolver resolver = HostResolver.SYSTEM;
 
     ConnectionParams(
             Role role,

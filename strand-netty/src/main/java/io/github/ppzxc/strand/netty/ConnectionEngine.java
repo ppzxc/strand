@@ -1052,7 +1052,9 @@ final class ConnectionEngine {
         try {
             p.appExecutor.execute(() -> p.observer.failed(failure));
         } catch (RuntimeException | Error e) {
-            failure.cause().addSuppressed(e);
+            if (!e.equals(failure.cause())) {
+                failure.cause().addSuppressed(e);
+            }
             p.observer.rejected(failure);
         }
     }

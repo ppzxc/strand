@@ -58,7 +58,7 @@ public final class NettyStrandClient {
     public static final class Builder extends CommonSettings<Builder> {
         private @Nullable Credentials credentials;
         private @Nullable RequestHandler handler;
-        private HostResolver resolver = java.net.InetAddress::getAllByName;
+        private HostResolver resolver = HostResolver.SYSTEM;
 
         private Builder() {}
 
