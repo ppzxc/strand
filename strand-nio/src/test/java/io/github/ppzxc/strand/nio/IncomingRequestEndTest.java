@@ -47,8 +47,8 @@ class IncomingRequestEndTest {
         assertThat(request.ended().isDone()).isTrue();
     }
 
-    private static AcceptanceKind kindOf(io.github.ppzxc.strand.api.Result<io.github.ppzxc.strand.api.ResponseAcceptance> result)
-            throws Exception {
+    private static AcceptanceKind kindOf(
+            io.github.ppzxc.strand.api.Result<io.github.ppzxc.strand.api.ResponseAcceptance> result) throws Exception {
         long limit = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WAIT_MS);
         while (!result.isDone() && System.nanoTime() < limit) {
             Thread.sleep(5);
@@ -163,7 +163,8 @@ class IncomingRequestEndTest {
         rig.peer.request(EngineRig.TYPE, new byte[] {1});
         long second = rig.peer.request(EngineRig.TYPE, new byte[] {2});
         rig.settle();
-        assertThat(firstStarted.await(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
+        assertThat(firstStarted.await(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS))
+                .isTrue();
         assertThat(rig.used(Resource.HANDLER_TASKS)).isEqualTo(2);
 
         rig.peer.cancelRequest(second);

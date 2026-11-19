@@ -252,7 +252,8 @@ final class EngineRig implements AutoCloseable {
         List<long[]> resets = new ArrayList<>();
         peerEvents.stream()
                 .filter(event -> event.kind() == Event.Kind.REQUEST_RESET)
-                .forEach(event -> resets.add(new long[] {event.streamId(), event.resetErrorCode().getAsLong()}));
+                .forEach(event -> resets.add(
+                        new long[] {event.streamId(), event.resetErrorCode().getAsLong()}));
         return resets;
     }
 

@@ -2,8 +2,8 @@ package io.github.ppzxc.strand.nio;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.ppzxc.strand.api.CloseNotice;
 import io.github.ppzxc.strand.api.Certainty;
+import io.github.ppzxc.strand.api.CloseNotice;
 import io.github.ppzxc.strand.api.Request;
 import io.github.ppzxc.strand.api.RequestHandle;
 import io.github.ppzxc.strand.api.RequestOptions;

@@ -225,8 +225,8 @@ final class RealRig implements AutoCloseable {
                     channel.setOption(StandardSocketOptions.SO_SNDBUF, 4096);
                     channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
                     channel.socket().connect(relayAddress);
-                    opened[0] = new RecordingPassage(PassageFactory.open(
-                            channel, clientContext, relayAddress.getHostString(), relay.port()));
+                    opened[0] = new RecordingPassage(
+                            PassageFactory.open(channel, clientContext, relayAddress.getHostString(), relay.port()));
                     return opened[0];
                 },
                 relayAddress,

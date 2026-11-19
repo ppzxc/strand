@@ -80,7 +80,8 @@ class RequestOutcomeTest {
         assertThat(rig.client.writtenBytes()).hasSize(before);
         assertThat(rig.peerRequestStreams()).isEmpty();
         assertThat(rig.peerResets()).isEmpty();
-        assertThat(rig.used(io.github.ppzxc.strand.api.Resource.OUTGOING_REQUESTS)).isZero();
+        assertThat(rig.used(io.github.ppzxc.strand.api.Resource.OUTGOING_REQUESTS))
+                .isZero();
     }
 
     @Test
@@ -241,8 +242,12 @@ class RequestOutcomeTest {
 
         assertThat(rig.peerRequestStreams()).hasSize(1);
         assertThat(rig.peerResets()).hasSize(1);
-        assertThat(rig.peerResets().get(0)[0]).isEqualTo(rig.peerRequestStreams().get(0));
-        assertThat(rig.peerEventKinds().subList(rig.peerEventKinds().size() - 2, rig.peerEventKinds().size()))
+        assertThat(rig.peerResets().get(0)[0])
+                .isEqualTo(rig.peerRequestStreams().get(0));
+        assertThat(rig.peerEventKinds()
+                        .subList(
+                                rig.peerEventKinds().size() - 2,
+                                rig.peerEventKinds().size()))
                 .containsExactly(
                         io.github.ppzxc.strand.core.internal.Event.Kind.REQUEST_RECEIVED,
                         io.github.ppzxc.strand.core.internal.Event.Kind.REQUEST_RESET);

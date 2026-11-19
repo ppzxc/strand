@@ -76,8 +76,7 @@ class EndpointPeerResetEventTest {
 
         server.receive(Frames.reset(1, 4));
 
-        assertThat(kinds(server.drainEvents()))
-                .containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.REQUEST_RESET);
+        assertThat(kinds(server.drainEvents())).containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.REQUEST_RESET);
     }
 
     @Test

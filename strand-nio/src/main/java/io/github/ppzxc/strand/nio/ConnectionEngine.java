@@ -703,7 +703,8 @@ final class ConnectionEngine {
     private void onRequestReset(Event event) {
         IncomingRequest request = incoming.get(event.streamId());
         if (request != null) {
-            finishIncoming(request.state(), RequestEnd.peerReset(event.resetErrorCode().getAsLong()));
+            finishIncoming(
+                    request.state(), RequestEnd.peerReset(event.resetErrorCode().getAsLong()));
         }
     }
 
