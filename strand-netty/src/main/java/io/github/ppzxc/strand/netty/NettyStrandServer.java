@@ -30,6 +30,7 @@ public final class NettyStrandServer {
     private final @Nullable RequestHandler handler;
     private final @Nullable ConnectionHandlerFactory factory;
     private final @Nullable Consumer<PreparationFailure> failureListener;
+    private final UnreleasedHandlers unreleased = new UnreleasedHandlers();
 
     private NettyStrandServer(
             CommonSettings.Common common,
@@ -230,12 +231,18 @@ public final class NettyStrandServer {
                     public void failed(PreparationFailure failure) {
                         deliver(failure);
                     }
+
+                    @Override
+                    public void rejected(PreparationFailure failure) {
+                        // 앱용 실행기가 알림을 거절했다. EventLoop에서 사용자 코드(관찰자)를 대신 실행하지 않고 관찰할 수 없는 실패는 버린다.
+                    }
                 },
                 handler,
                 factory,
                 verifier,
                 common.tls(null, 0),
                 common.allocator);
+        params.unreleased = unreleased;
         try {
             channel.config().setTcpNoDelay(true);
             new NettyStrandConnection(params, channel).startServer();
@@ -264,6 +271,15 @@ public final class NettyStrandServer {
         } catch (RuntimeException ignored) {
             // 관찰자의 실패는 연결 준비 결과를 바꾸지 않는다.
         }
+    }
+
+    /**
+     * 폐기 실행이 거절돼 앱이 회수할 수 있는 팩터리 결과의 조회. 조회는 소유권을 옮기지 않는다.
+     *
+     * @return 회수할 수 있는 결과
+     */
+    public List<UnreleasedHandler> unreleasedHandlers() {
+        return unreleased.snapshot();
     }
 
     /**
