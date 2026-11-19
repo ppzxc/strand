@@ -887,6 +887,7 @@ final class ConnectionEngine {
                 releaseSlots();
                 completeReleased();
                 closed.complete(finalNotice);
+                p.terminated.run();
             }
         }
     }
