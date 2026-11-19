@@ -682,4 +682,72 @@ class NettyStrandShutdownTest {
         assertThat(server.shutdownResult().resultNow().kind()).isEqualTo(ShutdownKind.COMPLETED);
         assertThat(((InetSocketAddress) listener.localAddress()).getPort()).isPositive();
     }
+
+    @Test
+    void aListenerThatCannotBeClosedYetIsReportedAsRemainingAndCompletesOnceTheLoopRuns() throws Exception {
+        AppFixture serverFixture = track(AppFixture.plain());
+        NettyStrandServer server = server(serverFixture, Duration.ofMillis(50), Duration.ofMillis(300))
+                .handler(r -> {})
+                .build();
+        Listener listener = listen(server);
+        CountDownLatch release = new CountDownLatch(1);
+        for (EventExecutor loop : serverFixture.group) {
+            loop.execute(() -> {
+                try {
+                    release.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+        }
+
+        // 리스닝 채널의 EventLoop가 막혀 있어 닫기가 끝나지 못한 채 기한이 지난다.
+        Future<Void> stopped = server.shutdown();
+
+        assertThatThrownBy(() -> AppFixture.get(stopped))
+                .isInstanceOf(ExecutionException.class)
+                .hasCauseInstanceOf(ShutdownDeadlineExceededException.class);
+        assertThat(server.shutdownResult().resultNow().remainingResources()).containsEntry(Resource.LISTENERS, 1L);
+        assertThat(listener.closed().isDone()).isFalse();
+        assertThat(server.resourcesTerminated().isDone()).isFalse();
+        release.countDown();
+        AppFixture.get(listener.closed());
+        AppFixture.get(server.resourcesTerminated());
+        assertThat(server.shutdownResult().resultNow().kind()).isEqualTo(ShutdownKind.DEADLINE_EXCEEDED);
+    }
+
+    @Test
+    void anInterruptedSupervisorStillWaitsForTheRealEventsAndFinishes() throws Exception {
+        AppFixture serverFixture = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        CountDownLatch handling = new CountDownLatch(1);
+        CompletableFuture<Void> releaseHandler = new CompletableFuture<>();
+        NettyStrandServer server = server(serverFixture, Duration.ofSeconds(60), Duration.ofSeconds(120))
+                .handler(request -> {
+                    handling.countDown();
+                    releaseHandler.get(60, TimeUnit.SECONDS);
+                    request.respond(Status.OK, new byte[0]);
+                })
+                .build();
+        Listener listener = listen(server);
+        NettyStrandConnection connection = connect(clientFixture.clientBuilder().build(), listener);
+        clientFixture.requestWhenServed(connection, Request.of(TYPE, bytes("hold")), true);
+        assertThat(handling.await(15, TimeUnit.SECONDS)).isTrue();
+        Future<Void> stopped = server.shutdown();
+        Thread supervisor = null;
+        for (Thread thread : Thread.getAllStackTraces().keySet()) {
+            if (thread.getName().equals("strand-netty-shutdown") && thread.isAlive()) {
+                supervisor = thread;
+            }
+        }
+        assertThat(supervisor).isNotNull();
+
+        supervisor.interrupt();
+        // 중단은 기다림을 끝내지 않는다. 핸들러가 응답해 연결이 실제로 끝나는 사건으로 마무리한다.
+        releaseHandler.complete(null);
+
+        AppFixture.get(stopped);
+        AppFixture.get(server.resourcesTerminated());
+        assertThat(server.shutdownResult().resultNow().kind()).isEqualTo(ShutdownKind.COMPLETED);
+    }
 }

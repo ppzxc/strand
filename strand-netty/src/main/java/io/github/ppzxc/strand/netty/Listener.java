@@ -33,7 +33,8 @@ public final class Listener {
         this.channel = channel;
         this.closed = loop.newPromise();
         closed.setUncancellable();
-        // 등록한 채널은 닫히고 선택기 등록이 풀린 뒤에 완료한다: 소켓을 닫아도 선택기에 등록돼 있으면 JDK가 포트를 바로 놓지 않는다.
+        // 등록한 채널은 닫히고 선택기 등록이 풀린 뒤에 완료한다. 소켓을 닫아도 선택기에 등록돼 있으면 JDK가 포트를 바로 놓지 않는다.
+        // 등록에 실패한 채널은 등록 해제 사건이 없으므로 소유자가 close()로 정리 완료를 확정한다.
         // 수락한 채널은 이 EventLoop에서 읽기 한 번 안에 등록되거나 정리되므로(Acceptor) 닫힘과 경합할 수 없다.
         channel.pipeline().addLast(new ChannelInboundHandlerAdapter() {
             @Override
@@ -44,12 +45,6 @@ public final class Listener {
                     channel.releaseClosedSocket();
                     settle();
                 });
-            }
-        });
-        // 등록에 실패해 닫힌 채널은 등록 해제 사건 없이 닫힘만 알린다.
-        channel.closeFuture().addListener(done -> {
-            if (!channel.isRegistered()) {
-                settle();
             }
         });
     }
