@@ -171,6 +171,19 @@ class NettyResultsTest {
     }
 
     @Test
+    void cancellingACompletedFutureDoesNothingAndKeepsItsValue() throws Exception {
+        AppFixture fixture = track(AppFixture.plain());
+        NettyStrandConnection connection = connect(fixture, request -> request.respond(Status.OK, bytes("ok")));
+        Future<RequestResult> future = NettyResults.toFuture(
+                connection.request(Request.of(TYPE, bytes("x"))).result());
+        AppFixture.get(AppFixture.cf(future));
+
+        assertThat(future.cancel(false)).isFalse();
+        assertThat(future.isSuccess()).isTrue();
+        assertThat(future.getNow().status()).isEqualTo(Status.OK);
+    }
+
+    @Test
     void realCancellationIsDoneByTheHandleAndFuturesStillReceiveTheCancelledResult() throws Exception {
         AppFixture fixture = track(AppFixture.plain());
         NettyStrandConnection connection = connect(fixture, request -> {});
