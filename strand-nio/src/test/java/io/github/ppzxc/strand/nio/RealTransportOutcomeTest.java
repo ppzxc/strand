@@ -24,6 +24,9 @@ class RealTransportOutcomeTest {
     private static final byte[] BIG = new byte[900 * 1024];
     private static final byte[] SMALL = new byte[] {1, 2, 3};
     private static final Duration SHORT_DEADLINE = Duration.ofMillis(300);
+    /** 부분 진행에서 멈춘 뒤에 만료되도록, 멈춤을 관찰하는 시간보다 넉넉한 기한. */
+    private static final Duration LONG_DEADLINE = Duration.ofSeconds(3);
+
     private static final long CANCEL_CODE = 4;
 
     private RealRig rig;
@@ -57,9 +60,12 @@ class RealTransportOutcomeTest {
     /** 큰 요청이 부분 진행에서 멈춘 상태를 만든다: 중계기를 멈추고 큰 요청을 낸 뒤 소켓이 더 받지 못할 때까지 기다린다. */
     private RequestHandle blockWithAPartiallyWrittenRequest(Duration deadline) throws Exception {
         rig.relay.pause();
+        // 연결 준비 중의 쓰기가 아니라 이 요청의 쓰기만 세도록 기준을 잡는다.
+        long consumedBefore = rig.recording.consumed.get();
+        long stallsBefore = rig.recording.stalls.get();
         RequestHandle big = deadline == null ? send(BIG) : send(BIG, deadline);
-        rig.awaitStalls(1);
-        assertThat(rig.recording.consumed.get()).as("부분 진행").isPositive();
+        rig.awaitStalls(stallsBefore + 1);
+        assertThat(rig.recording.consumed.get() - consumedBefore).as("부분 진행").isPositive();
         return big;
     }
 
@@ -115,7 +121,7 @@ class RealTransportOutcomeTest {
     void expiryWhileTheFrameIsPartiallyWrittenIsDeadlineExceededUnknownAndTheServerStillGetsTheWholeFrameThenReset(
             boolean tls) throws Exception {
         rig = new RealRig(tls);
-        RequestHandle big = blockWithAPartiallyWrittenRequest(SHORT_DEADLINE);
+        RequestHandle big = blockWithAPartiallyWrittenRequest(LONG_DEADLINE);
 
         assertOutcome(big, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
         rig.relay.resume();
