@@ -153,15 +153,19 @@ class NioListenerCloseTest {
         ServerSocketChannel server = ServerSocketChannel.open();
         closeables.add(server::close);
         server.bind(AppFixture.anyLoopback());
-        Listener listener = new Listener(server, server.getLocalAddress(), accepted -> {
-            inAdmit.countDown();
-            try {
-                finishAdmit.await(30, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            PassageFactory.closeQuietly(accepted);
-        }, fixture.executor);
+        Listener listener = new Listener(
+                server,
+                server.getLocalAddress(),
+                accepted -> {
+                    inAdmit.countDown();
+                    try {
+                        finishAdmit.await(30, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    PassageFactory.closeQuietly(accepted);
+                },
+                fixture.executor);
         closeables.add(listener::close);
         SocketChannel client = SocketChannel.open(server.getLocalAddress());
         closeables.add(client::close);

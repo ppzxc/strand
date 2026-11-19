@@ -203,8 +203,8 @@ class NioStrandShutdownTest {
                 })
                 .build();
         Listener listener = listen(server);
-        NioStrandConnection client = connect(
-                clientFixture.clientBuilder().handler(r -> {}).build(), listener);
+        NioStrandConnection client =
+                connect(clientFixture.clientBuilder().handler(r -> {}).build(), listener);
         // 서버가 서버 쪽 요청을 응답 없이 쥐고 있다. CLOSE는 이 요청이 끝나길 기다리므로 grace 만료 때 abort로 끊긴다.
         NioStrandConnection accepted = serverSide.get(15, TimeUnit.SECONDS);
         RequestHandle pending = accepted.request(Request.of(TYPE, bytes("never answered")));
@@ -212,7 +212,8 @@ class NioStrandShutdownTest {
 
         AppFixture.get(server.shutdown());
 
-        assertThat(System.nanoTime() - start).isGreaterThanOrEqualTo(Duration.ofMillis(300).toNanos());
+        assertThat(System.nanoTime() - start)
+                .isGreaterThanOrEqualTo(Duration.ofMillis(300).toNanos());
         RequestResult outcome = serverFixture.result(pending.result());
         assertThat(outcome.status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(outcome.certainty()).isNotEqualTo(Certainty.RESPONSE);
