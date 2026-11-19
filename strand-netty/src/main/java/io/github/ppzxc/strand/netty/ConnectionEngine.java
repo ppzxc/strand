@@ -589,31 +589,23 @@ final class ConnectionEngine {
         wake();
     }
 
-    /** 전체 종료가 이 연결에 CLOSE를 시작시킨다. 아직 확정되지 않은 연결 시도는 먼저 취소하고, 채널이 활성화되기 전이면 곧바로 끝낸다. */
+    /**
+     * 전체 종료가 이 연결에 CLOSE를 시작시킨다. 아직 확정되지 않은 연결 시도는 먼저 취소한다. 채널이 활성화되기 전에 낸 명령은 연결 루프가 만들어질 때 처리되고, 활성화되지 못하는
+     * 시도는 취소가 끝낸다.
+     */
     void shutdownClose() {
         if (p.attempt != null) {
             p.attempt.cancel();
         }
         close();
-        endIfNotStarted();
     }
 
-    /** 전체 종료의 grace가 끝나 이 연결을 즉시 끊는다. 아직 확정되지 않은 연결 시도는 먼저 취소하고, 채널이 활성화되기 전이면 곧바로 끝낸다. */
+    /** 전체 종료의 grace가 끝나 이 연결을 즉시 끊는다. 아직 확정되지 않은 연결 시도는 먼저 취소한다. */
     void shutdownAbort() {
         if (p.attempt != null) {
             p.attempt.cancel();
         }
         abort();
-        endIfNotStarted();
-    }
-
-    /** 채널이 활성화되기 전에는 연결 루프가 없어 close·abort 명령이 처리되지 않는다. 이 경우 준비를 전체 종료로 확정하고 채널을 정리한다. */
-    private void endIfNotStarted() {
-        runOnLoop(() -> {
-            if (active == null && preparing && !stopped) {
-                setupFailed(new IllegalStateException("전체 종료가 연결 준비를 끝냈다"));
-            }
-        });
     }
 
     /**
