@@ -102,6 +102,10 @@ class NettyRealTransportOutcomeTest {
     private void assertTheConnectionStillCarriesRequests() throws Exception {
         RequestHandle probe = send(SMALL);
         IncomingRequest request = takeReceived();
+        while (request.payload().length != SMALL.length) {
+            // 늦게 시작한 앞선 큰 요청은 이미 끝났으므로 건너뛴다.
+            request = takeReceived();
+        }
         request.respond(Status.OK, new byte[0]);
         assertOutcome(probe, Status.OK, Certainty.RESPONSE);
     }
