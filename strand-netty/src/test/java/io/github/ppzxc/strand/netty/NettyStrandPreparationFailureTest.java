@@ -405,6 +405,8 @@ class NettyStrandPreparationFailureTest {
         Listener listener = listen(server);
         InetSocketAddress closedPort = AppFixture.loopback(listener);
         listener.close();
+        // 닫기는 비동기다. 리스닝 소켓이 실제로 풀린 뒤에 연결해야 거절(ConnectException)을 결정적으로 본다.
+        AppFixture.get(listener.closed());
         NettyStrandClient client = fixture.clientBuilder().build();
 
         PreparationFailure failure = failureOf(AppFixture.cf(client.connect(closedPort)));

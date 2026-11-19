@@ -23,6 +23,7 @@ public final class OwnerBudgets {
 
     private final Map<Resource, Budget> budgets = new EnumMap<>(Resource.class);
     private final ObservationBudget observations;
+    private volatile Runnable releaseObserver = () -> {};
 
     public OwnerBudgets(ResourceLimits limits) {
         for (Resource resource : ConnectionBudgets.SHARED) {
@@ -48,6 +49,26 @@ public final class OwnerBudgets {
 
     public void release(Resource resource, long amount) {
         budget(resource).release(amount);
+        releaseObserver.run();
+    }
+
+    /**
+     * 예약이 돌아올 때마다 호출할 관찰자를 정한다. 전체 종료가 잔존 작업이 풀리길 기다릴 때 쓴다. 관찰자는 가볍고 막히지 않아야 하며 어느 스레드에서든 불린다.
+     *
+     * @param observer 관찰자
+     */
+    public void onRelease(Runnable observer) {
+        this.releaseObserver = java.util.Objects.requireNonNull(observer);
+    }
+
+    /**
+     * 소유 객체 범위의 현재 예약량.
+     *
+     * @param resource 종류
+     * @return 현재 예약량
+     */
+    public long current(Resource resource) {
+        return usage(resource).current();
     }
 
     public ResourceUsage usage(Resource resource) {

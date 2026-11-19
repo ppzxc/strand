@@ -3,6 +3,8 @@ package io.github.ppzxc.strand.netty;
 import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.ResourceExhaustedException;
 import io.github.ppzxc.strand.api.ResourceUsage;
+import io.github.ppzxc.strand.api.Result;
+import io.github.ppzxc.strand.api.ShutdownResult;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.netty.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.netty.internal.SerialExecutor;
@@ -26,6 +28,7 @@ public final class NettyStrandClient {
     private final @Nullable RequestHandler handler;
     private final HostResolver resolver;
     private final long credentialBytes;
+    private final OwnerShutdown lifecycle;
 
     private NettyStrandClient(
             CommonSettings.Common common,
@@ -38,6 +41,7 @@ public final class NettyStrandClient {
         this.configSource = configSource;
         this.handler = handler;
         this.resolver = resolver;
+        this.lifecycle = new OwnerShutdown(common, null);
     }
 
     /** 연결마다 쓸 core 설정(자격 증명 포함)을 만든다. */
@@ -154,6 +158,10 @@ public final class NettyStrandClient {
         released.setUncancellable();
         ConnectAttemptState state = new ConnectAttemptState();
         NettyConnectAttempt attempt = new NettyConnectAttempt(promise, released, state);
+        if (!lifecycle.accepting()) {
+            failShutdown(promise, released, target);
+            return attempt;
+        }
         long now = common.nanoClock.getAsLong();
         ConnectionBudgets budgets = common.owner.newConnection(common.limits);
         Resource denied = ConnectionEngine.admit(budgets, common.space);
@@ -206,17 +214,35 @@ public final class NettyStrandClient {
         params.released = released;
         params.preparationBytes = preparationBytes;
         params.resolver = resolver;
+        StrandChannel channel = new StrandChannel();
+        NettyStrandConnection connection = new NettyStrandConnection(params, channel);
+        // 기록하는 순간부터 전체 종료가 이 연결을 다룰 수 있으므로 종료 훅을 먼저 정한다.
+        params.terminated = () -> lifecycle.unregister(connection);
+        if (!lifecycle.register(connection)) {
+            // 예약하는 사이 전체 종료가 시작됐다. 시작하지 않은 시도의 예약을 돌려주고 실패시킨다.
+            preparationBytes.releaseAll();
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            failShutdown(promise, released, target);
+            return attempt;
+        }
         try {
-            StrandChannel channel = new StrandChannel();
             channel.config().setTcpNoDelay(true);
-            new NettyStrandConnection(params, channel).startClient(target);
+            connection.startClient(target);
         } catch (RuntimeException | Error e) {
+            lifecycle.unregister(connection);
             preparationBytes.releaseAll();
             ConnectionEngine.cancelAdmission(budgets, common.space);
             promise.tryFailure(e);
             released.trySuccess(null);
         }
         return attempt;
+    }
+
+    private static void failShutdown(
+            Promise<NettyStrandConnection> promise, Promise<Void> released, InetSocketAddress target) {
+        promise.tryFailure(new PreparationFailedException(new PreparationFailure(
+                target, PreparationStage.CONNECTION, new IllegalStateException("전체 종료를 시작해 새 연결 시도를 받지 않는다"))));
+        released.trySuccess(null);
     }
 
     /** 이 시도가 라이브러리 안에 복사·보관하는 입력: 주소 이름과 자격 증명(방식 이름과 비밀). */
@@ -234,5 +260,37 @@ public final class NettyStrandClient {
      */
     public ResourceUsage resourceUsage(Resource resource) {
         return common.owner.usage(resource);
+    }
+
+    /**
+     * 소유 객체 전체를 종료한다. 새 접수를 막고, 진행 중인 연결 시도를 취소하고, 연결에 CLOSE를 시작하고, {@code shutdownGrace}가 끝나면 남은 연결을 끊고, 내부 실행
+     * 자원을 종료한다. 기한은 첫 호출 시각부터 센다. 반복 호출은 같은 Future를 돌려주며 기한을 늘리지 않는다. 앱이 준 EventLoopGroup과 실행기는 종료하지 않는다.
+     *
+     * <p>Future는 앱용 실행기를 거치지 않고 완료하며 앱이 취소할 수 없다. 붙인 리스너는 Netty 계약에 따라 EventLoop에서 실행된다.
+     *
+     * @return 모든 내부 자원이 {@code shutdownDeadline} 안에 정리되면 성공, 아니면 {@link
+     *     io.github.ppzxc.strand.api.ShutdownDeadlineExceededException}으로 실패하는 Future
+     */
+    public Future<Void> shutdown() {
+        return lifecycle.shutdown();
+    }
+
+    /**
+     * 전체 종료 결과의 보존된 관찰. {@code COMPLETED} 또는 {@code DEADLINE_EXCEEDED}와 기한 시점에 정리되지 않은 자원을 담는다. 확정한 결과는 바꾸지 않는다.
+     *
+     * @return 종료 결과
+     */
+    public Result<ShutdownResult> shutdownResult() {
+        return lifecycle.result();
+    }
+
+    /**
+     * 실제 내부 자원(연결·시도)과 잔존 작업(핸들러·인증·주소 해석)이 모두 해결되면 완료한다. 종료 기한 초과 뒤에도 정리가 계속되며, 그때 완료한다. 앱이 준
+     * EventLoopGroup과 실행기 자체의 종료는 기다리지 않는다. 앱이 취소할 수 없다.
+     *
+     * @return 실제 정리 완료
+     */
+    public Future<Void> resourcesTerminated() {
+        return lifecycle.terminated();
     }
 }
