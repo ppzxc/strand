@@ -34,6 +34,16 @@ final class ConnectionParams {
         void ready(NioStrandConnection connection);
 
         void failed(PreparationFailure failure);
+
+        /**
+         * 앱용 실행기가 준비 결과 알림을 거절했다. 알림을 대신할 스레드를 만들지 않으므로 이 호출은 전송 스레드에서 오며 사용자 코드를 실행하면 안 된다. 성공이었다면
+         * 연결은 곧 끊긴다. 기본은 실패 알림으로 본다.
+         *
+         * @param failure 앱에 닿지 못한 결과(성공이 거절됐다면 거절 원인)
+         */
+        default void rejected(PreparationFailure failure) {
+            failed(failure);
+        }
     }
 
     final Role role;
@@ -58,6 +68,17 @@ final class ConnectionParams {
     final @Nullable ConnectionHandlerFactory factory;
     final @Nullable CredentialVerifier verifier;
     final boolean tls;
+    /** 클라이언트 연결 시도의 취소 상태. 서버 연결에는 없다. */
+    @Nullable
+    ConnectAttemptState attempt;
+    /** 활성화되지 못해 폐기 실행이 거절된 팩터리 결과를 보존하는 곳. 서버 연결에만 있다. */
+    @Nullable
+    UnreleasedHandlers unreleased;
+    /** 라이브러리가 보관한 준비 데이터의 바이트 예약. 클라이언트 연결에만 있다. */
+    @Nullable
+    PreparationBytes preparationBytes;
+    /** 시도가 소유한 통로 정리 완료를 알린다. 클라이언트 연결에만 있다. */
+    java.util.concurrent.@Nullable CompletableFuture<Void> released;
 
     ConnectionParams(
             Role role,

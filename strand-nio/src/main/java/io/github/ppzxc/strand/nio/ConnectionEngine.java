@@ -107,6 +107,7 @@ final class ConnectionEngine {
     private PreparationStage stage;
     private boolean preparing = true;
     private boolean preparingSlotHeld = true;
+    private boolean releasedNotified;
     private final Map<Long, OutgoingEntry> pending = new HashMap<>();
     private final Map<Long, IncomingRequest> incoming = new HashMap<>();
     private CloseNotice finalNotice = CloseNotice.disconnected(null);
@@ -132,6 +133,9 @@ final class ConnectionEngine {
     }
 
     void start() {
+        if (p.attempt != null) {
+            p.attempt.bind(this);
+        }
         thread.start();
     }
 
@@ -210,6 +214,9 @@ final class ConnectionEngine {
     }
 
     private void releaseSlots() {
+        if (p.preparationBytes != null) {
+            p.preparationBytes.releaseAll();
+        }
         releaseProgress(p.budgets, p.space, progressKinds().length);
         p.budgets.owner().release(Resource.TOTAL_CONNECTIONS, 1);
         releasePreparingSlot();
@@ -241,6 +248,11 @@ final class ConnectionEngine {
     void abort() {
         abortRequested = true;
         wake();
+    }
+
+    /** 연결 시도 취소를 전송 스레드에 넘긴다. 성공과 취소 가운데 이기는 쪽은 전송 스레드가 처리하는 순서가 정한다. */
+    void cancelAttempt() {
+        submit(new CancelAttemptCommand());
     }
 
     RequestHandle request(Request request, RequestOptions options) {
@@ -462,6 +474,21 @@ final class ConnectionEngine {
         }
     }
 
+    private final class CancelAttemptCommand implements Command {
+        @Override
+        public void execute(Loop loop) {
+            if (preparing) {
+                ConnectionAttemptCancelledException cancelled = new ConnectionAttemptCancelledException();
+                loop.endCause = cancelled;
+                failPreparation(stage, cancelled);
+                loop.endpoint.disconnect();
+            }
+        }
+
+        @Override
+        public void abandon() {}
+    }
+
     private final class AuthenticationCompleteCommand implements Command {
         private final long id;
         private final AuthenticationResult result;
@@ -541,9 +568,13 @@ final class ConnectionEngine {
         }
     }
 
+    /**
+     * 활성화되지 못한 결과의 폐기를 앱용 실행기에 넘긴다. 폐기는 이 연결의 직렬 실행을 거치지 않는다: 같은 연결의 반환하지 않는 사용자 작업 뒤에서 폐기가 막히지
+     * 않고, 연결이 이미 끝났어도 실행된다.
+     */
     private void dispose(PreparedHandler handler) {
         try {
-            p.executor.execute(() -> {
+            p.appExecutor.execute(() -> {
                 try {
                     handler.dispose();
                 } finally {
@@ -551,8 +582,14 @@ final class ConnectionEngine {
                 }
             });
         } catch (RuntimeException | Error e) {
-            // 폐기 실행이 거절됐다. 폐기 동작을 전송 스레드에서 대신 실행하지 않는다. 앱 회수 경로는 후속 티켓(#319)이 맡는다.
-            p.budgets.owner().release(Resource.FACTORY_TASKS, 1);
+            // 폐기 실행이 거절됐다. 폐기 동작을 전송 스레드에서 대신 실행하지 않고 앱이 조회·회수하도록 보존한다. 예약은 앱이 인수할 때까지 유지한다.
+            UnreleasedHandlers registry = p.unreleased;
+            if (registry == null) {
+                p.budgets.owner().release(Resource.FACTORY_TASKS, 1);
+            } else {
+                registry.add(new UnreleasedHandler(
+                        handler, registry, () -> p.budgets.owner().release(Resource.FACTORY_TASKS, 1)));
+            }
         }
     }
 
@@ -582,31 +619,68 @@ final class ConnectionEngine {
     private void failPreparation(PreparationStage at, Throwable cause) {
         if (preparing) {
             preparing = false;
+            confirmAttempt();
             releasePreparingSlot();
             PreparationFailure failure = new PreparationFailure(p.remoteAddress, at, cause);
-            notifyPreparation(() -> p.observer.failed(failure));
+            notifyFailed(failure);
         }
     }
 
     private void becomeReady() {
         if (preparing) {
             preparing = false;
+            confirmAttempt();
             releasePreparingSlot();
-            notifyPreparation(() -> p.observer.ready(facade));
+            // 성공한 시도는 통로를 연결에 넘겼으므로 시도가 정리할 것이 없다.
+            completeReleased();
+            notifyReady();
+        }
+    }
+
+    private void confirmAttempt() {
+        if (p.attempt != null) {
+            p.attempt.confirm();
+        }
+    }
+
+    /** 시도가 소유한 통로 정리 완료를 알린다. 알림은 앱용 실행기를 거치며, 거절되면 실행기 없이 확정한다(앱이 붙인 의존 단계는 이 스레드에서 실행될 수 있다. 공통 API의 변환 Stage가 거절을 실패로 확정하는 것과 같다). */
+    private void completeReleased() {
+        java.util.concurrent.CompletableFuture<Void> released = p.released;
+        if (released == null || releasedNotified) {
+            return;
+        }
+        releasedNotified = true;
+        try {
+            p.appExecutor.execute(() -> released.complete(null));
+        } catch (RuntimeException | Error e) {
+            released.complete(null);
         }
     }
 
     /**
-     * 준비 결과 알림은 앱용 실행기에서 한다. 같은 연결의 인증·팩터리가 반환하지 않아도 알릴 수 있도록 연결별 직렬 실행을 거치지 않는다. 실행기가
-     * 거절해도 연결 시도가 끝나지 않고 남지 않게 별도 스레드로 알린다.
+     * 준비 성공 알림은 앱용 실행기에서 한다. 같은 연결의 인증·팩터리가 반환하지 않아도 알릴 수 있도록 연결별 직렬 실행을 거치지 않는다. 실행기가 거절하면
+     * 알림을 대신할 스레드를 만들지 않고, 앱이 받을 수 없는 연결이므로 끊고 시도를 거절 원인으로 실패시킨다. 서버는 성공을 알릴 앱 관찰자가 없어 거절돼도 연결을 유지한다.
      */
-    private void notifyPreparation(Runnable notification) {
+    private void notifyReady() {
         try {
-            p.appExecutor.execute(notification);
+            p.appExecutor.execute(() -> p.observer.ready(facade));
         } catch (RuntimeException | Error e) {
-            Thread notifier = new Thread(notification, "strand-nio-notify");
-            notifier.setDaemon(true);
-            notifier.start();
+            if (p.role == ConnectionParams.Role.CLIENT) {
+                abortRequested = true;
+                wake();
+                p.observer.rejected(new PreparationFailure(p.remoteAddress, stage, e));
+            }
+            // 서버는 성공을 알릴 앱 관찰자가 없으므로 알림이 거절돼도 연결을 유지한다.
+        }
+    }
+
+    /** 준비 실패 알림도 앱용 실행기에서 한다. 거절되면 원래 실패에 거절을 덧붙여 전송 스레드에서 확정한다(앱이 붙인 의존 단계는 이 스레드에서 실행될 수 있다). */
+    private void notifyFailed(PreparationFailure failure) {
+        try {
+            p.appExecutor.execute(() -> p.observer.failed(failure));
+        } catch (RuntimeException | Error e) {
+            failure.cause().addSuppressed(e);
+            p.observer.rejected(failure);
         }
     }
 
@@ -617,6 +691,10 @@ final class ConnectionEngine {
     }
 
     private void startFactory(Loop loop) {
+        if (!preparing) {
+            // 이미 취소·기한·종료로 준비가 확정됐다. 늦은 인증 완료로 팩터리를 시작하지 않는다.
+            return;
+        }
         ConnectionHandlerFactory factory = p.factory;
         if (factory == null) {
             activate(loop, p.handler);
@@ -648,7 +726,7 @@ final class ConnectionEngine {
         submit(new FactoryCompleteCommand(prepared, failure));
     }
 
-    private void runAuthentication(long id, Credentials credentials, CredentialVerifier verifier) {
+    private void runAuthentication(long id, Credentials credentials, CredentialVerifier verifier, long retained) {
         AuthenticationResult result = null;
         Throwable failure = null;
         try {
@@ -657,6 +735,7 @@ final class ConnectionEngine {
             failure = t;
         } finally {
             p.budgets.owner().release(Resource.AUTHENTICATION_TASKS, 1);
+            p.budgets.release(Resource.PREPARATION_BYTES, retained);
         }
         submit(new AuthenticationCompleteCommand(id, result, failure));
     }
@@ -786,7 +865,10 @@ final class ConnectionEngine {
         return passage;
     }
 
-    private void failedToOpen(Throwable cause) {
+    private void failedToOpen(Throwable original) {
+        // 통로를 여는 동안에는 명령을 처리하지 않으므로, 그사이 접수된 취소가 열기 실패의 원인이다.
+        Throwable cause =
+                p.attempt != null && p.attempt.cancelRequested() ? new ConnectionAttemptCancelledException() : original;
         failPreparation(stage, cause);
         finalNotice = CloseNotice.disconnected(cause);
     }
@@ -803,6 +885,7 @@ final class ConnectionEngine {
                 failPreparation(stage, fatal != null ? fatal : new IllegalStateException("연결이 준비 중에 끝났다"));
             } finally {
                 releaseSlots();
+                completeReleased();
                 closed.complete(finalNotice);
             }
         }
@@ -1052,21 +1135,31 @@ final class ConnectionEngine {
             stage = PreparationStage.AUTHENTICATION;
             CredentialVerifier verifier = Objects.requireNonNull(p.verifier);
             long id = event.authenticationId();
+            // 자격 증명 복사본(방식 이름과 비밀)은 보관하기 전에 바이트를 예약한다. 사용자 함수가 반환하면 돌려준다.
+            long retained = (long) event.authenticationMechanism().get().length() + event.body().length;
+            if (!p.budgets.tryReserve(Resource.PREPARATION_BYTES, retained)) {
+                rejectAuthentication(id, new ResourceExhaustedException(Resource.PREPARATION_BYTES));
+                return;
+            }
             Credentials credentials =
                     Credentials.of(event.authenticationMechanism().get(), event.body());
             if (!p.budgets.owner().tryReserve(Resource.AUTHENTICATION_TASKS, 1)) {
-                endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
-                failPreparation(
-                        PreparationStage.AUTHENTICATION, new ResourceExhaustedException(Resource.AUTHENTICATION_TASKS));
+                p.budgets.release(Resource.PREPARATION_BYTES, retained);
+                rejectAuthentication(id, new ResourceExhaustedException(Resource.AUTHENTICATION_TASKS));
                 return;
             }
             try {
-                p.executor.execute(() -> runAuthentication(id, credentials, verifier));
+                p.executor.execute(() -> runAuthentication(id, credentials, verifier, retained));
             } catch (RuntimeException | Error e) {
                 p.budgets.owner().release(Resource.AUTHENTICATION_TASKS, 1);
-                endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
-                failPreparation(PreparationStage.AUTHENTICATION, e);
+                p.budgets.release(Resource.PREPARATION_BYTES, retained);
+                rejectAuthentication(id, e);
             }
+        }
+
+        private void rejectAuthentication(long id, Throwable cause) {
+            endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
+            failPreparation(PreparationStage.AUTHENTICATION, cause);
         }
 
         private void onClosed(Event event) {
