@@ -10,6 +10,7 @@ rootProject.name = "strand"
 
 include("strand-core")
 include("strand-nio")
+include("strand-netty")
 include("strand-conformance")
 include("strand-examples")
 include("strand-integration-test")
