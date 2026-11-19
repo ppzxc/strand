@@ -42,6 +42,8 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -67,6 +69,9 @@ final class ConnectionEngine {
     private static final int UNIMPLEMENTED = 12;
     /** 한 번에 처리하는 입력 단위의 상한. 넘으면 시계와 명령 처리를 먼저 한다. */
     static final int MAX_UNITS_PER_STEP = 64;
+
+    /** 핸들러 예외 같은 로컬 진단의 기록처. 상대에게 보내는 것이 아니다. */
+    private static final Logger LOGGER = Logger.getLogger("io.github.ppzxc.strand.nio");
 
     private static final long NANOS_PER_MILLI = 1_000_000L;
     private static final byte[] EMPTY = new byte[0];
@@ -111,6 +116,11 @@ final class ConnectionEngine {
     private final Map<Long, OutgoingEntry> pending = new HashMap<>();
     private final Map<Long, IncomingRequest> incoming = new HashMap<>();
     private CloseNotice finalNotice = CloseNotice.disconnected(null);
+    /**
+     * 결과나 응답을 접수한 뒤에도 본문을 가진 출력이 아직 남아 있어 돌려주지 못한 바이트 예약. 스트림 번호별로 그 애플리케이션 프레임 출력이 다 나가거나(또는
+     * 연결이 끊겨 출력이 사라지면) 돌려준다. 전송 스레드에서만 읽고 쓴다.
+     */
+    private final Map<Long, HeldBytes> heldBytes = new HashMap<>();
 
     ConnectionEngine(NioStrandConnection facade, ConnectionParams params) {
         this.facade = facade;
@@ -213,7 +223,41 @@ final class ConnectionEngine {
         }
     }
 
+    private static final class HeldBytes {
+        final Resource resource;
+        final long amount;
+
+        HeldBytes(Resource resource, long amount) {
+            this.resource = resource;
+            this.amount = amount;
+        }
+    }
+
+    /** 스트림의 애플리케이션 프레임 출력이 사라질 때까지 바이트 예약을 유지한다. 0바이트는 유지할 것이 없다. */
+    private void holdBytes(long streamId, Resource resource, long amount) {
+        if (amount > 0) {
+            heldBytes.put(streamId, new HeldBytes(resource, amount));
+        }
+    }
+
+    /** 스트림의 출력이 다 나갔다. 그 출력 때문에 유지하던 바이트 예약을 돌려준다. */
+    private void returnHeldBytes(long streamId) {
+        HeldBytes held = heldBytes.remove(streamId);
+        if (held != null) {
+            p.budgets.release(held.resource, held.amount);
+        }
+    }
+
+    /** 출력이 모두 사라졌다(연결이 끊겼거나 마무리됐다). 남은 출력 때문에 유지하던 바이트 예약을 모두 돌려준다. */
+    private void returnAllHeldBytes() {
+        for (HeldBytes held : heldBytes.values()) {
+            p.budgets.release(held.resource, held.amount);
+        }
+        heldBytes.clear();
+    }
+
     private void releaseSlots() {
+        returnAllHeldBytes();
         if (p.preparationBytes != null) {
             p.preparationBytes.releaseAll();
         }
@@ -315,14 +359,40 @@ final class ConnectionEngine {
     }
 
     Result<ResponseAcceptance> respond(IncomingRequest request, int status, byte[] body) {
+        IncomingState state = request.state();
         ResultCompletion<ResponseAcceptance> result = new ResultCompletion<>(
                 p.executor, p.budgets.observationBudget(), p.budgets.owner().observationBudget());
-        if (!p.budgets.tryReserve(Resource.RESPONSE_BYTES, body.length)) {
+        // 재시도마다 끝났는지·이미 응답했는지를 자원 부족보다 먼저 판정한다.
+        ResponseAcceptance ended = endedAcceptance(state);
+        if (ended != null) {
+            result.complete(ended);
+            return result;
+        }
+        // 응답 접수 명령은 요청마다 하나만 기다린다. 본문이 비어 예약이 0이어도 명령 대기가 예약 없이 늘지 않게 한다.
+        if (!state.responding.compareAndSet(false, true)) {
             result.complete(ResponseAcceptance.resourceExhausted(Resource.RESPONSE_BYTES));
             return result;
         }
-        submit(new RespondCommand(request.state(), status, body.clone(), result));
+        if (!p.budgets.tryReserve(Resource.RESPONSE_BYTES, body.length)) {
+            state.responding.set(false);
+            // 부족을 알리는 사이 요청이 끝났다면 끝남이 우선이다.
+            ResponseAcceptance nowEnded = endedAcceptance(state);
+            result.complete(
+                    nowEnded != null ? nowEnded : ResponseAcceptance.resourceExhausted(Resource.RESPONSE_BYTES));
+            return result;
+        }
+        submit(new RespondCommand(state, status, body.clone(), result));
         return result;
+    }
+
+    /** 요청이 이미 끝났으면 그에 맞는 접수 결과를, 아직 살아 있으면 null을 돌려준다. */
+    private static @Nullable ResponseAcceptance endedAcceptance(IncomingState state) {
+        if (!state.ended.isDone()) {
+            return null;
+        }
+        return state.ended.resultNow().isResponseAccepted()
+                ? ResponseAcceptance.alreadyResponded()
+                : ResponseAcceptance.requestEnded();
     }
 
     private final class Handle implements RequestHandle {
@@ -453,23 +523,30 @@ final class ConnectionEngine {
                 } else {
                     // 상대가 RESET했거나 연결이 끝난 스트림이다. 응답은 접수하지 않았다.
                     acceptance = ResponseAcceptance.requestEnded();
-                    releaseIncoming(state);
+                    returnIncoming(state);
                 }
             } catch (IllegalArgumentException e) {
                 // 협상한 프레임 크기를 넘는 응답. 본문을 보관하지 않고 응답 권한도 소비하지 않는다.
                 acceptance = ResponseAcceptance.resourceExhausted(Resource.PEER_FRAME_SIZE);
             }
-            // 예약을 돌려준 뒤에 결과를 보존해, 결과를 본 앱이 곧바로 다시 응답해도 예약이 이미 돌아와 있다.
-            p.budgets.release(Resource.RESPONSE_BYTES, body.length);
-            result.complete(acceptance);
+            if (accepted) {
+                // 응답 프레임이 core 출력으로 쌓였다. 본문 참조는 그 프레임이 다 나가거나 연결이 끝날 때까지 남으므로 예약도 그때 돌려준다.
+                holdBytes(state.streamId, Resource.RESPONSE_BYTES, body.length);
+            } else {
+                p.budgets.release(Resource.RESPONSE_BYTES, body.length);
+            }
+            // 요청 종료와 대기 표시 해제를 결과보다 먼저 보존해, 결과를 본 앱이 곧바로 다시 응답하면 이미 응답한 것으로 판정된다.
+            state.responding.set(false);
             if (accepted) {
                 finishIncoming(state, RequestEnd.responseAccepted());
             }
+            result.complete(acceptance);
         }
 
         @Override
         public void abandon() {
             p.budgets.release(Resource.RESPONSE_BYTES, body.length);
+            state.responding.set(false);
             result.complete(ResponseAcceptance.requestEnded());
         }
     }
@@ -767,9 +844,10 @@ final class ConnectionEngine {
         try {
             p.executor.execute(() -> runHandler(request, handler));
         } catch (RuntimeException | Error e) {
-            // 실행 거절은 핸들러 시작 전 REFUSED다.
+            // 실행 거절은 핸들러 시작 전 REFUSED다. 작업이 본문을 쥐지 않았으므로 바이트도 함께 돌아온다.
             incoming.remove(streamId);
-            releaseIncoming(state);
+            state.handlerSettled();
+            returnIncoming(state);
             p.budgets.release(Resource.HANDLER_TASKS, 1);
             loop.endpoint.refuseRequest(streamId);
         }
@@ -804,17 +882,23 @@ final class ConnectionEngine {
         return true;
     }
 
-    private void releaseIncoming(IncomingState state) {
-        if (!state.reservationReleased) {
-            state.reservationReleased = true;
-            p.budgets.release(Resource.INCOMING_BYTES, state.reservedBytes);
+    /** 요청이 끝났다: 요청 수 예약을 돌려주고, 핸들러 작업도 참조를 놓았으면 바이트 예약도 돌려준다. */
+    private void returnIncoming(IncomingState state) {
+        if (state.claimCountReturn()) {
             p.budgets.release(Resource.INCOMING_REQUESTS, 1);
+        }
+        returnIncomingBytes(state);
+    }
+
+    private void returnIncomingBytes(IncomingState state) {
+        if (state.claimBytesReturn()) {
+            p.budgets.release(Resource.INCOMING_BYTES, state.reservedBytes);
         }
     }
 
     private void finishIncoming(IncomingState state, RequestEnd end) {
         incoming.remove(state.streamId);
-        releaseIncoming(state);
+        returnIncoming(state);
         state.ended.complete(end);
     }
 
@@ -826,10 +910,25 @@ final class ConnectionEngine {
             }
             handler.handle(request);
         } catch (Throwable t) {
-            // 아직 살아 있고 응답 전이면 빈 INTERNAL 응답을 시도한다. 예외 메시지는 상대에게 보내지 않고 연결은 유지한다.
+            // 아직 살아 있고 응답 전이면 빈 INTERNAL 응답을 시도한다. 예외 메시지는 상대에게 보내지 않고 연결은 유지한다. 원인은 로컬 진단에만 남긴다.
+            diagnoseHandlerFailure(request, t);
             request.respond(Status.INTERNAL, EMPTY);
         } finally {
+            request.state().handlerSettled();
+            returnIncomingBytes(request.state());
             p.budgets.release(Resource.HANDLER_TASKS, 1);
+        }
+    }
+
+    /** 핸들러 예외를 로컬 진단으로 남긴다. 상대에게는 보내지 않는다. 진단 실패가 요청 처리를 바꾸지 않는다. */
+    private void diagnoseHandlerFailure(IncomingRequest request, Throwable failure) {
+        try {
+            LOGGER.log(
+                    Level.WARNING,
+                    "받은 요청 핸들러가 예외를 던졌다(type=" + request.type() + ", 상대=" + p.remoteAddress + ")",
+                    failure);
+        } catch (RuntimeException ignored) {
+            // 로그 처리기 오류가 빈 INTERNAL 응답과 슬롯 반환을 막지 않는다.
         }
     }
 
@@ -1053,6 +1152,8 @@ final class ConnectionEngine {
                 EndpointOutput output = endpoint.nextOutput();
                 if (output == null) {
                     writing = null;
+                    // 더 쓸 출력이 없다. 끊겨서 사라진 부분 출력이 쥐고 있던 바이트 예약도 돌려준다.
+                    returnAllHeldBytes();
                     return true;
                 }
                 if (writing == null || writing.id() != output.id()) {
@@ -1067,6 +1168,7 @@ final class ConnectionEngine {
                     writingOffset += count;
                     progressed = true;
                     if (writingOffset == writingBytes.length) {
+                        returnHeldBytes(output.applicationStreamId());
                         writing = null;
                     }
                 }
@@ -1114,9 +1216,23 @@ final class ConnectionEngine {
         }
 
         private void onResult(Event event) {
-            Optional.ofNullable(pending.remove(event.ticket().getAsLong()))
-                    .ifPresent(entry ->
-                            entry.finish(event.status(), map(event.certainty().get()), event.body()));
+            OutgoingEntry entry = pending.remove(event.ticket().getAsLong());
+            if (entry != null) {
+                // 결과가 확정돼도 그 요청 프레임이 일부만 나간 채 남아 있으면 본문 바이트 예약은 프레임이 다 나갈 때까지 유지한다.
+                entry.finish(
+                        event.status(),
+                        map(event.certainty().get()),
+                        event.body(),
+                        isPartiallyWritten(event.streamId()) ? event.streamId() : OutgoingEntry.NO_STREAM);
+            }
+        }
+
+        /** 쓰기를 시작해 일부만 나간 애플리케이션 프레임이 이 스트림의 것인가. 쓰기 전 프레임은 core가 철회하므로 참조가 남지 않는다. */
+        private boolean isPartiallyWritten(long streamId) {
+            return streamId > 0
+                    && writing != null
+                    && writingOffset > 0
+                    && writing.applicationStreamId() == streamId;
         }
 
         private void onClientAuthenticated() {
@@ -1283,6 +1399,7 @@ final class ConnectionEngine {
     /** 내가 낸 요청 하나. */
     private final class OutgoingEntry {
         static final long NO_TICKET = -1L;
+        static final long NO_STREAM = 0L;
 
         final ResultCompletion<RequestResult> result;
         final int type;
@@ -1312,7 +1429,22 @@ final class ConnectionEngine {
 
         /** 결과를 확정하고 예약을 돌려준다. 결과는 한 번만 확정된다({@code ResultCompletion}이 두 번째를 무시한다). */
         void finish(int status, Certainty certainty, byte[] body) {
-            returnReservation();
+            finish(status, certainty, body, NO_STREAM);
+        }
+
+        /**
+         * 결과를 확정한다. 요청 수 예약은 돌려주고, 바이트 예약은 {@code heldStreamId}가 있으면 그 스트림의 프레임이 다 나갈 때까지 유지한다.
+         *
+         * @param heldStreamId 이 요청의 프레임이 일부만 나간 채 출력에 남아 있을 때 그 스트림 번호, 아니면 {@link #NO_STREAM}
+         */
+        void finish(int status, Certainty certainty, byte[] body, long heldStreamId) {
+            if (heldStreamId != NO_STREAM && reserved) {
+                reserved = false;
+                p.budgets.release(Resource.OUTGOING_REQUESTS, 1);
+                holdBytes(heldStreamId, Resource.OUTGOING_BYTES, bytes);
+            } else {
+                returnReservation();
+            }
             result.complete(new RequestResult(status, certainty, body));
         }
 
