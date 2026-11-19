@@ -58,6 +58,8 @@ public final class InMemoryPassage implements Passage {
     private boolean muted;
     private boolean held;
     private long writeCapacity = UNLIMITED;
+    private boolean failingWrites;
+    private final java.io.ByteArrayOutputStream writtenBytes = new java.io.ByteArrayOutputStream();
     private byte[] partial = new byte[0];
     private boolean parkedForRead;
     private boolean parkedForWrite;
@@ -194,6 +196,66 @@ public final class InMemoryPassage implements Passage {
             peer.deliver(Inbound.message(WebSocketMessageKind.BINARY, whole));
         }
         return accepted;
+    }
+
+    /**
+     * 진행 보고 방식 쓰기. 받아 주는 만큼({@link #writeCapacity})만 상대에게 보내고 그 바이트 수를 돌려준다. 0은 아무것도 보내지 않은 것이다. 바이트
+     * 스트림 통로에서만 쓴다.
+     */
+    @Override
+    public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
+        byte[] slice;
+        synchronized (lock) {
+            if (closed || outputShutdown) {
+                throw new IOException("닫힌 통로");
+            }
+            if (failingWrites) {
+                throw new IOException("쓰기 실패");
+            }
+            if (muted) {
+                return length;
+            }
+            int accepted = (int) Math.min(length, writeCapacity);
+            if (accepted == 0) {
+                return 0;
+            }
+            if (writeCapacity != UNLIMITED) {
+                writeCapacity -= accepted;
+            }
+            slice = Arrays.copyOfRange(bytes, offset, offset + accepted);
+            writtenBytes.write(slice, 0, slice.length);
+        }
+        peer.deliver(Inbound.bytes(slice));
+        return slice.length;
+    }
+
+    /**
+     * 진행 보고 방식으로 지금까지 받아 준 바이트 전체(쓴 순서).
+     *
+     * @return 받아 준 바이트
+     */
+    public byte[] writtenBytes() {
+        synchronized (lock) {
+            return writtenBytes.toByteArray();
+        }
+    }
+
+    /** 이 통로의 이후 쓰기가 입출력 오류로 실패하게 한다(읽기는 영향이 없다). */
+    public void failWrites() {
+        synchronized (lock) {
+            activity++;
+            failingWrites = true;
+            lock.notifyAll();
+        }
+    }
+
+    /**
+     * 상대가 이 통로로 보낸 것처럼 바이트를 읽을 쪽 받은 편지함에 넣는다. 테스트가 프레임을 직접 만들어 보낸다.
+     *
+     * @param bytes 읽게 할 바이트
+     */
+    public void inject(byte[] bytes) {
+        deliver(Inbound.bytes(bytes.clone()));
     }
 
     private static byte[] concat(byte[] head, byte[] tail) {
