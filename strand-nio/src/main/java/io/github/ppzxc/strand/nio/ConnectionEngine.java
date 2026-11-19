@@ -659,18 +659,18 @@ final class ConnectionEngine {
 
     /**
      * 준비 성공 알림은 앱용 실행기에서 한다. 같은 연결의 인증·팩터리가 반환하지 않아도 알릴 수 있도록 연결별 직렬 실행을 거치지 않는다. 실행기가 거절하면
-     * 알림을 대신할 스레드를 만들지 않고, 앱이 받을 수 없는 연결이므로 끊고 시도를 거절 원인으로 실패시킨다. 서버는 성공 알림이 필요 없다.
+     * 알림을 대신할 스레드를 만들지 않고, 앱이 받을 수 없는 연결이므로 끊고 시도를 거절 원인으로 실패시킨다. 서버는 성공을 알릴 앱 관찰자가 없어 거절돼도 연결을 유지한다.
      */
     private void notifyReady() {
-        if (p.role != ConnectionParams.Role.CLIENT) {
-            return;
-        }
         try {
             p.appExecutor.execute(() -> p.observer.ready(facade));
         } catch (RuntimeException | Error e) {
-            abortRequested = true;
-            wake();
-            p.observer.rejected(new PreparationFailure(p.remoteAddress, stage, e));
+            if (p.role == ConnectionParams.Role.CLIENT) {
+                abortRequested = true;
+                wake();
+                p.observer.rejected(new PreparationFailure(p.remoteAddress, stage, e));
+            }
+            // 서버는 성공을 알릴 앱 관찰자가 없으므로 알림이 거절돼도 연결을 유지한다.
         }
     }
 
