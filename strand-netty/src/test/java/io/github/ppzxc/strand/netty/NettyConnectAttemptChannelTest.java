@@ -72,7 +72,8 @@ class NettyConnectAttemptChannelTest {
         // 일반 Future 완료가 아니라 실제 채널 정리가 끝난 시점에 TLS 버퍼와 진행 공간 예약이 돌아와 있다.
         assertThat(allocator.metric().usedDirectMemory()).isZero();
         assertThat(allocator.metric().usedHeapMemory()).isZero();
-        assertThat(client.resourceUsage(Resource.TLS_CIPHERTEXT_BYTES).current()).isZero();
+        assertThat(client.resourceUsage(Resource.TLS_CIPHERTEXT_BYTES).current())
+                .isZero();
         assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
         hold.countDown();
         awaitTrue(() -> server.resourceUsage(Resource.AUTHENTICATION_TASKS).current() == 0);
@@ -80,7 +81,8 @@ class NettyConnectAttemptChannelTest {
         assertThat(fixture.group.isShuttingDown()).isFalse();
         assertThat(fixture.pool.isShutdown()).isFalse();
         NettyStrandConnection again = AppFixture.get(client.connect(AppFixture.loopback(listener)));
-        assertThat(fixture.result(again.request(Request.of(AppFixture.TYPE, new byte[0])).result())
+        assertThat(fixture.result(again.request(Request.of(AppFixture.TYPE, new byte[0]))
+                                .result())
                         .status())
                 .isEqualTo(Status.OK);
         again.abort();

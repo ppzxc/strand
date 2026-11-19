@@ -168,9 +168,7 @@ public final class NettyStrandClient {
         if (!preparationBytes.tryReserve(retainedInputBytes(target))) {
             ConnectionEngine.cancelAdmission(budgets, common.space);
             promise.tryFailure(new PreparationFailedException(new PreparationFailure(
-                    target,
-                    PreparationStage.CONNECTION,
-                    new ResourceExhaustedException(Resource.PREPARATION_BYTES))));
+                    target, PreparationStage.CONNECTION, new ResourceExhaustedException(Resource.PREPARATION_BYTES))));
             released.trySuccess(null);
             return attempt;
         }

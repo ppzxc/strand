@@ -93,8 +93,8 @@ class NettyPreparationBytesTest {
                 .credentials(Credentials.of("TOKEN", "far-too-long-for-four-bytes".getBytes(StandardCharsets.UTF_8)))
                 .build();
 
-        PreparationFailure failure = failureOf(
-                AppFixture.cf(client.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), 9))));
+        PreparationFailure failure =
+                failureOf(AppFixture.cf(client.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), 9))));
 
         assertThat(failure.stage()).isEqualTo(PreparationStage.CONNECTION);
         assertThat(failure.cause()).isInstanceOf(ResourceExhaustedException.class);
@@ -113,8 +113,8 @@ class NettyPreparationBytesTest {
                 .resolver(host -> new InetAddress[] {InetAddress.getLoopbackAddress()})
                 .build();
 
-        PreparationFailure failure = failureOf(
-                AppFixture.cf(client.connect(InetSocketAddress.createUnresolved("h", 9))));
+        PreparationFailure failure =
+                failureOf(AppFixture.cf(client.connect(InetSocketAddress.createUnresolved("h", 9))));
 
         assertThat(failure.stage()).isEqualTo(PreparationStage.CONNECTION);
         assertThat(failure.cause()).isInstanceOf(ResourceExhaustedException.class);
@@ -170,8 +170,7 @@ class NettyPreparationBytesTest {
                 .clientBuilder()
                 .credentials(Credentials.of("TOKEN", secret))
                 .build();
-        CompletableFuture<NettyStrandConnection> attempt =
-                AppFixture.cf(client.connect(AppFixture.loopback(listener)));
+        CompletableFuture<NettyStrandConnection> attempt = AppFixture.cf(client.connect(AppFixture.loopback(listener)));
         assertThat(entered.await(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
 
         assertThat(app.resourceUsage(Resource.PREPARATION_BYTES).current()).isEqualTo(secret.length + "TOKEN".length());
@@ -199,8 +198,7 @@ class NettyPreparationBytesTest {
                 .clientBuilder()
                 .credentials(Credentials.of("TOKEN", "far-too-long-for-four-bytes".getBytes(StandardCharsets.UTF_8)))
                 .build();
-        CompletableFuture<NettyStrandConnection> attempt =
-                AppFixture.cf(client.connect(AppFixture.loopback(listener)));
+        CompletableFuture<NettyStrandConnection> attempt = AppFixture.cf(client.connect(AppFixture.loopback(listener)));
 
         PreparationFailure failure = failures.poll(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
 

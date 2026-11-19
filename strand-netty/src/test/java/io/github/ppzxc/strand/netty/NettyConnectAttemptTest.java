@@ -197,8 +197,7 @@ class NettyConnectAttemptTest {
     void theLastAddressFailureIsReportedWhenEveryAddressFails() throws Exception {
         AppFixture fixture = track(AppFixture.plain());
         NettyStrandClient client = fixture.clientBuilder()
-                .resolver(host ->
-                        new InetAddress[] {loopback(2), loopback(3)})
+                .resolver(host -> new InetAddress[] {loopback(2), loopback(3)})
                 .build();
 
         PreparationFailure failure = failureOf(client.connectAttempt(InetSocketAddress.createUnresolved("h", 1)));
