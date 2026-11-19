@@ -103,6 +103,26 @@ class NettyOutputReferenceReturnTest {
         assertThat(client.owner.usage(Resource.OUTGOING_BYTES).current()).isZero();
     }
 
+    @Test
+    void cancellingARequestWhoseFrameIsQueuedBehindAPartiallyWrittenOneReturnsItsBytesAtOnce() throws Exception {
+        client = NettyRig.client();
+        client.writeCapacity(50);
+        long stalls = client.stalls();
+        RequestHandle writing = client.connection.request(Request.of(NettyRig.TYPE, BODY));
+        NettyRig.awaitTrue(() -> client.stalls() > stalls);
+        RequestHandle queued = client.connection.request(Request.of(NettyRig.TYPE, BODY));
+        NettyRig.awaitTrue(() -> client.used(Resource.OUTGOING_REQUESTS) == 2);
+
+        queued.cancel();
+        NettyRig.awaitTrue(() -> queued.result().isDone());
+
+        // 아직 쓰기 시작 전인 프레임은 지금 쓰는 프레임의 참조와 무관하므로 그 요청의 수·바이트가 모두 돌아오고, 쓰는 프레임의 바이트만 남는다.
+        assertThat(queued.result().resultNow().certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+        assertThat(client.used(Resource.OUTGOING_REQUESTS)).isEqualTo(1);
+        assertThat(client.used(Resource.OUTGOING_BYTES)).isEqualTo(BODY.length);
+        assertThat(writing.result().isDone()).isFalse();
+    }
+
     // --- 응답 바이트 ---
 
     private IncomingRequest receiveOne(BlockingQueue<IncomingRequest> received) throws Exception {
@@ -146,6 +166,28 @@ class NettyOutputReferenceReturnTest {
         NettyServerRig.awaitTrue(() -> server.stalls() > stalls);
         assertThat(acceptance.resultNow().kind()).isEqualTo(AcceptanceKind.ACCEPTED);
         assertThat(server.used(Resource.RESPONSE_BYTES)).isEqualTo(BODY.length);
+
+        server.connection.abort();
+        server.fixture.result(server.connection.closed());
+
+        assertThat(server.used(Resource.RESPONSE_BYTES)).isZero();
+        assertThat(server.owner.usage(Resource.RESPONSE_BYTES).current()).isZero();
+    }
+
+    @Test
+    void responseBytesOfAFrameQueuedBehindTheOneBeingWrittenReturnWhenTheConnectionEnds() throws Exception {
+        BlockingQueue<IncomingRequest> received = new LinkedBlockingQueue<>();
+        server = new NettyServerRig(received::add);
+        IncomingRequest first = receiveOne(received);
+        IncomingRequest second = receiveOne(received);
+        server.writeCapacity(0);
+        long stalls = server.stalls();
+        first.respond(Status.OK, BODY);
+        NettyServerRig.awaitTrue(() -> server.stalls() > stalls);
+        Result<ResponseAcceptance> queued = second.respond(Status.OK, BODY);
+        NettyServerRig.awaitTrue(queued::isDone);
+        // 두 번째 응답 프레임은 core 출력에 쌓이기만 하고 아직 쓰기를 시작하지 않았다. 둘 다 본문 참조가 남아 있다.
+        assertThat(server.used(Resource.RESPONSE_BYTES)).isEqualTo(2L * BODY.length);
 
         server.connection.abort();
         server.fixture.result(server.connection.closed());
