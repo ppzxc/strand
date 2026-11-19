@@ -241,11 +241,7 @@ final class ConnectionEngine {
 
     /** 이벤트 루프: 다음 주소 하나에 연결한다. 남은 준비 기한이 없으면 기한 초과로 끝낸다. */
     private void connectNext() {
-        InetSocketAddress target = pendingTargets.poll();
-        if (target == null) {
-            setupFailed(new UnknownHostException(String.valueOf(p.remoteAddress)));
-            return;
-        }
+        InetSocketAddress target = pendingTargets.remove();
         long remaining = p.preparationDeadlineAtNanos - p.nanoClock.getAsLong();
         if (remaining <= 0) {
             setupFailed(new PreparationDeadlineExceededException());
@@ -276,8 +272,8 @@ final class ConnectionEngine {
     /** 이벤트 루프: 한 주소의 연결이 실패했다. 남은 주소가 있고 시도가 끝나지 않았으면 새 채널로 다음 주소를 연결하고, 아니면 이 실패로 끝낸다. */
     @SuppressWarnings("FutureReturnValueIgnored") // 실패한 채널의 정리 완료는 관찰할 것이 없다.
     private void connectFailed(StrandChannel failed, Throwable cause) {
-        if (!failed.equals(channel) || attemptEnded()) {
-            // 취소·기한이 먼저 끝냈거나 이미 교체한 채널의 실패다.
+        if (attemptEnded()) {
+            // 취소·기한이 먼저 끝냈다.
             return;
         }
         if (pendingTargets.isEmpty()) {
@@ -371,15 +367,13 @@ final class ConnectionEngine {
     private final class Handler extends ChannelInboundHandlerAdapter {
         @Override
         public void channelActive(ChannelHandlerContext ctx) {
-            if (ctx.channel().equals(channel)) {
-                onActive();
-            }
+            onActive();
         }
 
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object message) {
             try {
-                if (message instanceof ByteBuf && ctx.channel().equals(channel)) {
+                if (message instanceof ByteBuf) {
                     onRead((ByteBuf) message);
                 }
             } finally {
@@ -600,7 +594,7 @@ final class ConnectionEngine {
      */
     void cancelAttempt() {
         runOnLoop(() -> {
-            if (!preparing || tornDown.get()) {
+            if (!preparing) {
                 return;
             }
             if (active == null) {
@@ -941,13 +935,9 @@ final class ConnectionEngine {
             });
         } catch (RuntimeException | Error e) {
             // 폐기 실행이 거절됐다. 폐기 동작을 EventLoop에서 대신 실행하지 않고 앱이 조회·회수하도록 보존한다. 예약은 앱이 인수할 때까지 유지한다.
-            UnreleasedHandlers registry = p.unreleased;
-            if (registry == null) {
-                p.budgets.owner().release(Resource.FACTORY_TASKS, 1);
-            } else {
-                registry.add(new UnreleasedHandler(
-                        handler, registry, () -> p.budgets.owner().release(Resource.FACTORY_TASKS, 1)));
-            }
+            UnreleasedHandlers registry = Objects.requireNonNull(p.unreleased);
+            registry.add(new UnreleasedHandler(
+                    handler, registry, () -> p.budgets.owner().release(Resource.FACTORY_TASKS, 1)));
         }
     }
 
@@ -1054,8 +1044,10 @@ final class ConnectionEngine {
         try {
             p.appExecutor.execute(() -> p.observer.failed(failure));
         } catch (RuntimeException | Error e) {
-            if (!e.equals(failure.cause())) {
+            try {
                 failure.cause().addSuppressed(e);
+            } catch (IllegalArgumentException sameAsCause) {
+                // 거절 예외가 원인과 같은 객체면 덧붙일 것이 없다.
             }
             p.observer.rejected(failure);
         }
@@ -1068,10 +1060,6 @@ final class ConnectionEngine {
     }
 
     private void startFactory(Loop loop) {
-        if (!preparing) {
-            // 이미 취소·기한·종료로 준비가 확정됐다. 늦은 인증 완료로 팩터리를 시작하지 않는다.
-            return;
-        }
         ConnectionHandlerFactory factory = p.factory;
         if (factory == null) {
             activate(loop, p.handler);

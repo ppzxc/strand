@@ -325,6 +325,101 @@ class NettyConnectAttemptTest {
         awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
     }
 
+    @Test
+    void aResolverThatFindsNoAddressFailsTheConnectionStageAsAnUnknownHost() throws Exception {
+        AppFixture fixture = track(AppFixture.plain());
+        NettyStrandClient client =
+                fixture.clientBuilder().resolver(host -> new InetAddress[0]).build();
+
+        PreparationFailure failure = failureOf(client.connectAttempt(InetSocketAddress.createUnresolved("h", 9)));
+
+        assertThat(failure.stage()).isEqualTo(PreparationStage.CONNECTION);
+        assertThat(failure.cause()).isInstanceOf(java.net.UnknownHostException.class);
+        awaitTrue(() -> client.resourceUsage(Resource.RESOLVE_TASKS).current() == 0);
+    }
+
+    @Test
+    void aResolverThatReturnsNothingIsTreatedAsFindingNoAddress() throws Exception {
+        AppFixture fixture = track(AppFixture.plain());
+        NettyStrandClient client =
+                fixture.clientBuilder().resolver(host -> null).build();
+
+        PreparationFailure failure = failureOf(client.connectAttempt(InetSocketAddress.createUnresolved("h", 9)));
+
+        assertThat(failure.cause()).isInstanceOf(java.net.UnknownHostException.class);
+    }
+
+    @Test
+    void repeatingACancelBeforeTheAttemptEndsIsAcceptedAgainWithoutExtraEffect() throws Exception {
+        AppFixture fixture = track(AppFixture.plain());
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch hold = new CountDownLatch(1);
+        NettyStrandClient client = fixture.clientBuilder()
+                .resolver(host -> {
+                    entered.countDown();
+                    try {
+                        hold.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return new InetAddress[] {InetAddress.getLoopbackAddress()};
+                })
+                .build();
+        NettyConnectAttempt attempt = client.connectAttempt(InetSocketAddress.createUnresolved("slow", 9));
+        assertThat(entered.await(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(attempt.cancel()).isTrue();
+        assertThat(attempt.cancel()).isTrue();
+
+        assertThat(failureOf(attempt).cause()).isInstanceOf(ConnectionAttemptCancelledException.class);
+        hold.countDown();
+        // 확정된 뒤의 취소는 접수하지 않는다.
+        assertThat(attempt.cancel()).isFalse();
+    }
+
+    @Test
+    void aServerWhoseExecutorRejectsTheReadyNotificationKeepsTheConnection() throws Exception {
+        AppFixture server = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        NettyStrandServer app = accepting(server)
+                .handlerFactory(connection -> PreparedHandler.of(request -> request.respond(Status.OK, new byte[0])))
+                .build();
+        Listener listener = listen(app);
+        // build 확인(1)·인증(2)·팩터리(3) 다음의 준비 성공 알림(4)만 거절한다. 서버는 성공을 알릴 앱 관찰자가 없다.
+        server.executor.rejectTaskNumber(4);
+
+        NettyStrandConnection connection =
+                AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
+
+        assertThat(clientFixture
+                        .requestWhenServed(connection, Request.of(AppFixture.TYPE, new byte[0]))
+                        .status())
+                .isEqualTo(Status.OK);
+        connection.abort();
+    }
+
+    @Test
+    void cancellingWhileTheTcpConnectIsPendingEndsTheAttemptAsCancelledAndClosesTheChannel() throws Exception {
+        AppFixture fixture = track(AppFixture.plain());
+        // 수락하지 않는 서버: 대기열이 차면 연결이 끝나지 않거나, 맺어져도 HELLO 응답이 없어 준비가 끝나지 않는다. 어느 쪽이든 준비 중에 취소한다.
+        try (ServerSocket silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+                java.net.Socket first = new java.net.Socket(InetAddress.getLoopbackAddress(), silent.getLocalPort());
+                java.net.Socket second = new java.net.Socket()) {
+            second.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), silent.getLocalPort()), 1000);
+            NettyStrandClient client = fixture.clientBuilder().build();
+            NettyConnectAttempt attempt = client.connectAttempt(
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), silent.getLocalPort()));
+            Thread.sleep(300);
+
+            assertThat(attempt.cancel()).isTrue();
+
+            assertThat(failureOf(attempt).cause()).isInstanceOf(ConnectionAttemptCancelledException.class);
+            AppFixture.get(attempt.transportReleased());
+            assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current())
+                    .isZero();
+        }
+    }
+
     private static List<Throwable> rootCauses(Throwable failure) {
         List<Throwable> chain = new java.util.ArrayList<>();
         for (Throwable t = failure; t != null; t = t.getCause()) {
