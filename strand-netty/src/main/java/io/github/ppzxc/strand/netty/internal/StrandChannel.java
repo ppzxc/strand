@@ -11,7 +11,7 @@ import java.nio.channels.SocketChannel;
  * 출력은 {@code write}/{@code flush}와 {@code Future}를 거치지 않고 {@link #writeAttempt}로 소켓에 직접 쓴다. 그래서 실제로 소켓이 받아 준 바이트 수가
  * core 진행 보고의 근거다. 모든 메서드는 이 채널의 이벤트 루프에서만 부른다.
  */
-public final class StrandChannel extends NioSocketChannel {
+public class StrandChannel extends NioSocketChannel {
     /** 클라이언트 쪽: 아직 연결하지 않은 채널. */
     public StrandChannel() {
         super();
