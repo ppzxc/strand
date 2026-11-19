@@ -57,6 +57,10 @@ final class NettyRig implements AutoCloseable {
             capacity.set(bytes);
         }
 
+        long stallCount() {
+            return stalls.get();
+        }
+
         /** 서버 쪽: 수락한 소켓을 감싼다. */
         LimitedChannel(java.nio.channels.SocketChannel accepted) {
             super(null, accepted);

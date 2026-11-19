@@ -39,7 +39,16 @@ final class NettyServerRig implements AutoCloseable {
     private final ServerSocketChannel listener;
     private final Socket socket;
 
-    NettyServerRig(RequestHandler handler, Executor appExecutor) throws Exception {
+    private java.util.concurrent.CountDownLatch gateRelease;
+
+    NettyServerRig(RequestHandler handler) throws Exception {
+        this(handler, null);
+    }
+
+    /**
+     * @param wrapExecutor 앱용 실행기를 감싸는 함수(실행하지 않는 실행기처럼 앱 쪽 작업의 진행을 시험이 쥐어야 할 때). 없으면 fixture의 실행기를 그대로 쓴다
+     */
+    NettyServerRig(RequestHandler handler, java.util.function.UnaryOperator<Executor> wrapExecutor) throws Exception {
         EndpointConfig config = EndpointConfig.defaults()
                 .knownTypes(Collections.singleton(AppFixture.TYPE))
                 .maxConcurrentStreams(8)
@@ -58,7 +67,7 @@ final class NettyServerRig implements AutoCloseable {
         SocketChannel accepted = listener.accept();
         channel = new NettyRig.LimitedChannel(accepted);
         channel.config().setTcpNoDelay(true);
-        Executor executor = appExecutor == null ? fixture.executor : appExecutor;
+        Executor executor = wrapExecutor == null ? fixture.executor : wrapExecutor.apply(fixture.executor);
         ConnectionParams params = new ConnectionParams(
                 ConnectionParams.Role.SERVER,
                 config,
@@ -107,6 +116,37 @@ final class NettyServerRig implements AutoCloseable {
         channel.capacity(bytes);
     }
 
+    /** 서버 쪽 채널이 응답 바이트를 받아 주지 못한(일부라도 남긴) 횟수. */
+    long stalls() {
+        return channel.stallCount();
+    }
+
+    /** 이벤트 루프를 막아, 그동안의 앱 호출이 core 등록 전 대기에 머물게 한다. */
+    void closeGate() throws InterruptedException {
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        gateRelease = release;
+        loop.execute(() -> {
+            entered.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        if (!entered.await(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS)) {
+            throw new AssertionError("이벤트 루프가 문 앞에 서지 않았다");
+        }
+    }
+
+    void openGate() {
+        java.util.concurrent.CountDownLatch release = gateRelease;
+        gateRelease = null;
+        if (release != null) {
+            release.countDown();
+        }
+    }
+
     long used(Resource resource) {
         return connection.resourceUsage(resource).current();
     }
@@ -117,6 +157,7 @@ final class NettyServerRig implements AutoCloseable {
 
     @Override
     public void close() {
+        openGate();
         connection.abort();
         peer.close();
         try {
