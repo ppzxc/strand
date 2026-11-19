@@ -13,7 +13,7 @@ import java.util.function.Function;
 /**
  * 벡터 형식이 정한 이벤트 종류의 단일 정의. 종류마다 형태(필드 규칙), 기대 JSON 렌더링, 실제 {@link Event} 렌더링을 함께 갖는다. 두
  * 렌더링은 종류마다 하나의 형식 함수를 거치므로 같은 문자열을 낸다. 렌더링은 벡터 형식이 정한 필드만 그리고, 벡터 형식에 없는
- * 이벤트(AUTHENTICATED)는 그리지 않는다.
+ * 이벤트(AUTHENTICATED, REQUEST_RESET)는 그리지 않는다.
  */
 final class EventKind {
 
@@ -98,9 +98,9 @@ final class EventKind {
         return kind.expected.apply(event);
     }
 
-    /** 실제 이벤트를 같은 표기로. 벡터 형식에 없는 이벤트(AUTHENTICATED)는 null이다. 정의도 없고 제외로 정해지지도 않은 종류는 오류다. */
+    /** 실제 이벤트를 같은 표기로. 벡터 형식에 없는 이벤트(AUTHENTICATED, REQUEST_RESET)는 null이다. 정의도 없고 제외로 정해지지도 않은 종류는 오류다. */
     static String actual(Event event) {
-        if (event.kind() == Event.Kind.AUTHENTICATED) {
+        if (event.kind() == Event.Kind.AUTHENTICATED || event.kind() == Event.Kind.REQUEST_RESET) {
             return null;
         }
         for (EventKind kind : ALL) {
