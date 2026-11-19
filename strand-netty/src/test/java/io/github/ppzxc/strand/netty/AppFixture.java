@@ -112,6 +112,7 @@ final class AppFixture implements AutoCloseable {
         long ownerOutgoingBytes = 1 << 24;
         long ownerResponseBytes = 1 << 24;
         long ownerHandlerTasks = -1;
+        long connectionHandlerTasks = -1;
         long ownerProgressConnections = -1;
         long perConnectionObservations = 64;
         long maxFrameSize = EndpointConfig.DEFAULT_MAX_FRAME_SIZE;
@@ -172,6 +173,12 @@ final class AppFixture implements AutoCloseable {
             return this;
         }
 
+        /** 연결 범위의 핸들러 작업 한도만 따로 정한다(기본은 {@code perConnection}). */
+        Spec connectionHandlerTasks(long value) {
+            this.connectionHandlerTasks = value;
+            return this;
+        }
+
         Spec ownerOutgoingBytes(long value) {
             this.ownerOutgoingBytes = value;
             return this;
@@ -217,7 +224,7 @@ final class AppFixture implements AutoCloseable {
                             .outgoingRequests(perConnection, bodyBytes)
                             .incomingRequests(perConnection, bodyBytes)
                             .responseBytes(bodyBytes)
-                            .handlerTasks(perConnection)
+                            .handlerTasks(connectionHandlerTasks < 0 ? perConnection : connectionHandlerTasks)
                             .observations(perConnectionObservations)
                             .preparationBytes(perConnectionPreparationBytes)
                             .progressBytes(min[0], min[1], min[2], min[3], min[4], min[5])

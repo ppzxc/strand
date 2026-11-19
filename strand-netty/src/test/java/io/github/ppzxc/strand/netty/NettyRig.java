@@ -49,6 +49,23 @@ final class NettyRig implements AutoCloseable {
         private final AtomicLong stalls = new AtomicLong();
         private volatile boolean failing;
 
+        LimitedChannel() {
+            super();
+        }
+
+        void capacity(long bytes) {
+            capacity.set(bytes);
+        }
+
+        long stallCount() {
+            return stalls.get();
+        }
+
+        /** 서버 쪽: 수락한 소켓을 감싼다. */
+        LimitedChannel(java.nio.channels.SocketChannel accepted) {
+            super(null, accepted);
+        }
+
         @Override
         public int writeAttempt(ByteBuffer bytes) throws IOException {
             if (failing) {
