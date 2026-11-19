@@ -149,7 +149,7 @@ public final class NioStrandServer {
             try {
                 server.setOption(StandardSocketOptions.SO_REUSEADDR, true);
                 server.bind(address);
-                future.complete(new Listener(server, server.getLocalAddress(), this::admit));
+                future.complete(new Listener(server, server.getLocalAddress(), this::admit, common.executor));
             } catch (IOException | RuntimeException e) {
                 closeQuietly(server);
                 throw e;
