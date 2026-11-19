@@ -47,6 +47,14 @@ class IncomingRequestEndTest {
         assertThat(request.ended().isDone()).isTrue();
     }
 
+    private void awaitUsedZero(Resource resource) throws Exception {
+        long limit = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WAIT_MS);
+        while (rig.used(resource) != 0 && System.nanoTime() < limit) {
+            Thread.sleep(5);
+        }
+        assertThat(rig.used(resource)).isZero();
+    }
+
     private static AcceptanceKind kindOf(
             io.github.ppzxc.strand.api.Result<io.github.ppzxc.strand.api.ResponseAcceptance> result) throws Exception {
         long limit = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WAIT_MS);
@@ -86,7 +94,8 @@ class IncomingRequestEndTest {
         assertThat(end.isConnectionEnd()).isFalse();
         assertThat(end.errorCode()).isEqualTo(OptionalLong.of(0x1234));
         assertThat(rig.used(Resource.INCOMING_REQUESTS)).isZero();
-        assertThat(rig.used(Resource.INCOMING_BYTES)).isZero();
+        // 받은 요청 바이트는 요청 종료와 핸들러 작업의 본문 참조 해제가 모두 끝난 뒤 돌아온다(#318, #307).
+        awaitUsedZero(Resource.INCOMING_BYTES);
     }
 
     @Test
