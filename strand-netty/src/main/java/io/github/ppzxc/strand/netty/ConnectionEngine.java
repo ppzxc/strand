@@ -550,14 +550,16 @@ final class ConnectionEngine {
     private final class Handle implements RequestHandle {
         private final OutgoingEntry entry;
         private final AtomicBoolean cancelSubmitted = new AtomicBoolean();
+        private final LoopBoundResult result;
 
         Handle(OutgoingEntry entry) {
             this.entry = entry;
+            this.result = new LoopBoundResult(entry.result, loop);
         }
 
         @Override
         public Result<RequestResult> result() {
-            return entry.result;
+            return result;
         }
 
         @Override
