@@ -19,6 +19,15 @@ public final class EndpointOutput {
         return message;
     }
 
+    /**
+     * 이 출력이 애플리케이션 프레임(요청·응답)이면 그 {@code stream_id}, 아니면(제어 프레임·연결 서문·WebSocket Close) 0이다. 복사하지 않는다.
+     *
+     * @return 스트림 번호 또는 0
+     */
+    public long applicationStreamId() {
+        return message.applicationStreamId();
+    }
+
     public byte[] bytes() {
         return message.bytes();
     }
