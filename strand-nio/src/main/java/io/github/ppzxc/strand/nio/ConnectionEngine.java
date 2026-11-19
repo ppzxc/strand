@@ -300,6 +300,22 @@ final class ConnectionEngine {
         wake();
     }
 
+    /** 전체 종료가 이 연결에 CLOSE를 시작시킨다. 아직 확정되지 않은 연결 시도는 먼저 취소한다. */
+    void shutdownClose() {
+        if (p.attempt != null) {
+            p.attempt.cancel();
+        }
+        close();
+    }
+
+    /** 전체 종료의 grace가 끝나 이 연결을 즉시 끊는다. 아직 확정되지 않은 연결 시도는 먼저 취소한다. */
+    void shutdownAbort() {
+        if (p.attempt != null) {
+            p.attempt.cancel();
+        }
+        abort();
+    }
+
     /** 연결 시도 취소를 전송 스레드에 넘긴다. 성공과 취소 가운데 이기는 쪽은 전송 스레드가 처리하는 순서가 정한다. */
     void cancelAttempt() {
         submit(new CancelAttemptCommand());
@@ -988,6 +1004,7 @@ final class ConnectionEngine {
                 releaseSlots();
                 completeReleased();
                 closed.complete(finalNotice);
+                p.terminated.run();
             }
         }
     }

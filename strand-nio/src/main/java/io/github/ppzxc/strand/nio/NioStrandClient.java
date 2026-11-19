@@ -3,6 +3,8 @@ package io.github.ppzxc.strand.nio;
 import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.ResourceExhaustedException;
 import io.github.ppzxc.strand.api.ResourceUsage;
+import io.github.ppzxc.strand.api.Result;
+import io.github.ppzxc.strand.api.ShutdownResult;
 import io.github.ppzxc.strand.nio.internal.SerialExecutor;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -22,6 +24,7 @@ public final class NioStrandClient {
     private final @Nullable RequestHandler handler;
     private final TcpConnector.Resolver resolver;
     private final long credentialBytes;
+    private final OwnerShutdown lifecycle;
 
     private NioStrandClient(
             CommonSettings.Common common,
@@ -34,6 +37,7 @@ public final class NioStrandClient {
         this.common = common;
         this.configSource = configSource;
         this.handler = handler;
+        this.lifecycle = new OwnerShutdown(common, null);
     }
 
     /** 연결마다 쓸 core 설정(자격 증명 포함)을 만든다. */
@@ -147,6 +151,10 @@ public final class NioStrandClient {
         // 앱이 받는 Stage는 내부 결과와 따로 둔다. 앱이 이 Stage를 취소해도 연결 시도에는 영향이 없다.
         NioConnectAttempt attempt = new NioConnectAttempt(
                 future.thenApply(connection -> connection), released.thenApply(done -> null), state);
+        if (!lifecycle.accepting()) {
+            failWith(future, released, target, new IllegalStateException("전체 종료를 시작해 새 연결 시도를 받지 않는다"));
+            return attempt;
+        }
         long now = common.nanoClock.getAsLong();
         io.github.ppzxc.strand.nio.internal.ConnectionBudgets budgets = common.owner.newConnection(common.limits);
         Resource denied = ConnectionEngine.admit(budgets, common.space);
@@ -201,9 +209,19 @@ public final class NioStrandClient {
         params.attempt = state;
         params.preparationBytes = preparationBytes;
         params.released = released;
+        NioStrandConnection connection = new NioStrandConnection(params);
+        if (!lifecycle.register(connection)) {
+            // 예약하는 사이 전체 종료가 시작됐다. 시작하지 않은 시도의 예약을 돌려주고 실패시킨다.
+            preparationBytes.releaseAll();
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            failWith(future, released, target, new IllegalStateException("전체 종료를 시작해 새 연결 시도를 받지 않는다"));
+            return attempt;
+        }
+        params.terminated = () -> lifecycle.unregister(connection);
         try {
-            new NioStrandConnection(params).start();
+            connection.start();
         } catch (RuntimeException | Error e) {
+            lifecycle.unregister(connection);
             preparationBytes.releaseAll();
             ConnectionEngine.cancelAdmission(budgets, common.space);
             future.completeExceptionally(e);
@@ -218,8 +236,16 @@ public final class NioStrandClient {
             CompletableFuture<Void> released,
             InetSocketAddress target,
             Resource denied) {
-        future.completeExceptionally(new PreparationFailedException(
-                new PreparationFailure(target, PreparationStage.CONNECTION, new ResourceExhaustedException(denied))));
+        failWith(future, released, target, new ResourceExhaustedException(denied));
+    }
+
+    private static void failWith(
+            CompletableFuture<NioStrandConnection> future,
+            CompletableFuture<Void> released,
+            InetSocketAddress target,
+            RuntimeException cause) {
+        future.completeExceptionally(
+                new PreparationFailedException(new PreparationFailure(target, PreparationStage.CONNECTION, cause)));
         released.complete(null);
     }
 
@@ -238,5 +264,35 @@ public final class NioStrandClient {
      */
     public ResourceUsage resourceUsage(Resource resource) {
         return common.owner.usage(resource);
+    }
+
+    /**
+     * 소유 객체 전체를 종료한다. 새 접수를 막고, 진행 중인 연결 시도를 취소하고, 연결에 CLOSE를 시작하고, {@code shutdownGrace}가 끝나면 남은 연결을 끊고, 내부 실행
+     * 자원을 종료한다. 기한은 첫 호출 시각부터 센다. 반복 호출은 같은 결과를 돌려주며 기한을 늘리지 않는다. 앱이 준 실행기는 종료하지 않는다.
+     *
+     * @return 모든 내부 자원이 {@code shutdownDeadline} 안에 정리되면 성공, 아니면 {@link
+     *     io.github.ppzxc.strand.api.ShutdownDeadlineExceededException}으로 실패하는 결과
+     */
+    public CompletionStage<Void> shutdown() {
+        return lifecycle.shutdown();
+    }
+
+    /**
+     * 전체 종료 결과의 보존된 관찰. {@code COMPLETED} 또는 {@code DEADLINE_EXCEEDED}와 기한 시점에 정리되지 않은 자원을 담는다. 확정한 결과는 바꾸지 않는다.
+     *
+     * @return 종료 결과
+     */
+    public Result<ShutdownResult> shutdownResult() {
+        return lifecycle.result();
+    }
+
+    /**
+     * 실제 내부 자원(연결·시도)과 잔존 작업(핸들러·인증·주소 해석)이 모두 해결되면 완료한다. 종료 기한 초과 뒤에도 정리가 계속되며, 그때 완료한다. 앱이 준 실행기 자체의
+     * 종료는 기다리지 않는다.
+     *
+     * @return 실제 정리 완료
+     */
+    public CompletionStage<Void> resourcesTerminated() {
+        return lifecycle.terminated();
     }
 }

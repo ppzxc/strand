@@ -77,6 +77,8 @@ final class ConnectionParams {
     /** 라이브러리가 보관한 준비 데이터의 바이트 예약. 클라이언트 연결에만 있다. */
     @Nullable
     PreparationBytes preparationBytes;
+    /** 전송 스레드가 모든 정리를 마친 맨 마지막에 한 번 부른다. 소유 객체가 전체 종료를 위해 연결을 기록에서 뺀다. */
+    Runnable terminated = () -> {};
     /** 시도가 소유한 통로 정리 완료를 알린다. 클라이언트 연결에만 있다. */
     java.util.concurrent.@Nullable CompletableFuture<Void> released;
 
