@@ -696,6 +696,17 @@ final class ConnectionEngine {
         }
     }
 
+    /**
+     * 상대가 받은 요청을 RESET했다. 요청이 끝났음을 오류 코드와 함께 보존해 핸들러가 처리를 멈출 수 있게 하고(규격 4.4절), 실행 대기 중이던 핸들러는
+     * 시작하지 않는다. 이미 응답을 접수했거나 끝난 요청이면 core가 이 사건을 내지 않는다.
+     */
+    private void onRequestReset(Event event) {
+        IncomingRequest request = incoming.get(event.streamId());
+        if (request != null) {
+            finishIncoming(request.state(), RequestEnd.peerReset(event.resetErrorCode().getAsLong()));
+        }
+    }
+
     /** 받는 요청 수·바이트·핸들러 작업 슬롯을 예약한다. 하나라도 모자라면 확보한 것을 돌려주고 false. */
     private boolean reserveIncoming(long bytes) {
         if (!p.budgets.tryReserve(Resource.INCOMING_REQUESTS, 1)) {
@@ -1000,6 +1011,9 @@ final class ConnectionEngine {
                     break;
                 case REQUEST_RECEIVED:
                     onRequestReceived(this, event);
+                    break;
+                case REQUEST_RESET:
+                    onRequestReset(event);
                     break;
                 case AUTHENTICATED:
                     onClientAuthenticated();
