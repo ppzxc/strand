@@ -117,6 +117,7 @@ final class ConnectionEngine {
     private boolean preparing = true;
     private boolean preparingSlotHeld = true;
     private boolean releasedNotified;
+    private long resolvedBytes;
     private final ArrayDeque<InetSocketAddress> pendingTargets = new ArrayDeque<>();
     private final Map<Long, OutgoingEntry> pending = new HashMap<>();
     private final Map<Long, IncomingRequest> incoming = new HashMap<>();
@@ -170,7 +171,7 @@ final class ConnectionEngine {
         }
         armPreparationTimer();
         if (!target.isUnresolved()) {
-            runOnLoop(() -> connectTo(java.util.Collections.singletonList(target)));
+            runOnLoop(() -> connectTo(java.util.Collections.singletonList(target), 0));
             return;
         }
         if (!p.budgets.owner().tryReserve(Resource.RESOLVE_TASKS, 1)) {
@@ -208,7 +209,12 @@ final class ConnectionEngine {
             setupFailed(new UnknownHostException(target.getHostString()));
             return;
         }
-        runOnLoop(() -> connectTo(targets));
+        long bytes = 0;
+        for (InetSocketAddress each : targets) {
+            bytes += each.getAddress().getAddress().length;
+        }
+        long reserve = bytes;
+        runOnLoop(() -> connectTo(targets, reserve));
     }
 
     /** 시도가 이미 취소·기한·종료로 끝났는가. 끝난 시도는 새 소켓을 열지 않는다. */
@@ -216,10 +222,18 @@ final class ConnectionEngine {
         return connectFailure != null || tornDown.get();
     }
 
-    /** 이벤트 루프: 해석한 주소를 보관하고 첫 주소부터 연결한다. */
-    private void connectTo(List<InetSocketAddress> targets) {
+    /** 이벤트 루프: 해석한 주소의 바이트를 보관하기 전에 예약하고, 첫 주소부터 연결한다. */
+    private void connectTo(List<InetSocketAddress> targets, long bytes) {
         if (attemptEnded()) {
             return;
+        }
+        PreparationBytes preparationBytes = p.preparationBytes;
+        if (preparationBytes != null) {
+            if (!preparationBytes.tryReserve(bytes)) {
+                setupFailed(new ResourceExhaustedException(Resource.PREPARATION_BYTES));
+                return;
+            }
+            resolvedBytes = bytes;
         }
         pendingTargets.addAll(targets);
         connectNext();
@@ -386,6 +400,9 @@ final class ConnectionEngine {
         if (stopped || active != null) {
             return;
         }
+        // 연결이 맺어졌으므로 해석한 주소 목록은 더 쓰지 않는다.
+        pendingTargets.clear();
+        releaseResolvedBytes();
         try {
             stage = p.tls != null ? PreparationStage.SECURITY : PreparationStage.HELLO;
             Loop created = new Loop();
@@ -532,7 +549,18 @@ final class ConnectionEngine {
         }
     }
 
+    private void releaseResolvedBytes() {
+        PreparationBytes preparationBytes = p.preparationBytes;
+        if (preparationBytes != null && resolvedBytes > 0) {
+            preparationBytes.release(resolvedBytes);
+            resolvedBytes = 0;
+        }
+    }
+
     private void releaseSlots() {
+        if (p.preparationBytes != null) {
+            p.preparationBytes.releaseAll();
+        }
         releaseProgress(p.budgets, p.space, progressKinds().length);
         p.budgets.owner().release(Resource.TOTAL_CONNECTIONS, 1);
         releasePreparingSlot();
@@ -1071,7 +1099,7 @@ final class ConnectionEngine {
         submit(new FactoryCompleteCommand(prepared, failure));
     }
 
-    private void runAuthentication(long id, Credentials credentials, CredentialVerifier verifier) {
+    private void runAuthentication(long id, Credentials credentials, CredentialVerifier verifier, long retained) {
         AuthenticationResult result = null;
         Throwable failure = null;
         try {
@@ -1080,6 +1108,7 @@ final class ConnectionEngine {
             failure = t;
         } finally {
             p.budgets.owner().release(Resource.AUTHENTICATION_TASKS, 1);
+            p.budgets.release(Resource.PREPARATION_BYTES, retained);
         }
         submit(new AuthenticationCompleteCommand(id, result, failure));
     }
@@ -1524,21 +1553,31 @@ final class ConnectionEngine {
             stage = PreparationStage.AUTHENTICATION;
             CredentialVerifier verifier = Objects.requireNonNull(p.verifier);
             long id = event.authenticationId();
+            // 자격 증명 복사본(방식 이름과 비밀)은 보관하기 전에 바이트를 예약한다. 사용자 함수가 반환하면 돌려준다.
+            long retained = (long) event.authenticationMechanism().get().length() + event.body().length;
+            if (!p.budgets.tryReserve(Resource.PREPARATION_BYTES, retained)) {
+                rejectAuthentication(id, new ResourceExhaustedException(Resource.PREPARATION_BYTES));
+                return;
+            }
             Credentials credentials =
                     Credentials.of(event.authenticationMechanism().get(), event.body());
             if (!p.budgets.owner().tryReserve(Resource.AUTHENTICATION_TASKS, 1)) {
-                endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
-                failPreparation(
-                        PreparationStage.AUTHENTICATION, new ResourceExhaustedException(Resource.AUTHENTICATION_TASKS));
+                p.budgets.release(Resource.PREPARATION_BYTES, retained);
+                rejectAuthentication(id, new ResourceExhaustedException(Resource.AUTHENTICATION_TASKS));
                 return;
             }
             try {
-                p.executor.execute(() -> runAuthentication(id, credentials, verifier));
+                p.executor.execute(() -> runAuthentication(id, credentials, verifier, retained));
             } catch (RuntimeException | Error e) {
                 p.budgets.owner().release(Resource.AUTHENTICATION_TASKS, 1);
-                endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
-                failPreparation(PreparationStage.AUTHENTICATION, e);
+                p.budgets.release(Resource.PREPARATION_BYTES, retained);
+                rejectAuthentication(id, e);
             }
+        }
+
+        private void rejectAuthentication(long id, Throwable cause) {
+            endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
+            failPreparation(PreparationStage.AUTHENTICATION, cause);
         }
 
         private void onClosed(Event event) {

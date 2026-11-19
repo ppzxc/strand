@@ -25,12 +25,15 @@ public final class NettyStrandClient {
     private final EndpointConfigSource configSource;
     private final @Nullable RequestHandler handler;
     private final HostResolver resolver;
+    private final long credentialBytes;
 
     private NettyStrandClient(
             CommonSettings.Common common,
             EndpointConfigSource configSource,
             @Nullable RequestHandler handler,
-            HostResolver resolver) {
+            HostResolver resolver,
+            long credentialBytes) {
+        this.credentialBytes = credentialBytes;
         this.common = common;
         this.configSource = configSource;
         this.handler = handler;
@@ -112,7 +115,8 @@ public final class NettyStrandClient {
                         return auth == null ? config : config.auth(auth.mechanism(), auth.secret());
                     },
                     handler,
-                    resolver);
+                    resolver,
+                    auth == null ? 0 : auth.mechanism().length() + auth.secret().length);
         }
     }
 
@@ -159,6 +163,17 @@ public final class NettyStrandClient {
             released.trySuccess(null);
             return attempt;
         }
+        // 주소 해석·명령 대기 전에 보관할 입력(주소 이름·자격 증명)의 바이트를 예약한다.
+        PreparationBytes preparationBytes = new PreparationBytes(budgets);
+        if (!preparationBytes.tryReserve(retainedInputBytes(target))) {
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            promise.tryFailure(new PreparationFailedException(new PreparationFailure(
+                    target,
+                    PreparationStage.CONNECTION,
+                    new ResourceExhaustedException(Resource.PREPARATION_BYTES))));
+            released.trySuccess(null);
+            return attempt;
+        }
         ConnectionParams params = new ConnectionParams(
                 ConnectionParams.Role.CLIENT,
                 configSource.create(),
@@ -191,17 +206,25 @@ public final class NettyStrandClient {
                 common.allocator);
         params.attempt = state;
         params.released = released;
+        params.preparationBytes = preparationBytes;
         params.resolver = resolver;
         try {
             StrandChannel channel = new StrandChannel();
             channel.config().setTcpNoDelay(true);
             new NettyStrandConnection(params, channel).startClient(target);
         } catch (RuntimeException | Error e) {
+            preparationBytes.releaseAll();
             ConnectionEngine.cancelAdmission(budgets, common.space);
             promise.tryFailure(e);
             released.trySuccess(null);
         }
         return attempt;
+    }
+
+    /** 이 시도가 라이브러리 안에 복사·보관하는 입력: 주소 이름과 자격 증명(방식 이름과 비밀). */
+    private long retainedInputBytes(InetSocketAddress target) {
+        long bytes = target.getHostString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        return bytes + credentialBytes;
     }
 
     /**
