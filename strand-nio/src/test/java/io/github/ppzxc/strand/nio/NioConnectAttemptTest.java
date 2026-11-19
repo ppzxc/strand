@@ -105,9 +105,12 @@ class NioConnectAttemptTest {
         assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
         assertThat(client.resourceUsage(Resource.PREPARING_CONNECTIONS).current())
                 .isZero();
+        // 서버가 끊김을 보고 연결을 정리한 뒤에 사용자 작업이 반환해야 늦은 완료다. 반환하지 않는 작업은 연결 정리를 막지 않는다.
+        awaitTrue(() -> server.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
+        assertThat(server.resourceUsage(Resource.AUTHENTICATION_TASKS).current())
+                .isEqualTo(1);
         hold.countDown();
         awaitTrue(() -> server.resourceUsage(Resource.AUTHENTICATION_TASKS).current() == 0);
-        awaitTrue(() -> server.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
         assertThat(factoryRuns).hasValue(0);
     }
 
