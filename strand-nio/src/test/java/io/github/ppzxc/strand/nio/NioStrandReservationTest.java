@@ -365,7 +365,7 @@ class NioStrandReservationTest {
     }
 
     @Test
-    void whenTheAppExecutorRejectsEverythingConnectStillCompletesAndResultsStayObservable() throws Exception {
+    void whenTheAppExecutorRejectsEverythingAfterConnectResultsAreRetainedAndOnlyObservationsFail() throws Exception {
         AppFixture server = track(AppFixture.plain());
         AppFixture clientFixture = track(AppFixture.plain());
         NioStrandServer app = acceptingServer(server)
@@ -373,10 +373,10 @@ class NioStrandReservationTest {
                 .build();
         Listener listener = listen(app);
         NioStrandClient client = clientFixture.clientBuilder().build();
-        // 확인 작업(build)이 끝난 뒤에는 어떤 작업도 받지 않는다.
-        clientFixture.executor.rejecting = true;
 
         NioStrandConnection connection = AppFixture.get(client.connect(AppFixture.loopback(listener)));
+        // 연결이 준비된 뒤에는 어떤 작업도 받지 않는다. 결과는 보존되고 관찰만 거절된다.
+        clientFixture.executor.rejecting = true;
         RequestHandle handle = connection.request(Request.of(TYPE, bytes("x")));
         awaitTrue(() -> handle.result().isDone());
         Observation rejected = handle.result().observe(result -> {});
@@ -399,7 +399,8 @@ class NioStrandReservationTest {
                 .onConnectionFailure(failures::add)
                 .build();
         Listener listener = listen(app);
-        server.executor.rejecting = true;
+        // 인증 작업만 거절한다. 실패 알림은 받는다.
+        server.executor.rejectTaskNumber(2);
 
         CompletableFuture<NioStrandConnection> stage = clientFixture
                 .clientBuilder()
@@ -425,8 +426,8 @@ class NioStrandReservationTest {
                 .onConnectionFailure(failures::add)
                 .build();
         Listener listener = listen(app);
-        // 인증 작업만 받고 팩터리 작업부터 거절한다.
-        server.executor.acceptRemaining.set(1);
+        // 인증 작업은 받고 팩터리 작업만 거절한다. 실패 알림은 받는다.
+        server.executor.rejectTaskNumber(3);
 
         AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
         PreparationFailure failure = failures.poll(15, TimeUnit.SECONDS);

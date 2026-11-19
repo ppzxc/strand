@@ -34,9 +34,18 @@ final class AppFixture implements AutoCloseable {
             this.delegate = delegate;
         }
 
+        private final java.util.Set<Integer> rejectedNumbers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        private final AtomicInteger submitted = new AtomicInteger();
+
+        /** 이 실행기에 들어오는 {@code number}번째 작업(1부터)만 거절한다. build()의 확인 작업이 1번이다. */
+        void rejectTaskNumber(int number) {
+            rejectedNumbers.add(number);
+        }
+
         @Override
         public void execute(Runnable task) {
-            if (rejecting || acceptRemaining.getAndDecrement() <= 0) {
+            int number = submitted.incrementAndGet();
+            if (rejecting || acceptRemaining.getAndDecrement() <= 0 || rejectedNumbers.contains(number)) {
                 throw new java.util.concurrent.RejectedExecutionException("테스트가 거절한다");
             }
             delegate.execute(task);
@@ -102,6 +111,8 @@ final class AppFixture implements AutoCloseable {
         long maxFrameSize = EndpointConfig.DEFAULT_MAX_FRAME_SIZE;
         long bodyBytes = 1 << 20;
         long ownerObservations = -1;
+        long perConnectionPreparationBytes = 1 << 16;
+        long ownerPreparationBytes = 1 << 20;
 
         Spec perConnection(long value) {
             this.perConnection = value;
@@ -119,6 +130,12 @@ final class AppFixture implements AutoCloseable {
             this.ownerIncomingBytes = value * 8;
             this.ownerOutgoingBytes = value * 8;
             this.ownerResponseBytes = value * 8;
+            return this;
+        }
+
+        Spec preparationBytes(long perConnection, long owner) {
+            this.perConnectionPreparationBytes = perConnection;
+            this.ownerPreparationBytes = owner;
             return this;
         }
 
@@ -196,7 +213,7 @@ final class AppFixture implements AutoCloseable {
                             .responseBytes(bodyBytes)
                             .handlerTasks(perConnection)
                             .observations(perConnectionObservations)
-                            .preparationBytes(1 << 16)
+                            .preparationBytes(perConnectionPreparationBytes)
                             .progressBytes(min[0], min[1], min[2], min[3], min[4], min[5])
                             .build())
                     .perOwner(OwnerLimits.builder()
@@ -213,7 +230,7 @@ final class AppFixture implements AutoCloseable {
                             .responseBytes(ownerResponseBytes)
                             .handlerTasks(ownerHandlerTasks < 0 ? owner * connections : ownerHandlerTasks)
                             .observations(ownerObservations < 0 ? 64 * connections : ownerObservations)
-                            .preparationBytes(1 << 20)
+                            .preparationBytes(ownerPreparationBytes)
                             .progressBytes(
                                     min[0] * progressConnections,
                                     min[1] * progressConnections,
