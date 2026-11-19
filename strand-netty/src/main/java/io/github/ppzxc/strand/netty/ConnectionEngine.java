@@ -98,7 +98,7 @@ final class ConnectionEngine {
 
     private final NettyStrandConnection facade;
     private final ConnectionParams p;
-    private final StrandChannel channel;
+    private volatile StrandChannel channel;
     private final EventLoop loop;
     private final CollectionSpace collectionSpace;
     private final Queue<Command> commands = new ConcurrentLinkedQueue<>();
@@ -134,12 +134,17 @@ final class ConnectionEngine {
                 params.executor,
                 params.budgets.observationBudget(),
                 params.budgets.owner().observationBudget());
+        installChannel(channel);
+    }
+
+    /** 채널에 읽기 조각 설정과 연결 핸들러를 달고, 채널이 정리되면 연결 정리를 시작하게 한다. */
+    private void installChannel(StrandChannel installed) {
         // 읽기 조각은 TLS 암호문 패킷 하나(받는 암호문 공간이 그 두 배) 또는 TCP 기본 조각이다. 한 번의 읽기 루프에서 한 조각만 받는다.
-        int chunk = params.tls == null ? TCP_READ_CHUNK_BYTES : params.tls.sizes.packetBufferSize();
-        channel.config().setAllocator(params.allocator);
-        channel.config().setRecvByteBufAllocator(new FixedRecvByteBufAllocator(chunk));
-        channel.pipeline().addLast(new Handler());
-        channel.closeFuture().addListener(future -> onChannelClosed());
+        int chunk = p.tls == null ? TCP_READ_CHUNK_BYTES : p.tls.sizes.packetBufferSize();
+        installed.config().setAllocator(p.allocator);
+        installed.config().setRecvByteBufAllocator(new FixedRecvByteBufAllocator(chunk));
+        installed.pipeline().addLast(new Handler());
+        installed.closeFuture().addListener(future -> onChannelClosed());
     }
 
     private long usageLimit(Resource resource) {
