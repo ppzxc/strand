@@ -312,9 +312,7 @@ final class ConnectionEngine {
                 ? deadlineAfter(options.deadline().get())
                 : NO_DEADLINE;
         ResultCompletion<RequestResult> result = new ResultCompletion<>(
-                p.executor,
-                p.budgets.observationBudget(),
-                p.budgets.owner().observationBudget());
+                p.executor, p.budgets.observationBudget(), p.budgets.owner().observationBudget());
         if (stopped) {
             OutgoingEntry rejected = new OutgoingEntry(result, request.type(), EMPTY, EMPTY, bytes, deadlineAt);
             rejected.finishLocally(Status.UNAVAILABLE, Certainty.NOT_PROCESSED, null);
@@ -1233,10 +1231,7 @@ final class ConnectionEngine {
 
         /** 쓰기를 시작해 일부만 나간 애플리케이션 프레임이 이 스트림의 것인가. 쓰기 전 프레임은 core가 철회하므로 참조가 남지 않는다. */
         private boolean isPartiallyWritten(long streamId) {
-            return streamId > 0
-                    && writing != null
-                    && writingOffset > 0
-                    && writing.applicationStreamId() == streamId;
+            return streamId > 0 && writing != null && writingOffset > 0 && writing.applicationStreamId() == streamId;
         }
 
         private void onClientAuthenticated() {

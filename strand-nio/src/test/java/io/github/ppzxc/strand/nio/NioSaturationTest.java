@@ -98,8 +98,8 @@ class NioSaturationTest {
 
         connection.request(Request.of(TYPE, bytes("a")));
         connection.request(Request.of(TYPE, bytes("b")));
-        RequestResult third = fixture.result(
-                connection.request(Request.of(TYPE, bytes("c"))).result());
+        RequestResult third =
+                fixture.result(connection.request(Request.of(TYPE, bytes("c"))).result());
 
         assertThat(third.status()).isEqualTo(Status.RESOURCE_EXHAUSTED);
         assertThat(third.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
@@ -111,7 +111,8 @@ class NioSaturationTest {
         assertThat(perConnection.rejections()).isEqualTo(1);
         // 연결 범위에서 거절돼 소유 객체 범위의 예약과 거절 집계는 건드리지 않았다.
         assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isEqualTo(2);
-        assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).rejections()).isZero();
+        assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).rejections())
+                .isZero();
     }
 
     @Test
@@ -127,9 +128,11 @@ class NioSaturationTest {
 
         assertThat(rejected.status()).isEqualTo(Status.RESOURCE_EXHAUSTED);
         assertThat(rejected.resource()).hasValue(Resource.OUTGOING_BYTES);
-        assertThat(connection.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isZero();
+        assertThat(connection.resourceUsage(Resource.OUTGOING_REQUESTS).current())
+                .isZero();
         assertThat(connection.resourceUsage(Resource.OUTGOING_BYTES).current()).isZero();
-        assertThat(connection.resourceUsage(Resource.OUTGOING_BYTES).rejections()).isEqualTo(1);
+        assertThat(connection.resourceUsage(Resource.OUTGOING_BYTES).rejections())
+                .isEqualTo(1);
         assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isZero();
     }
 
@@ -146,20 +149,22 @@ class NioSaturationTest {
 
         first.request(Request.of(TYPE, bytes("a")));
         second.request(Request.of(TYPE, bytes("b")));
-        RequestResult refused = fixture.result(
-                first.request(Request.of(TYPE, bytes("c"))).result());
+        RequestResult refused =
+                fixture.result(first.request(Request.of(TYPE, bytes("c"))).result());
 
         assertThat(refused.resource()).hasValue(Resource.OUTGOING_REQUESTS);
         assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).limit()).isEqualTo(2);
         assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isEqualTo(2);
-        assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).rejections()).isEqualTo(1);
+        assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).rejections())
+                .isEqualTo(1);
         // 연결 몫은 소유 객체 거절 때 돌려받아 그 연결에는 요청 하나만 남아 있다.
         assertThat(first.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isEqualTo(1);
     }
 
     @Test
     void aPerConnectionHandlerSlotShortageRefusesTheRequestAndReturnsTheCountAndBytesTakenFirst() throws Exception {
-        AppFixture server = track(new AppFixture.Spec().connectionHandlerTasks(1).plain());
+        AppFixture server =
+                track(new AppFixture.Spec().connectionHandlerTasks(1).plain());
         AppFixture clientFixture = track(AppFixture.plain());
         CountDownLatch hold = new CountDownLatch(1);
         CompletableFuture<NioStrandConnection> serverSide = new CompletableFuture<>();
@@ -193,7 +198,8 @@ class NioSaturationTest {
 
     @Test
     void refusingManyRequestsForSelfSaturationNeverEndsTheConnectionAndLaterRequestsStillWork() throws Exception {
-        AppFixture server = track(new AppFixture.Spec().ownerIncoming(1, 1 << 20).plain());
+        AppFixture server =
+                track(new AppFixture.Spec().ownerIncoming(1, 1 << 20).plain());
         AppFixture clientFixture = track(AppFixture.plain());
         CountDownLatch hold = new CountDownLatch(1);
         BlockingQueue<IncomingRequest> seen = new LinkedBlockingQueue<>();
@@ -308,7 +314,8 @@ class NioSaturationTest {
     }
 
     @Test
-    void aHandlerExceptionAnswersWithAnEmptyInternalResponseKeepsTheConnectionAndIsOnlyLoggedLocally() throws Exception {
+    void aHandlerExceptionAnswersWithAnEmptyInternalResponseKeepsTheConnectionAndIsOnlyLoggedLocally()
+            throws Exception {
         AppFixture server = track(AppFixture.plain());
         AppFixture clientFixture = track(AppFixture.plain());
         NioStrandServer app = acceptingServer(server)
@@ -345,11 +352,10 @@ class NioSaturationTest {
             assertThat(fine.status()).isEqualTo(Status.OK);
             assertThat(connection.closed().isDone()).isFalse();
             awaitTrue(() -> capture.records.size() >= 2);
-            assertThat(capture.records)
-                    .allSatisfy(record -> {
-                        assertThat(record.getLevel()).isEqualTo(Level.WARNING);
-                        assertThat(record.getThrown()).hasMessage("secret-detail");
-                    });
+            assertThat(capture.records).allSatisfy(record -> {
+                assertThat(record.getLevel()).isEqualTo(Level.WARNING);
+                assertThat(record.getThrown()).hasMessage("secret-detail");
+            });
             awaitTrue(() -> app.resourceUsage(Resource.HANDLER_TASKS).current() == 0);
         } finally {
             logger.removeHandler(capture);
@@ -361,7 +367,8 @@ class NioSaturationTest {
     @Test
     void cancelAndCloseProgressWhileRequestCountAndObservationLimitsAreFullAndTheDefaultCloseNoticeStillFits()
             throws Exception {
-        AppFixture fixture = track(new AppFixture.Spec().perConnection(2).observations(1, 64).plain());
+        AppFixture fixture =
+                track(new AppFixture.Spec().perConnection(2).observations(1, 64).plain());
         NioStrandServer server = acceptingServer(fixture).handler(r -> {}).build();
         Listener listener = listen(server);
         NioStrandClient client = fixture.clientBuilder().build();
@@ -371,7 +378,8 @@ class NioSaturationTest {
         CountDownLatch release = new CountDownLatch(1);
         Observation occupying = first.result().observe(fixture.pool, result -> await(release));
         // 관찰 한도가 차 있으므로 결과는 관찰 없이 조회한다.
-        RequestResult countFull = connection.request(Request.of(TYPE, bytes("c"))).result().resultNow();
+        RequestResult countFull =
+                connection.request(Request.of(TYPE, bytes("c"))).result().resultNow();
         Observation general = second.result().observe(result -> {});
         CompletableFuture<CloseNotice> notice = new CompletableFuture<>();
         Observation closeNotice = connection.closed().observe(notice::complete);
@@ -393,8 +401,10 @@ class NioSaturationTest {
         assertThat(first.result().resultNow().status()).isEqualTo(Status.CANCELLED);
         assertThat(second.result().resultNow().status()).isEqualTo(Status.CANCELLED);
         assertThat(closed.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
-        assertThat(connection.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isZero();
-        assertThat(connection.resourceUsage(Resource.OUTGOING_REQUESTS).rejections()).isEqualTo(1);
+        assertThat(connection.resourceUsage(Resource.OUTGOING_REQUESTS).current())
+                .isZero();
+        assertThat(connection.resourceUsage(Resource.OUTGOING_REQUESTS).rejections())
+                .isEqualTo(1);
         assertThat(occupying.isDone()).isFalse();
         release.countDown();
         awaitTrue(occupying::isDone);
@@ -403,7 +413,8 @@ class NioSaturationTest {
 
     @Test
     void abortProgressesWhileTheHandlerSlotsAreHeldByHandlersThatNeverReturn() throws Exception {
-        AppFixture server = track(new AppFixture.Spec().connectionHandlerTasks(1).plain());
+        AppFixture server =
+                track(new AppFixture.Spec().connectionHandlerTasks(1).plain());
         AppFixture clientFixture = track(AppFixture.plain());
         CountDownLatch hold = new CountDownLatch(1);
         CountDownLatch started = new CountDownLatch(1);
