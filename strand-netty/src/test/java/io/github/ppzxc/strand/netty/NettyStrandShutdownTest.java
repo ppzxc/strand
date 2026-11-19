@@ -733,14 +733,13 @@ class NettyStrandShutdownTest {
         NettyStrandConnection connection = connect(clientFixture.clientBuilder().build(), listener);
         clientFixture.requestWhenServed(connection, Request.of(TYPE, bytes("hold")), true);
         assertThat(handling.await(15, TimeUnit.SECONDS)).isTrue();
+        java.util.Set<Thread> before = supervisors();
         Future<Void> stopped = server.shutdown();
-        Thread supervisor = null;
-        for (Thread thread : Thread.getAllStackTraces().keySet()) {
-            if (thread.getName().equals("strand-netty-shutdown") && thread.isAlive()) {
-                supervisor = thread;
-            }
-        }
-        assertThat(supervisor).isNotNull();
+        // 이 종료가 시작한 감독 스레드만 골라 중단한다(앞선 시험이 남긴 감독 스레드와 구별한다).
+        java.util.Set<Thread> started = supervisors();
+        started.removeAll(before);
+        assertThat(started).hasSize(1);
+        Thread supervisor = started.iterator().next();
 
         supervisor.interrupt();
         // 중단은 기다림을 끝내지 않는다. 핸들러가 응답해 연결이 실제로 끝나는 사건으로 마무리한다.
@@ -749,5 +748,15 @@ class NettyStrandShutdownTest {
         AppFixture.get(stopped);
         AppFixture.get(server.resourcesTerminated());
         assertThat(server.shutdownResult().resultNow().kind()).isEqualTo(ShutdownKind.COMPLETED);
+    }
+
+    private static java.util.Set<Thread> supervisors() {
+        java.util.Set<Thread> found = new java.util.HashSet<>();
+        for (Thread thread : Thread.getAllStackTraces().keySet()) {
+            if (thread.getName().equals("strand-netty-shutdown") && thread.isAlive()) {
+                found.add(thread);
+            }
+        }
+        return found;
     }
 }
