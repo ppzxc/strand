@@ -27,6 +27,8 @@ public final class ResultCompletion<T> implements Result<T> {
     /**
      * 일반 관찰 한도와 별도로 자리 하나({@code dedicated})를 이 결과에 둔다. 관찰은 이 자리를 먼저 쓰므로 일반 한도가 모두 차 있어도 한 건은 등록된다.
      * 자리가 쓰이는 동안 오는 관찰은 일반 한도를 쓴다. 연결의 기본 종료 알림 자리가 이렇게 확보된다.
+     *
+     * @param dedicated 별도 자리. 없으면 일반 한도만 쓴다
      */
     public ResultCompletion(
             Executor defaultExecutor,
