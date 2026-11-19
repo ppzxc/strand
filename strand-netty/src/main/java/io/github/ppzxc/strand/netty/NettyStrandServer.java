@@ -190,6 +190,7 @@ public final class NettyStrandServer {
     }
 
     /** 리스닝 채널이 수락한 채널을 받아 연결로 등록한다. 리스닝 채널이 이미 닫혔다면 경합으로 수락된 채널을 정리한다. */
+    // 시험이 닫기와 경합한 수락을 결정적으로 재현하려고 패키지 범위로 둔다.
     final class Acceptor extends ChannelInboundHandlerAdapter {
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object message) {
@@ -259,13 +260,14 @@ public final class NettyStrandServer {
                 common.allocator);
         params.unreleased = unreleased;
         NettyStrandConnection connection = new NettyStrandConnection(params, channel);
+        // 기록하는 순간부터 전체 종료가 이 연결을 다룰 수 있으므로 종료 훅을 먼저 정한다.
+        params.terminated = () -> lifecycle.unregister(connection);
         if (!lifecycle.register(connection)) {
             // 전체 종료가 시작됐다. 새 접수를 받지 않으므로 예약을 돌려주고 채널을 닫는다.
             ConnectionEngine.cancelAdmission(budgets, common.space);
             channel.unsafe().closeForcibly();
             return;
         }
-        params.terminated = () -> lifecycle.unregister(connection);
         try {
             channel.config().setTcpNoDelay(true);
             connection.startServer();

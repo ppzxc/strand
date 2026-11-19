@@ -61,8 +61,9 @@ final class OwnerShutdown {
                 common.executor,
                 new ObservationBudget(common.owner.usage(Resource.OBSERVATIONS).limit()),
                 common.owner.observationBudget());
-        this.stopped = common.group.next().newPromise();
-        this.terminated = common.group.next().newPromise();
+        io.netty.channel.EventLoop loop = common.group.next();
+        this.stopped = loop.newPromise();
+        this.terminated = loop.newPromise();
         stopped.setUncancellable();
         terminated.setUncancellable();
         common.owner.onRelease(this::poke);

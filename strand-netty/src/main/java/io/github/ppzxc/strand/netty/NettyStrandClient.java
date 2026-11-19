@@ -216,6 +216,8 @@ public final class NettyStrandClient {
         params.resolver = resolver;
         StrandChannel channel = new StrandChannel();
         NettyStrandConnection connection = new NettyStrandConnection(params, channel);
+        // 기록하는 순간부터 전체 종료가 이 연결을 다룰 수 있으므로 종료 훅을 먼저 정한다.
+        params.terminated = () -> lifecycle.unregister(connection);
         if (!lifecycle.register(connection)) {
             // 예약하는 사이 전체 종료가 시작됐다. 시작하지 않은 시도의 예약을 돌려주고 실패시킨다.
             preparationBytes.releaseAll();
@@ -223,7 +225,6 @@ public final class NettyStrandClient {
             failShutdown(promise, released, target);
             return attempt;
         }
-        params.terminated = () -> lifecycle.unregister(connection);
         try {
             channel.config().setTcpNoDelay(true);
             connection.startClient(target);
