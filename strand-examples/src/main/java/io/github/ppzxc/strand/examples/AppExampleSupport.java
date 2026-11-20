@@ -1,9 +1,13 @@
 package io.github.ppzxc.strand.examples;
 
+import io.github.ppzxc.strand.api.Certainty;
 import io.github.ppzxc.strand.api.ConnectionLimits;
 import io.github.ppzxc.strand.api.OwnerLimits;
+import io.github.ppzxc.strand.api.RequestResult;
 import io.github.ppzxc.strand.api.ResourceLimits;
+import io.github.ppzxc.strand.api.Status;
 import java.time.Duration;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -117,5 +121,25 @@ final class AppExampleSupport {
         volatile String clientShutdown = "";
         volatile String authenticatedPrincipal = "";
         volatile boolean stateReleased;
+    }
+
+    /**
+     * 연결 직후의 첫 요청을 보낸다. 서버의 연결 인증 응답은 핸들러 팩터리 실행 전에 나가므로, 서버 핸들러가 준비되기 전에 온 요청은 거절되어 {@code UNAVAILABLE}·처리
+     * 안 됨으로 돌아올 수 있다(규격 4.5절). 거절은 다시 보내도 안전하므로 점점 길게 기다리며 유한하게 다시 보낸다. 거절이 아닌 답은 그대로 돌려준다.
+     *
+     * @param attempt 요청 한 번을 보내고 결과를 기다린다
+     */
+    static RequestResult requestAfterRefusal(Callable<RequestResult> attempt) throws Exception {
+        long limit = System.nanoTime() + Duration.ofSeconds(WAIT_SECONDS).toNanos();
+        long pauseMillis = 5;
+        RequestResult result = attempt.call();
+        while (result.status() == Status.UNAVAILABLE
+                && result.certainty() == Certainty.NOT_PROCESSED
+                && System.nanoTime() < limit) {
+            Thread.sleep(pauseMillis);
+            pauseMillis = Math.min(pauseMillis * 2, 100);
+            result = attempt.call();
+        }
+        return result;
     }
 }

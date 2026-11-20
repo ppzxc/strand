@@ -145,14 +145,15 @@ public final class NioAppExample {
             attempt.transportReleased().toCompletableFuture().get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
 
             // 5) 요청·응답. 호출부터 시작하는 기한을 줄 수 있다.
-            RequestResult echoed = connection
+            // 서버 핸들러가 준비되기 전에 온 첫 요청은 거절될 수 있어, 거절이면 유한하게 다시 보낸다.
+            RequestResult echoed = AppExampleSupport.requestAfterRefusal(() -> connection
                     .request(
                             Request.of(AppExampleSupport.ECHO_TYPE, bytes("hello")),
                             RequestOptions.deadlineAfter(AppExampleSupport.PREPARATION_DEADLINE))
                     .result()
                     .toCompletionStage(appExecutor)
                     .toCompletableFuture()
-                    .get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+                    .get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS));
             outcome.echoStatus = echoed.status();
             outcome.echoBody = new String(echoed.payload(), StandardCharsets.UTF_8);
 
