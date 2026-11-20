@@ -122,13 +122,20 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
         state.registerAbort(() -> resolved.completeExceptionally(new InterruptedIOException("연결 시도가 취소됐다")));
         try {
             executor.execute(() -> {
+                InetAddress[] found = null;
+                Throwable failure = null;
                 try {
-                    resolved.complete(resolver.resolve(address.getHostString()));
+                    found = resolver.resolve(address.getHostString());
                 } catch (Throwable t) {
-                    resolved.completeExceptionally(t);
-                } finally {
-                    // 해석 작업이 실제로 반환할 때까지 슬롯을 유지한다. 기한·취소가 기다림을 끝내도 반환하지 않는다.
-                    budgets.owner().release(Resource.RESOLVE_TASKS, 1);
+                    failure = t;
+                }
+                // 해석 작업이 실제로 반환할 때까지 슬롯을 유지한다. 기한·취소가 기다림을 끝내도 반환하지 않는다.
+                // 반환 결과를 알리기 전에 돌려놓는다. 알린 뒤에 돌려주면 그 사이에 시도가 끝났다고 보는 쪽이 슬롯이 아직 쓰이는 것을 본다.
+                budgets.owner().release(Resource.RESOLVE_TASKS, 1);
+                if (failure != null) {
+                    resolved.completeExceptionally(failure);
+                } else {
+                    resolved.complete(found);
                 }
             });
         } catch (RuntimeException | Error e) {
