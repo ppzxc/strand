@@ -1655,7 +1655,10 @@ final class ConnectionEngine {
             }
         }
 
-        /** 준비 성공 알림이 거절돼 끊는다. 이 처리 단계의 남은 받은 요청 사건과 입력은 처리하지 않는다. */
+        /**
+         * 준비 성공 알림이 거절돼 끊는다. 이 처리 단계의 남은 사건과 입력은 처리하지 않는다. 결과와 종료 사건만 이어서 처리하며, 종료 사건은 이미 확정한
+         * 준비 결과(거절 원인)를 바꾸지 못한다({@code preparing}이 이미 거짓이다).
+         */
         void abandon() {
             abandoned = true;
             endpoint.disconnect();
@@ -1663,7 +1666,7 @@ final class ConnectionEngine {
         }
 
         private void dispatch(Event event) {
-            if (abandoned && event.kind() == Event.Kind.REQUEST_RECEIVED) {
+            if (abandoned && event.kind() != Event.Kind.CLOSED && event.kind() != Event.Kind.RESULT) {
                 return;
             }
             switch (event.kind()) {
