@@ -69,6 +69,6 @@ final class Budget {
     }
 
     synchronized ResourceUsage usage() {
-        return new ResourceUsage(limit, current, highWater, rejections);
+        return ResourceUsage.of(resource, limit, current, highWater, rejections);
     }
 }
