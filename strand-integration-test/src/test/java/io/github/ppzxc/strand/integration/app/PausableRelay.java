@@ -39,6 +39,17 @@ final class PausableRelay implements AutoCloseable {
         paused = true;
     }
 
+    private enum Direction {
+        CLIENT_TO_SERVER("relay-up"),
+        SERVER_TO_CLIENT("relay-down");
+
+        final String threadName;
+
+        Direction(String threadName) {
+            this.threadName = threadName;
+        }
+    }
+
     private void acceptLoop() {
         try {
             while (!server.isClosed()) {
@@ -46,15 +57,15 @@ final class PausableRelay implements AutoCloseable {
                 Socket upstream = new Socket(target.getAddress(), target.getPort());
                 sockets.add(client);
                 sockets.add(upstream);
-                pump(client, upstream, true);
-                pump(upstream, client, false);
+                pump(Direction.CLIENT_TO_SERVER, client, upstream);
+                pump(Direction.SERVER_TO_CLIENT, upstream, client);
             }
         } catch (IOException closed) {
             // 닫힘
         }
     }
 
-    private void pump(Socket from, Socket to, boolean gated) {
+    private void pump(Direction direction, Socket from, Socket to) {
         Thread thread = new Thread(
                 () -> {
                     byte[] buffer = new byte[2048];
@@ -62,7 +73,7 @@ final class PausableRelay implements AutoCloseable {
                         InputStream in = from.getInputStream();
                         OutputStream out = to.getOutputStream();
                         while (true) {
-                            while (gated && paused) {
+                            while (direction == Direction.CLIENT_TO_SERVER && paused) {
                                 Thread.sleep(5);
                             }
                             int read = in.read(buffer);
@@ -79,7 +90,7 @@ final class PausableRelay implements AutoCloseable {
                         closeQuietly(to);
                     }
                 },
-                gated ? "relay-up" : "relay-down");
+                direction.threadName);
         thread.setDaemon(true);
         thread.start();
     }

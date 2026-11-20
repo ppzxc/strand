@@ -25,5 +25,10 @@ public enum Resource {
     TRANSPORTS,
     LISTENERS,
     TIMERS,
-    UNRELEASED_HANDLERS
+    UNRELEASED_HANDLERS;
+
+    /** TLS progress budgets may be zero: a plain connection needs none. */
+    boolean isTlsProgress() {
+        return this == TLS_PLAINTEXT_BYTES || this == TLS_CIPHERTEXT_BYTES || this == TLS_CONTROL_BYTES;
+    }
 }
