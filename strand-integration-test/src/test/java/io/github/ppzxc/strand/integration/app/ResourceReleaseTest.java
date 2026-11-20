@@ -142,4 +142,48 @@ class ResourceReleaseTest {
             });
         }
     }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("kinds")
+    void tlsPlaintextAndCiphertextSpacesAreCountedSeparatelyAndReturnedAfterTheRealCleanup(RigKind kind)
+            throws Exception {
+        Rig rig = kind.open();
+        closeables.add(rig);
+        List<App.In> served = new CopyOnWriteArrayList<>();
+        App.Server server = rig.server(new Rig.ServerSetup().handler(served::add));
+        App.Client client = rig.client();
+        App.Lsn listener = Rig.get(server.listen());
+        closeables.add(listener::close);
+        App.Conn connection = Rig.get(client.connect(listener.address()));
+        connection.request(Request.of(TYPE, new byte[1]), RequestOptions.noDeadline());
+        awaitTrue(() -> served.size() == 1);
+
+        long plaintext = client.usage(io.github.ppzxc.strand.api.Resource.TLS_PLAINTEXT_BYTES)
+                .current();
+        long ciphertext = client.usage(io.github.ppzxc.strand.api.Resource.TLS_CIPHERTEXT_BYTES)
+                .current();
+        long control = client.usage(io.github.ppzxc.strand.api.Resource.TLS_CONTROL_BYTES)
+                .current();
+        if (kind.isTls()) {
+            // 평문 소비 공간과 암호문 공간은 서로 다른 저장 공간으로 모두 예약된다.
+            assertThat(plaintext).isPositive();
+            assertThat(ciphertext).isPositive().isNotEqualTo(plaintext);
+            assertThat(control).isPositive();
+        } else {
+            assertThat(plaintext + ciphertext + control).isZero();
+        }
+
+        connection.abort();
+        awaitTrue(() -> connection.closed().isDone());
+        awaitTrue(() -> served.get(0).connection().closed().isDone());
+        // 연결이 끝나고 실제 통로가 정리된 뒤에야 TLS 공간이 모두 돌아온다.
+        for (io.github.ppzxc.strand.api.Resource resource : new io.github.ppzxc.strand.api.Resource[] {
+            io.github.ppzxc.strand.api.Resource.TLS_PLAINTEXT_BYTES,
+            io.github.ppzxc.strand.api.Resource.TLS_CIPHERTEXT_BYTES,
+            io.github.ppzxc.strand.api.Resource.TLS_CONTROL_BYTES
+        }) {
+            awaitTrue(() -> client.usage(resource).current() == 0);
+            awaitTrue(() -> server.usage(resource).current() == 0);
+        }
+    }
 }

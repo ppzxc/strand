@@ -186,4 +186,61 @@ class SaturationCrossFlowTest {
         awaitTrue(() -> server.usage(Resource.TOTAL_CONNECTIONS).current() == 0);
         assertThat(client.usage(Resource.OUTGOING_REQUESTS).highWater()).isEqualTo(2);
     }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("kinds")
+    void responseAndObservationSaturationKeepCancelResultAndCloseProgressing(RigKind kind) throws Exception {
+        // 응답 바이트는 16바이트, 연결의 관찰 자리는 하나다.
+        Rig rig = open(kind, new Spec().perConnection(4).bodyBytes(16, 1 << 20).observations(1, 64));
+        List<App.In> held = new CopyOnWriteArrayList<>();
+        App.Server server = rig.server(new Rig.ServerSetup().handler(held::add));
+        App.Lsn listener = Rig.get(server.listen());
+        closeables.add(listener::close);
+        App.Client client = rig.client();
+        App.Conn connection = Rig.get(client.connect(listener.address()));
+        closeables.add(connection::abort);
+        RequestHandle handle = connection.request(request("hold"), RequestOptions.noDeadline());
+        awaitTrue(() -> held.size() == 1);
+
+        // 관찰 자리가 차면 다음 관찰은 실패한 Observation이고 원래 결과는 그대로다.
+        io.github.ppzxc.strand.api.Observation first = handle.result().observe(result -> {});
+        io.github.ppzxc.strand.api.Observation refusedObservation =
+                handle.result().observe(result -> {});
+        assertThat(refusedObservation.isDone()).isTrue();
+        assertThat(refusedObservation.failureNow()).isPresent();
+        assertThat(connection.usage(Resource.OBSERVATIONS).rejections()).isEqualTo(1);
+        assertThat(handle.result().isDone()).isFalse();
+
+        // 응답 바이트가 모자라면 접수하지 않고 응답 권한을 소비하지 않는다.
+        io.github.ppzxc.strand.api.ResponseAcceptance shortage =
+                rig.result(held.get(0).respond(Status.OK, new byte[64]));
+        assertThat(shortage.kind()).isEqualTo(AcceptanceKind.RESOURCE_EXHAUSTED);
+        assertThat(shortage.resource()).hasValue(Resource.RESPONSE_BYTES);
+
+        // 관찰·응답이 모두 포화인 채로 취소가 진행되어 결과가 보존되고, 이후 응답 재시도는 종료로 판정된다.
+        handle.cancel();
+        // 관찰 자리가 찼으므로 결과는 관찰이 아니라 비차단 조회로 읽는다.
+        awaitTrue(() -> handle.result().isDone());
+        RequestResult cancelled = handle.result().resultNow();
+        assertThat(cancelled.status()).isEqualTo(Status.CANCELLED);
+        awaitTrue(() -> held.get(0).ended().isDone());
+        assertThat(rig.result(held.get(0).respond(Status.OK, new byte[1])).kind())
+                .isEqualTo(AcceptanceKind.REQUEST_ENDED);
+
+        connection.abort();
+        awaitTrue(() -> connection.closed().isDone());
+        awaitTrue(() -> held.get(0).connection().closed().isDone());
+        awaitTrue(first::isDone);
+        for (Resource resource : new Resource[] {
+            Resource.OBSERVATIONS,
+            Resource.OUTGOING_BYTES,
+            Resource.OUTGOING_REQUESTS,
+            Resource.RESPONSE_BYTES,
+            Resource.INCOMING_BYTES
+        }) {
+            awaitTrue(() -> client.usage(resource).current() == 0);
+            awaitTrue(() -> server.usage(resource).current() == 0);
+        }
+        assertThat(handle.result().resultNow()).isSameAs(cancelled);
+    }
 }

@@ -52,6 +52,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -382,15 +383,6 @@ final class ConnectionEngine {
 
     private final class Handler extends ChannelInboundHandlerAdapter {
         @Override
-        public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
-            // 등록 해제 뒤에는 선택기를 얻을 수 없으므로 등록된 동안 기억해 닫은 뒤 소켓을 놓는 데 쓴다.
-            if (ctx.channel() instanceof StrandChannel) {
-                ((StrandChannel) ctx.channel()).captureSelector();
-            }
-            super.channelRegistered(ctx);
-        }
-
-        @Override
         public void channelActive(ChannelHandlerContext ctx) {
             onActive();
         }
@@ -481,9 +473,18 @@ final class ConnectionEngine {
         }
     }
 
+    @SuppressWarnings("FutureReturnValueIgnored") // 재확인 타이머는 취소하지 않는다. 소켓이 풀리면 끝난다.
     private void complete() {
-        // 채널 정리(closeFuture)는 소켓이 실제로 풀리기 전에 끝날 수 있다. closed 완료는 실제 해제 뒤여야 한다.
-        channel.releaseClosedSocket();
+        // 채널 정리(closeFuture)는 소켓이 실제로 풀리기 전에 끝날 수 있다. closed 완료는 실제 해제 뒤여야 하므로 JDK가 소켓을 놓을 때까지
+        // 타이머로 선택 주기를 지나간다(선택기를 직접 부르지 않는다).
+        if (channel.socketHeld() && !loop.isShuttingDown()) {
+            try {
+                loop.schedule(this::complete, WRITE_RETRY_NANOS, TimeUnit.NANOSECONDS);
+                return;
+            } catch (RejectedExecutionException e) {
+                // 이벤트 루프가 끝났다. 선택기가 닫히면 등록된 채널은 모두 풀린다.
+            }
+        }
         releaseSlots();
         completeReleased();
         closed.complete(finalNotice);
