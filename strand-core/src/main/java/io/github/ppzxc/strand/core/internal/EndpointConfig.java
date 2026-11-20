@@ -12,6 +12,9 @@ public final class EndpointConfig {
     /** 규격이 허용하는 가장 작은 {@code max_frame_size}(규격 3.2.1절). 이 하한의 유일한 정의다. */
     public static final long MAX_FRAME_SIZE_LOWER_LIMIT = 16_384L;
 
+    /** 받을 수 있는 프레임 최대 크기의 규격 기본값(규격 3.2.1절). */
+    public static final long DEFAULT_MAX_FRAME_SIZE = HelloParams.DEFAULT_MAX_FRAME_SIZE;
+
     private static final long MAX_U32 = 0xFFFF_FFFFL;
     /** 시각 계산(현재 + 기한)이 넘치지 않도록 막는 시간 값의 상한. */
     private static final long MAX_TIMEOUT_MS = Long.MAX_VALUE / 2;

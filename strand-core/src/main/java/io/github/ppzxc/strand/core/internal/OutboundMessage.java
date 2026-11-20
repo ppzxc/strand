@@ -34,6 +34,14 @@ public final class OutboundMessage {
         return bytes.length >= Frames.HEADER_SIZE && Frames.typeOf(bytes, 0) >= FrameType.FIRST_APPLICATION;
     }
 
+    /**
+     * 애플리케이션 프레임이면 그 프레임의 {@code stream_id}, 아니면 0이다(제어 프레임과 연결 서문·WebSocket Close). 복사하지 않는다. 전송 모듈이
+     * 와이어 배치를 알지 않고도 쓰고 있는 출력이 어느 스트림의 요청·응답인지 알게 한다.
+     */
+    long applicationStreamId() {
+        return isApplication() ? Frames.streamIdOf(bytes, 0) : 0;
+    }
+
     /** {@code NO_ERROR} 종료의 WebSocket Close. 상태 코드는 {@code 1000 Normal Closure}다(규격 1.2절). */
     static OutboundMessage normalWebSocketClose() {
         return new OutboundMessage(Kind.WEBSOCKET_CLOSE, NO_BYTES, NORMAL_CLOSURE);

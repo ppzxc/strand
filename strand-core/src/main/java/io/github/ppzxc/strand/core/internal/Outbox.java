@@ -50,6 +50,8 @@ final class Outbox {
     private @Nullable Node lastControl;
 
     private int size;
+    /** 대기열에 든 메시지 내용의 바이트 합. */
+    private long bytes;
 
     /** 애플리케이션 프레임을 맨 뒤에 붙인다. */
     Node addApplication(OutboundMessage message) {
@@ -109,6 +111,7 @@ final class Outbox {
         node.prev = null;
         node.next = null;
         size--;
+        bytes -= node.message.length();
         if (before == lastControl) {
             Node cursor = before;
             Node following = cursor == null ? head : cursor.next;
@@ -120,8 +123,37 @@ final class Outbox {
         }
     }
 
+    int size() {
+        return size;
+    }
+
+    long bytes() {
+        return bytes;
+    }
+
     boolean isEmpty() {
         return size == 0;
+    }
+
+    void discard() {
+        head = null;
+        tail = null;
+        lastControl = null;
+        size = 0;
+        bytes = 0;
+    }
+
+    @Nullable
+    Node first() {
+        return head;
+    }
+
+    void removeForWriting(Node node) {
+        if (node == lastControl) {
+            lastControl = node.prev;
+        }
+        node.waitId = LivenessTimers.NO_WAIT;
+        remove(node);
     }
 
     /**
@@ -142,6 +174,7 @@ final class Outbox {
         tail = null;
         lastControl = null;
         size = 0;
+        bytes = 0;
         return drained;
     }
 
@@ -161,5 +194,6 @@ final class Outbox {
             after.prev = node;
         }
         size++;
+        bytes += node.message.length();
     }
 }

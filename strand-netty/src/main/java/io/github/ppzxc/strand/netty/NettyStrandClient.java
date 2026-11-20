@@ -1,0 +1,296 @@
+package io.github.ppzxc.strand.netty;
+
+import io.github.ppzxc.strand.api.Resource;
+import io.github.ppzxc.strand.api.ResourceExhaustedException;
+import io.github.ppzxc.strand.api.ResourceUsage;
+import io.github.ppzxc.strand.api.Result;
+import io.github.ppzxc.strand.api.ShutdownResult;
+import io.github.ppzxc.strand.core.internal.EndpointConfig;
+import io.github.ppzxc.strand.netty.internal.ConnectionBudgets;
+import io.github.ppzxc.strand.netty.internal.SerialExecutor;
+import io.github.ppzxc.strand.netty.internal.StrandChannel;
+import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.Promise;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.util.List;
+import java.util.Objects;
+import org.jspecify.annotations.Nullable;
+
+/**
+ * Netty 클라이언트. {@link #connect}는 보안·HELLO·연결 인증·핸들러 등록을 마치면 성공하는 Netty {@link Future}를 돌려준다. 호출 스레드는 막히지 않는다.
+ * 이 객체는 앱이 준 {@code EventLoopGroup}과 실행기를 종료하지 않는다.
+ */
+public final class NettyStrandClient {
+    private final CommonSettings.Common common;
+    private final EndpointConfigSource configSource;
+    private final @Nullable RequestHandler handler;
+    private final HostResolver resolver;
+    private final long credentialBytes;
+    private final OwnerShutdown lifecycle;
+
+    private NettyStrandClient(
+            CommonSettings.Common common,
+            EndpointConfigSource configSource,
+            @Nullable RequestHandler handler,
+            HostResolver resolver,
+            long credentialBytes) {
+        this.credentialBytes = credentialBytes;
+        this.common = common;
+        this.configSource = configSource;
+        this.handler = handler;
+        this.resolver = resolver;
+        this.lifecycle = new OwnerShutdown(common, null);
+    }
+
+    /** 연결마다 쓸 core 설정(자격 증명 포함)을 만든다. */
+    private interface EndpointConfigSource {
+        EndpointConfig create();
+    }
+
+    /**
+     * builder를 만든다.
+     *
+     * @return builder
+     */
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /** {@link NettyStrandClient} builder. */
+    public static final class Builder extends CommonSettings<Builder> {
+        private @Nullable Credentials credentials;
+        private @Nullable RequestHandler handler;
+        private HostResolver resolver = HostResolver.SYSTEM;
+
+        private Builder() {}
+
+        /** 테스트가 주소 해석을 제어하려고 바꾼다. */
+        Builder resolver(HostResolver value) {
+            this.resolver = Objects.requireNonNull(value, "resolver");
+            return this;
+        }
+
+        @Override
+        Builder self() {
+            return this;
+        }
+
+        @Override
+        void collectMissing(List<String> missing) {}
+
+        /**
+         * 연결 인증(AUTH)에 보낼 자격 증명. 정하지 않으면 {@code ANONYMOUS}와 빈 자격 증명을 보낸다.
+         *
+         * @param value 자격 증명
+         * @return 이 builder
+         */
+        public Builder credentials(Credentials value) {
+            this.credentials = Objects.requireNonNull(value, "credentials");
+            return this;
+        }
+
+        /**
+         * 서버가 낸 요청을 받는 핸들러. 정하지 않으면 받은 요청에 {@code UNIMPLEMENTED}로 답한다. 연결 시작 전에 등록하며 연결 성공 때 이미 등록돼 있다.
+         *
+         * @param value 핸들러
+         * @return 이 builder
+         */
+        public Builder handler(RequestHandler value) {
+            this.handler = Objects.requireNonNull(value, "handler");
+            return this;
+        }
+
+        /**
+         * 설정을 검증하고 클라이언트를 만든다.
+         *
+         * @return 클라이언트
+         * @throws IllegalStateException 필수 설정이 없을 때
+         * @throws IllegalArgumentException 범위 오류, 최소 진행 공간 부족일 때
+         */
+        public NettyStrandClient build() {
+            Common common = validate();
+            Credentials auth = credentials;
+            return new NettyStrandClient(
+                    common,
+                    () -> {
+                        EndpointConfig config = common.endpointConfig();
+                        return auth == null ? config : config.auth(auth.mechanism(), auth.secret());
+                    },
+                    handler,
+                    resolver,
+                    auth == null ? 0 : auth.mechanism().length() + auth.secret().length);
+        }
+    }
+
+    /**
+     * 서버에 연결한다. {@link #connectAttempt}의 {@link NettyConnectAttempt#result()}와 같다. 성공은 TCP 연결·채널 보안·HELLO·연결 인증·핸들러
+     * 등록이 모두 끝났다는 뜻이다. 실패는 {@link PreparationFailedException}이고 단계와 원인을 알린다. 반환된 Future는 취소할 수 없고 연결 시도를 취소하는 길은
+     * {@link #connectAttempt}의 {@link NettyConnectAttempt#cancel()}뿐이다. Future는 연결 채널의 EventLoop에서 완료된다.
+     *
+     * @param address 서버 주소({@link InetSocketAddress})
+     * @return 연결 결과
+     * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
+     */
+    public Future<NettyStrandConnection> connect(SocketAddress address) {
+        return connectAttempt(address).result();
+    }
+
+    /**
+     * 취소할 수 있는 연결 시도를 시작한다. {@link #connect}와 같은 준비를 하며 {@link NettyConnectAttempt}로 결과 관찰·취소·채널 정리 관찰을 따로 한다. 호출
+     * 스레드는 막히지 않는다. 주소 해석이 필요하면 앱용 실행기에서 하고, 해석된 주소는 하나씩 순서대로 연결하며 모든 시도가 처음 정한 준비 기한을 공유한다.
+     *
+     * @param address 서버 주소({@link InetSocketAddress})
+     * @return 연결 시도
+     * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
+     */
+    public NettyConnectAttempt connectAttempt(SocketAddress address) {
+        if (!(Objects.requireNonNull(address, "address") instanceof InetSocketAddress)) {
+            throw new IllegalArgumentException("TCP 주소(InetSocketAddress)여야 한다");
+        }
+        InetSocketAddress target = (InetSocketAddress) address;
+        EventLoop loop = common.group.next();
+        // 앱이 받는 Future는 취소할 수 없게 한다. 취소를 받아들이면 성공한 연결이 주인 없이 남는다.
+        Promise<NettyStrandConnection> promise = loop.newPromise();
+        promise.setUncancellable();
+        Promise<Void> released = loop.newPromise();
+        released.setUncancellable();
+        ConnectAttemptState state = new ConnectAttemptState();
+        NettyConnectAttempt attempt = new NettyConnectAttempt(promise, released, state);
+        if (!lifecycle.accepting()) {
+            failShutdown(promise, released, target);
+            return attempt;
+        }
+        long now = common.nanoClock.getAsLong();
+        ConnectionBudgets budgets = common.owner.newConnection(common.limits);
+        Resource denied = ConnectionEngine.admit(budgets, common.space);
+        if (denied != null) {
+            promise.tryFailure(new PreparationFailedException(new PreparationFailure(
+                    target, PreparationStage.CONNECTION, new ResourceExhaustedException(denied))));
+            released.trySuccess(null);
+            return attempt;
+        }
+        // 주소 해석·명령 대기 전에 보관할 입력(주소 이름·자격 증명)의 바이트를 예약한다.
+        PreparationBytes preparationBytes = new PreparationBytes(budgets);
+        if (!preparationBytes.tryReserve(retainedInputBytes(target))) {
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            promise.tryFailure(new PreparationFailedException(new PreparationFailure(
+                    target, PreparationStage.CONNECTION, new ResourceExhaustedException(Resource.PREPARATION_BYTES))));
+            released.trySuccess(null);
+            return attempt;
+        }
+        ConnectionParams params = new ConnectionParams(
+                ConnectionParams.Role.CLIENT,
+                configSource.create(),
+                target,
+                loop,
+                new SerialExecutor(common.executor),
+                common.executor,
+                budgets,
+                common.space,
+                common.maxFrameSize,
+                common.deadlineAt(now),
+                common.closeFinishNanos,
+                common.writeQueueBytes,
+                common.nanoClock,
+                new ConnectionParams.PreparationObserver() {
+                    @Override
+                    public void ready(NettyStrandConnection connection) {
+                        promise.trySuccess(connection);
+                    }
+
+                    @Override
+                    public void failed(PreparationFailure failure) {
+                        promise.tryFailure(new PreparationFailedException(failure));
+                    }
+                },
+                handler,
+                null,
+                null,
+                common.tls(target.getHostString(), target.getPort()),
+                common.allocator);
+        params.attempt = state;
+        params.released = released;
+        params.preparationBytes = preparationBytes;
+        params.resolver = resolver;
+        StrandChannel channel = new StrandChannel();
+        NettyStrandConnection connection = new NettyStrandConnection(params, channel);
+        // 기록하는 순간부터 전체 종료가 이 연결을 다룰 수 있으므로 종료 훅을 먼저 정한다.
+        params.terminated = () -> lifecycle.unregister(connection);
+        if (!lifecycle.register(connection)) {
+            // 예약하는 사이 전체 종료가 시작됐다. 시작하지 않은 시도의 예약을 돌려주고 실패시킨다.
+            preparationBytes.releaseAll();
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            failShutdown(promise, released, target);
+            return attempt;
+        }
+        try {
+            channel.config().setTcpNoDelay(true);
+            connection.startClient(target);
+        } catch (RuntimeException | Error e) {
+            lifecycle.unregister(connection);
+            preparationBytes.releaseAll();
+            ConnectionEngine.cancelAdmission(budgets, common.space);
+            promise.tryFailure(e);
+            released.trySuccess(null);
+        }
+        return attempt;
+    }
+
+    private static void failShutdown(
+            Promise<NettyStrandConnection> promise, Promise<Void> released, InetSocketAddress target) {
+        promise.tryFailure(new PreparationFailedException(new PreparationFailure(
+                target, PreparationStage.CONNECTION, new IllegalStateException("전체 종료를 시작해 새 연결 시도를 받지 않는다"))));
+        released.trySuccess(null);
+    }
+
+    /** 이 시도가 라이브러리 안에 복사·보관하는 입력: 주소 이름과 자격 증명(방식 이름과 비밀). */
+    private long retainedInputBytes(InetSocketAddress target) {
+        long bytes = target.getHostString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        return bytes + credentialBytes;
+    }
+
+    /**
+     * 소유 객체 전체 범위의 한도 사용량 집계(설정값·현재량·최고량·거절 횟수). 자격 증명은 담지 않는다.
+     *
+     * @param resource 조회할 종류
+     * @return 사용량
+     * @throws IllegalArgumentException 소유 객체 범위에 없는 종류일 때
+     */
+    public ResourceUsage resourceUsage(Resource resource) {
+        return common.owner.usage(resource);
+    }
+
+    /**
+     * 소유 객체 전체를 종료한다. 새 접수를 막고, 진행 중인 연결 시도를 취소하고, 연결에 CLOSE를 시작하고, {@code shutdownGrace}가 끝나면 남은 연결을 끊고, 내부 실행
+     * 자원을 종료한다. 기한은 첫 호출 시각부터 센다. 반복 호출은 같은 Future를 돌려주며 기한을 늘리지 않는다. 앱이 준 EventLoopGroup과 실행기는 종료하지 않는다.
+     *
+     * <p>Future는 앱용 실행기를 거치지 않고 완료하며 앱이 취소할 수 없다. 붙인 리스너는 Netty 계약에 따라 EventLoop에서 실행된다.
+     *
+     * @return 모든 내부 자원이 {@code shutdownDeadline} 안에 정리되면 성공, 아니면 {@link
+     *     io.github.ppzxc.strand.api.ShutdownDeadlineExceededException}으로 실패하는 Future
+     */
+    public Future<Void> shutdown() {
+        return lifecycle.shutdown();
+    }
+
+    /**
+     * 전체 종료 결과의 보존된 관찰. {@code COMPLETED} 또는 {@code DEADLINE_EXCEEDED}와 기한 시점에 정리되지 않은 자원을 담는다. 확정한 결과는 바꾸지 않는다.
+     *
+     * @return 종료 결과
+     */
+    public Result<ShutdownResult> shutdownResult() {
+        return lifecycle.result();
+    }
+
+    /**
+     * 실제 내부 자원(연결·시도)과 잔존 작업(핸들러·인증·주소 해석)이 모두 해결되면 완료한다. 종료 기한 초과 뒤에도 정리가 계속되며, 그때 완료한다. 앱이 준
+     * EventLoopGroup과 실행기 자체의 종료는 기다리지 않는다. 앱이 취소할 수 없다.
+     *
+     * @return 실제 정리 완료
+     */
+    public Future<Void> resourcesTerminated() {
+        return lifecycle.terminated();
+    }
+}

@@ -92,8 +92,7 @@ public final class TcpPassage implements Passage {
             if (timeoutMs == 0) {
                 return Inbound.none();
             }
-            int interest =
-                    (waitForRead && !ended ? SelectionKey.OP_READ : 0) | (waitForWrite ? SelectionKey.OP_WRITE : 0);
+            int interest = (waitForRead ? SelectionKey.OP_READ : 0) | (waitForWrite ? SelectionKey.OP_WRITE : 0);
             key.interestOps(interest);
             if (timeoutMs < 0) {
                 selector.select();
@@ -160,6 +159,18 @@ public final class TcpPassage implements Passage {
             writingBuffer = null;
         }
         return count;
+    }
+
+    @Override
+    public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
+        if (length <= 0) {
+            return 0;
+        }
+        try {
+            return channel.write(ByteBuffer.wrap(bytes, offset, length));
+        } catch (ClosedSelectorException | CancelledKeyException e) {
+            throw new IOException("닫힌 통로", e);
+        }
     }
 
     @Override

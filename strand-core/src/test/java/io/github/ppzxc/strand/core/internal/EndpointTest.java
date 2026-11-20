@@ -1757,7 +1757,7 @@ class EndpointTest {
         server.drainEvents();
 
         server.receive(bytes("000000140004ff0000000000000000010000000000000004"));
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RESET);
         server.receive(bytes("0000001001010000000000000000000300000000"));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);

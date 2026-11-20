@@ -14,8 +14,8 @@ tasks.check {
 // examples(release 11)와 build-logic은 일부러 뺀다.
 tasks.register("runtimeMatrixTest") {
   group = "verification"
-  description = "런타임 매트릭스 대상 모듈(core, nio, conformance)의 테스트만 실행한다. -PtestJavaVersion=<N>과 함께 쓴다."
-  dependsOn(":strand-core:test", ":strand-nio:test", ":strand-conformance:test")
+  description = "런타임 매트릭스 대상 모듈(core, nio, netty, conformance)의 테스트만 실행한다. -PtestJavaVersion=<N>과 함께 쓴다."
+  dependsOn(":strand-core:test", ":strand-nio:test", ":strand-netty:test", ":strand-conformance:test", ":strand-api:test")
 }
 
 // 배포 테스트 하네스 (a): mavenLocal에 배포한 core를 외부 소비자 4개가 받아 쓰는지 확인한다. 느려서 check에는 묶지 않는다.
@@ -29,8 +29,8 @@ class VersionArg(@get:Input val version: Provider<String>) : CommandLineArgument
 val deployTestVersion = providers.gradleProperty("version")
 tasks.register<Exec>("deployTest") {
   group = "verification"
-  description = "~/.m2에 strand-core와 strand-nio를 발행하고(정리하지 않는다) deploy-test/run.sh로 외부 소비자 4개를 돌린다(하네스 a)."
-  dependsOn(":strand-core:publishToMavenLocal", ":strand-nio:publishToMavenLocal")
+  description = "~/.m2에 strand-core·strand-api·strand-nio를 발행하고(정리하지 않는다) deploy-test/run.sh로 외부 소비자 4개를 돌린다(하네스 a)."
+  dependsOn(":strand-core:publishToMavenLocal", ":strand-api:publishToMavenLocal", ":strand-nio:publishToMavenLocal")
   workingDir = layout.projectDirectory.asFile
   executable = layout.projectDirectory.file("deploy-test/run.sh").asFile.path
   argumentProviders.add(VersionArg(deployTestVersion))

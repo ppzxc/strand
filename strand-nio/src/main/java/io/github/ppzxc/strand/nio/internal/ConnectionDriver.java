@@ -94,7 +94,7 @@ public final class ConnectionDriver implements AutoCloseable {
      * 대한 응답(내가 알린 동시 스트림 × 상대가 알린 최대 프레임), 거기에 제어 프레임 몇 개를 위한 프레임 하나를 더한다. 상대가 알린 값은 상대가 정하므로
      * 절대 한도(기본 {@link #DEFAULT_MAX_WRITE_QUEUE_BYTES}, {@link Builder#maxWriteQueueBytes}로 바꾼다)로 막는다.
      */
-    static long writeQueueLimit(
+    public static long writeQueueLimit(
             long peerMaxFrameSize, long peerMaxConcurrentStreams, long ownMaxConcurrentStreams, long absoluteLimit) {
         long range = (peerMaxConcurrentStreams + ownMaxConcurrentStreams) * peerMaxFrameSize + peerMaxFrameSize;
         return Math.max(peerMaxFrameSize, Math.min(range, absoluteLimit));

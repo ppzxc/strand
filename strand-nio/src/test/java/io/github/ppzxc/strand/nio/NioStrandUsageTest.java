@@ -1,0 +1,474 @@
+package io.github.ppzxc.strand.nio;
+
+import static io.github.ppzxc.strand.nio.AppFixture.TYPE;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import io.github.ppzxc.strand.api.AcceptanceKind;
+import io.github.ppzxc.strand.api.Certainty;
+import io.github.ppzxc.strand.api.CloseNotice;
+import io.github.ppzxc.strand.api.Extensions;
+import io.github.ppzxc.strand.api.Request;
+import io.github.ppzxc.strand.api.RequestHandle;
+import io.github.ppzxc.strand.api.RequestOptions;
+import io.github.ppzxc.strand.api.RequestResult;
+import io.github.ppzxc.strand.api.Resource;
+import io.github.ppzxc.strand.api.ResponseAcceptance;
+import io.github.ppzxc.strand.api.Status;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
+/** 실제 TCP와 TLS 위에서 앱 공개 API로 보안·인증·핸들러 준비 뒤 양방향 요청·응답과 연결 종료를 검증한다(#316). */
+class NioStrandUsageTest {
+
+    private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
+
+    @AfterEach
+    void cleanUp() throws Exception {
+        for (AutoCloseable closeable : closeables) {
+            closeable.close();
+        }
+    }
+
+    static Stream<String> transports() {
+        return Stream.of("tcp", "tls");
+    }
+
+    private AppFixture fixture(String transport) throws Exception {
+        AppFixture fixture = transport.equals("tls") ? AppFixture.tls() : AppFixture.plain();
+        closeables.add(fixture);
+        return fixture;
+    }
+
+    private static CredentialVerifier acceptAll(String principal) {
+        return credentials -> AuthenticationResult.accepted(principal);
+    }
+
+    /**
+     * 서버의 AUTH(ACK)는 팩터리 실행 전에 나가므로, connect 직후의 첫 요청은 서버 핸들러가 준비되기 전이면 REFUSED(UNAVAILABLE, 처리 안 됨)로 돌아올 수 있다(규격 4.5절). 같은 연결이면
+     * 기다렸다가 다시 보낸다.
+     */
+    private static RequestResult requestWhenReady(AppFixture fixture, NioStrandConnection connection, byte[] payload)
+            throws Exception {
+        long limit = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(AppFixture.WAIT_SECONDS);
+        RequestResult result =
+                fixture.result(connection.request(Request.of(TYPE, payload)).result());
+        while (result.status() == Status.UNAVAILABLE
+                && result.certainty() == Certainty.NOT_PROCESSED
+                && System.nanoTime() < limit) {
+            Thread.sleep(10);
+            result =
+                    fixture.result(connection.request(Request.of(TYPE, payload)).result());
+        }
+        return result;
+    }
+
+    private static byte[] bytes(String text) {
+        return text.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private Listener listen(NioStrandServer server) throws Exception {
+        Listener listener = AppFixture.get(server.listen(AppFixture.anyLoopback()));
+        closeables.add(listener::close);
+        return listener;
+    }
+
+    private NioStrandConnection connect(NioStrandClient client, Listener listener) throws Exception {
+        NioStrandConnection connection = AppFixture.get(client.connect(AppFixture.loopback(listener)));
+        closeables.add(connection::abort);
+        return connection;
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void bidirectionalRequestsAndResponsesWorkAfterPreparation(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        CompletableFuture<NioStrandConnection> serverSide = new CompletableFuture<>();
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("alice"))
+                .handlerFactory(connection -> {
+                    serverSide.complete(connection);
+                    return PreparedHandler.of(request -> {
+                        // 서버가 받은 요청에 응답하고, 같은 연결로 클라이언트에 역방향 요청도 낸다.
+                        request.respond(
+                                Status.OK, bytes("echo:" + new String(request.payload(), StandardCharsets.UTF_8)));
+                        request.connection().request(Request.of(TYPE, bytes("reverse")));
+                    });
+                })
+                .build();
+        Listener listener = listen(server);
+        CompletableFuture<byte[]> reversed = new CompletableFuture<>();
+        NioStrandClient client = fixture.clientBuilder()
+                .handler(request -> {
+                    reversed.complete(request.payload());
+                    request.respond(Status.OK, bytes("ack"));
+                })
+                .build();
+
+        NioStrandConnection connection = connect(client, listener);
+        RequestResult forward = requestWhenReady(fixture, connection, bytes("ping"));
+
+        assertThat(forward.status()).isEqualTo(Status.OK);
+        assertThat(forward.certainty()).isEqualTo(Certainty.RESPONSE);
+        assertThat(new String(forward.payload(), StandardCharsets.UTF_8)).isEqualTo("echo:ping");
+        assertThat(reversed.get(15, TimeUnit.SECONDS)).isEqualTo(bytes("reverse"));
+        NioStrandConnection accepted = serverSide.get(15, TimeUnit.SECONDS);
+        RequestHandle reverseRequest = accepted.request(Request.of(TYPE, bytes("again")));
+        RequestResult backward = fixture.result(reverseRequest.result());
+        assertThat(backward.status()).isEqualTo(Status.OK);
+        assertThat(backward.certainty()).isEqualTo(Certainty.RESPONSE);
+        assertThat(new String(backward.payload(), StandardCharsets.UTF_8)).isEqualTo("ack");
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void connectSucceedsOnlyAfterTheAuthenticatedPeerAndHandlerAreReady(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        AtomicReference<Object> factoryPeer = new AtomicReference<>();
+        AtomicReference<List<String>> seenMechanism = new AtomicReference<>();
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(credentials -> {
+                    seenMechanism.set(Arrays.asList(
+                            credentials.mechanism(), new String(credentials.secret(), StandardCharsets.UTF_8)));
+                    return AuthenticationResult.accepted("user-" + credentials.mechanism());
+                })
+                .handlerFactory(connection -> {
+                    factoryPeer.set(connection.authenticatedPeer().principal());
+                    return PreparedHandler.of(request -> request.respond(Status.OK, request.payload()));
+                })
+                .build();
+        Listener listener = listen(server);
+        NioStrandClient client = fixture.clientBuilder()
+                .credentials(Credentials.of("BEARER", bytes("opaque")))
+                .build();
+
+        NioStrandConnection connection = connect(client, listener);
+
+        // 서버의 AUTH(ACK)는 팩터리 실행 전에 나가므로 팩터리 완료는 기다려 확인한다. 클라이언트 쪽은 connect 성공 때 이미 준비돼 있다.
+        long limit = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(AppFixture.WAIT_SECONDS);
+        while (factoryPeer.get() == null && System.nanoTime() < limit) {
+            Thread.sleep(10);
+        }
+        assertThat(factoryPeer.get()).isEqualTo("user-BEARER");
+        assertThat(seenMechanism.get()).containsExactly("BEARER", "opaque");
+        assertThat(connection.authenticatedPeer().remoteAddress()).isEqualTo(AppFixture.loopback(listener));
+        assertThat(requestWhenReady(fixture, connection, bytes("x")).status()).isEqualTo(Status.OK);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void incomingRequestExposesTypeExtensionsBodyConnectionAndEnded(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        CompletableFuture<IncomingRequest> seen = new CompletableFuture<>();
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handler(seen::complete)
+                .build();
+        Listener listener = listen(server);
+        NioStrandConnection connection = connect(fixture.clientBuilder().build(), listener);
+        Extensions extensions =
+                Extensions.builder().idempotencyKey(bytes("key-1")).build();
+
+        RequestHandle handle =
+                connection.request(Request.of(TYPE, bytes("body")).extensions(extensions));
+        IncomingRequest request = seen.get(15, TimeUnit.SECONDS);
+
+        assertThat(request.type()).isEqualTo(TYPE);
+        assertThat(request.payload()).isEqualTo(bytes("body"));
+        assertThat(request.extensions().get(3))
+                .hasValueSatisfying(value -> assertThat(value).isEqualTo(bytes("key-1")));
+        assertThat(request.connection()).isNotNull();
+        assertThat(request.ended().isDone()).isFalse();
+        assertThatThrownBy(() -> request.ended().resultNow()).isInstanceOf(IllegalStateException.class);
+        // 핸들러가 응답 없이 반환했고, 이후 다른 스레드가 응답한다.
+        CompletableFuture<ResponseAcceptance> later = CompletableFuture.supplyAsync(() -> {
+            try {
+                return fixture.result(request.respond(Status.OK, bytes("late")));
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        assertThat(later.get(15, TimeUnit.SECONDS).kind()).isEqualTo(AcceptanceKind.ACCEPTED);
+        assertThat(fixture.result(handle.result()).payload()).isEqualTo(bytes("late"));
+        assertThat(fixture.result(request.ended()).isResponseAccepted()).isTrue();
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void onlyTheFirstResponseIsAcceptedAndTheRestReportWhy(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        CompletableFuture<IncomingRequest> seen = new CompletableFuture<>();
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handler(seen::complete)
+                .build();
+        Listener listener = listen(server);
+        NioStrandConnection connection = connect(fixture.clientBuilder().build(), listener);
+        connection.request(Request.of(TYPE, bytes("body")));
+        IncomingRequest request = seen.get(15, TimeUnit.SECONDS);
+
+        ResponseAcceptance first = fixture.result(request.respond(Status.OK, bytes("one")));
+        ResponseAcceptance second = fixture.result(request.respond(Status.OK, bytes("two")));
+
+        assertThat(first.kind()).isEqualTo(AcceptanceKind.ACCEPTED);
+        assertThat(second.kind()).isIn(AcceptanceKind.ALREADY_RESPONDED, AcceptanceKind.REQUEST_ENDED);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void handlerExceptionAnswersEmptyInternalAndKeepsTheConnection(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handler(request -> {
+                    if (request.payload().length == 0) {
+                        throw new IllegalStateException("업무 오류 메시지는 상대에게 보이지 않는다");
+                    }
+                    request.respond(Status.OK, request.payload());
+                })
+                .build();
+        Listener listener = listen(server);
+        NioStrandConnection connection = connect(fixture.clientBuilder().build(), listener);
+
+        RequestResult failed =
+                fixture.result(connection.request(Request.of(TYPE, new byte[0])).result());
+        RequestResult next =
+                fixture.result(connection.request(Request.of(TYPE, bytes("ok"))).result());
+
+        assertThat(failed.status()).isEqualTo(Status.INTERNAL);
+        assertThat(failed.payload()).isEmpty();
+        assertThat(next.status()).isEqualTo(Status.OK);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void userCodeNeverRunsOnTheTransportThreadAndRunsOneAtATimePerConnection(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        List<String> threads = new CopyOnWriteArrayList<>();
+        List<Integer> overlap = new CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger running = new java.util.concurrent.atomic.AtomicInteger();
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(credentials -> {
+                    threads.add(Thread.currentThread().getName());
+                    return AuthenticationResult.accepted("p");
+                })
+                .handlerFactory(connection -> {
+                    threads.add(Thread.currentThread().getName());
+                    return PreparedHandler.of(request -> {
+                        overlap.add(running.incrementAndGet());
+                        threads.add(Thread.currentThread().getName());
+                        Thread.sleep(30);
+                        running.decrementAndGet();
+                        request.respond(Status.OK, new byte[0]);
+                    });
+                })
+                .build();
+        Listener listener = listen(server);
+        NioStrandConnection connection = connect(fixture.clientBuilder().build(), listener);
+
+        fixture.requestWhenServed(connection, Request.of(TYPE, new byte[0]));
+        RequestHandle[] handles = new RequestHandle[4];
+        for (int i = 0; i < handles.length; i++) {
+            handles[i] = connection.request(Request.of(TYPE, new byte[0]));
+        }
+        for (RequestHandle handle : handles) {
+            fixture.result(handle.result());
+        }
+
+        assertThat(threads).isNotEmpty().allSatisfy(name -> assertThat(name).startsWith("app-executor-"));
+        assertThat(overlap).containsOnly(1);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void closeThenAbortAndTheRetainedClosedResultReleaseEverythingTheConnectionOwned(String transport)
+            throws Exception {
+        AppFixture fixture = fixture(transport);
+        CompletableFuture<NioStrandConnection> accepted = new CompletableFuture<>();
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handlerFactory(connection -> {
+                    accepted.complete(connection);
+                    return PreparedHandler.of(request -> request.respond(Status.OK, new byte[0]));
+                })
+                .build();
+        Listener listener = listen(server);
+        NioStrandClient client = fixture.clientBuilder().build();
+        NioStrandConnection connection = connect(client, listener);
+        NioStrandConnection peer = accepted.get(15, TimeUnit.SECONDS);
+        assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isEqualTo(1);
+
+        connection.close();
+        connection.close();
+        CloseNotice notice = fixture.result(connection.closed());
+        CloseNotice peerNotice = fixture.result(peer.closed());
+
+        assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
+        assertThat(notice.sender()).hasValue(CloseNotice.Sender.LOCAL);
+        assertThat(peerNotice.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
+        assertThat(peerNotice.sender()).hasValue(CloseNotice.Sender.PEER);
+        // closed가 완료된 시점에 연결이 쥔 슬롯과 진행 공간은 이미 돌아와 있다.
+        assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
+        assertThat(client.resourceUsage(Resource.TLS_CIPHERTEXT_BYTES).current())
+                .isZero();
+        assertThat(client.resourceUsage(Resource.FRAME_ASSEMBLY_BYTES).current())
+                .isZero();
+        assertThat(connection.resourceUsage(Resource.FRAME_ASSEMBLY_BYTES).current())
+                .isZero();
+        // close 뒤 abort는 무해하고, 앱이 준 실행기는 종료하지 않는다.
+        connection.abort();
+        assertThat(fixture.pool.isShutdown()).isFalse();
+        assertThat(fixture.result(connection.closed())).isSameAs(notice);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void abortEndsTheConnectionImmediatelyAndThePeerSeesADisconnect(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        CompletableFuture<NioStrandConnection> accepted = new CompletableFuture<>();
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handlerFactory(connection -> {
+                    accepted.complete(connection);
+                    return PreparedHandler.of(request -> {});
+                })
+                .build();
+        Listener listener = listen(server);
+        NioStrandConnection connection = connect(fixture.clientBuilder().build(), listener);
+        NioStrandConnection peer = accepted.get(15, TimeUnit.SECONDS);
+        RequestHandle pendingRequest = connection.request(Request.of(TYPE, bytes("never answered")));
+
+        connection.abort();
+
+        CloseNotice notice = fixture.result(connection.closed());
+        assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
+        assertThat(fixture.result(peer.closed()).kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
+        // 응답이 없던 요청은 끊김으로 한 번 확정되고 보존된다.
+        RequestResult result = fixture.result(pendingRequest.result());
+        assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(result.certainty()).isIn(Certainty.UNKNOWN, Certainty.NOT_PROCESSED);
+        // 종료된 연결에 낸 요청은 UNAVAILABLE이고 처리 안 됨이다.
+        RequestResult afterEnd = fixture.result(
+                connection.request(Request.of(TYPE, bytes("late"))).result());
+        assertThat(afterEnd.status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(afterEnd.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void requestDeadlineStartsAtTheCallAndZeroExpiresImmediately(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handler(request -> {})
+                .build();
+        Listener listener = listen(server);
+        NioStrandConnection connection = connect(fixture.clientBuilder().build(), listener);
+
+        RequestResult immediate = fixture.result(connection
+                .request(Request.of(TYPE, bytes("x")), RequestOptions.deadlineAfter(Duration.ZERO))
+                .result());
+        RequestResult timedOut = fixture.result(connection
+                .request(Request.of(TYPE, bytes("y")), RequestOptions.deadlineAfter(Duration.ofMillis(150)))
+                .result());
+
+        assertThat(immediate.status()).isEqualTo(Status.DEADLINE_EXCEEDED);
+        assertThat(immediate.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+        assertThat(timedOut.status()).isEqualTo(Status.DEADLINE_EXCEEDED);
+        assertThat(timedOut.certainty()).isEqualTo(Certainty.UNKNOWN);
+        assertThatThrownBy(() -> RequestOptions.deadlineAfter(Duration.ofMillis(-1)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void cancelYieldsTheRetainedCancelledResultNotTheCancelCall(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handler(request -> {})
+                .build();
+        Listener listener = listen(server);
+        NioStrandConnection connection = connect(fixture.clientBuilder().build(), listener);
+        RequestHandle handle = connection.request(Request.of(TYPE, bytes("slow")));
+
+        handle.cancel();
+        handle.cancel();
+
+        RequestResult result = fixture.result(handle.result());
+        assertThat(result.status()).isEqualTo(Status.CANCELLED);
+        assertThat(fixture.result(handle.result())).isSameAs(result);
+        // 끝난 요청의 취소는 아무 일도 하지 않는다.
+        handle.cancel();
+        assertThat(fixture.result(handle.result())).isSameAs(result);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void outgoingRequestLimitRejectsLocallyAndReturnsTheReservations(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handler(request -> {})
+                .build();
+        Listener listener = listen(server);
+        NioStrandClient client = fixture.clientBuilder().build();
+        NioStrandConnection connection = connect(client, listener);
+        RequestHandle[] handles = new RequestHandle[8];
+        for (int i = 0; i < handles.length; i++) {
+            handles[i] = connection.request(Request.of(TYPE, bytes("held")));
+        }
+
+        RequestResult rejected = fixture.result(
+                connection.request(Request.of(TYPE, bytes("one too many"))).result());
+
+        assertThat(rejected.status()).isEqualTo(Status.RESOURCE_EXHAUSTED);
+        assertThat(rejected.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+        assertThat(rejected.resource()).hasValue(Resource.OUTGOING_REQUESTS);
+        assertThat(connection.resourceUsage(Resource.OUTGOING_REQUESTS).rejections())
+                .isEqualTo(1);
+        for (RequestHandle handle : handles) {
+            handle.cancel();
+        }
+        for (RequestHandle handle : handles) {
+            fixture.result(handle.result());
+        }
+        assertThat(connection.resourceUsage(Resource.OUTGOING_REQUESTS).current())
+                .isZero();
+        assertThat(connection.resourceUsage(Resource.OUTGOING_BYTES).current()).isZero();
+        assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isZero();
+        assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).highWater()).isEqualTo(8);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void clientWithoutAHandlerAnswersUnimplemented(String transport) throws Exception {
+        AppFixture fixture = fixture(transport);
+        CompletableFuture<NioStrandConnection> accepted = new CompletableFuture<>();
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handlerFactory(connection -> {
+                    accepted.complete(connection);
+                    return PreparedHandler.of(request -> {});
+                })
+                .build();
+        Listener listener = listen(server);
+        connect(fixture.clientBuilder().build(), listener);
+
+        RequestResult result = fixture.result(accepted.get(15, TimeUnit.SECONDS)
+                .request(Request.of(TYPE, bytes("x")))
+                .result());
+
+        assertThat(result.status()).isEqualTo(Status.UNIMPLEMENTED);
+    }
+}
