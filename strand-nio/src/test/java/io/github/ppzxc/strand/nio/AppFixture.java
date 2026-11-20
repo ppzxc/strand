@@ -75,10 +75,28 @@ final class AppFixture implements AutoCloseable {
             rejectNext.set(true);
         }
 
+        private volatile boolean rejectReadyNotification;
+
+        /** 준비 성공 알림을 내는 제출(엔진의 notifyReady)만 거절한다. 다른 작업은 받는다. */
+        void rejectNextReadyNotification() {
+            rejectReadyNotification = true;
+        }
+
+        private static boolean fromReadyNotification() {
+            for (StackTraceElement e : new Throwable().getStackTrace()) {
+                if (e.getMethodName().equals("notifyReady")) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         @Override
         public void execute(Runnable task) {
             int number = submitted.incrementAndGet();
+            boolean rejectReady = rejectReadyNotification && fromReadyNotification();
             boolean reject = rejectNext.compareAndSet(true, false)
+                    || rejectReady
                     || rejecting
                     || acceptRemaining.getAndDecrement() <= 0
                     || rejectedNumbers.contains(number);
