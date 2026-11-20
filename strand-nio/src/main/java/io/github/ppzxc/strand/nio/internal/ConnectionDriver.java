@@ -1004,8 +1004,11 @@ public final class ConnectionDriver implements AutoCloseable {
                     }
                     notifyClosed(event);
                     break;
-                default:
+                case REQUEST_RESET:
+                    // 드라이버의 받은 요청에는 취소 개념이 없어 앱에 알리지 않는다. 이후 응답은 core가 거절한다.
                     break;
+                default:
+                    throw new IllegalStateException("처리하지 않는 사건 종류: " + event.kind());
             }
         }
 

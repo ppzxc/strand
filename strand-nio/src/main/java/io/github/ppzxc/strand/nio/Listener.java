@@ -23,6 +23,7 @@ public final class Listener {
 
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Executor appExecutor;
+    private final long fallbackNanos;
     /** 앱이 관찰하는 정리 완료. 앱용 실행기를 거쳐 완료한다. */
     private final CompletableFuture<Void> closedStage = new CompletableFuture<>();
     /** 소유 객체가 내부 기록용으로 보는 정리 완료. 수락 스레드가 끝날 때 곧바로 완료한다. */
@@ -32,10 +33,12 @@ public final class Listener {
             ServerSocketChannel server,
             SocketAddress localAddress,
             Consumer<SocketChannel> acceptor,
-            Executor appExecutor) {
+            Executor appExecutor,
+            long fallbackNanos) {
         this.server = server;
         this.localAddress = localAddress;
         this.appExecutor = appExecutor;
+        this.fallbackNanos = fallbackNanos;
         Thread thread = new Thread(() -> acceptLoop(acceptor), "strand-nio-accept");
         thread.setDaemon(true);
         thread.start();
@@ -69,13 +72,9 @@ public final class Listener {
         }
     }
 
-    /** 앱이 붙인 의존 단계가 수락 스레드를 막지 않게 앱용 실행기에서 완료한다. 실행기가 거절하면 이 스레드에서 완료한다. */
+    /** 앱이 붙인 의존 단계가 수락 스레드를 막지 않게 앱용 실행기에서 완료한다. 실행기가 거절하거나 기한이 지나도록 실행하지 않으면 직접 완료한다. */
     private void complete(CompletableFuture<Void> stage) {
-        try {
-            appExecutor.execute(() -> stage.complete(null));
-        } catch (RuntimeException | Error e) {
-            stage.complete(null);
-        }
+        StageCompletion.complete(appExecutor, () -> stage.complete(null), fallbackNanos);
     }
 
     /** 소유 객체가 리스닝 정리 완료를 기록하는 내부 관찰. */

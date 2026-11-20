@@ -102,7 +102,7 @@ jobs:
 
       # SBOM(CycloneDX JSON)은 Release에만 붙이고 Central에는 올리지 않는다.
       - name: Generate SBOM
-        run: ./gradlew :strand-core:cyclonedxBom :strand-nio:cyclonedxBom
+        run: ./gradlew :strand-core:cyclonedxBom :strand-api:cyclonedxBom :strand-nio:cyclonedxBom :strand-netty:cyclonedxBom
 
       - name: Collect and sign release assets
         env:
@@ -121,5 +121,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$VERSION" --draft --verify-tag --title "$VERSION" \
-            --notes "strand-core·strand-nio $VERSION. Central Portal에서 Publish한 뒤 이 draft를 공개한다." \
+            --notes "strand-core·strand-api·strand-nio·strand-netty $VERSION. Central Portal에서 Publish한 뒤 이 draft를 공개한다." \
             release-assets/*

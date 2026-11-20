@@ -157,7 +157,12 @@ public final class NioStrandServer {
             try {
                 server.setOption(StandardSocketOptions.SO_REUSEADDR, true);
                 server.bind(address);
-                Listener listener = new Listener(server, server.getLocalAddress(), this::admit, common.executor);
+                Listener listener = new Listener(
+                        server,
+                        server.getLocalAddress(),
+                        this::admit,
+                        common.executor,
+                        common.shutdownDeadline.toNanos());
                 if (lifecycle.register(listener)) {
                     future.complete(listener);
                 } else {

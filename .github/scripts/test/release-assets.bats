@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# release.yml이 core·nio 두 모듈의 SBOM과 자산을 같은 모양으로 담는지 본다. 실행: bats .github/scripts/test
+# release.yml이 core·api·nio·netty 네 모듈의 SBOM과 자산을 같은 모양으로 담는지 본다. 실행: bats .github/scripts/test
 
 setup() {
   workflow="$BATS_TEST_DIRNAME/../../workflows/release.yml"
@@ -18,15 +18,23 @@ make_repo() {
   done
 }
 
-@test "수집 스크립트를 실제로 돌리면 두 모듈의 jar·sources·javadoc·SBOM 8개가 모인다" {
-  make_repo strand-core strand-nio
+@test "수집 스크립트를 실제로 돌리면 네 모듈의 jar·sources·javadoc·SBOM 16개가 모인다" {
+  make_repo strand-core strand-api strand-nio strand-netty
   run "$repo/.github/scripts/collect-release-assets.sh" 9.9.9
   [ "$status" -eq 0 ]
   LC_ALL=C run ls "$repo/release-assets"
-  [ "$output" = "strand-core-9.9.9-cyclonedx.json
+  [ "$output" = "strand-api-9.9.9-cyclonedx.json
+strand-api-9.9.9-javadoc.jar
+strand-api-9.9.9-sources.jar
+strand-api-9.9.9.jar
+strand-core-9.9.9-cyclonedx.json
 strand-core-9.9.9-javadoc.jar
 strand-core-9.9.9-sources.jar
 strand-core-9.9.9.jar
+strand-netty-9.9.9-cyclonedx.json
+strand-netty-9.9.9-javadoc.jar
+strand-netty-9.9.9-sources.jar
+strand-netty-9.9.9.jar
 strand-nio-9.9.9-cyclonedx.json
 strand-nio-9.9.9-javadoc.jar
 strand-nio-9.9.9-sources.jar
@@ -34,15 +42,17 @@ strand-nio-9.9.9.jar" ]
 }
 
 @test "각 SBOM은 같은 모듈의 bom.json이다" {
-  make_repo strand-core strand-nio
+  make_repo strand-core strand-api strand-nio strand-netty
   run "$repo/.github/scripts/collect-release-assets.sh" 9.9.9
   [ "$status" -eq 0 ]
   [ "$(cat "$repo/release-assets/strand-core-9.9.9-cyclonedx.json")" = "sbom of strand-core" ]
+  [ "$(cat "$repo/release-assets/strand-api-9.9.9-cyclonedx.json")" = "sbom of strand-api" ]
   [ "$(cat "$repo/release-assets/strand-nio-9.9.9-cyclonedx.json")" = "sbom of strand-nio" ]
+  [ "$(cat "$repo/release-assets/strand-netty-9.9.9-cyclonedx.json")" = "sbom of strand-netty" ]
 }
 
 @test "다른 디렉터리에서 불러도 저장소 루트에 모은다" {
-  make_repo strand-core strand-nio
+  make_repo strand-core strand-api strand-nio strand-netty
   cd /
   run "$repo/.github/scripts/collect-release-assets.sh" 9.9.9
   [ "$status" -eq 0 ]
@@ -50,7 +60,7 @@ strand-nio-9.9.9.jar" ]
 }
 
 @test "release-assets가 이미 있으면 실패하고 안의 파일을 건드리지 않는다" {
-  make_repo strand-core strand-nio
+  make_repo strand-core strand-api strand-nio strand-netty
   mkdir "$repo/release-assets"
   echo stale > "$repo/release-assets/old.jar"
   run "$repo/.github/scripts/collect-release-assets.sh" 9.9.9
@@ -60,10 +70,10 @@ strand-nio-9.9.9.jar" ]
 }
 
 @test "한 모듈의 산출물이 없으면 모듈과 경로를 알리고 실패하며 release-assets를 만들지 않는다" {
-  make_repo strand-core
+  make_repo strand-core strand-api strand-nio
   run "$repo/.github/scripts/collect-release-assets.sh" 9.9.9
   [ "$status" -ne 0 ]
-  [[ "$output" == *"strand-nio"* ]]
+  [[ "$output" == *"strand-netty"* ]]
   [ ! -e "$repo/release-assets" ]
 }
 
@@ -106,7 +116,7 @@ PY
   require_yaml
   repo="$BATS_TEST_TMPDIR/drift"
   mkdir -p "$repo"
-  sed 's/^modules=(strand-core strand-nio)$/modules=(strand-core strand-nio strand-xyz)/' "$collect" > "$repo/collect.sh"
+  sed 's/^modules=(strand-core strand-api strand-nio strand-netty)$/modules=(strand-core strand-api strand-nio strand-netty strand-xyz)/' "$collect" > "$repo/collect.sh"
   collect="$repo/collect.sh"
   run check_workflow
   [ "$status" -ne 0 ]

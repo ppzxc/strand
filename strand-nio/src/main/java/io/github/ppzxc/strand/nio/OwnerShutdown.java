@@ -252,13 +252,9 @@ final class OwnerShutdown {
         }
     }
 
-    /** 앱이 붙인 의존 단계가 이 스레드를 막지 않게 앱용 실행기에서 완료한다. 실행기가 거절하면 이 스레드에서 완료한다. */
+    /** 앱이 붙인 의존 단계가 이 스레드를 막지 않게 앱용 실행기에서 완료한다. 실행기가 거절하거나 종료 기한이 지나도록 실행하지 않으면 직접 완료한다. */
     private void dispatch(Runnable action) {
-        try {
-            executor.execute(action);
-        } catch (RuntimeException | Error e) {
-            action.run();
-        }
+        StageCompletion.complete(executor, action, deadlineNanos);
     }
 
     /** 잠금을 쥔 채 부른다. */
