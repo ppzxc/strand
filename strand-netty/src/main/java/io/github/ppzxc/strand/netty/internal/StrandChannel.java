@@ -58,6 +58,8 @@ public class StrandChannel extends NioSocketChannel {
         }
         try {
             registered.selectNow();
+            // selectNow가 거둔 준비 사건은 Netty가 다음 선택 뒤에 처리한다. 막힌 채 기다리지 않고 바로 처리하도록 선택기를 깨운다.
+            registered.wakeup();
         } catch (IOException | ClosedSelectorException e) {
             // 선택기가 이미 닫혔다면 선택기가 등록된 채널을 모두 놓았다.
         }
