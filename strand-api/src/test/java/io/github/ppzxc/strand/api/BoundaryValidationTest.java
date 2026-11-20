@@ -26,7 +26,7 @@ class BoundaryValidationTest {
 
     @Test
     void rejectsInconsistentUsage() {
-        assertThrows(IllegalArgumentException.class, () -> new ResourceUsage(0, 0, 0, 0));
+        assertThrows(IllegalArgumentException.class, () -> new ResourceUsage(-1, 0, 0, 0));
         assertThrows(IllegalArgumentException.class, () -> new ResourceUsage(1, -1, 0, 0));
         assertThrows(IllegalArgumentException.class, () -> new ResourceUsage(1, 0, 2, 0));
         assertThrows(IllegalArgumentException.class, () -> new ResourceUsage(1, 0, 0, -1));

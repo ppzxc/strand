@@ -14,15 +14,14 @@ import io.github.ppzxc.strand.nio.AuthenticationResult;
 import io.github.ppzxc.strand.nio.IncomingRequest;
 import io.github.ppzxc.strand.nio.Listener;
 import io.github.ppzxc.strand.nio.NioConnectAttempt;
+import io.github.ppzxc.strand.nio.NioMinimumProgress;
 import io.github.ppzxc.strand.nio.NioSecurity;
 import io.github.ppzxc.strand.nio.NioStrandClient;
 import io.github.ppzxc.strand.nio.NioStrandConnection;
 import io.github.ppzxc.strand.nio.NioStrandServer;
 import io.github.ppzxc.strand.nio.PreparedHandler;
 import io.github.ppzxc.strand.nio.UnreleasedHandler;
-import io.github.ppzxc.strand.nio.internal.ProgressSpace;
 import io.github.ppzxc.strand.nio.internal.TestTls;
-import io.github.ppzxc.strand.nio.internal.TlsSizes;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.ArrayList;
@@ -39,11 +38,18 @@ final class NioRig extends Rig {
 
     NioRig(boolean tls, Spec spec) throws Exception {
         super(tls, spec);
-        TlsSizes sizes = tls ? TlsSizes.of(TestTls.client()) : null;
-        ProgressSpace space = ProgressSpace.derive(spec.perConnection, spec.perConnection, spec.maxFrameSize, sizes);
-        this.limits = spec.build(space.minimums());
         this.serverSecurity = tls ? NioSecurity.tls(TestTls.server()) : NioSecurity.externallySecured();
         this.clientSecurity = tls ? NioSecurity.tls(TestTls.client()) : NioSecurity.externallySecured();
+        io.github.ppzxc.strand.api.MinimumProgressSpace space =
+                NioMinimumProgress.of(clientSecurity, spec.maxFrameSize, spec.perConnection, spec.perConnection);
+        this.limits = spec.build(new long[] {
+            space.get(Resource.FRAME_ASSEMBLY_BYTES),
+            space.get(Resource.CONTROL_OUTPUT_BYTES),
+            space.get(Resource.RESULT_EVENT_BYTES),
+            space.get(Resource.TLS_PLAINTEXT_BYTES),
+            space.get(Resource.TLS_CIPHERTEXT_BYTES),
+            space.get(Resource.TLS_CONTROL_BYTES)
+        });
     }
 
     @Override

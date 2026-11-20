@@ -29,8 +29,8 @@ public final class ResourceLimits {
      * conservative Endpoint bound defined by #313 (open requests plus deferred requests plus a fixed margin), and
      * the TLS plaintext, ciphertext and control minimums depend on the negotiated TLS configuration. A transport
      * builder must compute those values and pass them here. The NIO builder does so from the core Endpoint
-     * reservation bounds and the SSLEngine buffer sizes (#316); the Netty builder is still pending (#322). The
-     * builder-time floor in {@code progressBytes} is therefore only a lower sanity bound, not a progress guarantee.
+     * reservation bounds and the SSLEngine buffer sizes (#316); the Netty builder does the same with its own
+     * engine sizes. The builder-time floor in {@code progressBytes} is therefore only a lower sanity bound, not a progress guarantee.
      */
     public void requireProgress(
             long frame, long control, long result, long plaintext, long ciphertext, long tlsControl) {
@@ -46,7 +46,8 @@ public final class ResourceLimits {
         long[] minimum = {frame, control, result, plaintext, ciphertext, tlsControl};
         for (int i = 0; i < kinds.length; i++) {
             if (owner.get(kinds[i]) < minimum[i]) {
-                throw new IllegalArgumentException("insufficient owner progress space: " + kinds[i]);
+                throw new IllegalArgumentException("insufficient progress space: " + kinds[i]
+                        + " scope=per-owner required=" + minimum[i] + " configured=" + owner.get(kinds[i]));
             }
         }
     }

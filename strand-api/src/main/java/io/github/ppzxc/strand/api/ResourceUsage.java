@@ -8,7 +8,7 @@ public final class ResourceUsage {
     private final long rejections;
 
     public ResourceUsage(long limit, long current, long highWater, long rejections) {
-        if (limit <= 0 || current < 0 || current > highWater || highWater > limit || rejections < 0) {
+        if (limit < 0 || current < 0 || current > highWater || highWater > limit || rejections < 0) {
             throw new IllegalArgumentException("inconsistent resource usage");
         }
         this.limit = limit;

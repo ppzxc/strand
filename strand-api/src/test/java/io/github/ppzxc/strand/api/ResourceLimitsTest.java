@@ -89,4 +89,49 @@ class ResourceLimitsTest {
                 IllegalStateException.class,
                 () -> ResourceLimits.builder().perConnection(connection).build());
     }
+
+    @Test
+    void minimumProgressSpaceReportsEachResourceAndRejectsOthers() {
+        MinimumProgressSpace space = MinimumProgressSpace.of(11, 22, 33, 0, 0, 0);
+        assertEquals(11, space.get(Resource.FRAME_ASSEMBLY_BYTES));
+        assertEquals(22, space.get(Resource.CONTROL_OUTPUT_BYTES));
+        assertEquals(33, space.get(Resource.RESULT_EVENT_BYTES));
+        assertEquals(0, space.get(Resource.TLS_PLAINTEXT_BYTES));
+        assertEquals(0, space.get(Resource.TLS_CIPHERTEXT_BYTES));
+        assertEquals(0, space.get(Resource.TLS_CONTROL_BYTES));
+        assertThrows(IllegalArgumentException.class, () -> space.get(Resource.OUTGOING_REQUESTS));
+    }
+
+    @Test
+    void shortfallMessageNamesResourceScopeRequiredAndConfigured() {
+        ConnectionLimits connection = ConnectionLimits.builder()
+                .outgoingRequests(1, 100)
+                .incomingRequests(1, 100)
+                .responseBytes(100)
+                .handlerTasks(1)
+                .observations(1)
+                .preparationBytes(100)
+                .progressBytes(100, 100, 100, 100, 100, 100)
+                .build();
+        IllegalArgumentException e = assertThrows(
+                IllegalArgumentException.class, () -> connection.requireProgress(100, 100, 101, 100, 100, 100));
+        assertTrue(e.getMessage().contains("RESULT_EVENT_BYTES"), e.getMessage());
+        assertTrue(e.getMessage().contains("per-connection"), e.getMessage());
+        assertTrue(e.getMessage().contains("required=101"), e.getMessage());
+        assertTrue(e.getMessage().contains("configured=100"), e.getMessage());
+    }
+
+    @Test
+    void tlsProgressMayBeZeroForAPlainConnection() {
+        ConnectionLimits.builder()
+                .outgoingRequests(1, 100)
+                .incomingRequests(1, 100)
+                .responseBytes(100)
+                .handlerTasks(1)
+                .observations(1)
+                .preparationBytes(100)
+                .progressBytes(100, 100, 100, 0, 0, 0)
+                .build()
+                .requireProgress(100, 100, 100, 0, 0, 0);
+    }
 }
