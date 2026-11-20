@@ -435,8 +435,16 @@ class NettyStrandReservationTest {
                 .build();
         Listener listener = listen(app);
 
-        AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
-        PreparationFailure failure = failures.poll(15, TimeUnit.SECONDS);
+        // 인증 작업과 팩터리는 같은 직렬 실행기 위에서 돈다. 인증 작업이 아직 끝나지 않았으면 팩터리는 새 작업으로 실행기에 제출되지 않고 같은 drain에
+        // 얹히므로 거절 대상이 아니다(그때는 연결이 정상 준비된다). 거절이 팩터리 제출에 닿은 시도가 나올 때까지 연결을 다시 시도한다.
+        PreparationFailure failure = null;
+        for (int attempt = 0; attempt < 50 && failure == null; attempt++) {
+            AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
+            failure = failures.poll(500, TimeUnit.MILLISECONDS);
+        }
+        if (failure == null) {
+            failure = failures.poll(15, TimeUnit.SECONDS);
+        }
 
         assertThat(failure).as("실행기가 받은 작업:\n" + server.executor.journal()).isNotNull();
         assertThat(failure.stage()).isEqualTo(PreparationStage.HANDLER_FACTORY);
