@@ -382,6 +382,15 @@ final class ConnectionEngine {
 
     private final class Handler extends ChannelInboundHandlerAdapter {
         @Override
+        public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
+            // 등록 해제 뒤에는 선택기를 얻을 수 없으므로 등록된 동안 기억해 닫은 뒤 소켓을 놓는 데 쓴다.
+            if (ctx.channel() instanceof StrandChannel) {
+                ((StrandChannel) ctx.channel()).captureSelector();
+            }
+            super.channelRegistered(ctx);
+        }
+
+        @Override
         public void channelActive(ChannelHandlerContext ctx) {
             onActive();
         }

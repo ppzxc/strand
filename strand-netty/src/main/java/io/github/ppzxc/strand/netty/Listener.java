@@ -38,6 +38,12 @@ public final class Listener {
         // 수락한 채널은 이 EventLoop에서 읽기 한 번 안에 등록되거나 정리되므로(Acceptor) 닫힘과 경합할 수 없다.
         channel.pipeline().addLast(new ChannelInboundHandlerAdapter() {
             @Override
+            public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
+                channel.captureSelector();
+                super.channelRegistered(ctx);
+            }
+
+            @Override
             public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
                 super.channelUnregistered(ctx);
                 // 등록 해제와 같은 작업 안에서 선택 키가 취소됐다. 키를 비운 뒤 완료한다.
