@@ -392,12 +392,13 @@ class NioStrandShutdownTest {
         Listener listener = listen(server);
         List<String> threads = new CopyOnWriteArrayList<>();
 
-        server.shutdown().thenRun(() -> threads.add(Thread.currentThread().getName()));
+        // 완료 전에 붙여야 콜백이 완료한 스레드에서 돈다.
         server.resourcesTerminated()
                 .thenRun(() -> threads.add(Thread.currentThread().getName()));
         listener.closed().thenRun(() -> threads.add(Thread.currentThread().getName()));
 
-        awaitTrue(() -> threads.size() == 3);
+        server.shutdown();
+        awaitTrue(() -> threads.size() == 2);
         assertThat(threads).allMatch(name -> name.startsWith("app-executor-"));
     }
 
