@@ -42,15 +42,15 @@ class AppExamplesTest {
     @Test
     void nettyExampleRunsOverPlainTcp() throws Exception {
         AppExampleSupport.Outcome outcome =
-                NettyAppExample.run(NettySecurity.externallySecured(), NettySecurity.externallySecured(), null);
+                NettyAppExample.run(NettySecurity.externallySecured(), NettySecurity.externallySecured());
         assertFullFlow(outcome);
         assertThat(outcome.conversionCancelKeptRequest).isTrue();
     }
 
     @Test
     void nettyExampleRunsOverTls() throws Exception {
-        AppExampleSupport.Outcome outcome = NettyAppExample.run(
-                NettySecurity.tls(TestTls.server()), NettySecurity.tls(TestTls.client()), TestTls.client());
+        AppExampleSupport.Outcome outcome =
+                NettyAppExample.run(NettySecurity.tls(TestTls.server()), NettySecurity.tls(TestTls.client()));
         assertFullFlow(outcome);
         assertThat(outcome.conversionCancelKeptRequest).isTrue();
     }

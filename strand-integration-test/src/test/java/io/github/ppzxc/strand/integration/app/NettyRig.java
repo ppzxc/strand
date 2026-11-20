@@ -14,14 +14,13 @@ import io.github.ppzxc.strand.netty.AuthenticationResult;
 import io.github.ppzxc.strand.netty.IncomingRequest;
 import io.github.ppzxc.strand.netty.Listener;
 import io.github.ppzxc.strand.netty.NettyConnectAttempt;
+import io.github.ppzxc.strand.netty.NettyMinimumProgress;
 import io.github.ppzxc.strand.netty.NettySecurity;
 import io.github.ppzxc.strand.netty.NettyStrandClient;
 import io.github.ppzxc.strand.netty.NettyStrandConnection;
 import io.github.ppzxc.strand.netty.NettyStrandServer;
 import io.github.ppzxc.strand.netty.PreparedHandler;
 import io.github.ppzxc.strand.netty.UnreleasedHandler;
-import io.github.ppzxc.strand.netty.internal.ProgressSpace;
-import io.github.ppzxc.strand.netty.internal.TlsSizes;
 import io.github.ppzxc.strand.nio.internal.TestTls;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -42,11 +41,18 @@ final class NettyRig extends Rig {
 
     NettyRig(boolean tls, Spec spec) throws Exception {
         super(tls, spec);
-        TlsSizes sizes = tls ? TlsSizes.of(TestTls.client()) : null;
-        ProgressSpace space = ProgressSpace.derive(spec.perConnection, spec.perConnection, spec.maxFrameSize, sizes);
-        this.limits = spec.build(space.minimums());
         this.serverSecurity = tls ? NettySecurity.tls(TestTls.server()) : NettySecurity.externallySecured();
         this.clientSecurity = tls ? NettySecurity.tls(TestTls.client()) : NettySecurity.externallySecured();
+        io.github.ppzxc.strand.api.MinimumProgressSpace space =
+                NettyMinimumProgress.of(clientSecurity, spec.maxFrameSize, spec.perConnection, spec.perConnection);
+        this.limits = spec.build(new long[] {
+            space.get(Resource.FRAME_ASSEMBLY_BYTES),
+            space.get(Resource.CONTROL_OUTPUT_BYTES),
+            space.get(Resource.RESULT_EVENT_BYTES),
+            space.get(Resource.TLS_PLAINTEXT_BYTES),
+            space.get(Resource.TLS_CIPHERTEXT_BYTES),
+            space.get(Resource.TLS_CONTROL_BYTES)
+        });
     }
 
     @Override
