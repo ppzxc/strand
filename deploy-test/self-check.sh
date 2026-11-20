@@ -94,11 +94,11 @@ check_pom_description "$core_pom" || exit 1
   || { echo "core description이 기대한 문구가 아니다: $(pom_description_line "$core_pom")" >&2; exit 1; }
 echo "POM 메타데이터 확인: strand-core"
 check_nio_pom "$nio_pom" "$core_pom" || exit 1
+echo "nio POM 메타데이터, core와 다른 description, 의존(strand-core·strand-api) 확인"
 check_api_pom "$api_pom" "$core_pom" || exit 1
 echo "api POM 메타데이터, core와 다른 description, jspecify 외 의존 없음 확인"
 check_netty_pom "$netty_pom" "$core_pom" || exit 1
 echo "netty POM 메타데이터, core와 다른 description, 의존(strand-core·strand-api·netty-transport) 확인"
-echo "nio POM 메타데이터, core와 다른 description, 의존(strand-core·strand-api·netty-transport) 확인"
 
 # nio POM이 어긋나면 검사가 실패하는지 변조한 사본으로 확인한다.
 pomdir="$(mktemp -d)"
