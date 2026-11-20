@@ -267,6 +267,35 @@ class ConnectionDriverTest {
 
     @ParameterizedTest
     @EnumSource(Wire.class)
+    void aRequestThePeerResetsDoesNotFailTheDriverAndLaterResponsesAreRejectedByCore(Wire wire) throws Exception {
+        InMemoryPassage.Pair link = wire.connect();
+        CompletableFuture<IncomingRequest> received = new CompletableFuture<>();
+        server(wire, link.second(), request -> {
+            if (!received.isDone()) {
+                received.complete(request);
+            } else {
+                echo(request);
+            }
+        });
+        ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
+        RequestHandle handle = client.request(APPLICATION_TYPE, bytes("to-be-reset"));
+        IncomingRequest request = await(received);
+
+        handle.cancel();
+
+        // 같은 연결의 다음 요청이 처리됐다면 그보다 먼저 보낸 RESET도 서버 드라이버가 처리했다(실패 없이).
+        RequestResult next = await(client.request(APPLICATION_TYPE, bytes("next")).result());
+        assertThat(next.status()).isEqualTo(STATUS_OK);
+        // 리셋된 요청의 응답은 core가 거절해 프레임이 나가지 않는다. 클라이언트의 결과는 취소 그대로다.
+        await(request.respond(STATUS_OK, bytes("late")));
+        RequestResult after = await(client.request(APPLICATION_TYPE, bytes("again")).result());
+        assertThat(after.status()).isEqualTo(STATUS_OK);
+        assertThat(text(after.body())).isEqualTo("re:again");
+        assertThat(await(handle.result()).status()).isEqualTo(STATUS_CANCELLED);
+    }
+
+    @ParameterizedTest
+    @EnumSource(Wire.class)
     void cancellingARequestStillWaitingForTheAuthGateEndsItWithCancelledAndNotProcessed(Wire wire) throws Exception {
         InMemoryPassage.Pair link = wire.connect();
         ConnectionDriver client = client(wire, link.first(), ConnectionDriverTest::ignore);
