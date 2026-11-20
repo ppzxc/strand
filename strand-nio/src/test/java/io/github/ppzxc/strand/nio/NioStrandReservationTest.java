@@ -232,6 +232,11 @@ class NioStrandReservationTest {
         assertThat(retried.kind()).isEqualTo(AcceptanceKind.ACCEPTED);
         assertThat(again.kind()).isEqualTo(AcceptanceKind.ALREADY_RESPONDED);
         assertThat(clientFixture.result(handle.result()).payload()).isEqualTo(bytes("1234"));
+        // 응답 바이트는 응답 프레임이 실제로 다 쓰였다고 보고된 뒤 돌아온다(#318 #307). 상대가 응답을 받은 시점과 순서 보장이 없으므로 반환을 기다린다.
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (app.resourceUsage(Resource.RESPONSE_BYTES).current() != 0 && System.nanoTime() < limit) {
+            Thread.sleep(5);
+        }
         assertThat(app.resourceUsage(Resource.RESPONSE_BYTES).current()).isZero();
     }
 
