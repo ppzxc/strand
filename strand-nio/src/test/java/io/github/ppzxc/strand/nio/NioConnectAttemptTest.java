@@ -387,6 +387,94 @@ class NioConnectAttemptTest {
     }
 
     @Test
+    void aPeerRequestCoalescedWithTheAuthAckInOneReadNeverReachesTheClientHandlerAfterTheRejectedNotification()
+            throws Exception {
+        AppFixture clientFixture = track(AppFixture.plain());
+        AtomicInteger handled = new AtomicInteger();
+        try (CoalescingPeer peer = new CoalescingPeer(AppFixture.TYPE)) {
+            NioStrandClient client = clientFixture
+                    .clientBuilder()
+                    .handler(request -> {
+                        handled.incrementAndGet();
+                        request.respond(Status.OK, new byte[0]);
+                    })
+                    .build();
+            clientFixture.executor.rejectNextReadyNotification();
+            java.net.InetSocketAddress addr = peer.address();
+
+            PreparationFailure failure = failureOf(client.connect(addr).toCompletableFuture());
+            Thread.sleep(300);
+
+            assertThat(rootCauses(failure.cause())).anyMatch(t -> t instanceof RejectedExecutionException);
+            assertThat(handled).hasValue(0);
+            awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
+        }
+    }
+
+    @Test
+    void aPeerRequestArrivingAfterTheRejectedReadyNotificationNeverReachesTheClientHandler() throws Exception {
+        AppFixture server = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        AtomicInteger handled = new AtomicInteger();
+        CountDownLatch stop = new CountDownLatch(1);
+        NioStrandServer app = accepting(server)
+                .handlerFactory(connection -> {
+                    Thread sender = new Thread(() -> {
+                        try {
+                            while (!stop.await(1, TimeUnit.MILLISECONDS)) {
+                                connection.request(Request.of(AppFixture.TYPE, new byte[0]));
+                            }
+                        } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                        }
+                    });
+                    sender.setDaemon(true);
+                    sender.start();
+                    return PreparedHandler.of(request -> {});
+                })
+                .build();
+        Listener listener = listen(app);
+        NioStrandClient client = clientFixture
+                .clientBuilder()
+                .handler(request -> {
+                    handled.incrementAndGet();
+                    request.respond(Status.OK, new byte[0]);
+                })
+                .build();
+        clientFixture.executor.rejectNextReadyNotification();
+
+        PreparationFailure failure =
+                failureOf(client.connect(AppFixture.loopback(listener)).toCompletableFuture());
+        Thread.sleep(300);
+        stop.countDown();
+
+        assertThat(rootCauses(failure.cause())).anyMatch(t -> t instanceof RejectedExecutionException);
+        assertThat(handled).hasValue(0);
+        awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
+    }
+
+    @Test
+    void aServerWhoseExecutorRejectsTheReadyNotificationKeepsTheConnection() throws Exception {
+        AppFixture server = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        NioStrandServer app = accepting(server)
+                .handlerFactory(connection -> PreparedHandler.of(request -> request.respond(Status.OK, new byte[0])))
+                .build();
+        Listener listener = listen(app);
+        // build 확인(1)·인증(2)·팩터리(3) 다음의 준비 성공 알림(4)만 거절한다. 서버는 성공을 알릴 앱 관찰자가 없다.
+        server.executor.rejectTaskNumber(4);
+
+        NioStrandConnection connection =
+                AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
+
+        assertThat(clientFixture
+                        .requestWhenServed(connection, Request.of(AppFixture.TYPE, new byte[0]))
+                        .status())
+                .isEqualTo(Status.OK);
+        connection.abort();
+    }
+
+    @Test
     void aResolverThatThrowsFailsTheConnectionStageWithThatCauseAndReturnsTheSlot() throws Exception {
         AppFixture fixture = track(AppFixture.plain());
         IllegalStateException boom = new IllegalStateException("resolver bug");

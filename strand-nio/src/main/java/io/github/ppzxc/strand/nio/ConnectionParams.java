@@ -81,6 +81,8 @@ final class ConnectionParams {
     Runnable terminated = () -> {};
     /** 시도가 소유한 통로 정리 완료를 알린다. 클라이언트 연결에만 있다. */
     java.util.concurrent.@Nullable CompletableFuture<Void> released;
+    /** {@link #released}를 앱 실행기가 실행하지 않을 때 직접 완료하기까지 기다리는 시간. */
+    long releasedFallbackNanos = Long.MAX_VALUE;
 
     ConnectionParams(
             Role role,

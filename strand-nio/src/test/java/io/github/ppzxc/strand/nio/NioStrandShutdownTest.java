@@ -358,6 +358,128 @@ class NioStrandShutdownTest {
     }
 
     @Test
+    void anExecutorThatAcceptsButNeverRunsTasksStillLetsEveryShutdownStageFinishAfterTheDeadline() throws Exception {
+        AppFixture serverFixture = track(AppFixture.plain());
+        NioStrandServer server = server(serverFixture, Duration.ofMillis(100), Duration.ofMillis(300))
+                .handler(r -> {})
+                .build();
+        Listener listener = listen(server);
+        AppFixture clientFixture = track(AppFixture.plain());
+        NioStrandClient client = clientFixture
+                .clientBuilder()
+                .shutdownGrace(Duration.ofMillis(100))
+                .shutdownDeadline(Duration.ofMillis(300))
+                .build();
+        NioConnectAttempt attempt = client.connectAttempt(new InetSocketAddress("127.0.0.1", 1));
+        serverFixture.executor.swallowing = true;
+        clientFixture.executor.swallowing = true;
+
+        CompletionStage<Void> stopped = server.shutdown();
+
+        AppFixture.get(stopped);
+        AppFixture.get(server.resourcesTerminated());
+        AppFixture.get(listener.closed());
+        AppFixture.get(client.shutdown());
+        AppFixture.get(attempt.transportReleased());
+    }
+
+    @Test
+    void shutdownStagesCompleteOnTheAppExecutorWhenItRunsTasks() throws Exception {
+        AppFixture fixture = track(AppFixture.plain());
+        NioStrandServer server = server(fixture, Duration.ofSeconds(1), Duration.ofSeconds(5))
+                .handler(r -> {})
+                .build();
+        Listener listener = listen(server);
+        List<String> threads = new CopyOnWriteArrayList<>();
+
+        // 완료 전에 붙여야 콜백이 완료한 스레드에서 돈다.
+        server.resourcesTerminated()
+                .thenRun(() -> threads.add(Thread.currentThread().getName()));
+        listener.closed().thenRun(() -> threads.add(Thread.currentThread().getName()));
+
+        server.shutdown();
+        awaitTrue(() -> threads.size() == 2);
+        assertThat(threads).allMatch(name -> name.startsWith("app-executor-"));
+    }
+
+    @Test
+    void theServerShutdownStageCompletesOnTheAppExecutorWhenItRunsTasks() throws Exception {
+        AppFixture serverFixture = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        CompletableFuture<NioStrandConnection> serverSide = new CompletableFuture<>();
+        NioStrandServer server = server(serverFixture, Duration.ofMillis(300), Duration.ofSeconds(30))
+                .handlerFactory(c -> {
+                    serverSide.complete(c);
+                    return PreparedHandler.of(r -> {});
+                })
+                .build();
+        Listener listener = listen(server);
+        connect(clientFixture.clientBuilder().handler(r -> {}).build(), listener);
+        // 응답 없는 요청이 grace 만료까지 종료를 붙들어, 아래 콜백은 항상 완료 전에 붙는다.
+        serverSide.get(15, TimeUnit.SECONDS).request(Request.of(TYPE, bytes("never answered")));
+        List<String> threads = new CopyOnWriteArrayList<>();
+
+        CompletionStage<Void> stopped = server.shutdown();
+        assertThat(done(stopped)).isFalse();
+        stopped.thenRun(() -> threads.add(Thread.currentThread().getName()));
+
+        AppFixture.get(stopped);
+        awaitTrue(() -> threads.size() == 1);
+        assertThat(threads).allMatch(name -> name.startsWith("app-executor-"));
+    }
+
+    @Test
+    void theClientShutdownStageCompletesOnTheAppExecutorWhenItRunsTasks() throws Exception {
+        AppFixture serverFixture = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        CompletableFuture<NioStrandConnection> serverSide = new CompletableFuture<>();
+        NioStrandServer server = server(serverFixture, Duration.ofSeconds(1), Duration.ofSeconds(30))
+                .handlerFactory(c -> {
+                    serverSide.complete(c);
+                    return PreparedHandler.of(r -> {});
+                })
+                .build();
+        Listener listener = listen(server);
+        NioStrandClient client = clientFixture
+                .clientBuilder()
+                .shutdownGrace(Duration.ofMillis(300))
+                .shutdownDeadline(Duration.ofSeconds(30))
+                .handler(r -> {})
+                .build();
+        NioStrandConnection connection = connect(client, listener);
+        connection.request(Request.of(TYPE, bytes("never answered")));
+        List<String> threads = new CopyOnWriteArrayList<>();
+
+        CompletionStage<Void> stopped = client.shutdown();
+        assertThat(done(stopped)).isFalse();
+        stopped.thenRun(() -> threads.add(Thread.currentThread().getName()));
+
+        AppFixture.get(stopped);
+        awaitTrue(() -> threads.size() == 1);
+        assertThat(threads).allMatch(name -> name.startsWith("app-executor-"));
+    }
+
+    @Test
+    void transportReleasedCompletesOnTheAppExecutorWhenItRunsTasks() throws Exception {
+        AppFixture serverFixture = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        NioStrandServer server = server(serverFixture, Duration.ofSeconds(1), Duration.ofSeconds(5))
+                .handler(r -> {})
+                .build();
+        Listener listener = listen(server);
+        NioStrandClient client = clientFixture.clientBuilder().build();
+        List<String> threads = new CopyOnWriteArrayList<>();
+
+        NioConnectAttempt attempt = client.connectAttempt(AppFixture.loopback(listener));
+        attempt.transportReleased()
+                .thenRun(() -> threads.add(Thread.currentThread().getName()));
+
+        AppFixture.get(attempt.transportReleased());
+        awaitTrue(() -> threads.size() == 1);
+        assertThat(threads).allMatch(name -> name.startsWith("app-executor-"));
+    }
+
+    @Test
     void closedDoesNotWaitForAHandlerThatNeverReturns() throws Exception {
         AppFixture serverFixture = track(AppFixture.plain());
         AppFixture clientFixture = track(AppFixture.plain());

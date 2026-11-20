@@ -326,6 +326,72 @@ class NettyConnectAttemptTest {
     }
 
     @Test
+    void aPeerRequestCoalescedWithTheAuthAckInOneReadNeverReachesTheClientHandlerAfterTheRejectedNotification()
+            throws Exception {
+        AppFixture clientFixture = track(AppFixture.plain());
+        AtomicInteger handled = new AtomicInteger();
+        try (CoalescingPeer peer = new CoalescingPeer(AppFixture.TYPE)) {
+            NettyStrandClient client = clientFixture
+                    .clientBuilder()
+                    .handler(request -> {
+                        handled.incrementAndGet();
+                        request.respond(Status.OK, new byte[0]);
+                    })
+                    .build();
+            clientFixture.executor.rejectNextReadyNotification();
+            java.net.InetSocketAddress addr = peer.address();
+
+            PreparationFailure failure = failureOf(client.connectAttempt(addr));
+            Thread.sleep(300);
+
+            assertThat(rootCauses(failure.cause())).anyMatch(t -> t instanceof RejectedExecutionException);
+            assertThat(handled).hasValue(0);
+            awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
+        }
+    }
+
+    @Test
+    void aPeerRequestArrivingAfterTheRejectedReadyNotificationNeverReachesTheClientHandler() throws Exception {
+        AppFixture server = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        AtomicInteger handled = new AtomicInteger();
+        CountDownLatch stop = new CountDownLatch(1);
+        NettyStrandServer app = accepting(server)
+                .handlerFactory(connection -> {
+                    Thread sender = new Thread(() -> {
+                        try {
+                            while (!stop.await(1, TimeUnit.MILLISECONDS)) {
+                                connection.request(Request.of(AppFixture.TYPE, new byte[0]));
+                            }
+                        } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                        }
+                    });
+                    sender.setDaemon(true);
+                    sender.start();
+                    return PreparedHandler.of(request -> {});
+                })
+                .build();
+        Listener listener = listen(app);
+        NettyStrandClient client = clientFixture
+                .clientBuilder()
+                .handler(request -> {
+                    handled.incrementAndGet();
+                    request.respond(Status.OK, new byte[0]);
+                })
+                .build();
+        clientFixture.executor.rejectNextReadyNotification();
+
+        PreparationFailure failure = failureOf(client.connectAttempt(AppFixture.loopback(listener)));
+        Thread.sleep(300);
+        stop.countDown();
+
+        assertThat(rootCauses(failure.cause())).anyMatch(t -> t instanceof RejectedExecutionException);
+        assertThat(handled).hasValue(0);
+        awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
+    }
+
+    @Test
     void aResolverThatFindsNoAddressFailsTheConnectionStageAsAnUnknownHost() throws Exception {
         AppFixture fixture = track(AppFixture.plain());
         NettyStrandClient client =

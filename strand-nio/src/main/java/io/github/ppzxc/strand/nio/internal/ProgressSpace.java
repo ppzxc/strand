@@ -1,5 +1,6 @@
 package io.github.ppzxc.strand.nio.internal;
 
+import io.github.ppzxc.strand.api.MinimumProgressSpace;
 import io.github.ppzxc.strand.api.ResourceLimits;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import org.jspecify.annotations.Nullable;
@@ -21,8 +22,7 @@ import org.jspecify.annotations.Nullable;
  *       하나. 이 셋은 서로 다른 저장 공간이라 모두 센다.
  * </ul>
  *
- * TLS를 쓰지 않는 연결(채널 보안을 TCP 밖에서 보장)은 TLS 공간을 예약하지 않는다. 다만 {@code requireProgress}가 모든 최소치가 양수일 것을
- * 요구하므로 그 검사에는 1을 넘긴다.
+ * TLS를 쓰지 않는 연결(채널 보안을 TCP 밖에서 보장)은 TLS 공간을 예약하지 않는다. 그 최소치는 0이다.
  */
 public final class ProgressSpace {
     /** 제어 프레임 하나의 크기: 프레임 헤더와 CLOSE의 고정 payload(error_code와 last_stream_id). 우리가 쌓는 가장 큰 제어 프레임이다. */
@@ -100,16 +100,15 @@ public final class ProgressSpace {
         return tlsControl;
     }
 
-    /** {@code requireProgress}에 넘기는 최소치: 프레임, 제어, 결과, TLS 평문, 암호문, TLS 제어 순서다. TLS를 쓰지 않으면 TLS 최소치는 1이다. */
+    /** {@code requireProgress}에 넘기는 최소치: 프레임, 제어, 결과, TLS 평문, 암호문, TLS 제어 순서다. TLS를 쓰지 않으면 TLS 최소치는 0이다. */
     public long[] minimums() {
-        return new long[] {
-            frameAssembly,
-            controlOutput,
-            resultEvent,
-            Math.max(1, tlsPlaintext),
-            Math.max(1, tlsCiphertext),
-            Math.max(1, tlsControl)
-        };
+        return new long[] {frameAssembly, controlOutput, resultEvent, tlsPlaintext, tlsCiphertext, tlsControl};
+    }
+
+    /** 공개 값 타입으로 바꾼다. */
+    public MinimumProgressSpace toApi() {
+        return MinimumProgressSpace.of(
+                frameAssembly, controlOutput, resultEvent, tlsPlaintext, tlsCiphertext, tlsControl);
     }
 
     /**

@@ -51,6 +51,17 @@ final class AppExampleSupport {
      *
      * @param progress 프레임 조립·제어 출력·결과 사건·TLS 평문·암호문·TLS 제어 순서의 연결별 최소 공간
      */
+    static ResourceLimits limits(io.github.ppzxc.strand.api.MinimumProgressSpace space) {
+        return limits(new long[] {
+            space.get(io.github.ppzxc.strand.api.Resource.FRAME_ASSEMBLY_BYTES),
+            space.get(io.github.ppzxc.strand.api.Resource.CONTROL_OUTPUT_BYTES),
+            space.get(io.github.ppzxc.strand.api.Resource.RESULT_EVENT_BYTES),
+            space.get(io.github.ppzxc.strand.api.Resource.TLS_PLAINTEXT_BYTES),
+            space.get(io.github.ppzxc.strand.api.Resource.TLS_CIPHERTEXT_BYTES),
+            space.get(io.github.ppzxc.strand.api.Resource.TLS_CONTROL_BYTES)
+        });
+    }
+
     static ResourceLimits limits(long[] progress) {
         return ResourceLimits.builder()
                 .perConnection(ConnectionLimits.builder()

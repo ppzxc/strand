@@ -1,13 +1,13 @@
 package io.github.ppzxc.strand.nio;
 
 import io.github.ppzxc.strand.api.ConnectionLimits;
+import io.github.ppzxc.strand.api.MinimumProgressSpace;
 import io.github.ppzxc.strand.api.OwnerLimits;
+import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.ResourceLimits;
 import io.github.ppzxc.strand.api.Result;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.nio.internal.ProgressSpace;
 import io.github.ppzxc.strand.nio.internal.TestTls;
-import io.github.ppzxc.strand.nio.internal.TlsSizes;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.time.Duration;
@@ -27,6 +27,9 @@ final class AppFixture implements AutoCloseable {
     static final class ToggleExecutor implements java.util.concurrent.Executor {
         private final java.util.concurrent.Executor delegate;
         volatile boolean rejecting;
+        /** 켜면 작업을 받고(거절하지 않고) 실행하지 않는다. */
+        volatile boolean swallowing;
+
         final java.util.concurrent.atomic.AtomicInteger acceptRemaining =
                 new java.util.concurrent.atomic.AtomicInteger(Integer.MAX_VALUE);
 
@@ -75,16 +78,37 @@ final class AppFixture implements AutoCloseable {
             rejectNext.set(true);
         }
 
+        private volatile boolean rejectReadyNotification;
+
+        /** 준비 성공 알림을 내는 제출(엔진의 notifyReady)만 거절한다. 다른 작업은 받는다. */
+        void rejectNextReadyNotification() {
+            rejectReadyNotification = true;
+        }
+
+        private static boolean fromReadyNotification() {
+            for (StackTraceElement e : new Throwable().getStackTrace()) {
+                if (e.getMethodName().equals("notifyReady")) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         @Override
         public void execute(Runnable task) {
             int number = submitted.incrementAndGet();
+            boolean rejectReady = rejectReadyNotification && fromReadyNotification();
             boolean reject = rejectNext.compareAndSet(true, false)
+                    || rejectReady
                     || rejecting
                     || acceptRemaining.getAndDecrement() <= 0
                     || rejectedNumbers.contains(number);
             journal.add("#" + number + (reject ? " 거절 " : " 수락 ") + caller());
             if (reject) {
                 throw new java.util.concurrent.RejectedExecutionException("테스트가 거절한다");
+            }
+            if (swallowing) {
+                return;
             }
             delegate.execute(task);
         }
@@ -120,15 +144,14 @@ final class AppFixture implements AutoCloseable {
     static AppFixture plain(long perConnection, long owner, long connections) {
         return new AppFixture(
                 false,
-                limits(perConnection, owner, connections, null),
+                limits(perConnection, owner, connections, NioSecurity.externallySecured()),
                 NioSecurity.externallySecured(),
                 NioSecurity.externallySecured());
     }
 
     static AppFixture tls() throws Exception {
-        TlsSizes sizes = TlsSizes.of(TestTls.client());
-        return new AppFixture(
-                true, limits(8, 8, 4, sizes), NioSecurity.tls(TestTls.server()), NioSecurity.tls(TestTls.client()));
+        NioSecurity client = NioSecurity.tls(TestTls.client());
+        return new AppFixture(true, limits(8, 8, 4, client), NioSecurity.tls(TestTls.server()), client);
     }
 
     /** 테스트가 고치는 한도의 사양. 기본은 넉넉하고, 진행 공간만 도출한 최소치다. */
@@ -234,22 +257,31 @@ final class AppFixture implements AutoCloseable {
 
         AppFixture plain() {
             AppFixture fixture = new AppFixture(
-                    false, build(null), NioSecurity.externallySecured(), NioSecurity.externallySecured());
+                    false,
+                    build(NioSecurity.externallySecured()),
+                    NioSecurity.externallySecured(),
+                    NioSecurity.externallySecured());
             fixture.maxFrameSize = maxFrameSize;
             return fixture;
         }
 
         AppFixture tls() throws Exception {
-            TlsSizes sizes = TlsSizes.of(TestTls.client());
-            AppFixture fixture = new AppFixture(
-                    true, build(sizes), NioSecurity.tls(TestTls.server()), NioSecurity.tls(TestTls.client()));
+            NioSecurity client = NioSecurity.tls(TestTls.client());
+            AppFixture fixture = new AppFixture(true, build(client), NioSecurity.tls(TestTls.server()), client);
             fixture.maxFrameSize = maxFrameSize;
             return fixture;
         }
 
-        ResourceLimits build(TlsSizes sizes) {
-            ProgressSpace space = ProgressSpace.derive(perConnection, perConnection, maxFrameSize, sizes);
-            long[] min = space.minimums();
+        ResourceLimits build(NioSecurity security) {
+            MinimumProgressSpace space = NioMinimumProgress.of(security, maxFrameSize, perConnection, perConnection);
+            long[] min = {
+                space.get(Resource.FRAME_ASSEMBLY_BYTES),
+                space.get(Resource.CONTROL_OUTPUT_BYTES),
+                space.get(Resource.RESULT_EVENT_BYTES),
+                space.get(Resource.TLS_PLAINTEXT_BYTES),
+                space.get(Resource.TLS_CIPHERTEXT_BYTES),
+                space.get(Resource.TLS_CONTROL_BYTES)
+            };
             long progressConnections = ownerProgressConnections < 0 ? connections : ownerProgressConnections;
             return ResourceLimits.builder()
                     .perConnection(ConnectionLimits.builder()
@@ -288,10 +320,10 @@ final class AppFixture implements AutoCloseable {
         }
     }
 
-    static ResourceLimits limits(long perConnection, long owner, long connections, TlsSizes sizes) {
+    static ResourceLimits limits(long perConnection, long owner, long connections, NioSecurity security) {
         Spec spec = new Spec().perConnection(perConnection).connections(connections);
         spec.owner = owner;
-        return spec.build(sizes);
+        return spec.build(security);
     }
 
     NioStrandServer.Builder serverBuilder() {

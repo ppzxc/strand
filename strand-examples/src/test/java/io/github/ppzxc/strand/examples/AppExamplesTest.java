@@ -31,27 +31,26 @@ class AppExamplesTest {
 
     @Test
     void nioExampleRunsOverPlainTcp() throws Exception {
-        assertFullFlow(NioAppExample.run(NioSecurity.externallySecured(), NioSecurity.externallySecured(), null));
+        assertFullFlow(NioAppExample.run(NioSecurity.externallySecured(), NioSecurity.externallySecured()));
     }
 
     @Test
     void nioExampleRunsOverTls() throws Exception {
-        assertFullFlow(NioAppExample.run(
-                NioSecurity.tls(TestTls.server()), NioSecurity.tls(TestTls.client()), TestTls.client()));
+        assertFullFlow(NioAppExample.run(NioSecurity.tls(TestTls.server()), NioSecurity.tls(TestTls.client())));
     }
 
     @Test
     void nettyExampleRunsOverPlainTcp() throws Exception {
         AppExampleSupport.Outcome outcome =
-                NettyAppExample.run(NettySecurity.externallySecured(), NettySecurity.externallySecured(), null);
+                NettyAppExample.run(NettySecurity.externallySecured(), NettySecurity.externallySecured());
         assertFullFlow(outcome);
         assertThat(outcome.conversionCancelKeptRequest).isTrue();
     }
 
     @Test
     void nettyExampleRunsOverTls() throws Exception {
-        AppExampleSupport.Outcome outcome = NettyAppExample.run(
-                NettySecurity.tls(TestTls.server()), NettySecurity.tls(TestTls.client()), TestTls.client());
+        AppExampleSupport.Outcome outcome =
+                NettyAppExample.run(NettySecurity.tls(TestTls.server()), NettySecurity.tls(TestTls.client()));
         assertFullFlow(outcome);
         assertThat(outcome.conversionCancelKeptRequest).isTrue();
     }

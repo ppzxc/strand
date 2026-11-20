@@ -124,6 +124,8 @@ public final class NioStrandClient {
      * 서버에 연결한다. 성공은 TCP 연결·채널 보안·HELLO·연결 인증·핸들러 등록이 모두 끝났다는 뜻이다. 실패는 {@link PreparationFailedException}이고 단계와
      * 원인을 알린다. 반환된 Stage를 취소해도 연결 시도는 취소되지 않는다.
      *
+     * <p>준비 성공 알림의 제출을 앱용 실행기가 거절하면 그 즉시 연결을 끊고, 결과는 {@link java.util.concurrent.RejectedExecutionException}을 원인으로 하는 준비 실패다. 실패로 확정된 연결에서 핸들러는 실행되지 않는다.
+     *
      * @param address 서버 주소({@link InetSocketAddress})
      * @return 연결 결과
      * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
@@ -209,6 +211,7 @@ public final class NioStrandClient {
         params.attempt = state;
         params.preparationBytes = preparationBytes;
         params.released = released;
+        params.releasedFallbackNanos = common.shutdownDeadline.toNanos();
         NioStrandConnection connection = new NioStrandConnection(params);
         if (!lifecycle.register(connection)) {
             // 예약하는 사이 전체 종료가 시작됐다. 시작하지 않은 시도의 예약을 돌려주고 실패시킨다.

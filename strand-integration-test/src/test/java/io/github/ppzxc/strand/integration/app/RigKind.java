@@ -17,6 +17,10 @@ final class RigKind {
                 new RigKind(false, false), new RigKind(false, true), new RigKind(true, false), new RigKind(true, true));
     }
 
+    static Stream<RigKind> tls() {
+        return all().filter(kind -> kind.tls);
+    }
+
     static Stream<RigKind> netty() {
         return all().filter(kind -> kind.netty);
     }

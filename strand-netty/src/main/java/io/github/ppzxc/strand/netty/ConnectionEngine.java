@@ -1110,14 +1110,14 @@ final class ConnectionEngine {
         }
     }
 
-    private void becomeReady() {
+    private void becomeReady(Loop loop) {
         if (preparing) {
             preparing = false;
             confirmAttempt();
             releasePreparingSlot();
             // 성공한 시도는 채널을 연결에 넘겼으므로 시도가 정리할 것이 없다.
             completeReleased();
-            notifyReady();
+            notifyReady(loop);
         }
     }
 
@@ -1147,13 +1147,13 @@ final class ConnectionEngine {
      * 준비 성공 알림은 앱용 실행기에서 한다. 같은 연결의 인증·팩터리가 반환하지 않아도 알릴 수 있도록 연결별 직렬 실행을 거치지 않는다. 실행기가 거절하면
      * 알림을 대신할 스레드를 만들지 않고, 앱이 받을 수 없는 연결이므로 끊고 시도를 거절 원인으로 실패시킨다. 서버는 성공을 알릴 앱 관찰자가 없어 거절돼도 연결을 유지한다.
      */
-    private void notifyReady() {
+    private void notifyReady(Loop loop) {
         try {
             p.appExecutor.execute(() -> p.observer.ready(facade));
         } catch (RuntimeException | Error e) {
             if (p.role == ConnectionParams.Role.CLIENT) {
-                abortRequested = true;
-                wake();
+                // 같은 처리 단계 안에서 즉시 끊는다. 남은 수집 사건과 입력은 처리하지 않아 실패로 확정된 연결에서 핸들러가 실행되지 않는다.
+                loop.abandon();
                 p.observer.rejected(new PreparationFailure(p.remoteAddress, stage, e));
             }
         }
@@ -1176,7 +1176,7 @@ final class ConnectionEngine {
     private void activate(Loop loop, @Nullable RequestHandler handler) {
         activeHandler = handler;
         loop.endpoint.handlerReady();
-        becomeReady();
+        becomeReady(loop);
     }
 
     private void startFactory(Loop loop) {
@@ -1349,6 +1349,7 @@ final class ConnectionEngine {
         final long origin;
         long lastElapsed;
         boolean finished;
+        private boolean abandoned;
         boolean closedSeen;
         private boolean transportGone;
         private boolean outputShutdown;
@@ -1492,7 +1493,7 @@ final class ConnectionEngine {
 
         /** 받은 입력을 유한 단위로 처리한다. 수거 공간이 모자라 멈추면 사건을 수거하고 쓰기를 진행한 뒤 소비 위치부터 다시 입력한다. */
         private void processInput() throws IOException {
-            while (!transportGone) {
+            while (!transportGone && !abandoned) {
                 if (inputPos >= input.length) {
                     byte[] next = inputQueue.poll();
                     if (next == null) {
@@ -1654,7 +1655,20 @@ final class ConnectionEngine {
             }
         }
 
+        /**
+         * 준비 성공 알림이 거절돼 끊는다. 이 처리 단계의 남은 사건과 입력은 처리하지 않는다. 결과와 종료 사건만 이어서 처리하며, 종료 사건은 이미 확정한
+         * 준비 결과(거절 원인)를 바꾸지 못한다({@code preparing}이 이미 거짓이다).
+         */
+        void abandon() {
+            abandoned = true;
+            endpoint.disconnect();
+            finished = true;
+        }
+
         private void dispatch(Event event) {
+            if (abandoned && event.kind() != Event.Kind.CLOSED && event.kind() != Event.Kind.RESULT) {
+                return;
+            }
             switch (event.kind()) {
                 case RESULT:
                     onResult(event);
@@ -1675,7 +1689,7 @@ final class ConnectionEngine {
                     onClosed(event);
                     break;
                 default:
-                    break;
+                    throw new IllegalStateException("처리하지 않는 사건 종류: " + event.kind());
             }
         }
 

@@ -4,13 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ppzxc.strand.api.ConnectionLimits;
+import io.github.ppzxc.strand.api.MinimumProgressSpace;
 import io.github.ppzxc.strand.api.OwnerLimits;
 import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.ResourceLimits;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.nio.internal.ProgressSpace;
 import io.github.ppzxc.strand.nio.internal.TestTls;
-import io.github.ppzxc.strand.nio.internal.TlsSizes;
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -205,10 +205,9 @@ class NioStrandBuilderTest {
                         complete().security(NioSecurity.tls(TestTls.client())).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("TLS_");
-        TlsSizes sizes = TlsSizes.of(TestTls.client());
         complete()
                 .security(NioSecurity.tls(TestTls.client()))
-                .resourceLimits(AppFixture.limits(8, 8, 4, sizes))
+                .resourceLimits(AppFixture.limits(8, 8, 4, NioSecurity.tls(TestTls.client())))
                 .build();
     }
 
@@ -221,5 +220,93 @@ class NioStrandBuilderTest {
         copy[0] = 9;
         assertThat(credentials.secret()).containsExactly(1);
         assertThat(credentials.mechanism()).isEqualTo("BEARER");
+    }
+
+    private static final Resource[] PROGRESS = {
+        Resource.FRAME_ASSEMBLY_BYTES,
+        Resource.CONTROL_OUTPUT_BYTES,
+        Resource.RESULT_EVENT_BYTES,
+        Resource.TLS_PLAINTEXT_BYTES,
+        Resource.TLS_CIPHERTEXT_BYTES,
+        Resource.TLS_CONTROL_BYTES
+    };
+
+    private static ResourceLimits limitsFrom(MinimumProgressSpace space, Resource shortKind, boolean shortOwner) {
+        long[] c = new long[6];
+        long[] o = new long[6];
+        for (int i = 0; i < 6; i++) {
+            c[i] = o[i] = space.get(PROGRESS[i]);
+            if (PROGRESS[i] == shortKind) {
+                if (shortOwner) {
+                    o[i]--;
+                } else {
+                    c[i]--;
+                }
+            }
+        }
+        return ResourceLimits.builder()
+                .perConnection(ConnectionLimits.builder()
+                        .outgoingRequests(8, 1 << 20)
+                        .incomingRequests(8, 1 << 20)
+                        .responseBytes(1 << 20)
+                        .handlerTasks(8)
+                        .observations(8)
+                        .preparationBytes(1 << 16)
+                        .progressBytes(c[0], c[1], c[2], c[3], c[4], c[5])
+                        .build())
+                .perOwner(OwnerLimits.builder()
+                        .preparingConnections(4)
+                        .totalConnections(4)
+                        .preparationTasks(4, 4, 4)
+                        .outgoingRequests(32, 1 << 24)
+                        .incomingRequests(32, 1 << 24)
+                        .responseBytes(1 << 24)
+                        .handlerTasks(32)
+                        .observations(32)
+                        .preparationBytes(1 << 20)
+                        .progressBytes(o[0], o[1], o[2], o[3], o[4], o[5])
+                        .build())
+                .build();
+    }
+
+    @Test
+    void queriedMinimumProgressSpaceBuildsForPlainAndTlsAndOneByteLessIsNamed() throws Exception {
+        for (NioSecurity security :
+                new NioSecurity[] {NioSecurity.externallySecured(), NioSecurity.tls(TestTls.client())}) {
+            MinimumProgressSpace space = NioMinimumProgress.of(security, EndpointConfig.DEFAULT_MAX_FRAME_SIZE, 8, 8);
+            complete()
+                    .security(security)
+                    .resourceLimits(limitsFrom(space, null, false))
+                    .build();
+            for (Resource kind : PROGRESS) {
+                long required = space.get(kind);
+                if (required == 0) {
+                    continue;
+                }
+                for (boolean owner : new boolean[] {false, true}) {
+                    assertThatThrownBy(() -> complete()
+                                    .security(security)
+                                    .resourceLimits(limitsFrom(space, kind, owner))
+                                    .build())
+                            .isInstanceOf(IllegalArgumentException.class)
+                            .hasMessageContaining(kind.name())
+                            .hasMessageContaining(owner ? "per-owner" : "per-connection")
+                            .hasMessageContaining("required=" + required)
+                            .hasMessageContaining("configured=" + (required - 1));
+                }
+            }
+        }
+    }
+
+    @Test
+    void tlsMinimumProgressSpaceIsPositiveAndPlainIsZero() throws Exception {
+        MinimumProgressSpace plain =
+                NioMinimumProgress.of(NioSecurity.externallySecured(), EndpointConfig.DEFAULT_MAX_FRAME_SIZE, 8, 8);
+        MinimumProgressSpace tls =
+                NioMinimumProgress.of(NioSecurity.tls(TestTls.client()), EndpointConfig.DEFAULT_MAX_FRAME_SIZE, 8, 8);
+        assertThat(plain.get(Resource.TLS_CIPHERTEXT_BYTES)).isZero();
+        assertThat(tls.get(Resource.TLS_CIPHERTEXT_BYTES)).isPositive();
+        assertThat(tls.get(Resource.TLS_PLAINTEXT_BYTES)).isPositive();
+        assertThat(tls.get(Resource.TLS_CONTROL_BYTES)).isPositive();
     }
 }

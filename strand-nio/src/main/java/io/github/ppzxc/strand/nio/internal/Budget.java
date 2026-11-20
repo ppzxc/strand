@@ -16,7 +16,11 @@ final class Budget {
     private long rejections;
 
     Budget(Resource resource, long limit) {
-        if (limit <= 0) {
+        // 평문 연결은 TLS 공간이 필요 없어 그 한도가 0일 수 있다.
+        boolean tls = resource == Resource.TLS_PLAINTEXT_BYTES
+                || resource == Resource.TLS_CIPHERTEXT_BYTES
+                || resource == Resource.TLS_CONTROL_BYTES;
+        if (limit < 0 || (limit == 0 && !tls)) {
             throw new IllegalArgumentException(resource + " 한도는 양수여야 한다: " + limit);
         }
         this.resource = Objects.requireNonNull(resource);
@@ -65,6 +69,6 @@ final class Budget {
     }
 
     synchronized ResourceUsage usage() {
-        return new ResourceUsage(limit, current, highWater, rejections);
+        return ResourceUsage.of(resource, limit, current, highWater, rejections);
     }
 }

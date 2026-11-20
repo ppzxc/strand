@@ -1,13 +1,13 @@
 package io.github.ppzxc.strand.netty;
 
 import io.github.ppzxc.strand.api.ConnectionLimits;
+import io.github.ppzxc.strand.api.MinimumProgressSpace;
 import io.github.ppzxc.strand.api.OwnerLimits;
+import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.ResourceLimits;
 import io.github.ppzxc.strand.api.Result;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.netty.internal.ProgressSpace;
 import io.github.ppzxc.strand.netty.internal.TestTls;
-import io.github.ppzxc.strand.netty.internal.TlsSizes;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.Future;
@@ -78,10 +78,28 @@ final class AppFixture implements AutoCloseable {
             rejectNext.set(true);
         }
 
+        private volatile boolean rejectReadyNotification;
+
+        /** 준비 성공 알림을 내는 제출(엔진의 notifyReady)만 거절한다. 다른 작업은 받는다. */
+        void rejectNextReadyNotification() {
+            rejectReadyNotification = true;
+        }
+
+        private static boolean fromReadyNotification() {
+            for (StackTraceElement e : new Throwable().getStackTrace()) {
+                if (e.getMethodName().equals("notifyReady")) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         @Override
         public void execute(Runnable task) {
             int number = submitted.incrementAndGet();
+            boolean rejectReady = rejectReadyNotification && fromReadyNotification();
             boolean reject = rejectNext.compareAndSet(true, false)
+                    || rejectReady
                     || rejecting
                     || acceptRemaining.getAndDecrement() <= 0
                     || rejectedNumbers.contains(number);
@@ -126,15 +144,14 @@ final class AppFixture implements AutoCloseable {
     static AppFixture plain(long perConnection, long owner, long connections) {
         return new AppFixture(
                 false,
-                limits(perConnection, owner, connections, null),
+                limits(perConnection, owner, connections, NettySecurity.externallySecured()),
                 NettySecurity.externallySecured(),
                 NettySecurity.externallySecured());
     }
 
     static AppFixture tls() throws Exception {
-        TlsSizes sizes = TlsSizes.of(TestTls.client());
-        return new AppFixture(
-                true, limits(8, 8, 4, sizes), NettySecurity.tls(TestTls.server()), NettySecurity.tls(TestTls.client()));
+        NettySecurity client = NettySecurity.tls(TestTls.client());
+        return new AppFixture(true, limits(8, 8, 4, client), NettySecurity.tls(TestTls.server()), client);
     }
 
     /** 테스트가 고치는 한도의 사양. 기본은 넉넉하고, 진행 공간만 도출한 최소치다. */
@@ -240,22 +257,31 @@ final class AppFixture implements AutoCloseable {
 
         AppFixture plain() {
             AppFixture fixture = new AppFixture(
-                    false, build(null), NettySecurity.externallySecured(), NettySecurity.externallySecured());
+                    false,
+                    build(NettySecurity.externallySecured()),
+                    NettySecurity.externallySecured(),
+                    NettySecurity.externallySecured());
             fixture.maxFrameSize = maxFrameSize;
             return fixture;
         }
 
         AppFixture tls() throws Exception {
-            TlsSizes sizes = TlsSizes.of(TestTls.client());
-            AppFixture fixture = new AppFixture(
-                    true, build(sizes), NettySecurity.tls(TestTls.server()), NettySecurity.tls(TestTls.client()));
+            NettySecurity client = NettySecurity.tls(TestTls.client());
+            AppFixture fixture = new AppFixture(true, build(client), NettySecurity.tls(TestTls.server()), client);
             fixture.maxFrameSize = maxFrameSize;
             return fixture;
         }
 
-        ResourceLimits build(TlsSizes sizes) {
-            ProgressSpace space = ProgressSpace.derive(perConnection, perConnection, maxFrameSize, sizes);
-            long[] min = space.minimums();
+        ResourceLimits build(NettySecurity security) {
+            MinimumProgressSpace space = NettyMinimumProgress.of(security, maxFrameSize, perConnection, perConnection);
+            long[] min = {
+                space.get(Resource.FRAME_ASSEMBLY_BYTES),
+                space.get(Resource.CONTROL_OUTPUT_BYTES),
+                space.get(Resource.RESULT_EVENT_BYTES),
+                space.get(Resource.TLS_PLAINTEXT_BYTES),
+                space.get(Resource.TLS_CIPHERTEXT_BYTES),
+                space.get(Resource.TLS_CONTROL_BYTES)
+            };
             long progressConnections = ownerProgressConnections < 0 ? connections : ownerProgressConnections;
             return ResourceLimits.builder()
                     .perConnection(ConnectionLimits.builder()
@@ -294,10 +320,10 @@ final class AppFixture implements AutoCloseable {
         }
     }
 
-    static ResourceLimits limits(long perConnection, long owner, long connections, TlsSizes sizes) {
+    static ResourceLimits limits(long perConnection, long owner, long connections, NettySecurity security) {
         Spec spec = new Spec().perConnection(perConnection).connections(connections);
         spec.owner = owner;
-        return spec.build(sizes);
+        return spec.build(security);
     }
 
     NettyStrandServer.Builder serverBuilder() {

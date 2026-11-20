@@ -18,7 +18,7 @@ public final class ConnectionLimits {
 
     /**
      * Validate transport-specific minimums once the frame and TLS configuration is known. The caller (a transport
-     * builder: NIO in #316, Netty in #322) computes the result-event and TLS minimums; this method never invents them.
+     * builder: NIO and Netty) computes the result-event and TLS minimums; this method never invents them.
      */
     public void requireProgress(
             long frame, long control, long result, long plaintext, long ciphertext, long tlsControl) {
@@ -32,8 +32,10 @@ public final class ConnectionLimits {
         };
         long[] minimum = {frame, control, result, plaintext, ciphertext, tlsControl};
         for (int i = 0; i < kinds.length; i++) {
-            if (minimum[i] <= 0 || get(kinds[i]) < minimum[i]) {
-                throw new IllegalArgumentException("insufficient progress space: " + kinds[i]);
+            boolean mayBeZero = kinds[i].isTlsProgress();
+            if (minimum[i] < 0 || (!mayBeZero && minimum[i] == 0) || get(kinds[i]) < minimum[i]) {
+                throw new IllegalArgumentException("insufficient progress space: " + kinds[i] + " scope=per-connection"
+                        + " required=" + minimum[i] + " configured=" + get(kinds[i]));
             }
         }
     }
