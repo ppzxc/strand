@@ -165,7 +165,8 @@ class NioListenerCloseTest {
                     }
                     PassageFactory.closeQuietly(accepted);
                 },
-                fixture.executor);
+                fixture.executor,
+                TimeUnit.SECONDS.toNanos(5));
         closeables.add(listener::close);
         SocketChannel client = SocketChannel.open(server.getLocalAddress());
         closeables.add(client::close);

@@ -27,6 +27,9 @@ final class AppFixture implements AutoCloseable {
     static final class ToggleExecutor implements java.util.concurrent.Executor {
         private final java.util.concurrent.Executor delegate;
         volatile boolean rejecting;
+        /** 켜면 작업을 받고(거절하지 않고) 실행하지 않는다. */
+        volatile boolean swallowing;
+
         final java.util.concurrent.atomic.AtomicInteger acceptRemaining =
                 new java.util.concurrent.atomic.AtomicInteger(Integer.MAX_VALUE);
 
@@ -85,6 +88,9 @@ final class AppFixture implements AutoCloseable {
             journal.add("#" + number + (reject ? " 거절 " : " 수락 ") + caller());
             if (reject) {
                 throw new java.util.concurrent.RejectedExecutionException("테스트가 거절한다");
+            }
+            if (swallowing) {
+                return;
             }
             delegate.execute(task);
         }
