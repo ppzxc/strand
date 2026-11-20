@@ -145,7 +145,8 @@ class NettyEngineSetupBranchTest {
             rig.connection.startClient(rig.target);
             rig.settleLoop();
 
-            assertThat(rig.channel.isRegistered()).isFalse();
+            // 등록 해제는 닫기 Future 뒤 이벤트 루프의 후속 작업이라 부하가 크면 settleLoop 직후에도 끝나지 않았을 수 있다.
+            NettyRig.awaitTrue(() -> !rig.channel.isRegistered());
         }
     }
 
