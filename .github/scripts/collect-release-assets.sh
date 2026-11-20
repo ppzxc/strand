@@ -7,7 +7,7 @@ version="${1:?버전이 필요하다}"
 # 경로가 저장소 루트 기준이라 어디서 불러도 루트로 옮겨 실행한다.
 cd "$(dirname "$0")/../.."
 # 모듈을 더하면 release.yml의 Generate SBOM 단계(cyclonedxBom 태스크)와 노트 문구도 함께 고친다.
-modules=(strand-core strand-nio)
+modules=(strand-core strand-api strand-nio strand-netty)
 
 [ ! -e release-assets ] || { echo "release-assets가 이미 있다. 낡은 자산이 섞이지 않게 지우고 다시 돌린다" >&2; exit 1; }
 
