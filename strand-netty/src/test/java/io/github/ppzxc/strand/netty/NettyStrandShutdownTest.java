@@ -131,6 +131,8 @@ class NettyStrandShutdownTest {
         AppFixture.get(stopped);
 
         // 리스닝 중지·연결 CLOSE가 끝났고 실제 자원이 정리된 뒤에야 성공한다.
+        // listener.closed()는 앱 실행기를 거쳐 알리므로 종료 완료와 순서가 정해져 있지 않다. 기다려서 확인한다.
+        AppFixture.get(listener.closed());
         assertThat(listener.closed().isDone()).isTrue();
         CloseNotice notice = serverFixture.result(serverSide.closed());
         assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
