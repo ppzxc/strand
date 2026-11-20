@@ -22,8 +22,9 @@ class CoreTcpDeliveryTest {
             AtomicLong ticket = new AtomicLong();
             fixture.driver.command(
                     () -> ticket.set(fixture.endpoint.request(OpenEndpoint.REQUEST_TYPE, new byte[100])));
-            assertThat(fixture.onLoop(fixture.driver::reported)).containsExactly(0);
-            assertThat(fixture.onLoop(fixture.driver::zeroWrites)).isEqualTo(1);
+            // 드라이버는 쓰기가 막히면 1ms마다 다시 시도하므로 0바이트 쓰기의 횟수는 시간에 따라 늘어난다. 횟수가 아니라 0만 보고됐음을 확인한다.
+            assertThat(fixture.onLoop(fixture.driver::reported)).isNotEmpty().containsOnly(0);
+            assertThat(fixture.onLoop(fixture.driver::zeroWrites)).isPositive();
 
             fixture.driver.command(() -> fixture.endpoint.cancelRequest(ticket.get()));
             List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
