@@ -58,13 +58,13 @@ class ProgressSpaceTest {
     }
 
     @Test
-    void withoutTlsTheTlsSpacesAreNotReservedButKeepAPositiveMinimum() {
+    void withoutTlsTheTlsSpacesAreNotReservedAndTheirMinimumIsZero() {
         ProgressSpace space = ProgressSpace.derive(10, 5, MAX_FRAME, null);
 
         assertThat(space.tlsPlaintext()).isZero();
         assertThat(space.tlsCiphertext()).isZero();
         assertThat(space.tlsControl()).isZero();
-        assertThat(space.minimums()).containsExactly(MAX_FRAME, 32 * 19, MAX_FRAME + 220, 1, 1, 1);
+        assertThat(space.minimums()).containsExactly(MAX_FRAME, 32 * 19, MAX_FRAME + 220, 0, 0, 0);
     }
 
     @Test
