@@ -167,6 +167,8 @@ class OutputReferenceReturnTest {
         private final Executor delegate;
         private final Queue<Runnable> held = new ArrayDeque<>();
         private volatile boolean holding;
+        private final java.util.concurrent.atomic.AtomicInteger delegated =
+                new java.util.concurrent.atomic.AtomicInteger();
 
         HeldExecutor(Executor delegate) {
             this.delegate = delegate;
@@ -179,11 +181,28 @@ class OutputReferenceReturnTest {
                     held.add(task);
                 }
             } else {
-                delegate.execute(task);
+                delegated.incrementAndGet();
+                try {
+                    delegate.execute(() -> {
+                        try {
+                            task.run();
+                        } finally {
+                            delegated.decrementAndGet();
+                        }
+                    });
+                } catch (RuntimeException | Error e) {
+                    delegated.decrementAndGet();
+                    throw e;
+                }
             }
         }
 
-        void hold() {
+        /**
+         * 이미 위임한 작업이 모두 끝난 뒤에 붙잡기 시작한다. 연결 하나의 사용자 코드는 직렬 실행기가 한 번에 하나씩 돌리는데, 시작 때 낸 작업을 도는 직렬
+         * 실행기의 드레인이 아직 살아 있으면 그 뒤에 온 작업이 이 실행기를 거치지 않고 같은 드레인에서 바로 실행된다.
+         */
+        void hold() throws Exception {
+            awaitTrue(() -> delegated.get() == 0);
             holding = true;
         }
 
