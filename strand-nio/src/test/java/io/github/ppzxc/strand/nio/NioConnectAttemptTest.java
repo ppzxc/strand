@@ -387,6 +387,31 @@ class NioConnectAttemptTest {
     }
 
     @Test
+    void aPeerRequestCoalescedWithTheAuthAckInOneReadNeverReachesTheClientHandlerAfterTheRejectedNotification()
+            throws Exception {
+        AppFixture clientFixture = track(AppFixture.plain());
+        AtomicInteger handled = new AtomicInteger();
+        try (CoalescingPeer peer = new CoalescingPeer(AppFixture.TYPE)) {
+            NioStrandClient client = clientFixture
+                    .clientBuilder()
+                    .handler(request -> {
+                        handled.incrementAndGet();
+                        request.respond(Status.OK, new byte[0]);
+                    })
+                    .build();
+            clientFixture.executor.rejectNextReadyNotification();
+            java.net.InetSocketAddress addr = peer.address();
+
+            PreparationFailure failure = failureOf(client.connect(addr).toCompletableFuture());
+            Thread.sleep(300);
+
+            assertThat(rootCauses(failure.cause())).anyMatch(t -> t instanceof RejectedExecutionException);
+            assertThat(handled).hasValue(0);
+            awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
+        }
+    }
+
+    @Test
     void aPeerRequestArrivingAfterTheRejectedReadyNotificationNeverReachesTheClientHandler() throws Exception {
         AppFixture server = track(AppFixture.plain());
         AppFixture clientFixture = track(AppFixture.plain());
