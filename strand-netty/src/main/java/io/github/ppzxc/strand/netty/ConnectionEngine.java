@@ -473,6 +473,8 @@ final class ConnectionEngine {
     }
 
     private void complete() {
+        // 채널 정리(closeFuture)는 소켓이 실제로 풀리기 전에 끝날 수 있다. closed 완료는 실제 해제 뒤여야 한다.
+        channel.releaseClosedSocket();
         releaseSlots();
         completeReleased();
         closed.complete(finalNotice);

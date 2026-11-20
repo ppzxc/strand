@@ -4,6 +4,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedSelectorException;
 import java.nio.channels.SocketChannel;
 
 /**
@@ -12,6 +13,9 @@ import java.nio.channels.SocketChannel;
  * core 진행 보고의 근거다. 모든 메서드는 이 채널의 이벤트 루프에서만 부른다.
  */
 public class StrandChannel extends NioSocketChannel {
+    /** 선택기에 한 번이라도 등록했다. 등록한 적 없는 채널은 선택 키가 없다. */
+    private volatile boolean registeredOnce;
+
     /** 클라이언트 쪽: 아직 연결하지 않은 채널. */
     public StrandChannel() {
         super();
@@ -35,5 +39,26 @@ public class StrandChannel extends NioSocketChannel {
     /** 보내는 쪽만 닫는다(TCP FIN). 상대가 끊을 때까지 읽는 것은 그대로다. */
     public void shutdownOutputNow() throws IOException {
         javaChannel().shutdownOutput();
+    }
+
+    @Override
+    protected void doRegister() throws Exception {
+        super.doRegister();
+        registeredOnce = true;
+    }
+
+    /**
+     * 닫힌 채널의 취소된 선택 키를 지금 비운다. JDK는 선택기에 등록돼 있던 채널의 파일 기술자를 선택기가 취소된 키를 처리할 때 놓는다. 그래서 {@code closeFuture}가
+     * 끝나도 다음 선택 주기가 돌기 전에는 소켓이 실제로 풀리지 않는다. 이 채널의 EventLoop에서 채널을 닫은 뒤에 부른다.
+     */
+    public void releaseClosedSocket() {
+        if (!registeredOnce) {
+            return;
+        }
+        try {
+            selectionKey().selector().selectNow();
+        } catch (IOException | ClosedSelectorException e) {
+            // 선택기가 이미 닫혔다면 선택기가 등록된 채널을 모두 놓았다.
+        }
     }
 }
