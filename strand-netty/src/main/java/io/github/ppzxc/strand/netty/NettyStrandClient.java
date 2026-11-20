@@ -129,6 +129,8 @@ public final class NettyStrandClient {
      * 등록이 모두 끝났다는 뜻이다. 실패는 {@link PreparationFailedException}이고 단계와 원인을 알린다. 반환된 Future는 취소할 수 없고 연결 시도를 취소하는 길은
      * {@link #connectAttempt}의 {@link NettyConnectAttempt#cancel()}뿐이다. Future는 연결 채널의 EventLoop에서 완료된다.
      *
+     * <p>준비 성공 알림의 제출을 앱용 실행기가 거절하면 그 즉시 연결을 끊고, 결과는 {@link java.util.concurrent.RejectedExecutionException}을 원인으로 하는 준비 실패다. 실패로 확정된 연결에서 핸들러는 실행되지 않는다.
+     *
      * @param address 서버 주소({@link InetSocketAddress})
      * @return 연결 결과
      * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
