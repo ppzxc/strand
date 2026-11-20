@@ -34,7 +34,7 @@ checked: 2026-11-20
 | 수용 기준 | 이미 덮은 개별 시험 | 새로 추가한 교차 시험·자료 |
 | --- | --- | --- |
 | 1. 실제 TCP/TLS 준비·양방향 요청·취소·기한·종료, 예제 | `NioStrandUsageTest`, `NettyStrandUsageTest`(준비 뒤 양방향·종료) | `strand-examples`의 `NioAppExample`·`NettyAppExample`과 `AppExamplesTest`: 필수 한도·시간 설정을 모두 표시하고 보안·인증·팩터리 준비, 양방향 요청, 취소, 기한, 연결 종료, 전체 종료를 한 흐름에서 TCP·TLS 각각 실행 |
-| 2. 연결별·전체 포화 중 취소·결과 보존·종료, 예약 반환 | `*SaturationTest`, `*ReservationTest`(자원 하나씩) | `SaturationCrossFlowTest`: 연결별 한도와 소유 객체 전체 한도가 찬 채로 취소·응답·abort를 잇고 모든 예약과 연결 슬롯이 0으로 돌아옴 |
+| 2. 연결별·전체 포화 중 취소·결과 보존·종료, 예약 반환 | `*SaturationTest`, `*ReservationTest`(자원 하나씩) | `SaturationCrossFlowTest`: 연결별 한도와 소유 객체 전체 한도가 찬 채로 취소·응답·abort를 잇고 모든 예약과 연결 슬롯이 0으로 돌아옴. TLS 암호문 공간 포화는 `TlsSaturationCrossFlowTest`(#348) |
 | 3. 준비 취소·늦은 팩터리·폐기 거절·claim·종료 기한 초과 겹침 | `*UnreleasedHandlerTest`, `*ConnectAttemptTest`, `*ShutdownTest`(둘씩) | `PreparationOverlapTest`: 준비 포화, 준비 취소, 늦은 인증·팩터리, 폐기 거절, 8개 스레드 동시 claim, 기한 초과가 한 서버에서 겹침 |
 | 4. 앱 실행기 정체·Netty 변환 취소 중 결과 조회, 결과가 종료 사건보다 먼저 | `NettyResultsTest`, `*SaturationTest`(관찰 자리), `*ShutdownTest`(정체 실행기) | `ExecutorStallTest`: 실제 TCP/TLS에서 실행기를 정체시킨 채 취소·abort, 변환 Future 취소 독립(Netty). 종료 알림 시점에 남은 결과가 확정되어 있음 |
 | 5. 관찰별 완료 경계, TLS 평문 소비/암호문 정리, 남은 자원 없음 | 경계별 개별 시험, `CoreTlsDeliveryTest`·`TlsBoundaryTest`(#315), `*RealOutputReferenceTest` | `CompletionBoundaryTest`(리스닝·연결·전체 종료 결과·실제 자원 종료가 한 흐름에서 서로 다른 경계), `ResourceReleaseTest`(`closed()` 관찰 직후 소켓 없음, 종료 뒤 소켓·내부 스레드·Netty 예약 작업 없음) |
@@ -84,5 +84,5 @@ TLS 평문 소비와 암호문 정리의 구별은 core 구동 수준에서 #315
 - 병렬로 다른 Gradle 작업을 함께 돌리는 등 부하가 크면 15초 상한 조건 대기가 초과할 수 있다. 위 `selectNow()` 결함이 그 한 원인이었고 고친 뒤에는 병렬 실행에서 재현되지 않았다.
 - `strand-examples`는 release 11이라 JDK 8 테스트 JVM에서 실행되지 않는다(기존 구성). JDK 8 칸은 `strand-netty`와 `strand-integration-test`만 해당한다.
 - 예제(`NioAppExample`·`NettyAppExample`)는 연결별 최소 진행 공간을 전송 모듈 내부의 `ProgressSpace`로 도출한다. 공개 API에는 이 최소 필요량을 조회하는 방법이 없고, 승인된 예제는 이 값들을 앱이 제공하는 설정 변수로 둔다. 예제의 나머지는 공개 API만 쓴다. 최소 필요량 조회 API는 별도 결정이 필요하다.
-- TLS 평문·암호문·제어 공간의 포화 자체(공간이 찬 채 취소·종료)는 이 검증에서 교차로 만들지 않았다. 앱 API는 이 공간을 최소 필요량으로만 설정할 수 있고, 공간 부족에서의 진행은 #315·#319·#322의 통로·구동 시험이 본다. 이 검증은 TLS 연결에서 평문·암호문·제어 공간이 따로 예약되고 실제 정리 뒤에 돌아옴을 확인한다.
+- TLS 암호문 공간의 포화(공간이 찬 채 취소·결과 보존·종료)는 `TlsSaturationCrossFlowTest`가 NIO·Netty 실제 TLS에서 교차로 본다(#348). 한도는 최소 진행 공간 조회 API(`NioMinimumProgress`·`NettyMinimumProgress`)로 최소치에 맞추고, 암호문을 그대로 전달하는 중계가 클라이언트→서버 읽기를 멈춰 암호문 공간을 채운다. 평문·제어 공간의 개별 포화는 여전히 교차로 만들지 않았고 #315·#319·#322의 통로·구동 시험이 본다.
 - 서버의 AUTH(ACK)는 팩터리 실행 전에 나가므로 클라이언트의 `connect`는 서버 핸들러가 준비되기 전에 성공할 수 있다. 그 사이에 온 요청은 서버가 `RESET(REFUSED)`로 거절하고(`Endpoint`의 `deferredAuthentication && !handlerReady` 검사), 클라이언트에는 `UNAVAILABLE`·처리 안 됨으로 돌아온다. 이 구간의 거절은 의도된 동작이며 다시 보내도 안전하다(규격 4.5절). 같은 연결로 곧바로 다시 보내면 거절이 되풀이될 수 있으므로 점점 길게 기다렸다가 보내거나 다른 연결로 보낸다. 앱은 팩터리를 빨리 끝내 이 구간을 줄인다. 알림 거절의 활성화 창은 후속 이슈(#331)에서 다룬다.
