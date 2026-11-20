@@ -435,7 +435,9 @@ class NettyConnectAttemptTest {
         assertThat(entered.await(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
 
         assertThat(attempt.cancel()).isTrue();
-        assertThat(attempt.cancel()).isTrue();
+        // 첫 취소가 EventLoop에서 시도를 확정하는 시점은 두 번째 호출과 경합한다. 확정 전이면 true, 후면 false라서
+        // 반환값은 단정하지 않는다. 확정 전 반복 취소의 접수는 ConnectAttemptStateTest가 결정적으로 검증한다.
+        attempt.cancel();
 
         assertThat(failureOf(attempt).cause()).isInstanceOf(ConnectionAttemptCancelledException.class);
         hold.countDown();
