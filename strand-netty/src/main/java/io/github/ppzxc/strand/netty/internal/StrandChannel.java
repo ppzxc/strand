@@ -36,4 +36,12 @@ public class StrandChannel extends NioSocketChannel {
     public void shutdownOutputNow() throws IOException {
         javaChannel().shutdownOutput();
     }
+
+    /**
+     * 닫은 채널의 소켓을 JDK가 아직 선택기에 붙들고 있는가. {@code closeFuture}가 끝나도 선택기가 취소된 키를 처리하는 다음 선택 주기가 돌기 전에는 소켓이 실제로 풀리지 않는다.
+     * 선택 키(Netty 내부, 4.2는 등록 해제 뒤 내주지 않는다)가 아니라 JDK 채널의 상태로 본다. 선택기에 등록한 적 없으면 false다.
+     */
+    public boolean socketHeld() {
+        return javaChannel().isRegistered();
+    }
 }

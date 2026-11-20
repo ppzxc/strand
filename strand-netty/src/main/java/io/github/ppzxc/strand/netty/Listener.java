@@ -9,6 +9,8 @@ import io.netty.util.concurrent.Promise;
 import java.net.SocketAddress;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 
@@ -22,6 +24,9 @@ public final class Listener {
     private final AtomicBoolean settled = new AtomicBoolean();
     /** 앱이 관찰하는 정리 완료. 앱용 실행기를 거치지 않고 정리가 끝나는 곳에서 곧바로 완료한다. 앱이 취소할 수 없다. */
     private final Promise<Void> closed;
+    /** 소켓이 풀렸는지 다시 보는 주기. 쓰기 막힘 재시도와 같은 1ms다(#315 검증에서 쓴 값). */
+    private static final long RELEASE_POLL_NANOS = 1_000_000L;
+
     /** 소유 객체가 내부 기록용으로 보는 정리 완료. */
     private final CompletableFuture<Void> terminated = new CompletableFuture<>();
 
@@ -41,10 +46,7 @@ public final class Listener {
             public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
                 super.channelUnregistered(ctx);
                 // 등록 해제와 같은 작업 안에서 선택 키가 취소됐다. 키를 비운 뒤 완료한다.
-                ctx.executor().execute(() -> {
-                    channel.releaseClosedSocket();
-                    settle();
-                });
+                ctx.executor().execute(() -> settleWhenReleased(loop));
             }
         });
     }
@@ -88,6 +90,25 @@ public final class Listener {
     /** 소유 객체가 리스닝 정리 완료를 기록하는 내부 관찰. */
     CompletableFuture<Void> terminated() {
         return terminated;
+    }
+
+    /** 리스닝 소켓을 JDK가 놓을 때까지 선택 주기를 지나가며 기다린 뒤 완료한다. 선택기를 직접 부르지 않고 타이머로 이벤트 루프가 선택하게 한다. */
+    private void settleWhenReleased(EventLoop loop) {
+        if (channel.socketHeld() && !loop.isShuttingDown()) {
+            try {
+                // 이벤트 루프가 끝나면 Netty가 예약 작업을 취소한다. 그때는 기다릴 선택 주기가 없으니 바로 끝낸다.
+                loop.schedule(() -> settleWhenReleased(loop), RELEASE_POLL_NANOS, TimeUnit.NANOSECONDS)
+                        .addListener(timer -> {
+                            if (timer.isCancelled()) {
+                                settle();
+                            }
+                        });
+                return;
+            } catch (RejectedExecutionException e) {
+                // 이벤트 루프가 끝났다. 선택기가 닫히면 등록된 채널은 모두 풀린다.
+            }
+        }
+        settle();
     }
 
     private void settle() {

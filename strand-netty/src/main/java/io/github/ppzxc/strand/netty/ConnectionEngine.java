@@ -52,6 +52,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -473,6 +474,26 @@ final class ConnectionEngine {
     }
 
     private void complete() {
+        // 채널 정리(closeFuture)는 소켓이 실제로 풀리기 전에 끝날 수 있다. closed 완료는 실제 해제 뒤여야 하므로 JDK가 소켓을 놓을 때까지
+        // 타이머로 선택 주기를 지나간다(선택기를 직접 부르지 않는다).
+        if (channel.socketHeld() && !loop.isShuttingDown()) {
+            try {
+                // 이벤트 루프가 끝나면 Netty가 예약 작업을 취소한다. 그때는 기다릴 선택 주기가 없으니 바로 끝낸다.
+                loop.schedule(this::complete, WRITE_RETRY_NANOS, TimeUnit.NANOSECONDS)
+                        .addListener(timer -> {
+                            if (timer.isCancelled()) {
+                                finishClosed();
+                            }
+                        });
+                return;
+            } catch (RejectedExecutionException e) {
+                // 이벤트 루프가 끝났다. 선택기가 닫히면 등록된 채널은 모두 풀린다.
+            }
+        }
+        finishClosed();
+    }
+
+    private void finishClosed() {
         releaseSlots();
         completeReleased();
         closed.complete(finalNotice);

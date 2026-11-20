@@ -10,6 +10,8 @@ dependencies {
   testImplementation(project(":strand-nio"))
   // 통로 시험 도구(PassageContract.writeFully)를 함께 쓴다.
   testImplementation(testFixtures(project(":strand-nio")))
+  // 앱 공개 API 통합 수용 검증(#328)이 NIO와 Netty 전송을 모두 쓴다.
+  testImplementation(project(":strand-netty"))
   testImplementation("io.netty:netty-transport:${nettyVersion.get()}")
 }
 
