@@ -54,6 +54,25 @@ class NettyStrandUsageTest {
         return credentials -> AuthenticationResult.accepted(principal);
     }
 
+    /**
+     * 서버의 AUTH(ACK)는 팩터리 실행 전에 나가므로, connect 직후의 첫 요청은 서버 핸들러가 준비되기 전이면 REFUSED(UNAVAILABLE, 처리 안 됨)로 돌아올 수 있다(규격 4.5절). 같은 연결이면
+     * 기다렸다가 다시 보낸다.
+     */
+    private static RequestResult requestWhenReady(AppFixture fixture, NettyStrandConnection connection, byte[] payload)
+            throws Exception {
+        long limit = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(AppFixture.WAIT_SECONDS);
+        RequestResult result =
+                fixture.result(connection.request(Request.of(TYPE, payload)).result());
+        while (result.status() == Status.UNAVAILABLE
+                && result.certainty() == Certainty.NOT_PROCESSED
+                && System.nanoTime() < limit) {
+            Thread.sleep(10);
+            result =
+                    fixture.result(connection.request(Request.of(TYPE, payload)).result());
+        }
+        return result;
+    }
+
     private static byte[] bytes(String text) {
         return text.getBytes(StandardCharsets.UTF_8);
     }
@@ -97,8 +116,7 @@ class NettyStrandUsageTest {
                 .build();
 
         NettyStrandConnection connection = connect(client, listener);
-        RequestResult forward = fixture.result(
-                connection.request(Request.of(TYPE, bytes("ping"))).result());
+        RequestResult forward = requestWhenReady(fixture, connection, bytes("ping"));
 
         assertThat(forward.status()).isEqualTo(Status.OK);
         assertThat(forward.certainty()).isEqualTo(Certainty.RESPONSE);
@@ -144,10 +162,7 @@ class NettyStrandUsageTest {
         assertThat(factoryPeer.get()).isEqualTo("user-BEARER");
         assertThat(seenMechanism.get()).containsExactly("BEARER", "opaque");
         assertThat(connection.authenticatedPeer().remoteAddress()).isEqualTo(AppFixture.loopback(listener));
-        assertThat(fixture.result(
-                                connection.request(Request.of(TYPE, bytes("x"))).result())
-                        .status())
-                .isEqualTo(Status.OK);
+        assertThat(requestWhenReady(fixture, connection, bytes("x")).status()).isEqualTo(Status.OK);
     }
 
     @ParameterizedTest

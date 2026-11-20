@@ -45,10 +45,21 @@ final class AppFixture implements AutoCloseable {
             rejectedNumbers.add(number);
         }
 
+        private final java.util.concurrent.atomic.AtomicBoolean rejectNext =
+                new java.util.concurrent.atomic.AtomicBoolean();
+
+        /** 다음에 들어오는 작업 하나만 거절한다. 작업 번호가 아니라 호출 시점에 기대므로 앞선 작업 수에 흔들리지 않는다. */
+        void rejectNextTask() {
+            rejectNext.set(true);
+        }
+
         @Override
         public void execute(Runnable task) {
             int number = submitted.incrementAndGet();
-            if (rejecting || acceptRemaining.getAndDecrement() <= 0 || rejectedNumbers.contains(number)) {
+            if (rejectNext.compareAndSet(true, false)
+                    || rejecting
+                    || acceptRemaining.getAndDecrement() <= 0
+                    || rejectedNumbers.contains(number)) {
                 throw new java.util.concurrent.RejectedExecutionException("테스트가 거절한다");
             }
             delegate.execute(task);

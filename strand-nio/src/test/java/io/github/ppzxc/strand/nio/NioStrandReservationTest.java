@@ -426,13 +426,16 @@ class NioStrandReservationTest {
         AppFixture server = track(AppFixture.plain());
         AppFixture clientFixture = track(AppFixture.plain());
         BlockingQueue<PreparationFailure> failures = new LinkedBlockingQueue<>();
-        NioStrandServer app = acceptingServer(server)
+        NioStrandServer app = server.serverBuilder()
+                .authenticate(c -> {
+                    // 인증 작업이 도는 중에 다음 작업(팩터리)만 거절하도록 건다. 작업 번호에 기대지 않는다.
+                    server.executor.rejectNextTask();
+                    return AuthenticationResult.accepted("p");
+                })
                 .handlerFactory(connection -> PreparedHandler.of(request -> {}))
                 .onConnectionFailure(failures::add)
                 .build();
         Listener listener = listen(app);
-        // 인증 작업은 받고 팩터리 작업만 거절한다. 실패 알림은 받는다.
-        server.executor.rejectTaskNumber(3);
 
         AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
         PreparationFailure failure = failures.poll(15, TimeUnit.SECONDS);
