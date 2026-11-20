@@ -209,6 +209,7 @@ public final class NioStrandClient {
         params.attempt = state;
         params.preparationBytes = preparationBytes;
         params.released = released;
+        params.releasedFallbackNanos = common.shutdownDeadline.toNanos();
         NioStrandConnection connection = new NioStrandConnection(params);
         if (!lifecycle.register(connection)) {
             // 예약하는 사이 전체 종료가 시작됐다. 시작하지 않은 시도의 예약을 돌려주고 실패시킨다.

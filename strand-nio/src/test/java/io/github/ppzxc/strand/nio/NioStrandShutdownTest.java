@@ -358,6 +358,51 @@ class NioStrandShutdownTest {
     }
 
     @Test
+    void anExecutorThatAcceptsButNeverRunsTasksStillLetsEveryShutdownStageFinishAfterTheDeadline() throws Exception {
+        AppFixture serverFixture = track(AppFixture.plain());
+        NioStrandServer server = server(serverFixture, Duration.ofMillis(100), Duration.ofMillis(300))
+                .handler(r -> {})
+                .build();
+        Listener listener = listen(server);
+        AppFixture clientFixture = track(AppFixture.plain());
+        NioStrandClient client = clientFixture
+                .clientBuilder()
+                .shutdownGrace(Duration.ofMillis(100))
+                .shutdownDeadline(Duration.ofMillis(300))
+                .build();
+        NioConnectAttempt attempt = client.connectAttempt(new InetSocketAddress("127.0.0.1", 1));
+        serverFixture.executor.swallowing = true;
+        clientFixture.executor.swallowing = true;
+
+        CompletionStage<Void> stopped = server.shutdown();
+
+        AppFixture.get(stopped);
+        AppFixture.get(server.resourcesTerminated());
+        AppFixture.get(listener.closed());
+        AppFixture.get(client.shutdown());
+        AppFixture.get(attempt.transportReleased());
+    }
+
+    @Test
+    void shutdownStagesCompleteOnTheAppExecutorWhenItRunsTasks() throws Exception {
+        AppFixture fixture = track(AppFixture.plain());
+        NioStrandServer server = server(fixture, Duration.ofSeconds(1), Duration.ofSeconds(5))
+                .handler(r -> {})
+                .build();
+        Listener listener = listen(server);
+        List<String> threads = new CopyOnWriteArrayList<>();
+
+        // 완료 전에 붙여야 콜백이 완료한 스레드에서 돈다.
+        server.resourcesTerminated()
+                .thenRun(() -> threads.add(Thread.currentThread().getName()));
+        listener.closed().thenRun(() -> threads.add(Thread.currentThread().getName()));
+
+        server.shutdown();
+        awaitTrue(() -> threads.size() == 2);
+        assertThat(threads).allMatch(name -> name.startsWith("app-executor-"));
+    }
+
+    @Test
     void closedDoesNotWaitForAHandlerThatNeverReturns() throws Exception {
         AppFixture serverFixture = track(AppFixture.plain());
         AppFixture clientFixture = track(AppFixture.plain());
