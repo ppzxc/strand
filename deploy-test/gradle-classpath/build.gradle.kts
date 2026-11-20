@@ -20,16 +20,20 @@ sourceSets.main { java.srcDir("../shared/src/main/java") }
 dependencies {
   implementation("io.github.ppzxc:strand-core:$strandVersion")
   implementation("io.github.ppzxc:strand-nio:$strandVersion")
+  implementation("io.github.ppzxc:strand-netty:$strandVersion")
+  // strand-netty는 Netty를 compileOnlyApi로 의존해 POM에 싣지 않는다. 소비자가 Netty를 직접 의존한다.
+  implementation("io.netty:netty-transport:4.1.101.Final")
 }
 
 application {
   mainClass = "strand.deploytest.Main"
 }
 
-// 기대 버전은 기본적으로 받아 온 버전이다. 비교 경로 자체를 시험할 때만 -PexpectedVersion, -PexpectedNioVersion으로 덮어쓴다.
+// 기대 버전은 기본적으로 받아 온 버전이다. 비교 경로 자체를 시험할 때만 -PexpectedVersion, -PexpectedNioVersion, -PexpectedNettyVersion으로 덮어쓴다.
 tasks.run {
   args(
     providers.gradleProperty("expectedVersion").orElse(strandVersion).get(),
     providers.gradleProperty("expectedNioVersion").orElse(strandVersion).get(),
+    providers.gradleProperty("expectedNettyVersion").orElse(strandVersion).get(),
   )
 }

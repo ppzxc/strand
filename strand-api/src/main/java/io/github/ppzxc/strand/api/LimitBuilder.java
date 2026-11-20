@@ -13,6 +13,12 @@ abstract class LimitBuilder<B extends LimitBuilder<B>> {
         values.put(resource, value);
     }
 
+    /** TLS progress budgets may be zero: a plain connection needs none. */
+    private void putTls(Resource resource, long value) {
+        if (value < 0) throw new IllegalArgumentException(resource + " must not be negative");
+        values.put(resource, value);
+    }
+
     public B outgoingRequests(long count, long bytes) {
         put(Resource.OUTGOING_REQUESTS, count);
         put(Resource.OUTGOING_BYTES, bytes);
@@ -57,9 +63,9 @@ abstract class LimitBuilder<B extends LimitBuilder<B>> {
         put(Resource.FRAME_ASSEMBLY_BYTES, frame);
         put(Resource.CONTROL_OUTPUT_BYTES, control);
         put(Resource.RESULT_EVENT_BYTES, result);
-        put(Resource.TLS_PLAINTEXT_BYTES, plain);
-        put(Resource.TLS_CIPHERTEXT_BYTES, cipher);
-        put(Resource.TLS_CONTROL_BYTES, tlsControl);
+        putTls(Resource.TLS_PLAINTEXT_BYTES, plain);
+        putTls(Resource.TLS_CIPHERTEXT_BYTES, cipher);
+        putTls(Resource.TLS_CONTROL_BYTES, tlsControl);
         return self();
     }
 

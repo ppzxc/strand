@@ -1686,7 +1686,7 @@ final class ConnectionEngine {
                     onClosed(event);
                     break;
                 default:
-                    break;
+                    throw new IllegalStateException("처리하지 않는 사건 종류: " + event.kind());
             }
         }
 

@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.examples;
 
 import io.github.ppzxc.strand.api.AcceptanceKind;
+import io.github.ppzxc.strand.api.MinimumProgressSpace;
 import io.github.ppzxc.strand.api.Request;
 import io.github.ppzxc.strand.api.RequestHandle;
 import io.github.ppzxc.strand.api.RequestOptions;
@@ -12,13 +13,12 @@ import io.github.ppzxc.strand.nio.AuthenticationResult;
 import io.github.ppzxc.strand.nio.Credentials;
 import io.github.ppzxc.strand.nio.Listener;
 import io.github.ppzxc.strand.nio.NioConnectAttempt;
+import io.github.ppzxc.strand.nio.NioMinimumProgress;
 import io.github.ppzxc.strand.nio.NioSecurity;
 import io.github.ppzxc.strand.nio.NioStrandClient;
 import io.github.ppzxc.strand.nio.NioStrandConnection;
 import io.github.ppzxc.strand.nio.NioStrandServer;
 import io.github.ppzxc.strand.nio.PreparedHandler;
-import io.github.ppzxc.strand.nio.internal.ProgressSpace;
-import io.github.ppzxc.strand.nio.internal.TlsSizes;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -26,8 +26,6 @@ import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
-import javax.net.ssl.SSLContext;
-import org.jspecify.annotations.Nullable;
 
 /**
  * NIO 전송의 앱 공개 API 사용 예제. 한 프로세스에서 서버와 클라이언트를 만들어 보안·연결 인증·핸들러 팩터리 준비 뒤 양방향 요청, 취소, 요청 기한, 연결 종료, 전체 종료를 순서대로
@@ -38,7 +36,7 @@ public final class NioAppExample {
     private NioAppExample() {}
 
     public static void main(String[] args) throws Exception {
-        AppExampleSupport.Outcome outcome = run(NioSecurity.externallySecured(), NioSecurity.externallySecured(), null);
+        AppExampleSupport.Outcome outcome = run(NioSecurity.externallySecured(), NioSecurity.externallySecured());
         System.out.println(
                 "echo=" + outcome.echoBody + " reverse=" + outcome.reverseBody + " close=" + outcome.closeKind);
     }
@@ -50,21 +48,19 @@ public final class NioAppExample {
     /**
      * @param serverSecurity 서버 쪽 채널 보안(TLS 또는 외부에서 보호된 채널)
      * @param clientSecurity 클라이언트 쪽 채널 보안
-     * @param tlsContext TLS 엔진 버퍼 크기를 알려 주는 컨텍스트. TLS를 쓰지 않으면 null
      */
-    static AppExampleSupport.Outcome run(
-            NioSecurity serverSecurity, NioSecurity clientSecurity, @Nullable SSLContext tlsContext) throws Exception {
+    static AppExampleSupport.Outcome run(NioSecurity serverSecurity, NioSecurity clientSecurity) throws Exception {
         AppExampleSupport.Outcome outcome = new AppExampleSupport.Outcome();
         // 앱이 소유하는 실행기: 인증·팩터리·핸들러·알림이 여기서 돈다. 끝나면 앱이 종료한다.
         ExecutorService appExecutor = AppExampleSupport.newAppExecutor("strand-nio-app-example");
         try {
             // 1) 필수 설정: 한도와 시간. 진행 공간은 전송 모듈이 알려 주는 최소 필요량이다.
-            ProgressSpace space = ProgressSpace.derive(
-                    AppExampleSupport.REQUESTS_PER_CONNECTION,
-                    AppExampleSupport.REQUESTS_PER_CONNECTION,
+            MinimumProgressSpace space = NioMinimumProgress.of(
+                    clientSecurity,
                     EndpointConfig.DEFAULT_MAX_FRAME_SIZE,
-                    tlsContext == null ? null : TlsSizes.of(tlsContext));
-            ResourceLimits limits = AppExampleSupport.limits(space.minimums());
+                    AppExampleSupport.REQUESTS_PER_CONNECTION,
+                    AppExampleSupport.REQUESTS_PER_CONNECTION);
+            ResourceLimits limits = AppExampleSupport.limits(space);
 
             // 2) 서버: 보안 → 연결 인증 → 팩터리 준비. 팩터리는 연결별 업무 상태를 만들고 종료 알림에서 정리한다.
             CompletableFuture<Void> stateReleased = new CompletableFuture<>();

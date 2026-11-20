@@ -738,18 +738,14 @@ final class ConnectionEngine {
         }
     }
 
-    /** 시도가 소유한 통로 정리 완료를 알린다. 알림은 앱용 실행기를 거치며, 거절되면 실행기 없이 확정한다(앱이 붙인 의존 단계는 이 스레드에서 실행될 수 있다. 공통 API의 변환 Stage가 거절을 실패로 확정하는 것과 같다). */
+    /** 시도가 소유한 통로 정리 완료를 알린다. 알림은 앱용 실행기를 거치며, 거절되거나 기한이 지나도록 실행하지 않으면 실행기 없이 확정한다(앱이 붙인 의존 단계는 이 스레드에서 실행될 수 있다. 공통 API의 변환 Stage가 거절을 실패로 확정하는 것과 같다). */
     private void completeReleased() {
         java.util.concurrent.CompletableFuture<Void> released = p.released;
         if (released == null || releasedNotified) {
             return;
         }
         releasedNotified = true;
-        try {
-            p.appExecutor.execute(() -> released.complete(null));
-        } catch (RuntimeException | Error e) {
-            released.complete(null);
-        }
+        StageCompletion.complete(p.appExecutor, () -> released.complete(null), p.releasedFallbackNanos);
     }
 
     /**
@@ -1241,7 +1237,7 @@ final class ConnectionEngine {
                     onClosed(event);
                     break;
                 default:
-                    break;
+                    throw new IllegalStateException("처리하지 않는 사건 종류: " + event.kind());
             }
         }
 

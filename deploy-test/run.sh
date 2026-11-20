@@ -6,8 +6,9 @@
 # 환경 변수 STRAND_EXPECTED_VERSION은 하네스 자체 시험용이다. 주면 받아 온 jar가 아니라 이 값과 비교한다(불일치 실패 확인).
 # 환경 변수 STRAND_CONSUMERS는 소비자를 공백으로 구분해 일부만 고른다(기본은 4개 전체). self-check가 쓴다.
 # 환경 변수 STRAND_EXPECTED_NIO_VERSION은 nio에 대해 같은 일을 한다.
-# 각 소비자는 core와 nio를 의존하고, 실행 중인 core의 StrandVersion.get()과 nio jar 매니페스트의 Implementation-Version이
-# 모두 기대 버전과 같을 때만 통과한다.
+# 환경 변수 STRAND_EXPECTED_NETTY_VERSION은 netty에 대해 같은 일을 한다.
+# 각 소비자는 core, nio, netty를 의존하고(netty는 Netty도 직접 의존한다), 실행 중인 core의 StrandVersion.get()과
+# nio·netty jar 매니페스트의 Implementation-Version이 모두 기대 버전과 같을 때만 통과한다.
 # 소비자 JDK는 25다. 하나라도 실패하면 비정상 종료한다.
 set -euo pipefail
 
@@ -58,6 +59,10 @@ if [ -n "${STRAND_EXPECTED_NIO_VERSION:-}" ]; then
   gradle_args+=("-PexpectedNioVersion=$STRAND_EXPECTED_NIO_VERSION")
   maven_args+=("-DexpectedNioVersion=$STRAND_EXPECTED_NIO_VERSION")
 fi
+if [ -n "${STRAND_EXPECTED_NETTY_VERSION:-}" ]; then
+  gradle_args+=("-PexpectedNettyVersion=$STRAND_EXPECTED_NETTY_VERSION")
+  maven_args+=("-DexpectedNettyVersion=$STRAND_EXPECTED_NETTY_VERSION")
+fi
 maven_opts=()
 if [ "$repo" != "mavenLocal" ]; then
   gradle_args+=("-PrepoUrl=$repo")
@@ -86,8 +91,8 @@ run_maven() {
   "$mvn" -B -ntp ${maven_opts[@]+"${maven_opts[@]}"} -f "$here/$1/pom.xml" compile exec:exec "${maven_args[@]}" | tee "$here/$1/output.log"
   check_output "$1"
   if [ "$repo" != "mavenLocal" ]; then
-    # Central에도 같은 좌표가 있을 수 있다. core와 nio가 지정 저장소에서 왔는지 로컬 저장소의 출처 기록으로 확인한다.
-    for module in strand-core strand-nio; do
+    # Central에도 같은 좌표가 있을 수 있다. core, nio, netty가 지정 저장소에서 왔는지 로컬 저장소의 출처 기록으로 확인한다.
+    for module in strand-core strand-nio strand-netty; do
       recorded_from_input "$maven_local_repo/io/github/ppzxc/$module/$version/_remote.repositories" || {
         echo "$module가 지정 저장소($repo)에서 오지 않았다" >&2
         exit 1
@@ -108,4 +113,4 @@ for consumer in ${STRAND_CONSUMERS:-gradle-classpath gradle-modulepath maven-cla
     *) echo "알 수 없는 소비자: $consumer" >&2; exit 2 ;;
   esac
 done
-echo "배포 테스트 소비자 통과: strand-core, strand-nio $version ($repo)"
+echo "배포 테스트 소비자 통과: strand-core, strand-nio, strand-netty $version ($repo)"

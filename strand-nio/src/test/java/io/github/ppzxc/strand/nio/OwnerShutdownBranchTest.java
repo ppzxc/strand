@@ -66,7 +66,8 @@ class OwnerShutdownBranchTest {
                     }
                     PassageFactory.closeQuietly(accepted);
                 },
-                fixture.executor);
+                fixture.executor,
+                TimeUnit.SECONDS.toNanos(5));
     }
 
     private static java.net.SocketAddress local(ServerSocketChannel server) {

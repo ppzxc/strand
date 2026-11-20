@@ -32,8 +32,10 @@ public final class ConnectionLimits {
         };
         long[] minimum = {frame, control, result, plaintext, ciphertext, tlsControl};
         for (int i = 0; i < kinds.length; i++) {
-            if (minimum[i] <= 0 || get(kinds[i]) < minimum[i]) {
-                throw new IllegalArgumentException("insufficient progress space: " + kinds[i]);
+            boolean tls = i >= 3;
+            if (minimum[i] < 0 || (!tls && minimum[i] == 0) || get(kinds[i]) < minimum[i]) {
+                throw new IllegalArgumentException("insufficient progress space: " + kinds[i] + " scope=per-connection"
+                        + " required=" + minimum[i] + " configured=" + get(kinds[i]));
             }
         }
     }

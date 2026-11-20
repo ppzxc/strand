@@ -31,13 +31,12 @@ class AppExamplesTest {
 
     @Test
     void nioExampleRunsOverPlainTcp() throws Exception {
-        assertFullFlow(NioAppExample.run(NioSecurity.externallySecured(), NioSecurity.externallySecured(), null));
+        assertFullFlow(NioAppExample.run(NioSecurity.externallySecured(), NioSecurity.externallySecured()));
     }
 
     @Test
     void nioExampleRunsOverTls() throws Exception {
-        assertFullFlow(NioAppExample.run(
-                NioSecurity.tls(TestTls.server()), NioSecurity.tls(TestTls.client()), TestTls.client()));
+        assertFullFlow(NioAppExample.run(NioSecurity.tls(TestTls.server()), NioSecurity.tls(TestTls.client())));
     }
 
     @Test
