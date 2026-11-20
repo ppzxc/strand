@@ -440,7 +440,7 @@ class NioStrandReservationTest {
         AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
         PreparationFailure failure = failures.poll(15, TimeUnit.SECONDS);
 
-        assertThat(failure).isNotNull();
+        assertThat(failure).as("실행기가 받은 작업:\n" + server.executor.journal()).isNotNull();
         assertThat(failure.stage()).isEqualTo(PreparationStage.HANDLER_FACTORY);
         assertThat(failure.cause()).isInstanceOf(RejectedExecutionException.class);
         assertThat(app.resourceUsage(Resource.FACTORY_TASKS).current()).isZero();

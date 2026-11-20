@@ -36,6 +36,31 @@ final class AppFixture implements AutoCloseable {
 
         private final java.util.Set<Integer> rejectedNumbers = java.util.concurrent.ConcurrentHashMap.newKeySet();
         private final AtomicInteger submitted = new AtomicInteger();
+        private final java.util.List<String> journal = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        /** 이 실행기가 받은 작업의 번호·수락 여부·호출 위치. 단정이 실패할 때 원인을 남기기 위한 기록이다. */
+        String journal() {
+            return String.join("\n", journal);
+        }
+
+        private static String caller() {
+            StringBuilder where = new StringBuilder();
+            for (StackTraceElement e : new Throwable().getStackTrace()) {
+                String cls = e.getClassName();
+                if (cls.contains("ppzxc") && !cls.contains("AppFixture")) {
+                    where.append(cls.substring(cls.lastIndexOf('.') + 1))
+                            .append('.')
+                            .append(e.getMethodName())
+                            .append(':')
+                            .append(e.getLineNumber())
+                            .append(' ');
+                    if (where.length() > 160) {
+                        break;
+                    }
+                }
+            }
+            return where.toString();
+        }
 
         /** 이 실행기에 들어오는 {@code number}번째 작업(1부터)만 거절한다. build()의 확인 작업이 1번이다. */
         void rejectTaskNumber(int number) {
@@ -53,10 +78,12 @@ final class AppFixture implements AutoCloseable {
         @Override
         public void execute(Runnable task) {
             int number = submitted.incrementAndGet();
-            if (rejectNext.compareAndSet(true, false)
+            boolean reject = rejectNext.compareAndSet(true, false)
                     || rejecting
                     || acceptRemaining.getAndDecrement() <= 0
-                    || rejectedNumbers.contains(number)) {
+                    || rejectedNumbers.contains(number);
+            journal.add("#" + number + (reject ? " 거절 " : " 수락 ") + caller());
+            if (reject) {
                 throw new java.util.concurrent.RejectedExecutionException("테스트가 거절한다");
             }
             delegate.execute(task);
