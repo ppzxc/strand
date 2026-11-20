@@ -93,11 +93,16 @@ public final class Listener {
     }
 
     /** 리스닝 소켓을 JDK가 놓을 때까지 선택 주기를 지나가며 기다린 뒤 완료한다. 선택기를 직접 부르지 않고 타이머로 이벤트 루프가 선택하게 한다. */
-    @SuppressWarnings("FutureReturnValueIgnored") // 재확인 타이머는 취소하지 않는다. 소켓이 풀리면 끝난다.
     private void settleWhenReleased(EventLoop loop) {
         if (channel.socketHeld() && !loop.isShuttingDown()) {
             try {
-                loop.schedule(() -> settleWhenReleased(loop), RELEASE_POLL_NANOS, TimeUnit.NANOSECONDS);
+                // 이벤트 루프가 끝나면 Netty가 예약 작업을 취소한다. 그때는 기다릴 선택 주기가 없으니 바로 끝낸다.
+                loop.schedule(() -> settleWhenReleased(loop), RELEASE_POLL_NANOS, TimeUnit.NANOSECONDS)
+                        .addListener(timer -> {
+                            if (timer.isCancelled()) {
+                                settle();
+                            }
+                        });
                 return;
             } catch (RejectedExecutionException e) {
                 // 이벤트 루프가 끝났다. 선택기가 닫히면 등록된 채널은 모두 풀린다.
