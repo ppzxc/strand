@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 하네스 자체 스모크. mavenLocal에 배포한 core와 nio의 POM 메타데이터와, 기대 버전이 틀리면 하네스가 실패하는지 확인한다.
+# 하네스 자체 스모크. mavenLocal에 배포한 core·api·nio·netty의 POM 메타데이터와, 기대 버전이 틀리면 하네스가 실패하는지 확인한다.
 # 사용법: deploy-test/self-check.sh <버전>   (먼저 ./gradlew publishToMavenLocal)
 set -euo pipefail
 
@@ -54,15 +54,51 @@ check_nio_pom() { # <nio pom 경로> <core pom 경로>
   [ -z "$extra" ] || { echo "nio POM에 strand-core·strand-api 외 의존이 있다: $(tr '\n' ' ' <<<"$extra")" >&2; return 1; }
 }
 
+# api POM 검사: 메타데이터와 api 전용 description. 의존은 jspecify(애너테이션 전용) 외에 없어야 한다.
+check_api_pom() { # <api pom 경로> <core pom 경로>
+  local api="$1" core="$2" extra
+  check_pom_metadata strand-api "$api" || return 1
+  check_pom_description "$api" || return 1
+  if [ "$(pom_description_line "$api")" = "$(pom_description_line "$core")" ]; then
+    echo "api description이 core와 같다: $(pom_description_line "$api")" >&2
+    return 1
+  fi
+  extra="$(pom_dependency_artifacts "$api" | grep -vx jspecify || true)"
+  [ -z "$extra" ] || { echo "api POM에 jspecify 외 의존이 있다: $(tr '\n' ' ' <<<"$extra")" >&2; return 1; }
+}
+
+# netty POM 검사: 메타데이터, 의존은 strand-core와 strand-api, 그리고 compileOnlyApi로 POM에 실리는 netty-transport뿐.
+check_netty_pom() { # <netty pom 경로> <core pom 경로>
+  local netty="$1" core="$2" deps extra need
+  check_pom_metadata strand-netty "$netty" || return 1
+  check_pom_description "$netty" || return 1
+  if [ "$(pom_description_line "$netty")" = "$(pom_description_line "$core")" ]; then
+    echo "netty description이 core와 같다: $(pom_description_line "$netty")" >&2
+    return 1
+  fi
+  deps="$(pom_dependency_artifacts "$netty" | grep -vxE 'jspecify|netty-transport' || true)"
+  for need in strand-core strand-api; do
+    grep -qx -- "$need" <<<"$deps" || { echo "netty POM에 $need 의존이 없다" >&2; return 1; }
+  done
+  extra="$(grep -vxE 'strand-core|strand-api' <<<"$deps" || true)"
+  [ -z "$extra" ] || { echo "netty POM에 strand-core·strand-api 외 의존이 있다: $(tr '\n' ' ' <<<"$extra")" >&2; return 1; }
+}
+
 core_pom="$m2/strand-core/$version/strand-core-$version.pom"
 nio_pom="$m2/strand-nio/$version/strand-nio-$version.pom"
+api_pom="$m2/strand-api/$version/strand-api-$version.pom"
+netty_pom="$m2/strand-netty/$version/strand-netty-$version.pom"
 check_pom_metadata strand-core "$core_pom" || exit 1
 check_pom_description "$core_pom" || exit 1
 [ "$(pom_description_line "$core_pom")" = "<description>strand: 바이트 인코딩·디코딩 규격의 Java 구현</description>" ] \
   || { echo "core description이 기대한 문구가 아니다: $(pom_description_line "$core_pom")" >&2; exit 1; }
 echo "POM 메타데이터 확인: strand-core"
 check_nio_pom "$nio_pom" "$core_pom" || exit 1
-echo "nio POM 메타데이터, core와 다른 description, 의존(strand-core·strand-api) 확인"
+check_api_pom "$api_pom" "$core_pom" || exit 1
+echo "api POM 메타데이터, core와 다른 description, jspecify 외 의존 없음 확인"
+check_netty_pom "$netty_pom" "$core_pom" || exit 1
+echo "netty POM 메타데이터, core와 다른 description, 의존(strand-core·strand-api·netty-transport) 확인"
+echo "nio POM 메타데이터, core와 다른 description, 의존(strand-core·strand-api·netty-transport) 확인"
 
 # nio POM이 어긋나면 검사가 실패하는지 변조한 사본으로 확인한다.
 pomdir="$(mktemp -d)"
@@ -112,6 +148,18 @@ if ! grep -q "버전 불일치" <<<"$output" || ! grep -q "strand-nio expected=0
   exit 1
 fi
 echo "틀린 nio 기대 버전에서 하네스가 버전 불일치로 실패 확인"
+
+# netty만 기대 버전이 틀려도 같은 방식으로 실패해야 한다.
+if output="$(STRAND_CONSUMERS=gradle-classpath STRAND_EXPECTED_NETTY_VERSION="0.0.0-wrong" "$here/run.sh" "$version" 2>&1)"; then
+  echo "netty 기대 버전이 틀렸는데 하네스가 통과했다" >&2
+  exit 1
+fi
+if ! grep -q "버전 불일치" <<<"$output" || ! grep -q "strand-netty expected=0.0.0-wrong" <<<"$output"; then
+  echo "하네스가 netty 버전 불일치가 아닌 다른 사유로 실패했다:" >&2
+  echo "$output" >&2
+  exit 1
+fi
+echo "틀린 netty 기대 버전에서 하네스가 버전 불일치로 실패 확인"
 
 # Maven 3.9.x와 3.10의 출처 기록 형식을 모두 인정하고, 다른 저장소나 빈 기록은 거부하는지 확인한다.
 check_origin() { # <기대: ok|no> <기록 내용>
