@@ -153,8 +153,8 @@ class EndpointNextDeadlineTest {
 
     @Test
     void reflectsTheAckWaitOfTheHelloAndEndingItClosesTheConnection() {
-        Endpoint server =
-                Endpoint.server(EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000).authTimeoutMs(FAR));
+        Endpoint server = Endpoint.server(
+                EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000).authTimeoutMs(FAR));
         server.receive(bytes(PREFACE));
         server.drainMessages();
 
@@ -168,7 +168,8 @@ class EndpointNextDeadlineTest {
 
     @Test
     void reflectsTheAckWaitOfThePing() {
-        Endpoint server = open(EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000).authTimeoutMs(FAR));
+        Endpoint server = open(
+                EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000).authTimeoutMs(FAR));
         server.advance(300);
         server.ping(PING_PAYLOAD);
         server.drainMessages();
@@ -180,7 +181,8 @@ class EndpointNextDeadlineTest {
 
     @Test
     void reflectsTheAckWaitOfTheAuth() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000));
+        Endpoint client =
+                Endpoint.client(EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000));
         client.drainMessages();
         client.advance(200);
         client.receive(bytes(HELLO));
@@ -196,8 +198,8 @@ class EndpointNextDeadlineTest {
 
     @Test
     void reflectsTheServerAuthWait() {
-        Endpoint server =
-                Endpoint.server(EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(FAR).authTimeoutMs(700));
+        Endpoint server = Endpoint.server(
+                EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(FAR).authTimeoutMs(700));
         server.receive(bytes(PREFACE));
         server.advance(50);
         server.receive(bytes(HELLO));
@@ -236,8 +238,11 @@ class EndpointNextDeadlineTest {
 
     @Test
     void returnsTheEarliestOfSeveral() {
-        Endpoint server = open(
-                EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000).authTimeoutMs(FAR).idleIntervalMs(5000));
+        Endpoint server = open(EndpointConfig.defaults()
+                .idleIntervalMs(0)
+                .ackTimeoutMs(1000)
+                .authTimeoutMs(FAR)
+                .idleIntervalMs(5000));
         server.request(257, new byte[0], 4000);
         server.advance(200);
         server.ping(PING_PAYLOAD);

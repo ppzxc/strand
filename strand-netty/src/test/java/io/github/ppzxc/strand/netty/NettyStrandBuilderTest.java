@@ -137,17 +137,21 @@ class NettyStrandBuilderTest {
 
     @Test
     void anIdlePingIntervalOfZeroTurnsIdlePingOff() {
-        CommonSettings.Common common = complete().idlePingInterval(Duration.ZERO).validate();
+        CommonSettings.Common common =
+                complete().idlePingInterval(Duration.ZERO).validate();
 
         assertThat(common.idleIntervalMs).isZero();
     }
 
     @Test
     void outOfRangeIdlePingIntervalAndAckTimeoutAreRejectedAtBuild() {
-        assertThatThrownBy(() -> complete().idlePingInterval(Duration.ofSeconds(-1)).build())
+        assertThatThrownBy(() ->
+                        complete().idlePingInterval(Duration.ofSeconds(-1)).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("idlePingInterval");
-        assertThatThrownBy(() -> complete().idlePingInterval(Duration.ofSeconds(Long.MAX_VALUE)).build())
+        assertThatThrownBy(() -> complete()
+                        .idlePingInterval(Duration.ofSeconds(Long.MAX_VALUE))
+                        .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("idlePingInterval");
         assertThatThrownBy(() -> complete().ackTimeout(Duration.ZERO).build())
@@ -156,7 +160,9 @@ class NettyStrandBuilderTest {
         assertThatThrownBy(() -> complete().ackTimeout(Duration.ofSeconds(-1)).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ackTimeout");
-        assertThatThrownBy(() -> complete().ackTimeout(Duration.ofSeconds(Long.MAX_VALUE)).build())
+        assertThatThrownBy(() -> complete()
+                        .ackTimeout(Duration.ofSeconds(Long.MAX_VALUE))
+                        .build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ackTimeout");
     }
