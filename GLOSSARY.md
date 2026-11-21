@@ -129,7 +129,7 @@ _Avoid_: 흐름 제어(Flow Control - 윈도우 기반과 구분), 스로틀링
 _Avoid_: 미응답 바이트, 크레딧, 윈도우
 
 **대기 중인 스트림 (Pending Stream)**:
-정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어). 내 요청은 넘긴 때부터다
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
 _Avoid_: 유휴 스트림, 유예 상태, 진행 중인 스트림
 
 **내 요청의 단계 (Request Stages)**:
