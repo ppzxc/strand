@@ -21,3 +21,10 @@ req-hello-peer-frame-size-limit 형식미지원 상대가 알린 max_frame_size�
 req-stream-frame-before-handoff-discard 형식미지원 요청을 넘기기 전에 그 번호로 응답이나 RESET이 오는 상황은 벡터 형식에서 넘김 시점을 입력으로 정할 수 없어 만들 수 없다. 코드는 아직 따르지 않으며 #361의 티켓 #373이 구현한다
 req-close-end-certainty-partial-disconnect 형식미지원 쓰기를 시작했지만 넘기지 못한 요청은 NIO 실행 경로에서 부분 쓰기(write_limit_bytes) 뒤 취소로만 끝낼 수 있어, 끊김으로 끝나는 벡터를 만들 수 없다. core Endpoint 테스트가 고정한다 (#372)
 req-close-end-certainty-partial-own-end 형식미지원 쓰기를 시작했지만 넘기지 못한 요청은 NIO 실행 경로에서 부분 쓰기(write_limit_bytes) 뒤 취소로만 끝낼 수 있어, 내 쪽 오류 CLOSE로 끝나는 벡터를 만들 수 없다. core Endpoint 테스트가 고정한다 (#372)
+# 관측불가: 1.2절 WebSocket 오류 종료의 상태 코드와 Ping/Pong. WebSocket 계층의 동작이라 바이트·메시지 입출력으로 볼 수 없다.
+req-ws-close-error-not-1000 관측불가 오류 CLOSE 뒤 WebSocket Close의 상태 코드는 WebSocket 계층의 동작이다. core는 오류 종료에 WebSocket Close를 내지 않고 상태 코드는 전송 모듈이 고르므로 입출력으로 볼 수 없다
+req-ws-ping-pong-not-liveness 관측불가 WebSocket Ping·Pong은 WebSocket 계층의 제어 프레임이라 strand 프레임의 입출력으로 관측할 수 없다
+# 형식미지원: 크기 초과 프레임과 넘기지 못한 유휴 PING.
+req-hello-oversize-request-local-fail 형식미지원 상대의 max_frame_size를 넘는 요청을 호출 API에 냈을 때의 로컬 실패는 벡터 결과로 표현할 수 없다(req-hello-peer-frame-size-limit과 같은 사유)
+req-hello-oversize-auth-close-silent 형식미지원 클라이언트 AUTH가 상대 max_frame_size를 넘는 상황을 만드는 입력이 벡터 형식에 없다
+req-setup-unsent-idle-ping-close 형식미지원 쓰기가 막혀 전송 계층에 넘기지 못하는 상황(쓰기 완료 보고를 미루는 입력)이 벡터 형식에 없다. 코드는 아직 따르지 않으며 #361의 티켓 #375가 구현한다
