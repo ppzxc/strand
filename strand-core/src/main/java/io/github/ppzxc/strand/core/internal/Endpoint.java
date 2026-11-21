@@ -1921,7 +1921,7 @@ public final class Endpoint {
         messageBuffer = NO_BYTES;
         messageLength = 0;
         timers.clear();
-        for (OwnRequestLedger.Outcome outcome : ledger.onTransportClosed()) {
+        for (OwnRequestLedger.Outcome outcome : ledger.onTransportClosed(phase.endedByDisconnect())) {
             applyOutcome(outcome);
         }
         deferredPings.clear();
