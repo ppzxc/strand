@@ -625,7 +625,7 @@ final class ConnectionEngine {
             }
             switch (result.kind()) {
                 case ACCEPTED:
-                    loop.endpoint.completeAuthentication(id, AuthDecision.PASS);
+                    loop.endpoint.completeAuthentication(id, AuthDecision.PASS, result.lifetime());
                     facade.authenticated(
                             new AuthenticatedPeer(Objects.requireNonNull(result.principal()), p.remoteAddress));
                     startFactory(loop);
@@ -1252,7 +1252,7 @@ final class ConnectionEngine {
                     onRequestReset(event);
                     break;
                 case AUTHENTICATED:
-                    onClientAuthenticated();
+                    onClientAuthenticated(event);
                     break;
                 case AUTHENTICATION_REQUIRED:
                     onAuthenticationRequired(event);
@@ -1282,7 +1282,8 @@ final class ConnectionEngine {
             return streamId > 0 && writing != null && writingOffset > 0 && writing.applicationStreamId() == streamId;
         }
 
-        private void onClientAuthenticated() {
+        private void onClientAuthenticated(Event event) {
+            facade.announcedCredentialLifetime(event.credentialLifetime());
             Object principal = principalOf();
             facade.authenticated(new AuthenticatedPeer(principal, p.remoteAddress));
             activate(this, p.handler);

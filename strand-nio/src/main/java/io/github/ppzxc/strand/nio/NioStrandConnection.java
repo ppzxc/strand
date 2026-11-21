@@ -9,6 +9,7 @@ import io.github.ppzxc.strand.api.ResourceUsage;
 import io.github.ppzxc.strand.api.Result;
 import java.net.SocketAddress;
 import java.util.Objects;
+import java.util.OptionalLong;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -19,6 +20,7 @@ public final class NioStrandConnection {
     private final ConnectionEngine engine;
     private final SocketAddress remoteAddress;
     private volatile @Nullable AuthenticatedPeer peer;
+    private volatile OptionalLong credentialLifetime = OptionalLong.empty();
 
     NioStrandConnection(ConnectionParams params) {
         this.remoteAddress = params.remoteAddress;
@@ -112,6 +114,16 @@ public final class NioStrandConnection {
     }
 
     /**
+     * 서버가 연결 인증 통과 때 알린 남은 자격 증명 수명(초, 규격 3.3.1절 {@code credential_lifetime}). 클라이언트 연결에서 서버가 알리지 않았으면 비어
+     * 있다. 서버 연결에서는 항상 비어 있다. 라이브러리는 수명이 지나도 연결을 스스로 닫지 않는다.
+     *
+     * @return 알린 수명(초)
+     */
+    public OptionalLong credentialLifetime() {
+        return credentialLifetime;
+    }
+
+    /**
      * 상대 주소.
      *
      * @return 상대 주소
@@ -137,6 +149,10 @@ public final class NioStrandConnection {
 
     void shutdownAbort() {
         engine.shutdownAbort();
+    }
+
+    void announcedCredentialLifetime(OptionalLong value) {
+        this.credentialLifetime = value;
     }
 
     void authenticated(AuthenticatedPeer value) {

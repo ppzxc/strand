@@ -5,6 +5,7 @@ import io.github.ppzxc.strand.api.Result;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +25,7 @@ abstract class Rig implements AutoCloseable {
     /** 서버를 만드는 설정. 팩터리가 있으면 핸들러보다 우선한다. */
     static final class ServerSetup {
         App.AuthCheck auth = mechanism -> "peer";
+        OptionalLong lifetime = OptionalLong.empty();
         App.Factory factory;
         App.Handler handler = request -> {};
         Duration grace = Duration.ofSeconds(1);
@@ -31,6 +33,11 @@ abstract class Rig implements AutoCloseable {
 
         ServerSetup auth(App.AuthCheck value) {
             this.auth = value;
+            return this;
+        }
+
+        ServerSetup credentialLifetime(long seconds) {
+            this.lifetime = OptionalLong.of(seconds);
             return this;
         }
 

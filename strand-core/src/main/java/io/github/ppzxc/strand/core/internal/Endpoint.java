@@ -1664,17 +1664,34 @@ public final class Endpoint {
             phase.causedBy(e);
             decision = AuthDecision.TRANSIENT_FAILURE;
         }
-        finishAuthentication(decision);
+        finishAuthentication(decision, config.credentialLifetimeSeconds());
     }
 
-    /** 인증 판단 식별자에 대한 결과를 입력한다. 늦거나 중복된 결과는 무시한다. */
+    /** 인증 판단 식별자에 대한 결과를 입력한다. 통과여도 수명은 알리지 않는다. 늦거나 중복된 결과는 무시한다. */
     public void completeAuthentication(long id, AuthDecision decision) {
+        completeAuthentication(id, decision, OptionalLong.empty());
+    }
+
+    /**
+     * 인증 판단 식별자에 대한 결과를 입력한다. 늦거나 중복된 결과는 무시한다.
+     *
+     * @param credentialLifetime 통과일 때 {@code AUTH(ACK)}의 {@code credential_lifetime}으로 알릴 남은 수명(초, 부호 없는 32비트).
+     *     비어 있으면 알리지 않는다. 통과가 아니면 쓰지 않는다
+     * @throws IllegalArgumentException 수명이 부호 없는 32비트 범위를 벗어났을 때
+     */
+    public void completeAuthentication(long id, AuthDecision decision, OptionalLong credentialLifetime) {
         Objects.requireNonNull(decision, "decision");
+        Objects.requireNonNull(credentialLifetime, "credentialLifetime");
+        if (credentialLifetime.isPresent()
+                && (credentialLifetime.getAsLong() < 0 || credentialLifetime.getAsLong() > 0xFFFF_FFFFL)) {
+            throw new IllegalArgumentException(
+                    "credentialLifetime은 부호 없는 32비트 정수여야 한다: " + credentialLifetime.getAsLong());
+        }
         if (id != AUTHENTICATION_ID || !authenticationPending || !phase.isActive()) {
             return;
         }
         authenticationPending = false;
-        finishAuthentication(decision);
+        finishAuthentication(decision, credentialLifetime);
     }
 
     /** 인증을 마친 연결에서 핸들러 준비가 완료되었음을 알린다. */
@@ -1684,7 +1701,7 @@ public final class Endpoint {
         }
     }
 
-    private void finishAuthentication(AuthDecision decision) {
+    private void finishAuthentication(AuthDecision decision, OptionalLong credentialLifetime) {
         if (!phase.isActive()) {
             // 콜백 안에서 CLOSE를 보냈거나 연결 오류로 CLOSE 교환으로 쳤거나 연결이 끝났다(isActive는 이 셋을 모두 거짓으로 답한다). 판정과 무관하게
             // CLOSE·CLOSED 뒤 프레임을 쌓지 않는다(규격 3.5절). AUTH 단계에는 대기 중인 스트림이 없어 콜백 안의 close()가 conclude()로 곧바로
@@ -1696,7 +1713,6 @@ public final class Endpoint {
             connectionError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);
             return;
         }
-        OptionalLong credentialLifetime = config.credentialLifetimeSeconds();
         send(Frames.authAck(credentialLifetime));
         openAuthGate();
     }
