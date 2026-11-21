@@ -30,6 +30,7 @@ import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 
 /** strand-netty의 앱 공개 API를 중립 모양으로 감싼다. */
@@ -108,6 +109,11 @@ final class NettyRig extends Rig {
         public Object principal() {
             return connection.authenticatedPeer().principal();
         }
+
+        @Override
+        public OptionalLong credentialLifetime() {
+            return connection.credentialLifetime();
+        }
     }
 
     private static final class In implements App.In {
@@ -170,7 +176,9 @@ final class NettyRig extends Rig {
                     Object principal = setup.auth.verify(credentials.mechanism());
                     return principal == null
                             ? AuthenticationResult.rejected()
-                            : AuthenticationResult.accepted(principal);
+                            : setup.lifetime.isPresent()
+                                    ? AuthenticationResult.accepted(principal, setup.lifetime.getAsLong())
+                                    : AuthenticationResult.accepted(principal);
                 });
         if (setup.factory != null) {
             builder.handlerFactory(connection -> prepared(setup.factory.create(new Conn(connection))));
