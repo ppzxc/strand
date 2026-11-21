@@ -129,8 +129,12 @@ _Avoid_: 흐름 제어(Flow Control - 윈도우 기반과 구분), 스로틀링
 _Avoid_: 미응답 바이트, 크레딧, 윈도우
 
 **대기 중인 스트림 (Pending Stream)**:
-정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어)
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어). 내 요청은 넘긴 때부터다
 _Avoid_: 유휴 스트림, 유예 상태, 진행 중인 스트림
+
+**내 요청의 단계 (Request Stages)**:
+정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어). 번호를 받음, 쓰기를 시작함, 넘김 셋이다
+_Avoid_: 요청을 "보냈다"(단독 표기. 어느 단계인지 가리킬 것), 전송됨, 발송됨, 쓰기 완료(넘김과 혼동 주의. 전송 계층에 넘긴 때이지 상대가 받은 때가 아니다)
 
 **결과 확정성 (Outcome Certainty)**:
 정의: [규격 1.3절](docs/specification/STRAND_SPECIFICATION.md#13-용어). 값은 **응답 받음**, **처리 안 됨**, **결과 모름** 셋이다

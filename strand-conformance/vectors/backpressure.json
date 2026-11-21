@@ -664,7 +664,7 @@
       "id": "local-failure-at-peer-limit-sends-nothing-and-keeps-the-number",
       "description": "상대 엔드포인트가 max_concurrent_streams를 1로 알렸고 요청 1이 대기 중이면, 다음 요청은 대기열에 넣지 않고 프레임 없이 로컬 UNAVAILABLE로 즉시 실패한다. 스트림을 열기 전의 로컬 결과라서 stream_id가 없는 result(처리 안 됨)로 단언한다. 이 실패는 스트림 번호를 쓰지 않으므로, 요청 1의 응답을 받아 자리가 나면 다음 요청이 번호 3으로 나간다",
       "requirements": [
-        "req-hello-peer-concurrent-limit",
+        "req-hello-peer-concurrent-limit-numbered",
         "req-stream-ends-on-response-or-reset",
         "req-stream-id-increasing"
       ],
