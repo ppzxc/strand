@@ -99,7 +99,7 @@ class ConnectionDriverClockTest {
     }
 
     private static EndpointConfig config() {
-        return EndpointConfig.defaults().webSocket();
+        return EndpointConfig.defaults().webSocket().idleIntervalMs(0);
     }
 
     private Side startClient(Side side, EndpointConfig config) {

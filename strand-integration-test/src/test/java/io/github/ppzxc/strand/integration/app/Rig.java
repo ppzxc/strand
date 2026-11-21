@@ -57,6 +57,16 @@ abstract class Rig implements AutoCloseable {
         Duration grace = Duration.ofSeconds(1);
         Duration deadline = Duration.ofSeconds(5);
 
+        Duration idlePingInterval;
+        Duration ackTimeout;
+
+        /** 유휴 PING 간격과 확인 대기 시간을 정한다. 정하지 않으면 builder 기본값이다. */
+        ClientSetup liveness(Duration idle, Duration ack) {
+            this.idlePingInterval = idle;
+            this.ackTimeout = ack;
+            return this;
+        }
+
         ClientSetup handler(App.Handler value) {
             this.handler = value;
             return this;

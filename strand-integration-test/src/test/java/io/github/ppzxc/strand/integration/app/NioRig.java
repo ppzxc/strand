@@ -254,6 +254,14 @@ final class NioRig extends Rig {
                 .preparationDeadline(java.time.Duration.ofSeconds(10))
                 .shutdownGrace(setup.grace)
                 .shutdownDeadline(setup.deadline)
+                .idlePingInterval(setup.idlePingInterval == null
+                        ? java.time.Duration.ofMillis(
+                                io.github.ppzxc.strand.core.internal.EndpointConfig.DEFAULT_IDLE_INTERVAL_MS)
+                        : setup.idlePingInterval)
+                .ackTimeout(setup.ackTimeout == null
+                        ? java.time.Duration.ofMillis(
+                                io.github.ppzxc.strand.core.internal.EndpointConfig.DEFAULT_ACK_TIMEOUT_MS)
+                        : setup.ackTimeout)
                 .maxFrameSize(spec.maxFrameSize)
                 .security(clientSecurity)
                 .handler(handler(setup.handler))
