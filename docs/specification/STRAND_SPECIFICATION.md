@@ -32,6 +32,8 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
    - 메시지 기반 사용 환경. 단일 WebSocket 바이너리 메시지(`Opcode 0x02`) 1개에 정확히 Strand 프레임 1개를 싣는다(MUST)<a id="req-ws-one-frame-per-message"></a>. WebSocket 연결의 식별은 1.2.1절이 정한다.
    - 프레임 헤더(20바이트)와 payload 형식, 제어 프레임 및 상태 머신은 strand over TCP와 100% 동일하다.
    - 연결 서문(Connection Preface)은 첫 번째 바이너리 메시지로 보내며(3.1절), 연결을 닫을 때(3.5절)는 WebSocket 닫기(`Close Frame 0x08`)를 수행한다. CLOSE를 보내는 종료에서는 CLOSE 송신 뒤에 수행하고(MUST)<a id="req-ws-close-after-close-send"></a>, `NO_ERROR` 종료에는 `1000 Normal Closure`를 쓴다(MUST)<a id="req-ws-close-no-error-1000"></a>.
+   - 오류 CLOSE(`NO_ERROR`가 아닌 코드)를 보내거나 받은 연결을 WebSocket 닫기로 닫을 때의 상태 코드는 정하지 않는다. 단 `1000`은 쓰지 않는다(MUST NOT)<a id="req-ws-close-error-not-1000"></a>.
+   - WebSocket 계층의 Ping·Pong은 이 규격의 PING(3.4절)과 무관하다. 엔드포인트는 이를 PING 대신 생존 확인으로 쓰지 않는다(MUST NOT)<a id="req-ws-ping-pong-not-liveness"></a>. 유휴 PING과 확인 대기는 strand over WebSocket에서도 3.3절, 3.4.1절을 따른다.
    - 메시지 경계 위반: 서문 메시지의 위반은 3.1절을 따른다. 서문 뒤에 텍스트 메시지가 오거나, 크기가 4 + `length`와 다른 바이너리 메시지가 오면 연결 오류다(MUST, 5.1절 3번)<a id="req-ws-message-boundary-violation"></a>.
 
 #### 1.2.1 WebSocket 하위 프로토콜
@@ -48,7 +50,8 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 | **가닥 (Strand)** | 단일 연결 안에서 독립적으로 교환되는 하나의 요청과 그에 대한 단일 응답이 이루는 통신 단위 |
 | **스트림 (Stream)** | 동일한 `stream_id`를 공유하는 요청 프레임과 응답 프레임의 논리적 쌍. 스트림당 1개 요청과 1개 응답만 허용 |
 | **번호 공간 (Stream ID Space)** | 한 엔드포인트가 새 스트림에 쓰는 `stream_id`의 집합. 클라이언트는 홀수, 서버는 짝수를 쓰며, 크기 비교는 같은 공간 안에서만 한다(2.2.5절) |
-| **대기 중인 스트림 (Pending Stream)** | 요청을 보냈거나 받아들였고, 아직 응답이나 RESET이 오가지 않은 스트림. 스트림의 상태는 대기와 끝남 두 가지뿐이다(4.3절) |
+| **내 요청의 단계 (Request Stages)** | 내가 보낸 요청이 거치는 세 단계. **번호를 받음**은 요청이 `stream_id`를 받은 때다. **쓰기를 시작함**은 요청 프레임의 첫 바이트를 전송 계층에 넘긴 때다. **넘김**은 요청 프레임의 마지막 바이트를 전송 계층에 넘긴 때다. WebSocket에서는 프레임 하나를 바이너리 메시지 하나로 한 번에 WebSocket 계층에 넘기므로 쓰기를 시작함과 넘김이 같은 때다. 대기열 요청(아래)은 번호를 받기 전이다 |
+| **대기 중인 스트림 (Pending Stream)** | 내 요청은 넘긴 때부터, 받은 요청은 받아들인 때부터 아직 응답이나 RESET이 오가지 않은 스트림. 스트림의 상태는 대기와 끝남 두 가지뿐이다(4.3절) |
 | **대기열 요청 (Queued Request)** | 상대가 알린 `max_concurrent_streams`에 닿아 프레임을 보내지 못하고 기다리는 내 요청. 아직 `stream_id`를 받지 못했으며 스트림이 아니다(3.2.3절). 결과는 3.5절, 4.4절, 4.4.1절이 정한다 |
 | **개시자 (Initiator)** | 특정 스트림의 요청 프레임을 먼저 전송하여 가닥(Strand)을 시작한 엔드포인트 (클라이언트 또는 서버) |
 | **수신자 (Receiver)** | 개시자가 보낸 요청 프레임을 수신하여 처리하고 응답 프레임을 돌려주는 엔드포인트 |
@@ -62,7 +65,7 @@ strand over WebSocket은 하위 프로토콜 `Sec-WebSocket-Protocol: strand`로
 | **줄 앞 막힘 (Head-of-Line Blocking)** | 앞선 프레임을 다 쓰거나 다 읽기 전에는 뒤 프레임을 보내지도 읽지도 못하는 현상. 프레임을 쪼개지 않으므로 한 연결에서 막히는 시간은 `max_frame_size` 프레임 하나를 옮기는 시간이 한계다(2.1절, 3.2.3절) |
 | **배압 (Backpressure)** | 수신자의 처리 용량을 초과하지 않도록 송신량을 제어하는 메커니즘. 한도를 넘는 새 요청이나 로컬 사유로 받지 않는 새 요청을 즉시 거절한다(4.5절) |
 | **거절 (Refusal)** | 받는 쪽이 새 요청을 애플리케이션에 넘기기 전에 `RESET(REFUSED)`로 돌려보내는 것. 거절한 요청은 처리를 시작하지 않은 것이라 결과 확정성이 늘 처리 안 됨이다(4.4절, 4.5절) |
-| **동시 스트림 수 (Concurrent Streams)** | 한 번호 공간에서 대기 중인 스트림의 개수. 받는 쪽은 상대 공간을, 보내는 쪽은 내 공간을 센다(3.2.3절, 4.5절) |
+| **동시 스트림 수 (Concurrent Streams)** | 받는 쪽은 상대 번호 공간에서 대기 중인 스트림의 개수다(4.5절). 보내는 쪽은 내 번호 공간에서 번호를 받은 요청 가운데 끝나지 않은 것의 개수이며 넘기기 전인 요청도 센다(3.2.3절) |
 | **연결 종료 (CLOSE)** | 연결 전체의 종료를 알리는 제어 프레임. payload에 `error_code`와 `last_stream_id`를 싣는다(3.5절) |
 | **연결 오류 (Connection Error)** | 5.1절 3번 목록에 드는 수신 입력과 그 반응(5.1절) |
 | **CLOSE 교환 (Close Exchanged)** | CLOSE를 보냈거나 받은 상태(3.5절) |
@@ -318,7 +321,13 @@ HELLO 송신 규칙은 다음과 같다(모두 MUST).
 
 모르는 identifier는 무시한다(MUST)<a id="req-hello-unknown-identifier-ignore"></a>. 같은 identifier가 두 번 나오는 것은 모르는 identifier라도 연결 오류다(3.2.5절).
 
-`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알린 `max_frame_size`보다 큰 프레임을 보내지 않고(MUST)<a id="req-hello-peer-frame-size-limit"></a>, 내가 연 스트림 중 대기 중인 것(4.3절)이 이미 상대가 알린 `max_concurrent_streams`개이면 새 요청을 보내지 않는다(MUST)<a id="req-hello-peer-concurrent-limit"></a>. 받는 쪽이 세는 방법과 거절은 4.5절이다. 한도에 닿았을 때 새 요청을 기다리게 할지 로컬에서 실패시킬지는 구현이 정한다. 실패시키면 프레임을 보내지 않고 번호도 쓰지 않으며, 결과는 `stream_id` 없는 로컬 `UNAVAILABLE`(처리 안 됨)이다. 기다리게 한 요청이 대기열 요청이다(1.3절). 상대 HELLO를 받기 전에 보내는 프레임(HELLO·CLOSE)은 상대의 `max_frame_size`를 허용 범위의 최솟값 16 KiB로 보고 보낸다(MUST)<a id="req-hello-prehello-frame-size-min"></a>. 상대 HELLO가 연결 오류에 걸려 보내는 CLOSE도 같다.
+`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알린 `max_frame_size`보다 큰 프레임을 보내지 않고(MUST)<a id="req-hello-peer-frame-size-limit"></a>, 내 번호 공간에서 번호를 받은 요청 가운데 끝나지 않은 것(넘기기 전인 요청 포함, 1.3절)이 이미 상대가 알린 `max_concurrent_streams`개이면 새 요청을 보내지 않는다(MUST)<a id="req-hello-peer-concurrent-limit-numbered"></a>. 받는 쪽이 세는 방법과 거절은 4.5절이다. 한도에 닿았을 때 새 요청을 기다리게 할지 로컬에서 실패시킬지는 구현이 정한다. 실패시키면 프레임을 보내지 않고 번호도 쓰지 않으며, 결과는 `stream_id` 없는 로컬 `UNAVAILABLE`(처리 안 됨)이다. 기다리게 한 요청이 대기열 요청이다(1.3절). 
+
+**상대 `max_frame_size`를 넘는 프레임.** 보내려는 프레임이 상대가 알린 `max_frame_size`보다 크면 그 프레임은 보내지 않는다. 요청이면 프레임을 보내지 않고 번호도 쓰지 않으며 로컬에서 실패시킨다(MUST)<a id="req-hello-oversize-request-local-fail"></a>. 클라이언트의 `AUTH`이면 `AUTH`도 `CLOSE`도 보내지 않고 전송 계층을 닫는다(MUST)<a id="req-hello-oversize-auth-close-silent"></a>.
+
+> 비규범 주석: 응답이 상대의 `max_frame_size`를 넘으면 payload를 줄이거나 `RESOURCE_EXHAUSTED`(2.5.1절)로 답한다.
+
+상대 HELLO를 받기 전에 보내는 프레임(HELLO·CLOSE)은 상대의 `max_frame_size`를 허용 범위의 최솟값 16 KiB로 보고 보낸다(MUST)<a id="req-hello-prehello-frame-size-min"></a>. 상대 HELLO가 연결 오류에 걸려 보내는 CLOSE도 같다.
 
 각 엔드포인트는 상대 HELLO가 첫 프레임 검사(3.2.4절)를 통과하면 payload를 검증한다(MUST)<a id="req-hello-payload-validate"></a>. `max_frame_size`가 허용 범위(16 KiB\~1 MiB) 밖이면 검증에 실패한 것이며 연결 오류다(5.1절). 통과하면 상대 HELLO에 ACK HELLO로 답하고, 실패하면 ACK를 보내지 않는다. 서버와 클라이언트가 같은 규칙을 쓴다.
 
@@ -361,6 +370,8 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 **AUTH 대기.** 서버가 상대 HELLO에 ACK를 보낸 때부터 정해 둔 시간이 지나도록 `AUTH`를 받지 못하면 `CLOSE(UNAUTHENTICATED)`를 보내고 닫는다(MUST)<a id="req-setup-auth-timeout-close"></a>. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(3.5절). 대기 시간의 값은 로컬 설정이다. 클라이언트의 `AUTH(ACK)` 대기는 아래 확인 대기를 따른다.
 
 **확인 대기.** HELLO·PING·AUTH를 전송 계층에 넘긴 때(WebSocket에서는 그 프레임을 담은 바이너리 메시지를 WebSocket 계층에 넘긴 때)부터 정해 둔 시간이 지나도록 상대의 ACK가 오지 않으면 `CLOSE(UNRESPONSIVE)`를 보내고 닫는다(MUST)<a id="req-setup-ack-timeout-close"></a>. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(3.5절). 대기 시간의 값은 로컬 설정이다.
+
+**넘기지 못한 유휴 PING.** 확인 대기는 PING을 넘긴 때부터 센다. 유휴 PING(3.4.1절)을 보내기로 한 때부터 확인 대기 시간이 지나도록 전송 계층에 넘기지 못했고 그동안 출력이 진행하지 않았으면, 확인 대기 초과와 같게 닫는다(MUST)<a id="req-setup-unsent-idle-ping-close"></a>. 출력이 진행하지 않았다는 것은 그동안 어떤 프레임의 바이트도 전송 계층에 넘기지 못했다는 뜻이다. 출력이 진행하면 그 시점부터 다시 센다. 애플리케이션이 낸 PING과 HELLO·AUTH에는 적용하지 않는다.
 
 ```mermaid
 sequenceDiagram
@@ -431,6 +442,8 @@ AUTH payload
 | --- | --- | --- |
 | `0x0001` | `credential_lifetime` | 서버가 `AUTH(ACK)`를 보내는 시점에 남은 자격 증명의 수명(초). 빠지면 만료를 알리지 않는다 |
 
+> 비규범 주석: `credential_lifetime`을 받은 클라이언트는 자격 증명이 만료되기 전에 새 연결을 맺어 그리로 옮겨 갈 수 있다. 서버가 만료로 보내는 `CLOSE(NO_ERROR)`는 대기 중인 스트림을 마저 끝낸 뒤 닫는다(3.5절).
+
 **메커니즘.** 사용할 메커니즘은 두 엔드포인트가 미리 합의한다. 서버는 메커니즘 목록을 알리지 않는다. 문법에는 맞지만 서버가 모르는 메커니즘이거나 서버가 자격 증명을 거부하면 서버는 `CLOSE(UNAUTHENTICATED)`를 보내고(MUST)<a id="req-auth-reject-close-unauthenticated"></a> 닫는다. 거부 사유는 구분하지 않으며 `reason`은 비운다(MUST)<a id="req-auth-reject-reason-empty"></a>. 인증 서버 장애 같은 일시적 실패는 `CLOSE(INTERNAL_ERROR)`를 보낸다(MUST)<a id="req-auth-transient-failure-close-internal"></a>.
 
 **만료와 폐기.** 연결 인증은 연결마다 한 번이다. 재인증은 없다. 서버는 자격 증명이 만료되면 `CLOSE(NO_ERROR)`를 보내고(MUST)<a id="req-auth-expiry-close-no-error"></a>, 폐기되면 `CLOSE(UNAUTHENTICATED)`를 보낸다(MUST)<a id="req-auth-revoked-close-unauthenticated"></a>. 폐기의 `reason`도 비운다.
@@ -495,9 +508,9 @@ CLOSE payload
 **형태가 잘못된 CLOSE.** 다음 중 하나에 해당하는 CLOSE는 연결 오류다(모두 MUST, 5.1절).
 * payload가 12바이트 미만이다.<a id="req-close-malformed-payload-length-error"></a>
 * `last_stream_id`가 0이 아니면서 내 번호 공간의 값이 아니다.<a id="req-close-malformed-last-id-own-space-error"></a>
-* `last_stream_id`가 내가 요청 프레임을 보낸 스트림 가운데 가장 큰 `stream_id`보다 크다. 요청 프레임을 보내지 못한 번호는 세지 않으며, 보낸 요청이 없으면 0보다 큰 모든 값이 해당한다.<a id="req-close-malformed-last-id-above-sent-error"></a>
+* `last_stream_id`가 내가 넘긴 요청(1.3절) 가운데 가장 큰 `stream_id`보다 크다. 넘기지 못한 요청의 번호는 세지 않으며, 넘긴 요청이 없으면 0보다 큰 모든 값이 해당한다.<a id="req-close-malformed-last-id-above-handed-off-error"></a>
 
-**받은 CLOSE.** `type`이 CLOSE인 프레임은 형태가 잘못돼도 받은 CLOSE로 치고, 형태가 잘못된 CLOSE는 오류 CLOSE처럼 다룬다. 예외는 없다. 따라서 형태가 잘못된 CLOSE를 받으면 CLOSE를 보내지 않고 즉시 닫는다. 이 CLOSE의 `last_stream_id`는 쓰지 않으므로, 내 요청은 아래 "연결이 끝날 때"의 규칙을 따른다. 번호가 있고 전송 계층에 넘긴 요청은 결과 모름, 번호가 없거나 아직 넘기지 못한 요청은 처리 안 됨이다.
+**받은 CLOSE.** `type`이 CLOSE인 프레임은 형태가 잘못돼도 받은 CLOSE로 치고, 형태가 잘못된 CLOSE는 오류 CLOSE처럼 다룬다. 예외는 없다. 따라서 형태가 잘못된 CLOSE를 받으면 CLOSE를 보내지 않고 즉시 닫는다. 이 CLOSE의 `last_stream_id`는 쓰지 않으므로, 내 요청은 아래 "연결이 끝날 때"의 규칙을 따른다.
 
 CLOSE를 받으면 그 즉시, 대기 중인 내 요청 가운데 `stream_id`가 그 CLOSE의 `last_stream_id`보다 큰 것마다 애플리케이션에 로컬 `status` = `UNAVAILABLE`(처리 안 됨) 결과를 정확히 한 번 넘기고 그 스트림을 끝낸다(MUST)<a id="req-close-recv-unavailable-above-last-id"></a>. CLOSE를 보내거나 받으면 그 즉시, 아직 번호를 받지 못한 대기열 요청마다(1.3절) 같은 결과를 정확히 한 번 넘기고 끝낸다(MUST)<a id="req-close-queued-requests-unavailable-send"></a><a id="req-close-queued-requests-unavailable-recv"></a>. CLOSE를 둘 이상 받으면 처음 받은 CLOSE의 `last_stream_id`만 쓴다(MUST)<a id="req-close-first-last-id-only"></a>.
 
@@ -510,7 +523,7 @@ CLOSE를 보냈거나 받은 뒤 애플리케이션이 새 요청을 내면 프�
 * 오류 CLOSE(`NO_ERROR`가 아닌 코드)를 보냈거나 받았으면 즉시 전송 계층을 닫는다(MUST)<a id="req-close-error-close-immediate"></a>. 대기 중인 스트림이 남아 있어도 기다리지 않는다. 연결이 종료 중일 때 받은 오류 CLOSE도 같다.
 * 그 밖에 `NO_ERROR` CLOSE를 보냈거나 받았으면 연결은 **종료 중**이 된다. 대기 중인 스트림이 없어지면(처음부터 없는 경우 포함) 전송 계층을 닫는다(MUST)<a id="req-close-no-error-drain-then-close"></a>. 종료 중 상태 자체에는 시간 제한을 두지 않으며 얼마나 기다릴지는 애플리케이션이 정한다. 종료 중에도 생존 확인(3.3절의 확인 대기, 3.4.1절의 유휴 시 PING)은 계속한다(MUST)<a id="req-close-closing-liveness-continue"></a>.
 
-**연결이 끝날 때.** CLOSE를 보내거나 받아 닫을 때, CLOSE 없이 닫을 때(5.1절 1번·2번, 이미 CLOSE를 보냈거나 받은 뒤의 연결 오류와 확인 대기 초과 포함), 상대가 CLOSE 없이 전송 계층을 끊었을 때(TCP EOF·RST, WebSocket close) 모두 연결이 끝난 것이다. 전송 계층이 끊기면 보낼 수 없으므로 아무것도 보내지 않는다. 연결이 끝날 때 응답도 RESET도 받지 못한 채 대기 중인 내 요청(CLOSE의 `last_stream_id`로 이미 끝난 요청은 대기 중이 아니다. 상대 한도에 걸려 스트림을 열기 전에 대기열에서 기다리는 요청 포함)마다 애플리케이션에 로컬 `status` = `UNAVAILABLE` 결과를 정확히 한 번 넘기고(MUST)<a id="req-close-end-pending-unavailable"></a>, 그 뒤에 `closed` 이벤트를 낸다(MUST)<a id="req-close-end-closed-event"></a>. 요청의 마지막 바이트를 전송 계층에 넘기기 전이면 결과 확정성은 처리 안 됨이고, 넘긴 뒤이면 결과 모름이다(WebSocket에서는 그 프레임을 담은 바이너리 메시지를 WebSocket 계층에 넘겼는지로 정한다)(MUST)<a id="req-close-end-certainty-by-handoff"></a>. `closed`는 연결당 정확히 한 번 낸다(MUST)<a id="req-close-closed-once"></a>. 이미 닫힌 뒤에 전송 계층 끊김이 감지되어도 `closed`를 다시 내지 않고 아무것도 보내지 않는다. `NO_ERROR`로 마저 끝내고 대기 중인 스트림이 없어져 닫을 때도 `closed`는 마지막 스트림의 result(정상 응답 포함) 다음에 낸다(MUST)<a id="req-close-closed-after-last-result"></a>. 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 상대가 연 스트림은 내 요청이 아니므로 결과를 넘기지 않는다. 다시 보내도 되는지는 결과 확정성에 따라 4.6절이 정한다.
+**연결이 끝날 때.** CLOSE를 보내거나 받아 닫을 때, CLOSE 없이 닫을 때(5.1절 1번·2번, 이미 CLOSE를 보냈거나 받은 뒤의 연결 오류와 확인 대기 초과 포함), 상대가 CLOSE 없이 전송 계층을 끊었을 때(TCP EOF·RST, WebSocket close) 모두 연결이 끝난 것이다. 전송 계층이 끊기면 보낼 수 없으므로 아무것도 보내지 않는다. 연결이 끝날 때 응답도 RESET도 받지 못하고 끝나지 않은 내 요청(CLOSE의 `last_stream_id`로 이미 끝난 요청은 해당하지 않는다. 넘기기 전인 요청과 상대 한도에 걸려 대기열에서 기다리는 요청은 포함)마다 애플리케이션에 로컬 `status` = `UNAVAILABLE` 결과를 정확히 한 번 넘기고(MUST)<a id="req-close-end-pending-unavailable"></a>, 그 뒤에 `closed` 이벤트를 낸다(MUST)<a id="req-close-end-closed-event"></a>. 결과 확정성은 요청의 단계(1.3절)가 정한다. 번호를 받았지만 쓰기를 시작하기 전이면(CLOSE를 보내거나 받은 때 이 단계였던 요청 포함) 처리 안 됨이다(MUST)<a id="req-close-end-certainty-unwritten"></a>. 넘겼으면 결과 모름이다(MUST)<a id="req-close-end-certainty-handed-off"></a>. 쓰기를 시작했지만 넘기지 못했으면 연결이 끝난 까닭이 정한다. 상대가 전송 계층을 끊어(TCP EOF·RST, WebSocket close) 끝났으면 처리 안 됨이다(MUST)<a id="req-close-end-certainty-partial-disconnect"></a>. 그 밖의 까닭으로 끝났으면, 곧 내 쪽 판단으로 남은 출력을 마저 쓰는 종료(3.6절. 오류 CLOSE 송신, 연결 오류, 확인 대기 초과 등)이면 결과 모름이다(MUST)<a id="req-close-end-certainty-partial-own-end"></a>. `closed`는 연결당 정확히 한 번 낸다(MUST)<a id="req-close-closed-once"></a>. 이미 닫힌 뒤에 전송 계층 끊김이 감지되어도 `closed`를 다시 내지 않고 아무것도 보내지 않는다. `NO_ERROR`로 마저 끝내고 대기 중인 스트림이 없어져 닫을 때도 `closed`는 마지막 스트림의 result(정상 응답 포함) 다음에 낸다(MUST)<a id="req-close-closed-after-last-result"></a>. 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 상대가 연 스트림은 내 요청이 아니므로 결과를 넘기지 않는다. 다시 보내도 되는지는 결과 확정성에 따라 4.6절이 정한다.
 
 ```mermaid
 sequenceDiagram
@@ -582,14 +595,14 @@ sequenceDiagram
 
 | 상태 | 들어가는 조건 | 나가는 조건 |
 | --- | --- | --- |
-| 대기 | 요청 프레임을 보냄(받아들임) | 응답 프레임 또는 RESET을 보내거나 받음 → 끝남. 내 요청의 `stream_id`가 받은 CLOSE의 `last_stream_id`보다 큼(3.5절) → 끝남. 연결이 끝남(3.5절) → 끝남 |
+| 대기 | 내 요청을 넘김(받은 요청은 받아들임) | 응답 프레임 또는 RESET을 보내거나 받음 → 끝남. 내 요청의 `stream_id`가 받은 CLOSE의 `last_stream_id`보다 큼(3.5절) → 끝남. 연결이 끝남(3.5절) → 끝남 |
 | 끝남 | 응답 또는 RESET을 보내거나 받음. 받은 CLOSE의 `last_stream_id`로 내 요청이 끝남. 연결이 끝남. 받은 요청을 `RESET(REFUSED)`으로 거절하면 대기를 거치지 않고 바로 끝남 | — |
 
 스트림은 응답이나 RESET을 보내거나 받는 즉시 끝난다(MUST)<a id="req-stream-ends-on-response-or-reset"></a>. 응답을 보냈거나 받은 쪽만이 아니라 RESET을 보낸 쪽과 받은 쪽도 같다.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> 대기 : 요청 프레임 송신/수신<br/>(새 stream_id 할당)
+    [*] --> 대기 : 내 요청 넘김 / 받은 요청 받아들임
     [*] --> 끝남 : 받은 요청을 RESET(REFUSED)으로 거절<br/>(stream_id는 소비됨)
 
     대기 --> 끝남 : 응답 프레임 송신/수신
@@ -598,7 +611,7 @@ stateDiagram-v2
     대기 --> 끝남 : 연결 끝남
 ```
 
-**대기 중이 아닌 스트림을 가리키는 프레임.** 새 요청이 아닌 프레임(4.2.1절)이 대기 중인 스트림을 가리키지 않으면 조용히 버린다(5.1절 4번). 끝난 스트림이든 아직 열리지 않은 번호든 같고, RESET도 CLOSE도 보내지 않는다. CANCEL과 응답이 엇갈리는 것 같은 정상 경합으로 늦게 온 프레임은 이 규칙으로 처리된다.
+**대기 중이 아닌 스트림을 가리키는 프레임.** 새 요청이 아닌 프레임(4.2.1절)이 대기 중인 스트림을 가리키지 않으면 조용히 버린다(5.1절 4번). 끝난 스트림이든 아직 열리지 않은 번호든 같고, RESET도 CLOSE도 보내지 않는다. 내 번호 공간의 번호를 받았지만 아직 넘기지 않은 요청에 온 응답과 RESET도 같다(MUST)<a id="req-stream-frame-before-handoff-discard"></a>. CANCEL과 응답이 엇갈리는 것 같은 정상 경합으로 늦게 온 프레임은 이 규칙으로 처리된다.
 
 ### 4.4 스트림 중단: RESET
 
@@ -621,15 +634,15 @@ RESET의 `error_code`에는 CLOSE 전용 코드(2.5.2절의 5\~7)를 쓰지 않�
 
 받은 RESET에는 어떤 경우에도 RESET으로 답하지 않는다(MUST NOT)<a id="req-reset-no-reply"></a>. 대기 상태인 스트림이 RESET을 받으면 끝남으로 넘어가고(4.3절), 대기 중이 아닌 스트림에 RESET이 오면 4.3절에 따라 아무것도 보내지 않고 버린다.
 
-요청한 쪽이 결과가 더는 필요 없을 때는 `RESET(CANCEL)`을 보낸다. 요청 프레임의 쓰기를 시작했다면 그 프레임을 끊지 않고 마저 쓴 뒤 RESET을 보낸다(MUST)<a id="req-reset-cancel-finish-frame"></a>. 받은 쪽은 할 수 있으면 처리를 멈추고, 응답은 보내지 않는다.
+요청한 쪽이 결과가 더는 필요 없을 때는 `RESET(CANCEL)`을 보낸다. 쓰기를 시작했다면 요청 프레임을 끊지 않고 마저 쓴 뒤 RESET을 보낸다(MUST)<a id="req-reset-cancel-finish-frame"></a>. 받은 쪽은 할 수 있으면 처리를 멈추고, 응답은 보내지 않는다.
 
-**RESET으로 끝난 요청의 결과.** 내가 보낸 요청의 스트림이 RESET으로 끝나거나(내가 RESET을 보냈든 받았든) 요청 프레임을 한 바이트도 쓰기 전에 취소되면 애플리케이션에 로컬 `status` 결과를 정확히 한 번 넘긴다(MUST)<a id="req-reset-local-status-once"></a>. 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 요청을 받은 쪽에는 결과를 기다리는 요청이 없으므로 애플리케이션에 넘기는 결과가 없다.
+**RESET으로 끝난 요청의 결과.** 내가 보낸 요청의 스트림이 RESET으로 끝나거나(내가 RESET을 보냈든 받았든) 쓰기를 시작하기 전에 취소되면 애플리케이션에 로컬 `status` 결과를 정확히 한 번 넘긴다(MUST)<a id="req-reset-local-status-once"></a>. 이 `status`는 상대가 보낸 것이 아니라 로컬에서 만든 결과다. 요청을 받은 쪽에는 결과를 기다리는 요청이 없으므로 애플리케이션에 넘기는 결과가 없다.
 
 | 사건 | 애플리케이션에 넘기는 `status` | 결과 확정성 |
 | --- | --- | --- |
-| 요청 프레임의 쓰기를 시작한 뒤 요청 기한이 지나 내가 `RESET(CANCEL)`을 보냄(4.4.1절) | `DEADLINE_EXCEEDED` | 결과 모름 |
-| 요청 프레임을 한 바이트도 쓰기 전에 내가 요청을 취소함(대기열 요청 포함) | `CANCELLED` (MUST)<a id="req-reset-local-cancel-before-write"></a> | 처리 안 됨 |
-| 요청 프레임의 쓰기를 시작한 뒤 그 요청에 내가 RESET을 보냄 (`error_code` 무관) | `CANCELLED` | 결과 모름 |
+| 쓰기를 시작한 뒤 요청 기한이 지나 내가 `RESET(CANCEL)`을 보냄(4.4.1절) | `DEADLINE_EXCEEDED` | 결과 모름 |
+| 쓰기를 시작하기 전에 내가 요청을 취소함(대기열 요청 포함) | `CANCELLED` (MUST)<a id="req-reset-local-cancel-before-write"></a> | 처리 안 됨 |
+| 쓰기를 시작한 뒤 그 요청에 내가 RESET을 보냄 (`error_code` 무관) | `CANCELLED` | 결과 모름 |
 | `RESET(CANCEL)`을 받음 | `CANCELLED` | 결과 모름 |
 | `RESET(REFUSED)`를 받음 | `UNAVAILABLE` | 처리 안 됨 |
 | 그 밖의 RESET을 받음 | `INTERNAL` | 결과 모름 |
@@ -638,7 +651,7 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 #### 4.4.1 요청 기한
 
-요청한 쪽은 요청마다 로컬 기한을 둘 수 있다(MAY). 기한이 지났을 때 요청 프레임을 아직 한 바이트도 쓰지 않았다면(번호를 받지 못한 대기열 요청(1.3절)과, 번호는 받았지만 쓰기 전인 요청) `RESET` 없이 쓰지 않은 프레임을 버리고 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(처리 안 됨)를 넘기고 끝낸다(MUST)<a id="req-deadline-unwritten-local-exceeded"></a>. 쓰기를 시작했고 그 스트림이 아직 대기 중이면 `RESET(CANCEL)`을 보내고(MUST)<a id="req-deadline-written-reset-cancel"></a> 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(결과 모름)를 넘긴다. 기한을 두지 않은 요청에는 기한 만료를 이유로 `RESET`을 보내거나 `DEADLINE_EXCEEDED` 결과를 넘기지 않는다(MUST NOT)<a id="req-deadline-none-no-action"></a>. 기한의 값은 로컬 설정이다.
+요청한 쪽은 요청마다 로컬 기한을 둘 수 있다(MAY). 기한이 지났을 때 쓰기를 시작하기 전이면(번호를 받지 못한 대기열 요청(1.3절)과, 번호는 받았지만 쓰기를 시작하기 전인 요청) `RESET` 없이 쓰지 않은 프레임을 버리고 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(처리 안 됨)를 넘기고 끝낸다(MUST)<a id="req-deadline-unwritten-local-exceeded"></a>. 쓰기를 시작했고 그 스트림이 아직 끝나지 않았으면 `RESET(CANCEL)`을 보내고(MUST)<a id="req-deadline-written-reset-cancel"></a> 애플리케이션에 로컬 `status` = `DEADLINE_EXCEEDED`(결과 모름)를 넘긴다. 기한을 두지 않은 요청에는 기한 만료를 이유로 `RESET`을 보내거나 `DEADLINE_EXCEEDED` 결과를 넘기지 않는다(MUST NOT)<a id="req-deadline-none-no-action"></a>. 기한의 값은 로컬 설정이다.
 
 ### 4.5 배압 (Backpressure)
 
@@ -652,7 +665,7 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 소켓 읽기를 멈춰서는 안 된다(MUST NOT)<a id="req-backpressure-no-read-stop"></a>. 거절한 요청도 끝까지 읽고 버린다.
 
-단, 전송 구현은 자기 쓰기 대기열이 한도를 넘는 동안에는 읽기를 멈출 수 있다(MAY). 쓰기 대기열의 한도 값은 로컬 설정이다. 읽기를 멈춘 동안 상대의 생존은 유휴 PING(3.4.1절)의 확인 대기(3.3절) 초과로 판정된다.
+단, 전송 구현은 자기 쓰기 대기열이 한도를 넘는 동안에는 읽기를 멈출 수 있다(MAY). 쓰기 대기열의 한도 값은 로컬 설정이다. 읽기를 멈춘 동안 상대의 생존은 유휴 PING(3.4.1절)의 확인 대기 초과와 넘기지 못한 유휴 PING의 규칙(3.3절)으로 판정된다.
 
 > 비규범 주석: 읽기를 멈추면 PING, CLOSE, RESET까지 같이 막힌다.
 

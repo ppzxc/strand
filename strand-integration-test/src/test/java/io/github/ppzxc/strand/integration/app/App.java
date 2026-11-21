@@ -13,6 +13,7 @@ import io.github.ppzxc.strand.api.ShutdownResult;
 import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -30,11 +31,19 @@ final class App {
 
         void abort();
 
+        void expireCredential();
+
+        void revokeCredential();
+
+        void closeExcessiveUse();
+
         Result<CloseNotice> closed();
 
         ResourceUsage usage(Resource resource);
 
         Object principal();
+
+        OptionalLong credentialLifetime();
     }
 
     /** 받은 요청. */

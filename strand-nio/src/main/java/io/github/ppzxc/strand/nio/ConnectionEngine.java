@@ -63,6 +63,9 @@ final class ConnectionEngine {
     /** 규격 2.5.2절의 error_code. */
     private static final int NO_ERROR = 0;
 
+    /** 규격 2.5.2절 EXCESSIVE_USE. */
+    private static final int EXCESSIVE_USE = 5;
+
     private static final int INTERNAL_ERROR = 2;
     /** 규격 2.5.2절 UNAUTHENTICATED. 준비 중 CLOSE가 이 코드면 실패 단계는 연결 인증이다. */
     private static final long UNAUTHENTICATED = 7;
@@ -292,6 +295,26 @@ final class ConnectionEngine {
     void close() {
         if (closeSubmitted.compareAndSet(false, true)) {
             submit(new EndpointCall(endpoint -> endpoint.close(NO_ERROR)));
+        }
+    }
+
+    void expireCredential() {
+        requireServer("expireCredential");
+        submit(new EndpointCall(Endpoint::credentialExpired));
+    }
+
+    void revokeCredential() {
+        requireServer("revokeCredential");
+        submit(new EndpointCall(Endpoint::credentialRevoked));
+    }
+
+    void closeExcessiveUse() {
+        submit(new EndpointCall(endpoint -> endpoint.close(EXCESSIVE_USE)));
+    }
+
+    private void requireServer(String operation) {
+        if (p.role != ConnectionParams.Role.SERVER) {
+            throw new IllegalStateException(operation + "은 서버 연결에서만 부를 수 있다");
         }
     }
 
@@ -604,7 +627,7 @@ final class ConnectionEngine {
             }
             switch (result.kind()) {
                 case ACCEPTED:
-                    loop.endpoint.completeAuthentication(id, AuthDecision.PASS);
+                    loop.endpoint.completeAuthentication(id, AuthDecision.PASS, result.lifetime());
                     facade.authenticated(
                             new AuthenticatedPeer(Objects.requireNonNull(result.principal()), p.remoteAddress));
                     startFactory(loop);
@@ -1231,7 +1254,7 @@ final class ConnectionEngine {
                     onRequestReset(event);
                     break;
                 case AUTHENTICATED:
-                    onClientAuthenticated();
+                    onClientAuthenticated(event);
                     break;
                 case AUTHENTICATION_REQUIRED:
                     onAuthenticationRequired(event);
@@ -1261,7 +1284,8 @@ final class ConnectionEngine {
             return streamId > 0 && writing != null && writingOffset > 0 && writing.applicationStreamId() == streamId;
         }
 
-        private void onClientAuthenticated() {
+        private void onClientAuthenticated(Event event) {
+            facade.announcedCredentialLifetime(event.credentialLifetime());
             Object principal = principalOf();
             facade.authenticated(new AuthenticatedPeer(principal, p.remoteAddress));
             activate(this, p.handler);

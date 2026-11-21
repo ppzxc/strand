@@ -19,8 +19,10 @@ public final class EndpointConfig {
     /** 시각 계산(현재 + 기한)이 넘치지 않도록 막는 시간 값의 상한. */
     private static final long MAX_TIMEOUT_MS = Long.MAX_VALUE / 2;
 
-    private static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
+    public static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
     private static final long DEFAULT_AUTH_TIMEOUT_MS = 10000L;
+    /** 유휴 PING 간격의 기본값(30초). 0이면 끈다. */
+    public static final long DEFAULT_IDLE_INTERVAL_MS = 30_000L;
     /** 인증이 필요 없는 연결의 메커니즘(규격 3.3.1절). */
     static final String ANONYMOUS = "ANONYMOUS";
 
@@ -69,7 +71,7 @@ public final class EndpointConfig {
         long maxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
         long capabilities;
         long ackTimeoutMs = DEFAULT_ACK_TIMEOUT_MS;
-        long idleIntervalMs;
+        long idleIntervalMs = DEFAULT_IDLE_INTERVAL_MS;
         long authTimeoutMs = DEFAULT_AUTH_TIMEOUT_MS;
 
         @Nullable
@@ -175,7 +177,7 @@ public final class EndpointConfig {
     }
 
     /**
-     * 유휴 간격(규격 3.4.1절)을 바꾼 복사본. 이 시간 동안 상대에게서 받은 프레임이 없으면 PING을 보낸다. 정하지 않으면(0) 유휴 PING을
+     * 유휴 간격(규격 3.4.1절)을 바꾼 복사본. 이 시간 동안 상대에게서 받은 프레임이 없으면 PING을 보낸다. 정하지 않으면 30초이고, 0이면 유휴 PING을
      * 보내지 않는다. 규격은 값을 정하지 않는다.
      *
      * @param value 밀리초. 0이면 유휴 PING을 끈다

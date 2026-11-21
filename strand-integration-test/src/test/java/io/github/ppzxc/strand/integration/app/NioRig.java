@@ -27,6 +27,7 @@ import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -84,6 +85,21 @@ final class NioRig extends Rig {
         }
 
         @Override
+        public void expireCredential() {
+            connection.expireCredential();
+        }
+
+        @Override
+        public void revokeCredential() {
+            connection.revokeCredential();
+        }
+
+        @Override
+        public void closeExcessiveUse() {
+            connection.closeExcessiveUse();
+        }
+
+        @Override
         public Result<CloseNotice> closed() {
             return connection.closed();
         }
@@ -96,6 +112,11 @@ final class NioRig extends Rig {
         @Override
         public Object principal() {
             return connection.authenticatedPeer().principal();
+        }
+
+        @Override
+        public OptionalLong credentialLifetime() {
+            return connection.credentialLifetime();
         }
     }
 
@@ -158,7 +179,9 @@ final class NioRig extends Rig {
                     Object principal = setup.auth.verify(credentials.mechanism());
                     return principal == null
                             ? AuthenticationResult.rejected()
-                            : AuthenticationResult.accepted(principal);
+                            : setup.lifetime.isPresent()
+                                    ? AuthenticationResult.accepted(principal, setup.lifetime.getAsLong())
+                                    : AuthenticationResult.accepted(principal);
                 });
         if (setup.factory != null) {
             builder.handlerFactory(connection -> prepared(setup.factory.create(new Conn(connection))));
@@ -233,16 +256,29 @@ final class NioRig extends Rig {
 
     @Override
     App.Client client(ClientSetup setup) {
-        NioStrandClient client = NioStrandClient.builder()
+        NioStrandClient.Builder clientBuilder = NioStrandClient.builder()
                 .executor(executor)
                 .resourceLimits(limits)
                 .preparationDeadline(java.time.Duration.ofSeconds(10))
                 .shutdownGrace(setup.grace)
                 .shutdownDeadline(setup.deadline)
+                .idlePingInterval(
+                        setup.idlePingInterval == null
+                                ? java.time.Duration.ofMillis(
+                                        io.github.ppzxc.strand.core.internal.EndpointConfig.DEFAULT_IDLE_INTERVAL_MS)
+                                : setup.idlePingInterval)
+                .ackTimeout(
+                        setup.ackTimeout == null
+                                ? java.time.Duration.ofMillis(
+                                        io.github.ppzxc.strand.core.internal.EndpointConfig.DEFAULT_ACK_TIMEOUT_MS)
+                                : setup.ackTimeout)
                 .maxFrameSize(spec.maxFrameSize)
                 .security(clientSecurity)
-                .handler(handler(setup.handler))
-                .build();
+                .handler(handler(setup.handler));
+        if (setup.writeQueueBytes > 0) {
+            clientBuilder.writeQueueBytes(setup.writeQueueBytes);
+        }
+        NioStrandClient client = clientBuilder.build();
         return new App.Client() {
             @Override
             public App.Attempt connectAttempt(InetSocketAddress address) {

@@ -64,6 +64,11 @@ final class LivenessTimers {
     /** 서버의 AUTH 대기가 끝나는 시각. 대기 중이 아니면 null이다. */
     private @Nullable Long authDeadline;
 
+    /** 쓰기 대기열에 들었으나 아직 넘기지 못한 유휴 PING의 대기 식별자(규격 3.3절). 없으면 {@link #NO_WAIT}다. */
+    private long unsentIdleId = NO_WAIT;
+    /** 넘기지 못한 유휴 PING의 기한을 세는 시작 시각: 쓰기 대기열에 든 때, 그 뒤 마지막으로 출력이 진행한 때 가운데 늦은 것. */
+    private long unsentSince;
+
     private boolean ended;
     private long lastReceivedAt;
     private long idlePingCount;
@@ -104,8 +109,24 @@ final class LivenessTimers {
         return id;
     }
 
+    /** 대기 {@code id}의 PING이 유휴 PING으로 쓰기 대기열에 들어갔다. 넘기기 전까지 출력 진행이 없는 시간을 이때부터 센다. */
+    void idlePingQueued(long id, long now) {
+        unsentIdleId = id;
+        unsentSince = now;
+    }
+
+    /** 출력이 한 바이트라도 전송 계층에 넘어갔다. 넘기지 못한 유휴 PING의 기한을 이 시각부터 다시 센다. */
+    void outputProgressed(long now) {
+        if (unsentIdleId != NO_WAIT) {
+            unsentSince = now;
+        }
+    }
+
     /** 대기에 매인 프레임을 전송 계층에 넘겼다. 이때부터 {@code now + ackTimeoutMs}가 기한이다. 이미 끝났거나 시작한 대기는 그대로다. */
     void started(long id, long now) {
+        if (id == unsentIdleId) {
+            unsentIdleId = NO_WAIT;
+        }
         Wait wait = waits.get(id);
         if (wait != null && !wait.started) {
             wait.started = true;
@@ -118,10 +139,14 @@ final class LivenessTimers {
      * 맞는 대기가 없으면 아무 일도 없다.
      */
     void ackReceived(Kind kind, byte @Nullable [] payload) {
-        for (Iterator<Wait> it = waits.values().iterator(); it.hasNext(); ) {
-            Wait wait = it.next();
+        for (Iterator<Map.Entry<Long, Wait>> it = waits.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<Long, Wait> entry = it.next();
+            Wait wait = entry.getValue();
             if (wait.kind == kind && Arrays.equals(wait.payload, payload)) {
                 it.remove();
+                if (entry.getKey() == unsentIdleId) {
+                    unsentIdleId = NO_WAIT;
+                }
                 if (kind == Kind.PING) {
                     pingCount--;
                 }
@@ -151,6 +176,9 @@ final class LivenessTimers {
                 return Expiry.UNRESPONSIVE;
             }
         }
+        if (unsentIdleId != NO_WAIT && now > Deadlines.plus(unsentSince, ackTimeoutMs)) {
+            return Expiry.UNRESPONSIVE;
+        }
         return Expiry.NONE;
     }
 
@@ -176,6 +204,10 @@ final class LivenessTimers {
                 earliest = Math.min(earliest, Deadlines.after(wait.deadline));
                 found = true;
             }
+        }
+        if (unsentIdleId != NO_WAIT) {
+            earliest = Math.min(earliest, Deadlines.after(Deadlines.plus(unsentSince, ackTimeoutMs)));
+            found = true;
         }
         if (mayIdlePing && idleIntervalMs > 0 && !hasPing()) {
             earliest = Math.min(earliest, Deadlines.plus(lastReceivedAt, idleIntervalMs));
@@ -205,6 +237,7 @@ final class LivenessTimers {
     void clear() {
         ended = true;
         authDeadline = null;
+        unsentIdleId = NO_WAIT;
         waits.clear();
         pingCount = 0;
     }

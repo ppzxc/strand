@@ -36,6 +36,8 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
     private Duration closeFinishDeadline = DEFAULT_CLOSE_FINISH_DEADLINE;
     private @Nullable NioSecurity security;
     private long maxFrameSize = EndpointConfig.DEFAULT_MAX_FRAME_SIZE;
+    private Duration idlePingInterval = Duration.ofMillis(EndpointConfig.DEFAULT_IDLE_INTERVAL_MS);
+    private Duration ackTimeout = Duration.ofMillis(EndpointConfig.DEFAULT_ACK_TIMEOUT_MS);
     private LongSupplier nanoClock = System::nanoTime;
 
     abstract B self();
@@ -140,6 +142,29 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         return self();
     }
 
+    /**
+     * 유휴 PING 간격. 이 시간 동안 상대에게서 받은 프레임이 없으면 PING을 보낸다. 0이면 유휴 PING을 끈다. 정하지 않으면 30초다. 값은 core에 그대로
+     * 전달되며 이 모듈이 따로 타이머를 두지 않는다.
+     *
+     * @param value 유휴 간격(0 이상)
+     * @return 이 builder
+     */
+    public B idlePingInterval(Duration value) {
+        this.idlePingInterval = Objects.requireNonNull(value, "idlePingInterval");
+        return self();
+    }
+
+    /**
+     * 확인 대기 시간. HELLO나 PING을 보낸 뒤 ACK를 기다리는 시간이며, 넘으면 상대가 응답하지 않는 것으로 보고 연결을 끝낸다. 정하지 않으면 5초다.
+     *
+     * @param value 확인 대기 시간(양수)
+     * @return 이 builder
+     */
+    public B ackTimeout(Duration value) {
+        this.ackTimeout = Objects.requireNonNull(value, "ackTimeout");
+        return self();
+    }
+
     /** 테스트가 단조 시계를 주입한다. */
     B nanoClock(LongSupplier value) {
         this.nanoClock = Objects.requireNonNull(value);
@@ -198,6 +223,8 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         long closeFinishNanos = positiveNanos("closeFinishDeadline", closeFinishDeadline);
         // 범위 검사는 core가 한다(16384~1048576).
         EndpointConfig.defaults().maxFrameSize(maxFrameSize);
+        long idleIntervalMs = coreMillis("idlePingInterval", idlePingInterval, false);
+        long ackTimeoutMs = coreMillis("ackTimeout", ackTimeout, true);
         NioSecurity channelSecurity = Objects.requireNonNull(security);
         TlsSizes tlsSizes = null;
         if (channelSecurity.tlsContext() != null) {
@@ -224,7 +251,31 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
                 incoming,
                 grace,
                 deadline,
-                nanoClock);
+                nanoClock,
+                idleIntervalMs,
+                ackTimeoutMs);
+    }
+
+    /** core 설정이 받는 범위(밀리초)로 바꾸고, 벗어나면 거절한다. 범위 검사는 core가 한다. */
+    private static long coreMillis(String name, Duration value, boolean positive) {
+        long millis;
+        try {
+            if (value.toNanos() % 1_000_000 != 0) {
+                throw new IllegalArgumentException(name + "은 밀리초 단위여야 한다: " + value);
+            }
+            millis = value.toMillis();
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException(name + "이 너무 크다: " + value, e);
+        }
+        try {
+            EndpointConfig config = positive
+                    ? EndpointConfig.defaults().ackTimeoutMs(millis)
+                    : EndpointConfig.defaults().idleIntervalMs(millis);
+            Objects.requireNonNull(config);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(name + "이 범위를 벗어났다: " + value, e);
+        }
+        return millis;
     }
 
     private static long positiveNanos(String name, Duration value) {
@@ -253,6 +304,8 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         final Duration shutdownGrace;
         final Duration shutdownDeadline;
         final LongSupplier nanoClock;
+        final long idleIntervalMs;
+        final long ackTimeoutMs;
 
         Common(
                 Executor executor,
@@ -267,7 +320,9 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
                 long incomingRequests,
                 Duration shutdownGrace,
                 Duration shutdownDeadline,
-                LongSupplier nanoClock) {
+                LongSupplier nanoClock,
+                long idleIntervalMs,
+                long ackTimeoutMs) {
             this.executor = executor;
             this.limits = limits;
             this.owner = owner;
@@ -281,11 +336,17 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
             this.shutdownGrace = shutdownGrace;
             this.shutdownDeadline = shutdownDeadline;
             this.nanoClock = nanoClock;
+            this.idleIntervalMs = idleIntervalMs;
+            this.ackTimeoutMs = ackTimeoutMs;
         }
 
         /** 이 소유 객체의 core 설정: 받을 수 있는 프레임 크기와 동시 스트림 수(받는 요청 수 한도). */
         EndpointConfig endpointConfig() {
-            return EndpointConfig.defaults().maxFrameSize(maxFrameSize).maxConcurrentStreams(incomingRequests);
+            return EndpointConfig.defaults()
+                    .maxFrameSize(maxFrameSize)
+                    .maxConcurrentStreams(incomingRequests)
+                    .idleIntervalMs(idleIntervalMs)
+                    .ackTimeoutMs(ackTimeoutMs);
         }
 
         long deadlineAt(long now) {

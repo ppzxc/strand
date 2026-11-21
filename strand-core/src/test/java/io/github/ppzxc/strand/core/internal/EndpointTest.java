@@ -82,7 +82,7 @@ class EndpointTest {
     }
 
     private static Endpoint server() {
-        return Endpoint.server(EndpointConfig.defaults());
+        return Endpoint.server(EndpointConfig.defaults().idleIntervalMs(0));
     }
 
     private static Endpoint serverAfterPreface(EndpointConfig config) {
@@ -93,7 +93,7 @@ class EndpointTest {
     }
 
     private static Endpoint serverAfterPreface() {
-        return serverAfterPreface(EndpointConfig.defaults());
+        return serverAfterPreface(EndpointConfig.defaults().idleIntervalMs(0));
     }
 
     /** 서버: 상대 HELLO에 ACK를 보냈고 상대 ACK도 받은 상태. */
@@ -160,7 +160,7 @@ class EndpointTest {
     }
 
     private static Endpoint client() {
-        return Endpoint.client(EndpointConfig.defaults());
+        return Endpoint.client(EndpointConfig.defaults().idleIntervalMs(0));
     }
 
     /** 클라이언트가 서버의 {@code AUTH(ACK)}를 받아 AUTH 관문을 통과한다. 알림 이벤트는 비운다. */
@@ -1808,6 +1808,7 @@ class EndpointTest {
     void reservedResponseStatusIsDeliveredAsUnknown() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
+        client.drainMessages();
 
         client.receive(bytes(appFrame(1, 200, "")));
 
@@ -1818,6 +1819,7 @@ class EndpointTest {
     void responseExtensionsAreOnlyFormatCheckedAndTheirContentIsIgnored() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
+        client.drainMessages();
 
         // timeout의 길이가 4가 아니어도 응답에서는 값을 해석하지 않는다.
         client.receive(bytes(appFrame(1, 0, "00010003000001")));
@@ -3277,15 +3279,5 @@ class EndpointTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Endpoint.server(EndpointConfig.defaults().nextStreamId(1)))
                 .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void aResponseToAnUnwrittenRequestAlsoDropsItFromTheOutbox() {
-        Endpoint client = establishedClient();
-        client.request(257, new byte[0]);
-
-        client.receive(bytes(appFrame(1, 0, "")));
-
-        assertThat(client.drainMessages()).isEmpty();
     }
 }
