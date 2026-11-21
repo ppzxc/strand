@@ -84,6 +84,7 @@ import org.jspecify.annotations.Nullable;
 final class ConnectionEngine {
     /** 규격 2.5.2절의 error_code. */
     private static final int NO_ERROR = 0;
+    private static final int EXCESSIVE_USE = 5;
 
     private static final int INTERNAL_ERROR = 2;
     /** 규격 2.5.2절 UNAUTHENTICATED. 준비 중 CLOSE가 이 코드면 실패 단계는 연결 인증이다. */
@@ -652,6 +653,26 @@ final class ConnectionEngine {
     void close() {
         if (closeSubmitted.compareAndSet(false, true)) {
             submit(new EndpointCall(endpoint -> endpoint.close(NO_ERROR)));
+        }
+    }
+
+    void expireCredential() {
+        requireServer("expireCredential");
+        submit(new EndpointCall(Endpoint::credentialExpired));
+    }
+
+    void revokeCredential() {
+        requireServer("revokeCredential");
+        submit(new EndpointCall(Endpoint::credentialRevoked));
+    }
+
+    void closeExcessiveUse() {
+        submit(new EndpointCall(endpoint -> endpoint.close(EXCESSIVE_USE)));
+    }
+
+    private void requireServer(String operation) {
+        if (p.role != ConnectionParams.Role.SERVER) {
+            throw new IllegalStateException(operation + "은 서버 연결에서만 부를 수 있다");
         }
     }
 
