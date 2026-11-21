@@ -30,6 +30,12 @@ final class App {
 
         void abort();
 
+        void expireCredential();
+
+        void revokeCredential();
+
+        void closeExcessiveUse();
+
         Result<CloseNotice> closed();
 
         ResourceUsage usage(Resource resource);
