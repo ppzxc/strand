@@ -73,9 +73,13 @@ class QueuedRequestOutcomeSpecTest {
     }
 
     @Test
-    void malformedCloseReadsByHandOverToTransport() throws IOException {
+    void endOfConnectionJudgesCertaintyByRequestStage() throws IOException {
         String close = section("3.5 연결 종료");
-        assertThat(close).contains("넘긴 요청은 결과 모름").contains("넘기지 못한 요청은 처리 안 됨");
+        assertThat(close)
+                .contains("쓰기를 시작하기 전이면(CLOSE를 보내거나 받은 때 이 단계였던 요청 포함) 처리 안 됨이다")
+                .contains("넘겼으면 결과 모름이다")
+                .contains("내 쪽 판단으로 남은 출력을 마저 쓰는 종료")
+                .contains("결과 모름이다");
     }
 
     @Test

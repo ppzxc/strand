@@ -390,6 +390,11 @@ final class ConnectionPhase {
         this.cause = cause;
     }
 
+    /** 전송 계층이 CLOSE 없이 끊겨서 연결이 끝나는가({@link #transportDisconnected}). 내 쪽 판단으로 끝나는 경우는 거짓이다. */
+    boolean endedByDisconnect() {
+        return disconnected;
+    }
+
     /** 전송 계층을 닫았다. 연결이 끝났다. */
     void transportClosed() {
         closed = true;

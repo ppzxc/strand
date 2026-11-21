@@ -4,3 +4,5 @@
 req-hello-peer-concurrent-limit
 # CLOSE의 last_stream_id 검사 기준을 보낸 요청에서 넘긴 요청(1.3절)으로 정했다 (#363)
 req-close-malformed-last-id-above-sent-error
+# 결과 확정성을 요청의 세 단계로 나눴다. 쓰기를 시작했지만 넘기지 못한 요청은 끊김이면 처리 안 됨, 내 쪽 종료면 결과 모름이다 (#372)
+req-close-end-certainty-by-handoff
