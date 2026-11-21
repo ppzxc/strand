@@ -496,12 +496,13 @@ final class OwnRequestLedger {
 
     /**
      * 응답 도착 사건. 응답 type이 요청과 다르면 status와 payload를 버리고 로컬 INTERNAL로 끝낸다(규격 4.1절). 대기 중이 아니면 null이다.
-     * 상대가 아직 쓰지 않은 내 요청에 답한 경우(상대의 규격 위반)에도 쓰기 대기열에서 프레임을 거둔다.
+     * 아직 넘기지 않은 요청(번호만 받았거나 쓰는 중)에 온 응답도 조용히 버리고 null을 돌려준다. 요청은 그대로 두고 프레임도 거두지
+     * 않는다(규격 4.3절).
      */
     @Nullable
     Outcome onResponse(long streamId, int responseType, int rawStatus, byte[] body) {
         Record record = byStream.get(streamId);
-        if (record == null) {
+        if (record == null || !record.delivered) {
             return null;
         }
         boolean typeMatches = responseType == record.type;
@@ -513,12 +514,13 @@ final class OwnRequestLedger {
     }
 
     /**
-     * RESET 도착 사건(규격 4.4절 결과 표). 거절(REFUSED)한 요청은 쓰기를 시작했어도 처리를 시작하지 않았다. 대기 중이 아니면 null이다.
+     * RESET 도착 사건(규격 4.4절 결과 표). 거절(REFUSED)한 요청은 넘긴 뒤 처리를 시작하지 않았다. 대기 중이 아니면 null이다. 아직 넘기지
+     * 않은 요청에 온 RESET도 응답처럼 버리고 null을 돌려준다(규격 4.3절).
      */
     @Nullable
     Outcome onReset(long streamId, long errorCode) {
         Record record = byStream.get(streamId);
-        if (record == null) {
+        if (record == null || !record.delivered) {
             return null;
         }
         unregister(record);
