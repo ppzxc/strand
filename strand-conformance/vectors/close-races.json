@@ -1628,7 +1628,7 @@
       "id": "close-last-stream-id-above-highest-sent-is-malformed",
       "description": "내가 보낸 가장 큰 요청 번호(1)보다 큰 last_stream_id(3)를 담은 CLOSE는 형태가 잘못된 CLOSE다. CLOSE 없이 닫고, 대기 중인 내 요청 1은 결과 모름이다",
       "requirements": [
-        "req-close-malformed-last-id-above-sent-error",
+        "req-close-malformed-last-id-above-handed-off-error",
         "req-check-connection-error-silent-close",
         "req-close-end-pending-unavailable"
       ],

@@ -75,14 +75,14 @@ class QueuedRequestOutcomeSpecTest {
     @Test
     void malformedCloseReadsByHandOverToTransport() throws IOException {
         String close = section("3.5 연결 종료");
-        assertThat(close).contains("번호가 있고 전송 계층에 넘긴 요청은 결과 모름").contains("번호가 없거나 아직 넘기지 못한 요청은 처리 안 됨");
+        assertThat(close).contains("넘긴 요청은 결과 모름").contains("넘기지 못한 요청은 처리 안 됨");
     }
 
     @Test
     void cancelRowsSplitAtTheFirstWrittenByte() throws IOException {
         String reset = section("4.4 스트림 중단");
         List<String> rows = rows(reset);
-        assertThat(rows.stream().filter(l -> l.contains("한 바이트도 쓰기 전에")).collect(Collectors.toList()))
+        assertThat(rows.stream().filter(l -> l.contains("쓰기를 시작하기 전에")).collect(Collectors.toList()))
                 .singleElement()
                 .asString()
                 .contains("`CANCELLED`")
@@ -105,7 +105,7 @@ class QueuedRequestOutcomeSpecTest {
     void deadlineBeforeAnyByteWrittenDiscardsFrameWithoutReset() throws IOException {
         String deadline = section("4.4.1 요청 기한");
         assertThat(deadline)
-                .contains("한 바이트도 쓰지 않았")
+                .contains("쓰기를 시작하기 전이면")
                 .contains("대기열 요청")
                 .contains("`RESET` 없이")
                 .contains("`DEADLINE_EXCEEDED`(처리 안 됨)")
