@@ -84,6 +84,21 @@ final class NioRig extends Rig {
         }
 
         @Override
+        public void expireCredential() {
+            connection.expireCredential();
+        }
+
+        @Override
+        public void revokeCredential() {
+            connection.revokeCredential();
+        }
+
+        @Override
+        public void closeExcessiveUse() {
+            connection.closeExcessiveUse();
+        }
+
+        @Override
         public Result<CloseNotice> closed() {
             return connection.closed();
         }
