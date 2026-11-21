@@ -32,6 +32,8 @@ Strand 규격은 다음 두 가지를 동등한 공식 1급 사용 환경으로 
    - 메시지 기반 사용 환경. 단일 WebSocket 바이너리 메시지(`Opcode 0x02`) 1개에 정확히 Strand 프레임 1개를 싣는다(MUST)<a id="req-ws-one-frame-per-message"></a>. WebSocket 연결의 식별은 1.2.1절이 정한다.
    - 프레임 헤더(20바이트)와 payload 형식, 제어 프레임 및 상태 머신은 strand over TCP와 100% 동일하다.
    - 연결 서문(Connection Preface)은 첫 번째 바이너리 메시지로 보내며(3.1절), 연결을 닫을 때(3.5절)는 WebSocket 닫기(`Close Frame 0x08`)를 수행한다. CLOSE를 보내는 종료에서는 CLOSE 송신 뒤에 수행하고(MUST)<a id="req-ws-close-after-close-send"></a>, `NO_ERROR` 종료에는 `1000 Normal Closure`를 쓴다(MUST)<a id="req-ws-close-no-error-1000"></a>.
+   - 오류 CLOSE(`NO_ERROR`가 아닌 코드)를 보내거나 받은 연결을 WebSocket 닫기로 닫을 때의 상태 코드는 정하지 않는다. 단 `1000`은 쓰지 않는다(MUST NOT)<a id="req-ws-close-error-not-1000"></a>.
+   - WebSocket 계층의 Ping·Pong은 이 규격의 PING(3.4절)과 무관하다. 엔드포인트는 이를 PING 대신 생존 확인으로 쓰지 않는다(MUST NOT)<a id="req-ws-ping-pong-not-liveness"></a>. 유휴 PING과 확인 대기는 strand over WebSocket에서도 3.3절, 3.4.1절을 따른다.
    - 메시지 경계 위반: 서문 메시지의 위반은 3.1절을 따른다. 서문 뒤에 텍스트 메시지가 오거나, 크기가 4 + `length`와 다른 바이너리 메시지가 오면 연결 오류다(MUST, 5.1절 3번)<a id="req-ws-message-boundary-violation"></a>.
 
 #### 1.2.1 WebSocket 하위 프로토콜
@@ -319,7 +321,13 @@ HELLO 송신 규칙은 다음과 같다(모두 MUST).
 
 모르는 identifier는 무시한다(MUST)<a id="req-hello-unknown-identifier-ignore"></a>. 같은 identifier가 두 번 나오는 것은 모르는 identifier라도 연결 오류다(3.2.5절).
 
-`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알린 `max_frame_size`보다 큰 프레임을 보내지 않고(MUST)<a id="req-hello-peer-frame-size-limit"></a>, 내 번호 공간에서 번호를 받은 요청 가운데 끝나지 않은 것(넘기기 전인 요청 포함, 1.3절)이 이미 상대가 알린 `max_concurrent_streams`개이면 새 요청을 보내지 않는다(MUST)<a id="req-hello-peer-concurrent-limit-numbered"></a>. 받는 쪽이 세는 방법과 거절은 4.5절이다. 한도에 닿았을 때 새 요청을 기다리게 할지 로컬에서 실패시킬지는 구현이 정한다. 실패시키면 프레임을 보내지 않고 번호도 쓰지 않으며, 결과는 `stream_id` 없는 로컬 `UNAVAILABLE`(처리 안 됨)이다. 기다리게 한 요청이 대기열 요청이다(1.3절). 상대 HELLO를 받기 전에 보내는 프레임(HELLO·CLOSE)은 상대의 `max_frame_size`를 허용 범위의 최솟값 16 KiB로 보고 보낸다(MUST)<a id="req-hello-prehello-frame-size-min"></a>. 상대 HELLO가 연결 오류에 걸려 보내는 CLOSE도 같다.
+`max_*` 값은 보낸 쪽이 받아들일 수 있는 한도다. 그러니 각 엔드포인트는 상대가 알린 `max_frame_size`보다 큰 프레임을 보내지 않고(MUST)<a id="req-hello-peer-frame-size-limit"></a>, 내 번호 공간에서 번호를 받은 요청 가운데 끝나지 않은 것(넘기기 전인 요청 포함, 1.3절)이 이미 상대가 알린 `max_concurrent_streams`개이면 새 요청을 보내지 않는다(MUST)<a id="req-hello-peer-concurrent-limit-numbered"></a>. 받는 쪽이 세는 방법과 거절은 4.5절이다. 한도에 닿았을 때 새 요청을 기다리게 할지 로컬에서 실패시킬지는 구현이 정한다. 실패시키면 프레임을 보내지 않고 번호도 쓰지 않으며, 결과는 `stream_id` 없는 로컬 `UNAVAILABLE`(처리 안 됨)이다. 기다리게 한 요청이 대기열 요청이다(1.3절). 
+
+**상대 `max_frame_size`를 넘는 프레임.** 보내려는 프레임이 상대가 알린 `max_frame_size`보다 크면 그 프레임은 보내지 않는다. 요청이면 프레임을 보내지 않고 번호도 쓰지 않으며 로컬에서 실패시킨다(MUST)<a id="req-hello-oversize-request-local-fail"></a>. 클라이언트의 `AUTH`이면 `AUTH`도 `CLOSE`도 보내지 않고 전송 계층을 닫는다(MUST)<a id="req-hello-oversize-auth-close-silent"></a>.
+
+> 비규범 주석: 응답이 상대의 `max_frame_size`를 넘으면 payload를 줄이거나 `RESOURCE_EXHAUSTED`(2.5.1절)로 답한다.
+
+상대 HELLO를 받기 전에 보내는 프레임(HELLO·CLOSE)은 상대의 `max_frame_size`를 허용 범위의 최솟값 16 KiB로 보고 보낸다(MUST)<a id="req-hello-prehello-frame-size-min"></a>. 상대 HELLO가 연결 오류에 걸려 보내는 CLOSE도 같다.
 
 각 엔드포인트는 상대 HELLO가 첫 프레임 검사(3.2.4절)를 통과하면 payload를 검증한다(MUST)<a id="req-hello-payload-validate"></a>. `max_frame_size`가 허용 범위(16 KiB\~1 MiB) 밖이면 검증에 실패한 것이며 연결 오류다(5.1절). 통과하면 상대 HELLO에 ACK HELLO로 답하고, 실패하면 ACK를 보내지 않는다. 서버와 클라이언트가 같은 규칙을 쓴다.
 
@@ -362,6 +370,8 @@ HELLO는 연결 도중에 다시 보내지 않는다. 값을 바꾸고 싶으면
 **AUTH 대기.** 서버가 상대 HELLO에 ACK를 보낸 때부터 정해 둔 시간이 지나도록 `AUTH`를 받지 못하면 `CLOSE(UNAUTHENTICATED)`를 보내고 닫는다(MUST)<a id="req-setup-auth-timeout-close"></a>. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(3.5절). 대기 시간의 값은 로컬 설정이다. 클라이언트의 `AUTH(ACK)` 대기는 아래 확인 대기를 따른다.
 
 **확인 대기.** HELLO·PING·AUTH를 전송 계층에 넘긴 때(WebSocket에서는 그 프레임을 담은 바이너리 메시지를 WebSocket 계층에 넘긴 때)부터 정해 둔 시간이 지나도록 상대의 ACK가 오지 않으면 `CLOSE(UNRESPONSIVE)`를 보내고 닫는다(MUST)<a id="req-setup-ack-timeout-close"></a>. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(3.5절). 대기 시간의 값은 로컬 설정이다.
+
+**넘기지 못한 유휴 PING.** 확인 대기는 PING을 넘긴 때부터 센다. 유휴 PING(3.4.1절)을 보내기로 한 때부터 확인 대기 시간이 지나도록 전송 계층에 넘기지 못했고 그동안 출력이 진행하지 않았으면, 확인 대기 초과와 같게 닫는다(MUST)<a id="req-setup-unsent-idle-ping-close"></a>. 출력이 진행하지 않았다는 것은 그동안 어떤 프레임의 바이트도 전송 계층에 넘기지 못했다는 뜻이다. 출력이 진행하면 그 시점부터 다시 센다. 애플리케이션이 낸 PING과 HELLO·AUTH에는 적용하지 않는다.
 
 ```mermaid
 sequenceDiagram
@@ -431,6 +441,8 @@ AUTH payload
 | identifier | 이름 | 값 |
 | --- | --- | --- |
 | `0x0001` | `credential_lifetime` | 서버가 `AUTH(ACK)`를 보내는 시점에 남은 자격 증명의 수명(초). 빠지면 만료를 알리지 않는다 |
+
+> 비규범 주석: `credential_lifetime`을 받은 클라이언트는 자격 증명이 만료되기 전에 새 연결을 맺어 그리로 옮겨 갈 수 있다. 서버가 만료로 보내는 `CLOSE(NO_ERROR)`는 대기 중인 스트림을 마저 끝낸 뒤 닫는다(3.5절).
 
 **메커니즘.** 사용할 메커니즘은 두 엔드포인트가 미리 합의한다. 서버는 메커니즘 목록을 알리지 않는다. 문법에는 맞지만 서버가 모르는 메커니즘이거나 서버가 자격 증명을 거부하면 서버는 `CLOSE(UNAUTHENTICATED)`를 보내고(MUST)<a id="req-auth-reject-close-unauthenticated"></a> 닫는다. 거부 사유는 구분하지 않으며 `reason`은 비운다(MUST)<a id="req-auth-reject-reason-empty"></a>. 인증 서버 장애 같은 일시적 실패는 `CLOSE(INTERNAL_ERROR)`를 보낸다(MUST)<a id="req-auth-transient-failure-close-internal"></a>.
 
@@ -653,7 +665,7 @@ RESET이 아니라 CLOSE를 받거나 연결이 끝나면서 끝나는 대기 �
 
 소켓 읽기를 멈춰서는 안 된다(MUST NOT)<a id="req-backpressure-no-read-stop"></a>. 거절한 요청도 끝까지 읽고 버린다.
 
-단, 전송 구현은 자기 쓰기 대기열이 한도를 넘는 동안에는 읽기를 멈출 수 있다(MAY). 쓰기 대기열의 한도 값은 로컬 설정이다. 읽기를 멈춘 동안 상대의 생존은 유휴 PING(3.4.1절)의 확인 대기(3.3절) 초과로 판정된다.
+단, 전송 구현은 자기 쓰기 대기열이 한도를 넘는 동안에는 읽기를 멈출 수 있다(MAY). 쓰기 대기열의 한도 값은 로컬 설정이다. 읽기를 멈춘 동안 상대의 생존은 유휴 PING(3.4.1절)의 확인 대기 초과와 넘기지 못한 유휴 PING의 규칙(3.3절)으로 판정된다.
 
 > 비규범 주석: 읽기를 멈추면 PING, CLOSE, RESET까지 같이 막힌다.
 
