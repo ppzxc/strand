@@ -376,7 +376,7 @@ class OwnRequestLedgerTest {
     private void transportClosed(OwnRequestLedger l, Model m, String at) {
         List<Req> expected = new ArrayList<>(m.numberedInStreamOrder());
         expected.addAll(m.queuedInTicketOrder());
-        List<OwnRequestLedger.Outcome> actual = l.onTransportClosed();
+        List<OwnRequestLedger.Outcome> actual = l.onTransportClosed(false);
         assertThat(actual).as(at).hasSameSizeAs(expected);
         for (int i = 0; i < expected.size(); i++) {
             assertOutcome(actual.get(i), expected.get(i), Status.UNAVAILABLE, Model.unfinished(expected.get(i)));
@@ -689,7 +689,7 @@ class OwnRequestLedgerTest {
         accept(1, 0);
         startWrite();
         accept(3, 1);
-        List<OwnRequestLedger.Outcome> ended = ledger.onTransportClosed();
+        List<OwnRequestLedger.Outcome> ended = ledger.onTransportClosed(false);
         assertThat(ended).hasSize(2);
         assertEnded(ended.get(0), 1, Status.UNAVAILABLE, Certainty.UNKNOWN, false);
         assertEnded(ended.get(1), 3, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false);

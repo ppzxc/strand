@@ -26,7 +26,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>결과 확정성 판정(규격 3.5절, 4.4절, 4.4.1절)은 이 클래스에만 있다. 응답이나 RESET 없이 끝나는 경우 가운데 취소와 기한은
  * {@link #unfinishedCertainty} 한 자리가 정한다: 쓰기를 시작했으면 결과 모름, 아니면(번호 없음, 쓰기 전) 처리 안 됨이다. 전송 계층 닫힘은 규격 3.5절에
- * 따라 마지막 바이트를 전송 계층에 넘겼는지로 정한다({@link #onTransportClosed}): 일부만 쓰고 닫히면 처리 안 됨이다. 나머지 사건은 사건
+ * 따라 정한다({@link #onTransportClosed}): 마지막 바이트를 넘겼으면 결과 모름이다. 쓰기를 시작했지만 다 넘기지 못했으면 전송 계층이 끊긴 때만 처리 안 됨이고,
+ * 내 쪽 판단으로 끝나 남은 출력을 마저 쓰면 결과 모름이다. 나머지 사건은 사건
  * 자체가 확정성을 정한다: 응답은 {@link Certainty#RESPONSE}({@link #onResponse}), 거절(REFUSED) RESET은 쓰기를 시작했어도 처리 안 됨, 그 밖의
  * RESET은 결과 모름({@link #onReset}), CLOSE를 보내거나 받아 끝나는 번호 없는 요청과 CLOSE {@code last_stream_id} 뒤의 요청은 처리 안 됨({@link
  * #onClosing}, {@link #endAfter})이다.
@@ -568,12 +569,17 @@ final class OwnRequestLedger {
 
     /**
      * 전송 계층 닫힘 사건. 대기 중인 요청을 모두 끝내고 장부를 비운다. 번호를 받은 요청(스트림 번호 순)이 먼저고 번호 없는 요청(낸 순서)이 뒤다.
-     * 요청의 마지막 바이트를 전송 계층에 넘겼는지로 정한다(규격 3.5절). 못 넘긴 프레임은 이후에도 넘기지 않도록 거둔다.
+     * 확정성은 규격 3.5절의 세 단계로 정한다. 마지막 바이트를 넘겼으면 결과 모름이다. 한 바이트도 쓰기 전이면 처리 안 됨이고 프레임을 쓰기
+     * 대기열에서 거둔다. 쓰기를 시작했지만 다 넘기지 못했으면 끝난 까닭이 정한다. 전송 계층이 끊겼으면({@code transportBroken}) 상대가 온전한
+     * 프레임을 받을 수 없어 처리 안 됨이고, 내 쪽 판단으로 끝났으면 전송 모듈이 그 프레임을 마저 쓰므로 결과 모름이다.
+     *
+     * @param transportBroken 전송 계층이 CLOSE 없이 끊겨서 끝났는가(끊김 입력)
      */
-    List<Outcome> onTransportClosed() {
+    List<Outcome> onTransportClosed(boolean transportBroken) {
         List<Outcome> outcomes = new ArrayList<>(byStream.size() + queued.size());
         for (Record record : byStream.values()) {
-            Certainty certainty = record.delivered ? Certainty.UNKNOWN : Certainty.NOT_PROCESSED;
+            boolean handedOff = record.delivered || (!transportBroken && record.state == RequestState.WRITING_STARTED);
+            Certainty certainty = handedOff ? Certainty.UNKNOWN : Certainty.NOT_PROCESSED;
             unwrite(record);
             outcomes.add(new Outcome(record.ticket, record.streamId, Status.UNAVAILABLE, certainty, false, true));
         }
