@@ -260,6 +260,9 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
     private static long coreMillis(String name, Duration value, boolean positive) {
         long millis;
         try {
+            if (value.toNanos() % 1_000_000 != 0) {
+                throw new IllegalArgumentException(name + "은 밀리초 단위여야 한다: " + value);
+            }
             millis = value.toMillis();
         } catch (ArithmeticException e) {
             throw new IllegalArgumentException(name + "이 너무 크다: " + value, e);

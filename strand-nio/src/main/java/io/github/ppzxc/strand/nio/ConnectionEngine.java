@@ -63,6 +63,7 @@ final class ConnectionEngine {
     /** 규격 2.5.2절의 error_code. */
     private static final int NO_ERROR = 0;
 
+    /** 규격 2.5.2절 EXCESSIVE_USE. */
     private static final int EXCESSIVE_USE = 5;
 
     private static final int INTERNAL_ERROR = 2;

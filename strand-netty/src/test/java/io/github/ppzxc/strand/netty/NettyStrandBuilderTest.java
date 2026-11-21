@@ -125,6 +125,17 @@ class NettyStrandBuilderTest {
     }
 
     @Test
+    void subMillisecondDurationsAreRejectedInsteadOfTruncated() {
+        assertThatThrownBy(() ->
+                        complete().idlePingInterval(Duration.ofNanos(500_000)).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("idlePingInterval");
+        assertThatThrownBy(() -> complete().ackTimeout(Duration.ofNanos(1)).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ackTimeout");
+    }
+
+    @Test
     void idlePingIntervalAndAckTimeoutAreCarriedToTheCoreConfig() {
         CommonSettings.Common common = complete()
                 .idlePingInterval(Duration.ofSeconds(7))
