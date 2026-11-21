@@ -199,6 +199,7 @@ final class VectorRunner {
         long ackTimeout = Protocol.configLimit(setup, Protocol.ACK_TIMEOUT_MS);
         long authTimeout = Protocol.configLimit(setup, Protocol.AUTH_TIMEOUT_MS);
         EndpointConfig config = EndpointConfig.defaults()
+                .idleIntervalMs(0)
                 .maxFrameSize(hello.get("max_frame_size"))
                 .maxConcurrentStreams(hello.get("max_concurrent_streams"))
                 .capabilities(hello.get("capabilities"))

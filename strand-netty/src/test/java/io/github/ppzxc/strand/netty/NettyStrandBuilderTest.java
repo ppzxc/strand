@@ -117,6 +117,51 @@ class NettyStrandBuilderTest {
     }
 
     @Test
+    void idlePingIsOnEvery30SecondsAndAckTimeoutIs5SecondsByDefault() {
+        CommonSettings.Common common = complete().validate();
+
+        assertThat(common.idleIntervalMs).isEqualTo(30_000L);
+        assertThat(common.ackTimeoutMs).isEqualTo(5_000L);
+    }
+
+    @Test
+    void idlePingIntervalAndAckTimeoutAreCarriedToTheCoreConfig() {
+        CommonSettings.Common common = complete()
+                .idlePingInterval(Duration.ofSeconds(7))
+                .ackTimeout(Duration.ofMillis(1500))
+                .validate();
+
+        assertThat(common.idleIntervalMs).isEqualTo(7_000L);
+        assertThat(common.ackTimeoutMs).isEqualTo(1_500L);
+    }
+
+    @Test
+    void anIdlePingIntervalOfZeroTurnsIdlePingOff() {
+        CommonSettings.Common common = complete().idlePingInterval(Duration.ZERO).validate();
+
+        assertThat(common.idleIntervalMs).isZero();
+    }
+
+    @Test
+    void outOfRangeIdlePingIntervalAndAckTimeoutAreRejectedAtBuild() {
+        assertThatThrownBy(() -> complete().idlePingInterval(Duration.ofSeconds(-1)).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("idlePingInterval");
+        assertThatThrownBy(() -> complete().idlePingInterval(Duration.ofSeconds(Long.MAX_VALUE)).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("idlePingInterval");
+        assertThatThrownBy(() -> complete().ackTimeout(Duration.ZERO).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ackTimeout");
+        assertThatThrownBy(() -> complete().ackTimeout(Duration.ofSeconds(-1)).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ackTimeout");
+        assertThatThrownBy(() -> complete().ackTimeout(Duration.ofSeconds(Long.MAX_VALUE)).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ackTimeout");
+    }
+
+    @Test
     void maxFrameSizeIsCheckedByTheCore() {
         assertThatThrownBy(() -> complete().maxFrameSize(10).build()).isInstanceOf(IllegalArgumentException.class);
     }
