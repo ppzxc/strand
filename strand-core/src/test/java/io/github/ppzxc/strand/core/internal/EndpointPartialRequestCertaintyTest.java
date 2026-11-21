@@ -52,6 +52,24 @@ class EndpointPartialRequestCertaintyTest {
     }
 
     @Test
+    void disconnectAfterGracefulCloseStartedStaysNotProcessedForPartialRequest() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        connect(client, server);
+
+        client.request(257, new byte[] {1, 2, 3});
+        EndpointOutput request = client.nextOutput();
+        deliver(client, server, request, 0, 5);
+
+        client.close(ErrorCode.NO_ERROR);
+        client.disconnect();
+
+        List<Event> events = client.drainEvents();
+        assertThat(events).extracting(Event::kind).contains(Event.Kind.RESULT);
+        assertThat(events.get(0).certainty()).hasValue(Certainty.NOT_PROCESSED);
+    }
+
+    @Test
     void errorCloseWithoutAnyWrittenByteIsNotProcessedAndFrameIsNotSent() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
         Endpoint server = Endpoint.server(EndpointConfig.defaults());
