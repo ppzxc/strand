@@ -26,4 +26,4 @@ req-ws-ping-pong-not-liveness 관측불가 WebSocket Ping·Pong은 WebSocket 계
 # 형식미지원: 크기 초과 프레임과 넘기지 못한 유휴 PING.
 req-hello-oversize-request-local-fail 형식미지원 상대의 max_frame_size를 넘는 요청을 호출 API에 냈을 때의 로컬 실패는 벡터 결과로 표현할 수 없다(req-hello-peer-frame-size-limit과 같은 사유)
 req-hello-oversize-auth-close-silent 형식미지원 클라이언트 AUTH가 상대 max_frame_size를 넘는 상황을 만드는 입력이 벡터 형식에 없다
-req-setup-unsent-idle-ping-close 형식미지원 쓰기가 막혀 전송 계층에 넘기지 못하는 상황(쓰기 완료 보고를 미루는 입력)이 벡터 형식에 없다. 코드는 아직 따르지 않으며 #361의 티켓 #375가 구현한다
+req-setup-unsent-idle-ping-close 형식미지원 유휴 PING 간격을 정하는 설정(8.2절)과, 출력을 여러 단계에 걸쳐 계속 막고 바이트 단위 진행만 보고하는 입력(`hold_output`은 다음 단계까지만 보류한다)이 벡터 형식에 없다. core Endpoint 테스트(EndpointUnsentIdlePingTest)와 공개 API 통합 테스트로 확인한다

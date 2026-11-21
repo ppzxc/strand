@@ -256,7 +256,7 @@ final class NioRig extends Rig {
 
     @Override
     App.Client client(ClientSetup setup) {
-        NioStrandClient client = NioStrandClient.builder()
+        NioStrandClient.Builder clientBuilder = NioStrandClient.builder()
                 .executor(executor)
                 .resourceLimits(limits)
                 .preparationDeadline(java.time.Duration.ofSeconds(10))
@@ -274,8 +274,11 @@ final class NioRig extends Rig {
                                 : setup.ackTimeout)
                 .maxFrameSize(spec.maxFrameSize)
                 .security(clientSecurity)
-                .handler(handler(setup.handler))
-                .build();
+                .handler(handler(setup.handler));
+        if (setup.writeQueueBytes > 0) {
+            clientBuilder.writeQueueBytes(setup.writeQueueBytes);
+        }
+        NioStrandClient client = clientBuilder.build();
         return new App.Client() {
             @Override
             public App.Attempt connectAttempt(InetSocketAddress address) {

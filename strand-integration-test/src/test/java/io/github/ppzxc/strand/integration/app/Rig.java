@@ -66,11 +66,18 @@ abstract class Rig implements AutoCloseable {
 
         Duration idlePingInterval;
         Duration ackTimeout;
+        long writeQueueBytes;
 
         /** 유휴 PING 간격과 확인 대기 시간을 정한다. 정하지 않으면 builder 기본값이다. */
         ClientSetup liveness(Duration idle, Duration ack) {
             this.idlePingInterval = idle;
             this.ackTimeout = ack;
+            return this;
+        }
+
+        /** 쓰기 대기열 절대 한도(바이트). 정하지 않으면 builder 기본값이다. */
+        ClientSetup writeQueueBytes(long value) {
+            this.writeQueueBytes = value;
             return this;
         }
 

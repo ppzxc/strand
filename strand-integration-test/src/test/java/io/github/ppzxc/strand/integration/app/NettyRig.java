@@ -268,7 +268,7 @@ final class NettyRig extends Rig {
 
     @Override
     App.Client client(ClientSetup setup) {
-        NettyStrandClient client = NettyStrandClient.builder()
+        NettyStrandClient.Builder clientBuilder = NettyStrandClient.builder()
                 .eventLoopGroup(group)
                 .executor(executor)
                 .resourceLimits(limits)
@@ -287,8 +287,11 @@ final class NettyRig extends Rig {
                                 : setup.ackTimeout)
                 .maxFrameSize(spec.maxFrameSize)
                 .security(clientSecurity)
-                .handler(handler(setup.handler))
-                .build();
+                .handler(handler(setup.handler));
+        if (setup.writeQueueBytes > 0) {
+            clientBuilder.writeQueueBytes(setup.writeQueueBytes);
+        }
+        NettyStrandClient client = clientBuilder.build();
         return new App.Client() {
             @Override
             public App.Attempt connectAttempt(InetSocketAddress address) {

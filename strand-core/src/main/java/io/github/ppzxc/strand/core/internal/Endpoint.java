@@ -665,6 +665,7 @@ public final class Endpoint {
             throw new IllegalArgumentException("유효하지 않은 출력 접수");
         }
         startOutput();
+        timers.outputProgressed(now);
         completeOutput();
     }
 
@@ -741,7 +742,8 @@ public final class Endpoint {
         expireRequests();
         byte[] idlePing = phase.mayIdlePing() ? timers.idlePing(now) : null;
         if (idlePing != null) {
-            sendPing(idlePing);
+            // 넘기지 못한 유휴 PING의 기한(규격 3.3절): 쓰기 대기열에 든 때부터 센다.
+            timers.idlePingQueued(sendPing(idlePing), now);
         }
     }
 
@@ -1132,6 +1134,9 @@ public final class Endpoint {
         // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
         long drainedAt = now;
         List<OutboundMessage> drained = outbox.drain(id -> timers.started(id, drainedAt));
+        if (!drained.isEmpty()) {
+            timers.outputProgressed(drainedAt);
+        }
         ledger.onWriteStarted();
         return drained;
     }
@@ -1176,6 +1181,7 @@ public final class Endpoint {
         if (outputWritten == 0) {
             startOutput();
         }
+        timers.outputProgressed(now);
         outputWritten += count;
         if (outputWritten == output.length()) {
             completeOutput();
@@ -1933,8 +1939,8 @@ public final class Endpoint {
         sendAwaitingAck(Frames.hello(config), LivenessTimers.Kind.HELLO, null);
     }
 
-    private void sendPing(byte[] payload) {
-        sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), LivenessTimers.Kind.PING, payload);
+    private long sendPing(byte[] payload) {
+        return sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), LivenessTimers.Kind.PING, payload);
     }
 
     /**
@@ -1986,9 +1992,10 @@ public final class Endpoint {
     }
 
     /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
-    private void sendAwaitingAck(byte[] frame, LivenessTimers.Kind kind, byte @Nullable [] payload) {
+    private long sendAwaitingAck(byte[] frame, LivenessTimers.Kind kind, byte @Nullable [] payload) {
         Outbox.Node node = send(frame);
         node.waitId = timers.await(kind, payload);
+        return node.waitId;
     }
 
     /** AUTH 관문을 통과할 때까지 미룬 PING 하나. */
