@@ -75,6 +75,7 @@ class OwnRequestLedgerTest {
     @Test
     void endedRequestIsInNoIndex() {
         accept(1, 0);
+        startWrite();
         ledger.onResponse(1, TYPE, OK, new byte[0]);
         assertThat(ledger.streamIdOf(0)).isNull();
         assertThat(ledger.stateOfTicket(0)).isNull();
@@ -320,7 +321,8 @@ class OwnRequestLedgerTest {
                 .filter(x -> x.streamId == streamId)
                 .findFirst()
                 .orElse(null);
-        if (r == null) {
+        if (r == null || r.phase == Phase.UNWRITTEN) {
+            // 대기 중이 아니거나 아직 넘기지 않은 요청이면 버린다(규격 4.3절).
             assertThat(actual).as(at).isNull();
             return;
         }
@@ -475,6 +477,7 @@ class OwnRequestLedgerTest {
         accept(1, 0);
         assertThat(ledger.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.STREAM_LIMIT);
         assertThat(ledger.nextTicket()).isEqualTo(2);
+        startWrite();
         assertThat(ledger.onResponse(1, TYPE, OK, new byte[0])).isNotNull();
         assertThat(ledger.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.ADMITTED);
         assertThat(ledger.streamIdOf(2)).isEqualTo(3L);
@@ -495,6 +498,7 @@ class OwnRequestLedgerTest {
         OwnRequestLedger last = new OwnRequestLedger(new Outbox(), Long.MAX_VALUE, 1);
         last.setPeerMaxConcurrentStreams(1);
         assertThat(last.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.ADMITTED);
+        last.onWriteStarted();
         assertThat(last.onResponse(Long.MAX_VALUE, TYPE, OK, new byte[0])).isNotNull();
         assertThat(last.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.EXHAUSTED);
     }
@@ -579,20 +583,22 @@ class OwnRequestLedgerTest {
         assertThat(ended).extracting(o -> o.streamId).containsExactly(1L, 3L, 5L);
     }
 
-    /** 응답은 확정성이 RESPONSE이고 쓰기 전이어도 프레임을 거둔다. */
+    /** 넘기지 않은 요청에 온 응답은 버리고 요청과 프레임을 그대로 둔다(규격 4.3절). */
     @Test
-    void responseIsResponseCertaintyAndUnwritesUnwrittenFrame() {
+    void responseToUnhandedRequestIsDiscardedAndKeepsFrame() {
         accept(1, 0);
         accept(3, 1);
-        assertEnded(ledger.onResponse(1, TYPE, 7, new byte[0]), 1, 7, Certainty.RESPONSE, false);
-        assertThat(ledger.lastUnwrittenNode()).isNotNull();
-        assertThat(drain().size()).isEqualTo(1);
+        assertThat(ledger.onResponse(1, TYPE, 7, new byte[0])).isNull();
+        assertThat(ledger.openCount()).isEqualTo(2);
+        assertThat(ledger.stateOfStream(1)).isEqualTo(OwnRequestLedger.RequestState.NUMBERED_UNWRITTEN);
+        assertThat(drain()).hasSize(2);
     }
 
     /** 응답 type이 요청과 다르면 로컬 INTERNAL이다. */
     @Test
     void responseTypeMismatchIsLocalInternal() {
         accept(1, 0);
+        startWrite();
         assertEnded(
                 ledger.onResponse(1, TYPE + 1, OK, new byte[0]),
                 1,
@@ -605,6 +611,7 @@ class OwnRequestLedgerTest {
     @Test
     void reservedStatusIsUnknown() {
         accept(1, 0);
+        startWrite();
         assertEnded(ledger.onResponse(1, TYPE, 200, new byte[0]), 1, Status.UNKNOWN, Certainty.RESPONSE, false);
     }
 
@@ -616,13 +623,14 @@ class OwnRequestLedgerTest {
         assertEnded(ledger.onReset(1, ErrorCode.REFUSED), 1, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false);
     }
 
-    /** REFUSED가 아닌 RESET은 결과 모름이고 쓰기 전 프레임을 거둔다. */
+    /** 넘기지 않은 요청에 온 RESET은 버리고 프레임을 그대로 둔다. 넘긴 요청의 REFUSED가 아닌 RESET은 결과 모름이다. */
     @Test
-    void otherResetIsUnknownAndUnwritesUnwrittenFrame() {
+    void resetToUnhandedRequestIsDiscardedAndHandedOffOneIsUnknown() {
         accept(1, 0);
         accept(3, 1);
-        assertEnded(ledger.onReset(1, ErrorCode.CANCEL), 1, Status.CANCELLED, Certainty.UNKNOWN, false);
-        assertThat(drain()).hasSize(1);
+        assertThat(ledger.onReset(1, ErrorCode.CANCEL)).isNull();
+        assertThat(ledger.openCount()).isEqualTo(2);
+        assertThat(drain()).hasSize(2);
         accept(5, 2);
         startWrite();
         assertEnded(ledger.onReset(5, ErrorCode.INTERNAL_ERROR), 5, Status.INTERNAL, Certainty.UNKNOWN, false);
@@ -658,12 +666,12 @@ class OwnRequestLedgerTest {
         assertThat(ledger.stateOfStream(1)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
     }
 
-    /** 쓰기 전 요청의 REFUSED RESET은 처리 안 됨이다. */
+    /** 쓰기 전 요청의 REFUSED RESET도 버린다. */
     @Test
-    void refusedResetOfUnwrittenRequestIsNotProcessed() {
+    void refusedResetOfUnwrittenRequestIsDiscarded() {
         accept(1, 0);
-        assertEnded(ledger.onReset(1, ErrorCode.REFUSED), 1, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false);
-        assertThat(drain()).isEmpty();
+        assertThat(ledger.onReset(1, ErrorCode.REFUSED)).isNull();
+        assertThat(drain()).hasSize(1);
     }
 
     /** 쓰기를 시작한 요청의 응답은 RESPONSE이고 프레임은 이미 나갔다. */

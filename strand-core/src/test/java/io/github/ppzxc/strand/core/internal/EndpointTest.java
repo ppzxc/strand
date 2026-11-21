@@ -1808,6 +1808,7 @@ class EndpointTest {
     void reservedResponseStatusIsDeliveredAsUnknown() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
+        client.drainMessages();
 
         client.receive(bytes(appFrame(1, 200, "")));
 
@@ -1818,6 +1819,7 @@ class EndpointTest {
     void responseExtensionsAreOnlyFormatCheckedAndTheirContentIsIgnored() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
+        client.drainMessages();
 
         // timeout의 길이가 4가 아니어도 응답에서는 값을 해석하지 않는다.
         client.receive(bytes(appFrame(1, 0, "00010003000001")));
@@ -3277,15 +3279,5 @@ class EndpointTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Endpoint.server(EndpointConfig.defaults().nextStreamId(1)))
                 .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void aResponseToAnUnwrittenRequestAlsoDropsItFromTheOutbox() {
-        Endpoint client = establishedClient();
-        client.request(257, new byte[0]);
-
-        client.receive(bytes(appFrame(1, 0, "")));
-
-        assertThat(client.drainMessages()).isEmpty();
     }
 }
