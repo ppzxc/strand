@@ -14,10 +14,8 @@ import org.junit.jupiter.api.Test;
  */
 class EndpointUnsentIdlePingTest {
 
-    private static final EndpointConfig CONFIG = EndpointConfig.defaults()
-            .idleIntervalMs(500)
-            .ackTimeoutMs(1000)
-            .authTimeoutMs(Long.MAX_VALUE / 4);
+    private static final EndpointConfig CONFIG =
+            EndpointConfig.defaults().idleIntervalMs(500).ackTimeoutMs(1000).authTimeoutMs(Long.MAX_VALUE / 4);
 
     @Test
     void noOutputProgressClosesUnresponsiveAfterTheAckWaitSinceTheIdlePingWasQueued() {
@@ -137,7 +135,8 @@ class EndpointUnsentIdlePingTest {
 
     @Test
     void anApplicationPingBlockedInTheQueueIsNotSubjectToTheRule() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000));
+        Endpoint server =
+                Endpoint.server(EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000));
         open(server);
         server.ping(new byte[8]);
 
@@ -149,7 +148,8 @@ class EndpointUnsentIdlePingTest {
 
     @Test
     void theBlockedHelloIsNotSubjectToTheRule() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().idleIntervalMs(500).ackTimeoutMs(1000));
+        Endpoint client =
+                Endpoint.client(EndpointConfig.defaults().idleIntervalMs(500).ackTimeoutMs(1000));
 
         assertThat(client.nextDeadline()).isEqualTo(OptionalLong.empty());
         client.advance(100_000);
