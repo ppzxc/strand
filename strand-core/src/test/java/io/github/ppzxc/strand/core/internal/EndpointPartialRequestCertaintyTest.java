@@ -31,9 +31,7 @@ class EndpointPartialRequestCertaintyTest {
         deliver(client, server, request, firstPart, request.length() - firstPart);
         pump(client, server);
 
-        assertThat(server.drainEvents())
-                .extracting(Event::kind)
-                .contains(Event.Kind.REQUEST_RECEIVED);
+        assertThat(server.drainEvents()).extracting(Event::kind).contains(Event.Kind.REQUEST_RECEIVED);
     }
 
     @Test
