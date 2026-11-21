@@ -1974,6 +1974,94 @@
           "events": []
         }
       ]
+    },
+    {
+      "id": "response-before-handoff-is-discarded",
+      "description": "넘기기 전 요청에 응답이 오면 조용히 버리고 요청은 그대로 나간다. 요청을 넘긴 뒤 온 진짜 응답이 결과가 된다",
+      "requirements": [
+        "req-stream-frame-before-handoff-discard"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "hold_output": true,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001001010000000000000000000100000000",
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "0000001001010000000000000000000100000000",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "OK",
+              "certainty": "response"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reset-before-handoff-is-discarded",
+      "description": "넘기기 전 요청에 RESET이 오면 조용히 버리고 요청은 그대로 나간다. 요청을 넘긴 뒤 온 RESET이 결과 모름으로 끝낸다",
+      "requirements": [
+        "req-stream-frame-before-handoff-discard"
+      ],
+      "setup": {
+        "role": "client",
+        "established": true
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "type": 257,
+          "hold_output": true,
+          "send": [],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140004000000000000000000010000000000000004",
+          "send": [
+            {
+              "type": 257,
+              "stream_id": "1"
+            }
+          ],
+          "events": []
+        },
+        {
+          "kind": "recv",
+          "hex": "000000140004000000000000000000010000000000000004",
+          "send": [],
+          "events": [
+            {
+              "event": "result",
+              "stream_id": "1",
+              "status": "CANCELLED",
+              "certainty": "unknown"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
