@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -121,8 +120,8 @@ class ConnectionNotificationTest {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) {
-            return message.length() - offset;
+        public int writeBytes(byte[] bytes, int offset, int length) {
+            return length;
         }
 
         @Override
@@ -310,8 +309,8 @@ class ConnectionNotificationTest {
             }
 
             @Override
-            public int write(OutboundMessage message, int offset) {
-                return message.length() - offset;
+            public int writeBytes(byte[] bytes, int offset, int length) {
+                return length;
             }
 
             @Override
@@ -348,7 +347,7 @@ class ConnectionNotificationTest {
             }
 
             @Override
-            public int write(OutboundMessage message, int offset) throws IOException {
+            public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
                 throw failure;
             }
 
@@ -373,11 +372,10 @@ class ConnectionNotificationTest {
         Recorder clientSide = new Recorder();
         Recorder serverSide = new Recorder();
         IllegalStateException authenticatorFailure = new IllegalStateException("인증 서버 장애");
-        start(ConnectionDriver.server(
-                        EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
-                            throw authenticatorFailure;
-                        }),
-                        link.second())
+        start(ConnectionDriver.server(EndpointConfig.defaults(), link.second())
+                .authenticator((mechanism, credentials) -> {
+                    throw authenticatorFailure;
+                })
                 .executor(handlers)
                 .listener(serverSide));
         start(ConnectionDriver.client(EndpointConfig.defaults().auth("X", new byte[0]), link.first())
@@ -395,6 +393,25 @@ class ConnectionNotificationTest {
                 .isEqualTo(server.reason().errorCode())
                 .isNotZero();
         assertThat(client.reason().sender()).hasValue(CloseReason.Sender.PEER);
+    }
+
+    @Test
+    void anAuthDecisionCompletedLaterStillOpensTheGateWithoutBlockingTheTransportThread() throws Exception {
+        InMemoryPassage.Pair link = InMemoryPassage.streams();
+        Recorder clientSide = new Recorder();
+        CompletableFuture<io.github.ppzxc.strand.core.internal.AuthDecision> decision = new CompletableFuture<>();
+        start(ConnectionDriver.server(EndpointConfig.defaults(), link.second())
+                .authenticator((mechanism, credentials) -> decision)
+                .executor(handlers));
+        start(ConnectionDriver.client(EndpointConfig.defaults().auth("SLOW", new byte[0]), link.first())
+                .executor(handlers)
+                .listener(clientSide));
+
+        assertThat(clientSide.authenticated).isNotDone();
+        decision.complete(io.github.ppzxc.strand.core.internal.AuthDecision.PASS);
+
+        await(clientSide.authenticated);
+        assertThat(clientSide.closed).isNotDone();
     }
 
     @Test
@@ -471,11 +488,11 @@ class ConnectionNotificationTest {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
+        public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
             if (failWrites) {
                 throw new IOException("쓰기 실패");
             }
-            return delegate.write(message, offset);
+            return delegate.writeBytes(bytes, offset, length);
         }
 
         @Override

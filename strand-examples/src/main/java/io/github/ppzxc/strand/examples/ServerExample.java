@@ -75,8 +75,8 @@ public final class ServerExample {
             // 와도 끝난 연결이 목록에 남지 않게 한다.
             AtomicReference<ConnectionDriver> started = new AtomicReference<>();
             AtomicBoolean ended = new AtomicBoolean();
-            ConnectionDriver driver = ConnectionDriver.server(
-                            ExampleSupport.withAuthenticator(EndpointConfig.defaults()), TcpPassage.of(channel))
+            ConnectionDriver driver = ConnectionDriver.server(EndpointConfig.defaults(), TcpPassage.of(channel))
+                    .authenticator(ExampleSupport.authenticator())
                     .handler(handlers, request -> {
                         String body = new String(request.body(), StandardCharsets.UTF_8);
                         System.out.println("[서버] 요청 type=" + request.type() + " body=" + body);

@@ -9,38 +9,44 @@ import org.junit.jupiter.api.Test;
 class EndpointBoundedReceiveTest {
     @Test
     void borrowedPartialInputIsCopiedAndResumed() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Endpoint server = Drive.server(EndpointConfig.defaults());
         byte[] first = EndpointTest.bytes("c0de5354");
-        assertThat(server.receiveBounded(first, 0, first.length, 1)).isEqualTo(4);
+        assertThat(server.receiveBounded(first, 0, first.length, 1, Drive.ROOMY).consumed())
+                .isEqualTo(4);
         java.util.Arrays.fill(first, (byte) 0);
         byte[] rest = EndpointTest.bytes("52300000" + "0000001000010000000000000000000000000000");
-        assertThat(server.receiveBounded(rest, 0, rest.length, 1)).isEqualTo(4);
-        assertThat(server.drainMessages()).hasSize(1);
-        assertThat(server.receiveBounded(rest, 4, rest.length - 4, 1)).isEqualTo(20);
-        assertThat(server.drainMessages()).hasSize(1);
+        assertThat(server.receiveBounded(rest, 0, rest.length, 1, Drive.ROOMY).consumed())
+                .isEqualTo(4);
+        assertThat(Drive.drainMessages(server)).hasSize(1);
+        assertThat(server.receiveBounded(rest, 4, rest.length - 4, 1, Drive.ROOMY)
+                        .consumed())
+                .isEqualTo(20);
+        assertThat(Drive.drainMessages(server)).hasSize(1);
     }
 
     @Test
     void resumesAtTheUnconsumedUnit() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Endpoint server = Drive.server(EndpointConfig.defaults());
         byte[] input = EndpointTest.bytes("c0de535452300000" + "0000001000010000000000000000000000000000");
 
-        int first = server.receiveBounded(input, 0, input.length, 1);
+        int first =
+                server.receiveBounded(input, 0, input.length, 1, Drive.ROOMY).consumed();
         assertThat(first).isEqualTo(8);
-        assertThat(server.drainMessages()).hasSize(1);
-        int second = server.receiveBounded(input, first, input.length - first, 1);
+        assertThat(Drive.drainMessages(server)).hasSize(1);
+        int second = server.receiveBounded(input, first, input.length - first, 1, Drive.ROOMY)
+                .consumed();
         assertThat(second).isEqualTo(20);
-        assertThat(server.drainMessages()).hasSize(1);
+        assertThat(Drive.drainMessages(server)).hasSize(1);
     }
 
     private static Endpoint openServer() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        server.drainMessages();
-        server.drainEvents();
+        Endpoint server = Drive.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
         return server;
     }
 
@@ -58,7 +64,7 @@ class EndpointBoundedReceiveTest {
         server.request(257, new byte[0]);
         server.request(257, new byte[0]);
         server.request(257, new byte[0]);
-        server.drainMessages();
+        Drive.drainMessages(server);
         byte[] request = Frames.request(257, 1, new byte[0]);
         byte[] input = concat(request, Frames.close(ErrorCode.NO_ERROR, 0));
 
@@ -74,7 +80,7 @@ class EndpointBoundedReceiveTest {
 
         assertThat(second.consumed()).isEqualTo(input.length - request.length);
         assertThat(second.collectionRequired()).isFalse();
-        assertThat(server.drainEvents())
+        assertThat(Drive.drainEvents(server))
                 .extracting(Event::kind)
                 .containsExactly(Event.Kind.RESULT, Event.Kind.RESULT, Event.Kind.RESULT, Event.Kind.CLOSED);
     }
@@ -89,7 +95,7 @@ class EndpointBoundedReceiveTest {
 
         assertThat(first.consumed()).isEqualTo(2 * ping.length);
         assertThat(first.collectionRequired()).isTrue();
-        assertThat(server.drainMessages()).hasSize(2);
+        assertThat(Drive.drainMessages(server)).hasSize(2);
         ReceiveProgress second = server.receiveBounded(
                 input, first.consumed(), input.length - first.consumed(), 10, CollectionSpace.of(100, 5));
         assertThat(second.consumed()).isEqualTo(ping.length);

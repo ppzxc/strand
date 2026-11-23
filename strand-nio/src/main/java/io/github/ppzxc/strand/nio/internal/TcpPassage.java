@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.nio.internal;
 
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.CancelledKeyException;
@@ -9,7 +8,6 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.jspecify.annotations.Nullable;
 
 /**
  * JDK NIO 기반 TCP 통로. 이미 맺어진 {@link SocketChannel} 하나를 받아 바이트 스트림 통로({@link Inbound#bytes})로 쓴다. 채널은 이 통로가
@@ -21,7 +19,7 @@ import org.jspecify.annotations.Nullable;
  * 멈추지 않는다. 읽기와 쓰기 관심은 하나의 선택기에서 다룬다. 상대의 EOF는 {@link Inbound#end()}로, 리셋 같은 입출력 오류는
  * {@link IOException}으로 알린다. 서로 쓰기만 하는 두 끝이 멈추지 않는다는 것은 정상 흐름 제어 범위 안에서만 참이다. 드라이버의 쓰기 대기열이 상한을 넘으면 드라이버가 읽기를 멈추고, 그 뒤는 유휴 PING 확인 대기 초과로 끊긴다(유휴 PING을 끈 설정은 제외, {@code ConnectionDriver} 클래스 설명의 "쓰기 대기열 상한과 읽기 멈춤" 참고).
  *
- * <p>{@link #await}와 {@link #write}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
+ * <p>{@link #await}와 {@link #writeBytes}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
 public final class TcpPassage implements Passage {
 
@@ -34,8 +32,6 @@ public final class TcpPassage implements Passage {
     private final ByteBuffer readBuffer;
     private final AtomicBoolean closed = new AtomicBoolean();
     private boolean ended;
-    private @Nullable OutboundMessage writing;
-    private @Nullable ByteBuffer writingBuffer;
 
     private TcpPassage(SocketChannel channel, Selector selector, SelectionKey key, int readBufferBytes) {
         this.channel = channel;
@@ -128,37 +124,6 @@ public final class TcpPassage implements Passage {
         byte[] bytes = new byte[count];
         readBuffer.get(bytes);
         return Inbound.bytes(bytes);
-    }
-
-    @Override
-    public int write(OutboundMessage message, int offset) throws IOException {
-        // TCP에는 WebSocket Close에 해당하는 것이 없다. 그런 메시지는 내용이 비어 있어 아무것도 쓰지 않는다.
-        if (offset >= message.length()) {
-            return 0;
-        }
-        // bytes()는 복사본을 주므로 한 메시지를 나눠 쓰는 동안은 한 번만 복사해 둔다.
-        ByteBuffer buffer = writingBuffer;
-        // 복사본은 같은 메시지를 이어 쓸 때만 쓴다(위치가 offset과 같을 때). 위치가 다르면 버려진 복사본이라 새로 만든다.
-        if (writing != message || buffer == null || buffer.position() != offset) {
-            buffer = ByteBuffer.wrap(message.bytes());
-            writing = message;
-            writingBuffer = buffer;
-        }
-        buffer.position(offset);
-        int count;
-        try {
-            count = channel.write(buffer);
-        } catch (IOException | RuntimeException e) {
-            // 실패한 메시지의 쓰기 상태는 버린다. 같은 메시지로 다시 써도 처음부터 복사한다.
-            writing = null;
-            writingBuffer = null;
-            throw e;
-        }
-        if (offset + count >= message.length()) {
-            writing = null;
-            writingBuffer = null;
-        }
-        return count;
     }
 
     @Override

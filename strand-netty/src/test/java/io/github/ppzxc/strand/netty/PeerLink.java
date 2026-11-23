@@ -41,7 +41,7 @@ final class PeerLink implements AutoCloseable {
                 byte[] chunk = new byte[count];
                 System.arraycopy(buffer, 0, chunk, 0, count);
                 synchronized (this) {
-                    peer.receive(chunk);
+                    events.addAll(EndpointFeed.receive(peer, chunk));
                     flush();
                 }
             }
@@ -65,7 +65,7 @@ final class PeerLink implements AutoCloseable {
             collected.write(output.bytes(), 0, output.length());
             peer.outputProgress(output.id(), output.length());
         }
-        events.addAll(peer.drainEvents());
+        events.addAll(EndpointFeed.drain(peer));
         return collected.toByteArray();
     }
 
@@ -87,7 +87,7 @@ final class PeerLink implements AutoCloseable {
         } catch (IOException e) {
             ended = true;
         }
-        events.addAll(peer.drainEvents());
+        events.addAll(EndpointFeed.drain(peer));
     }
 
     synchronized List<Event> events() {

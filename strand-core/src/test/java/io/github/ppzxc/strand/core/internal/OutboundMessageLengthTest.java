@@ -13,8 +13,7 @@ class OutboundMessageLengthTest {
 
     @Test
     void lengthIsTheNumberOfBytesTheMessageCarries() {
-        List<OutboundMessage> messages =
-                Endpoint.client(EndpointConfig.defaults()).drainMessages();
+        List<OutboundMessage> messages = Drive.drainMessages(Endpoint.client(EndpointConfig.defaults()));
 
         assertThat(messages.get(0).length()).isEqualTo(PREFACE_BYTES);
         for (OutboundMessage message : messages) {

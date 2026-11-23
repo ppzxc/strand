@@ -21,28 +21,28 @@ class EndpointCloseReasonTest {
     }
 
     private static Endpoint openServer() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
-        server.receive(bytes(PREFACE));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.receive(bytes(AUTH_ANONYMOUS));
-        server.drainMessages();
-        server.drainEvents();
+        Endpoint server = Drive.server(EndpointConfig.defaults());
+        Drive.receive(server, bytes(PREFACE));
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
         return server;
     }
 
     private static Endpoint openClient() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        client.receive(bytes(AUTH_ACK));
-        client.drainMessages();
-        client.drainEvents();
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
+        Drive.drainMessages(client);
+        Drive.drainEvents(client);
         return client;
     }
 
     private static Event closedEvent(Endpoint endpoint) {
-        List<Event> events = endpoint.drainEvents();
+        List<Event> events = Drive.drainEvents(endpoint);
         Event closed = events.get(events.size() - 1);
         assertThat(closed.kind()).isEqualTo(Event.Kind.CLOSED);
         return closed;
@@ -58,7 +58,7 @@ class EndpointCloseReasonTest {
 
         server.close(ErrorCode.NO_ERROR, "hi");
 
-        assertThat(EndpointTest.hex(server.drainMessages().get(0).bytes()))
+        assertThat(EndpointTest.hex(Drive.drainMessages(server).get(0).bytes()))
                 .isEqualTo("0000001e000300000000000000000000000000000000000000000000000000006869");
     }
 
@@ -67,20 +67,20 @@ class EndpointCloseReasonTest {
         Endpoint server = openServer();
 
         assertThatThrownBy(() -> server.close(ErrorCode.NO_ERROR, null)).isInstanceOf(NullPointerException.class);
-        assertThat(server.drainMessages()).isEmpty();
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
     void closeRejectsANullReasonEvenAfterClosingStarted() {
         Endpoint server = openServer();
         server.close(ErrorCode.NO_ERROR, "first");
-        server.drainMessages();
-        server.drainEvents();
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
         assertThatThrownBy(() -> server.close(ErrorCode.NO_ERROR, null)).isInstanceOf(NullPointerException.class);
-        assertThat(server.drainMessages()).isEmpty();
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
@@ -91,7 +91,7 @@ class EndpointCloseReasonTest {
 
         server.close(ErrorCode.NO_ERROR, reason.toString());
 
-        byte[] frame = server.drainMessages().get(0).bytes();
+        byte[] frame = Drive.drainMessages(server).get(0).bytes();
         assertThat(frame).hasSize(65_534);
         assertThat(EndpointTest.hex(java.util.Arrays.copyOfRange(frame, frame.length - 3, frame.length)))
                 .isEqualTo("eab080");
@@ -106,21 +106,21 @@ class EndpointCloseReasonTest {
 
             server.close(ErrorCode.NO_ERROR, reason.toString());
 
-            assertThat(server.drainMessages().get(0).bytes()).hasSize(32 + reasonBytes);
+            assertThat(Drive.drainMessages(server).get(0).bytes()).hasSize(32 + reasonBytes);
         }
     }
 
     @Test
     void closeBeforePeerHelloUsesTheSixteenKiBFrameLimit() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
-        server.receive(bytes(PREFACE));
-        server.drainMessages();
+        Endpoint server = Drive.server(EndpointConfig.defaults());
+        Drive.receive(server, bytes(PREFACE));
+        Drive.drainMessages(server);
         StringBuilder reason = new StringBuilder();
         for (int i = 0; i < 20_000; i++) reason.append('x');
 
         server.close(ErrorCode.NO_ERROR, reason.toString());
 
-        assertThat(server.drainMessages().get(0).bytes()).hasSize(16_384);
+        assertThat(Drive.drainMessages(server).get(0).bytes()).hasSize(16_384);
     }
 
     private static void assertErrorClose(CloseReason reason, int errorCode, CloseReason.Sender sender) {
@@ -145,7 +145,7 @@ class EndpointCloseReasonTest {
     void peerNoErrorCloseEndsAsCloseSentByThePeer() {
         Endpoint server = openServer();
 
-        server.receive(Frames.close(ErrorCode.NO_ERROR, 0));
+        Drive.receive(server, Frames.close(ErrorCode.NO_ERROR, 0));
 
         CloseReason reason = closedReason(server);
         assertThat(reason.kind()).isEqualTo(CloseReason.Kind.CLOSE);
@@ -178,7 +178,7 @@ class EndpointCloseReasonTest {
     void peerErrorCloseCarriesItsErrorCode() {
         Endpoint server = openServer();
 
-        server.receive(Frames.close(ErrorCode.EXCESSIVE_USE, 0));
+        Drive.receive(server, Frames.close(ErrorCode.EXCESSIVE_USE, 0));
 
         assertErrorClose(closedReason(server), ErrorCode.EXCESSIVE_USE, CloseReason.Sender.PEER);
     }
@@ -188,9 +188,9 @@ class EndpointCloseReasonTest {
         Endpoint client = openClient();
         client.request(257, new byte[0]);
         client.close(ErrorCode.NO_ERROR);
-        client.drainEvents();
+        Drive.drainEvents(client);
 
-        client.receive(Frames.close(ErrorCode.INTERNAL_ERROR, 0));
+        Drive.receive(client, Frames.close(ErrorCode.INTERNAL_ERROR, 0));
 
         assertErrorClose(closedReason(client), ErrorCode.INTERNAL_ERROR, CloseReason.Sender.PEER);
     }
@@ -199,16 +199,16 @@ class EndpointCloseReasonTest {
     void connectionErrorEndsAsProtocolErrorCloseSentByMe() {
         Endpoint server = openServer();
 
-        server.receive(bytes(BAD_FRAME));
+        Drive.receive(server, bytes(BAD_FRAME));
 
         assertErrorClose(closedReason(server), ErrorCode.PROTOCOL_ERROR, CloseReason.Sender.LOCAL);
     }
 
     @Test
     void connectionErrorWithoutAnySentCloseStillReportsAnErrorClose() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Endpoint server = Drive.server(EndpointConfig.defaults());
 
-        server.receive(bytes("0000000000000000"));
+        Drive.receive(server, bytes("0000000000000000"));
 
         CloseReason reason = closedReason(server);
         assertThat(reason.kind()).isEqualTo(CloseReason.Kind.ERROR_CLOSE);
@@ -217,33 +217,16 @@ class EndpointCloseReasonTest {
 
     @Test
     void authenticatorRejectionEndsAsErrorCloseWithoutALocalCause() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((m, c) -> AuthDecision.REJECT));
-        server.receive(bytes(PREFACE));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.receive(bytes(AUTH_ANONYMOUS));
+        Endpoint server = Drive.server(EndpointConfig.defaults(), (m, c) -> AuthDecision.REJECT);
+        Drive.receive(server, bytes(PREFACE));
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
 
         Event closed = closedEvent(server);
 
         assertErrorClose(closed.closeReason().get(), ErrorCode.UNAUTHENTICATED, CloseReason.Sender.LOCAL);
         assertThat(closed.cause()).isEmpty();
-    }
-
-    @Test
-    void authenticatorExceptionIsStillReportedAlongsideTheErrorClose() {
-        IllegalStateException failure = new IllegalStateException("auth backend down");
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((m, c) -> {
-            throw failure;
-        }));
-        server.receive(bytes(PREFACE));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.receive(bytes(AUTH_ANONYMOUS));
-
-        Event closed = closedEvent(server);
-
-        assertThat(closed.cause()).containsSame(failure);
-        assertErrorClose(closed.closeReason().get(), ErrorCode.INTERNAL_ERROR, CloseReason.Sender.LOCAL);
     }
 
     @Test
@@ -260,8 +243,8 @@ class EndpointCloseReasonTest {
     @Test
     void disconnectBeforeTheAuthGateEndsAsDisconnected() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
 
         client.disconnect();
 
@@ -273,7 +256,7 @@ class EndpointCloseReasonTest {
         Endpoint client = openClient();
         client.request(257, new byte[0]);
         client.close(ErrorCode.NO_ERROR);
-        client.drainEvents();
+        Drive.drainEvents(client);
 
         client.disconnect();
 
@@ -283,18 +266,18 @@ class EndpointCloseReasonTest {
     @Test
     void ackTimeoutWhileClosingReportsTheActualErrorCodeSentByMe() {
         EndpointConfig config = EndpointConfig.defaults().ackTimeoutMs(1000).idleIntervalMs(500);
-        Endpoint server = Endpoint.server(config);
-        server.receive(bytes(PREFACE));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.receive(bytes(AUTH_ANONYMOUS));
-        server.receive(Frames.request(257, 1, new byte[0]));
-        server.advance(600);
-        server.drainMessages();
+        Endpoint server = Drive.server(config);
+        Drive.receive(server, bytes(PREFACE));
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
+        Drive.receive(server, Frames.request(257, 1, new byte[0]));
+        Drive.advance(server, 600);
+        Drive.drainMessages(server);
         server.close(ErrorCode.NO_ERROR);
-        server.drainEvents();
+        Drive.drainEvents(server);
 
-        server.advance(1500);
+        Drive.advance(server, 1500);
 
         assertErrorClose(closedReason(server), ErrorCode.UNRESPONSIVE, CloseReason.Sender.LOCAL);
     }
@@ -302,18 +285,18 @@ class EndpointCloseReasonTest {
     @Test
     void ackTimeoutAfterThePeerClosedReportsTheActualErrorCode() {
         EndpointConfig config = EndpointConfig.defaults().ackTimeoutMs(1000).idleIntervalMs(500);
-        Endpoint server = Endpoint.server(config);
-        server.receive(bytes(PREFACE));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.receive(bytes(AUTH_ANONYMOUS));
-        server.receive(Frames.request(257, 1, new byte[0]));
-        server.advance(600);
-        server.drainMessages();
-        server.receive(Frames.close(ErrorCode.NO_ERROR, 0));
-        server.drainEvents();
+        Endpoint server = Drive.server(config);
+        Drive.receive(server, bytes(PREFACE));
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
+        Drive.receive(server, Frames.request(257, 1, new byte[0]));
+        Drive.advance(server, 600);
+        Drive.drainMessages(server);
+        Drive.receive(server, Frames.close(ErrorCode.NO_ERROR, 0));
+        Drive.drainEvents(server);
 
-        server.advance(1500);
+        Drive.advance(server, 1500);
 
         assertErrorClose(closedReason(server), ErrorCode.UNRESPONSIVE, CloseReason.Sender.LOCAL);
     }
@@ -321,11 +304,11 @@ class EndpointCloseReasonTest {
     @Test
     void otherEventsCarryNoCloseReason() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        client.receive(bytes(AUTH_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
 
-        for (Event event : client.drainEvents()) {
+        for (Event event : Drive.drainEvents(client)) {
             assertThat(event.closeReason()).isEmpty();
         }
     }

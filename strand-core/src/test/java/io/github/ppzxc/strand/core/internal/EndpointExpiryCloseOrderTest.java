@@ -16,19 +16,19 @@ class EndpointExpiryCloseOrderTest {
     private static final int REQUEST_TYPE = 0x0100;
 
     private static Endpoint established() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
-        server.receive(Frames.preface());
-        server.receive(Frames.hello(EndpointConfig.defaults()));
-        server.receive(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
-        server.receive(Frames.auth("ANONYMOUS", new byte[0]));
-        server.drainMessages();
-        server.drainEvents();
+        Endpoint server = Drive.server(EndpointConfig.defaults());
+        Drive.receive(server, Frames.preface());
+        Drive.receive(server, Frames.hello(EndpointConfig.defaults()));
+        Drive.receive(server, Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
+        Drive.receive(server, Frames.auth("ANONYMOUS", new byte[0]));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
         return server;
     }
 
     private static List<Integer> types(Endpoint endpoint) {
         List<Integer> types = new ArrayList<>();
-        for (OutboundMessage message : endpoint.drainMessages()) {
+        for (OutboundMessage message : Drive.drainMessages(endpoint)) {
             types.add(Frames.typeOf(message.bytes(), 0));
         }
         return types;
@@ -38,14 +38,14 @@ class EndpointExpiryCloseOrderTest {
     void expiryResetPrecedesCloseAnchoredBehindAnUnwrittenRequest() {
         Endpoint server = established();
         server.request(REQUEST_TYPE, new byte[0], 10);
-        server.drainMessages();
+        Drive.drainMessages(server);
         server.request(REQUEST_TYPE, new byte[0], 10);
         server.close(ErrorCode.NO_ERROR);
 
-        server.advance(11);
+        Drive.advance(server, 11);
 
         assertThat(types(server)).containsExactly(FrameType.RESET, FrameType.CLOSE);
-        List<Event> events = server.drainEvents();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events)
                 .filteredOn(event -> event.kind() == Event.Kind.RESULT)
                 .extracting(Event::certainty)

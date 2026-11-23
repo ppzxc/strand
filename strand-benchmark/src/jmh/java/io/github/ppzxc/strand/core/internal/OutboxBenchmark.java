@@ -35,6 +35,7 @@ public class OutboxBenchmark {
     public int requests;
 
     private Endpoint server;
+    private BenchSupport.Clock clock;
     private long[] tickets;
 
     @Setup(Level.Invocation)
@@ -42,6 +43,7 @@ public class OutboxBenchmark {
         Endpoint[] pair = BenchSupport.establish(EndpointConfig.defaults().maxConcurrentStreams(requests));
         Endpoint client = pair[0];
         server = pair[1];
+        clock = new BenchSupport.Clock();
         for (int i = 0; i < requests; i++) {
             client.request(BenchSupport.REQUEST_TYPE, EMPTY);
         }
@@ -55,7 +57,7 @@ public class OutboxBenchmark {
     @Benchmark
     public List<OutboundMessage> closeWithQueuedRequests() {
         server.close(ErrorCode.PROTOCOL_ERROR);
-        return server.drainMessages();
+        return BenchSupport.drainMessages(server);
     }
 
     @Benchmark
@@ -82,7 +84,7 @@ public class OutboxBenchmark {
     @Benchmark
     public void advanceOncePerPendingRequest() {
         for (int i = 0; i < requests; i++) {
-            server.advance(1); // advance는 증분이다. 기한(DEADLINE_MS)은 넘지 않는다.
+            clock.advance(server, 1); // advance는 증분이다. 기한(DEADLINE_MS)은 넘지 않는다.
         }
     }
 }

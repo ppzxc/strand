@@ -285,8 +285,7 @@ class OwnRequestLedgerTest {
         long unwritten = m.byTicket.values().stream()
                 .filter(r -> r.phase == Phase.UNWRITTEN)
                 .count();
-        assertThat(box.drain(id -> {})).as("쓰기 전 요청의 프레임만 쓰기 대기열에 있다 " + at).hasSize((int) unwritten);
-        l.onWriteStarted();
+        assertThat(writeAll(box, l)).as("쓰기 전 요청의 프레임만 쓰기 대기열에 있다 " + at).hasSize((int) unwritten);
         m.byTicket.values().stream().filter(r -> r.phase == Phase.UNWRITTEN).forEach(r -> r.phase = Phase.WRITTEN);
     }
 
@@ -495,10 +494,11 @@ class OwnRequestLedgerTest {
     /** 번호가 소진되면 요청을 받지 않는다. 한도보다 먼저 판정한다. */
     @Test
     void exhaustedNumbersRefuseBeforeTheConcurrencyLimit() {
-        OwnRequestLedger last = new OwnRequestLedger(new Outbox(), Long.MAX_VALUE, 1);
+        Outbox lastOutbox = new Outbox();
+        OwnRequestLedger last = new OwnRequestLedger(lastOutbox, Long.MAX_VALUE, 1);
         last.setPeerMaxConcurrentStreams(1);
         assertThat(last.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.ADMITTED);
-        last.onWriteStarted();
+        writeAll(lastOutbox, last);
         assertThat(last.onResponse(Long.MAX_VALUE, TYPE, OK, new byte[0])).isNotNull();
         assertThat(last.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.EXHAUSTED);
     }
@@ -751,19 +751,29 @@ class OwnRequestLedgerTest {
         // 가운데 요청의 프레임만 거뒀고, 쓰기 전 마지막 노드는 그대로이며, 나머지 둘은 계속 쓰기 전으로 이어져 있다.
         assertThat(ledger.lastUnwrittenNode()).isNotNull();
         assertThat(drain()).hasSize(2);
-        ledger.onWriteStarted();
         assertThat(ledger.stateOfStream(1)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
         assertThat(ledger.stateOfStream(5)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
         assertThat(ledger.lastUnwrittenNode()).isNull();
     }
 
-    /** Endpoint가 메시지를 꺼낸 뒤 쓰기 시작 사건을 알리는 순서를 따른다. */
+    /** 진행 보고 방식의 순서를 따른다: 첫 바이트를 넘기면 쓰기 시작, 마지막 바이트를 넘기면 넘김을 장부에 알린다. */
     private void startWrite() {
-        outbox.drain(id -> {});
-        ledger.onWriteStarted();
+        writeAll(outbox, ledger);
     }
 
     private List<OutboundMessage> drain() {
-        return new ArrayList<>(outbox.drain(id -> {}));
+        return writeAll(outbox, ledger);
+    }
+
+    /** 쓰기 대기열의 메시지를 앞에서부터 모두 전체 쓴 것으로 하고, 장부에 두 사건을 알린 뒤 쓴 순서대로 돌려준다. */
+    private static List<OutboundMessage> writeAll(Outbox box, OwnRequestLedger l) {
+        List<OutboundMessage> written = new ArrayList<>();
+        for (Outbox.Node node = box.first(); node != null; node = box.first()) {
+            written.add(node.message);
+            l.onWriteStarted(node);
+            box.removeForWriting(node);
+            l.onWriteCompleted(node);
+        }
+        return written;
     }
 }

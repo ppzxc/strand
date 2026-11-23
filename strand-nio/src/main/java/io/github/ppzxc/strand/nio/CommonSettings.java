@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.nio;
 import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.ResourceLimits;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
+import io.github.ppzxc.strand.core.internal.WriteQueueLimit;
 import io.github.ppzxc.strand.nio.internal.OwnerBudgets;
 import io.github.ppzxc.strand.nio.internal.ProgressSpace;
 import io.github.ppzxc.strand.nio.internal.SerialExecutor;
@@ -22,7 +23,7 @@ import org.jspecify.annotations.Nullable;
  */
 abstract class CommonSettings<B extends CommonSettings<B>> {
     /** 쓰기 대기열 바이트의 기본값: 64 MiB(기존 승인 기본값). */
-    static final long DEFAULT_WRITE_QUEUE_BYTES = 64L * 1024 * 1024;
+    static final long DEFAULT_WRITE_QUEUE_BYTES = WriteQueueLimit.DEFAULT_ABSOLUTE_LIMIT;
 
     /** CLOSED 뒤 마무리 시간의 기본값: 5초(기존 승인 기본값). */
     static final Duration DEFAULT_CLOSE_FINISH_DEADLINE = Duration.ofSeconds(5);

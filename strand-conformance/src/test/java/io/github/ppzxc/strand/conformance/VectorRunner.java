@@ -7,11 +7,11 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.github.ppzxc.strand.core.internal.AuthDecision;
+import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
-import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -37,7 +37,7 @@ final class VectorRunner {
      */
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(VectorSchema.setupKeys());
 
-    private static final class AuthScenario {
+    private static final class AuthScenario implements ProgressDriver.AuthPolicy {
         private final String mechanism;
         private final String credentialsHex;
         private final OptionalLong lifetimeSeconds;
@@ -49,6 +49,26 @@ final class VectorRunner {
             this.credentialsHex = credentialsHex;
             this.lifetimeSeconds = lifetimeSeconds;
             this.transientFailure = transientFailure;
+        }
+
+        /** 인증 설정이 없는 벡터: 기본 메커니즘 하나만 통과시킨다. */
+        private static AuthScenario anonymous() {
+            return new AuthScenario(Protocol.DEFAULT_AUTH_MECHANISM, "", OptionalLong.empty(), false);
+        }
+
+        @Override
+        public AuthDecision decide(String mechanism, byte[] credentials) {
+            if (transientFailure) {
+                return AuthDecision.TRANSIENT_FAILURE;
+            }
+            return mechanism.equals(this.mechanism) && Arrays.equals(credentials, Bytes.fromHex(credentialsHex))
+                    ? AuthDecision.PASS
+                    : AuthDecision.REJECT;
+        }
+
+        @Override
+        public OptionalLong credentialLifetimeSeconds() {
+            return lifetimeSeconds;
         }
 
         private static AuthScenario from(JsonObject setup) {
@@ -72,12 +92,23 @@ final class VectorRunner {
     private final boolean client;
     private final boolean webSocket;
     private final Endpoint endpoint;
+    private final ProgressDriver driver;
     private final VirtualCredentialLifetime credentialLifetime;
 
     VectorRunner(boolean client, boolean webSocket, Endpoint endpoint, OptionalLong credentialLifetimeSeconds) {
+        this(client, webSocket, endpoint, credentialLifetimeSeconds, AuthScenario.anonymous());
+    }
+
+    private VectorRunner(
+            boolean client,
+            boolean webSocket,
+            Endpoint endpoint,
+            OptionalLong credentialLifetimeSeconds,
+            AuthScenario auth) {
         this.client = client;
         this.webSocket = webSocket;
         this.endpoint = endpoint;
+        this.driver = new ProgressDriver(endpoint, webSocket, auth);
         this.credentialLifetime = new VirtualCredentialLifetime(credentialLifetimeSeconds);
     }
 
@@ -112,10 +143,15 @@ final class VectorRunner {
         AuthScenario auth = AuthScenario.from(setup);
         boolean webSocket = isWebSocket(setup);
         EndpointConfig config = configOf(setup, webSocket, auth);
+        // 인증 판단은 사건으로 위임되고, 러너가 벡터의 인증 설정으로 답한다(ProgressDriver).
         VectorRunner runner = new VectorRunner(
-                client, webSocket, client ? Endpoint.client(config) : Endpoint.server(config), auth.lifetimeSeconds);
+                client,
+                webSocket,
+                client ? Endpoint.client(config) : Endpoint.server(config),
+                auth.lifetimeSeconds,
+                auth);
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
-        List<OutboundMessage> opening = runner.endpoint.drainMessages();
+        List<OutboundMessage> opening = runner.driver.flush();
         if (setup.get("established").getAsBoolean()) {
             runner.establish(opening, setup.getAsJsonObject("peer_hello"), auth);
             runner.credentialLifetime.startAtCurrentTime();
@@ -129,19 +165,26 @@ final class VectorRunner {
             runner.advanceVirtualCredentialClock(step);
             List<OutboundMessage> sent = new ArrayList<>(opening);
             if (!StepKind.of(step).holdsOutput(step)) {
-                sent.addAll(runner.endpoint.drainMessages());
+                // 넘김은 출력 진행 보고다. 부분 쓰기 한도가 있으면 그 바이트까지만 보고하고 나머지는 다음 단계에서 넘긴다.
+                sent.addAll(runner.driver.flush(writeLimit(step)));
             }
             runner.credentialLifetime.observeSentMessages(sent);
             boolean startsWithPreface = !opening.isEmpty();
             opening = new ArrayList<>();
-            assertThat(FrameKind.comparable(
-                            runner.describeMessages(sent, startsWithPreface), step.getAsJsonArray("send")))
+            List<Event> events = runner.driver.takeEvents();
+            List<String> observed = runner.describeMessages(sent, startsWithPreface);
+            if (runner.webSocketCloses(events)) {
+                observed.add(FrameKind.webSocketClose(Protocol.NORMAL_CLOSURE));
+            }
+            assertThat(FrameKind.comparable(observed, step.getAsJsonArray("send")))
                     .as("%d번째 단계의 send", number)
                     .isEqualTo(expectedFrames(step));
-            assertThat(describe(runner.endpoint.drainEvents()))
-                    .as("%d번째 단계의 events", number)
-                    .isEqualTo(expectedEvents(step));
+            assertThat(describe(events)).as("%d번째 단계의 events", number).isEqualTo(expectedEvents(step));
         }
+    }
+
+    private static long writeLimit(JsonObject step) {
+        return step.has("write_limit_bytes") ? step.get("write_limit_bytes").getAsLong() : Long.MAX_VALUE;
     }
 
     /** 실행하지 못하는 부분이 있으면 벡터를 실패시킨다(건너뛰지 않는다). 한 단계도 실행하기 전에 판정한다. */
@@ -160,6 +203,9 @@ final class VectorRunner {
             }
         }
         for (JsonObject step : vector.steps()) {
+            // 부분 쓰기는 바이트 진행을 보고하는 통로에서만 만든다. 메시지 통로는 메시지 전체만 접수한다.
+            addIfUnsupported(
+                    unsupported, !(step.has("write_limit_bytes") && isWebSocket(setup)), "request.write_limit_bytes");
             String kindName = step.get(StepKind.TAG).getAsString();
             StepKind kind = StepKind.named(kindName);
             addIfUnsupported(unsupported, kind != null, "단계 " + kindName);
@@ -205,25 +251,12 @@ final class VectorRunner {
                 .capabilities(hello.get("capabilities"))
                 .ackTimeoutMs(ackTimeout)
                 .authTimeoutMs(authTimeout);
-        if (webSocket) {
-            config = config.webSocket();
-        }
         if (setup.has("next_stream_id")) {
             config = config.nextStreamId(streamId(setup.get("next_stream_id")));
         }
         if (setup.has("auth")) {
             byte[] expectedCredentials = Bytes.fromHex(auth.credentialsHex);
-            config = config.auth(auth.mechanism, expectedCredentials).authenticator((mechanism, credentials) -> {
-                if (auth.transientFailure) {
-                    return AuthDecision.TRANSIENT_FAILURE;
-                }
-                return mechanism.equals(auth.mechanism) && Arrays.equals(credentials, expectedCredentials)
-                        ? AuthDecision.PASS
-                        : AuthDecision.REJECT;
-            });
-            if (auth.lifetimeSeconds.isPresent()) {
-                config = config.credentialLifetimeSeconds(auth.lifetimeSeconds.getAsLong());
-            }
+            config = config.auth(auth.mechanism, expectedCredentials);
         }
         if (setup.has("known_types")) {
             Set<Integer> known = new HashSet<>();
@@ -258,11 +291,11 @@ final class VectorRunner {
         List<OutboundMessage> hello = opening;
         if (!client) {
             deliver(FrameKind.encode(control("PREFACE", false)));
-            hello = endpoint.drainMessages();
+            hello = driver.flush();
         }
         assertThat(describeMessages(hello, client)).as("수립: 연결을 연 뒤의 출력").hasSize(client ? 2 : 1);
         deliver(FrameKind.encode(peerHelloFrame));
-        List<String> afterPeerHello = describeMessages(endpoint.drainMessages(), false);
+        List<String> afterPeerHello = describeMessages(driver.flush(), false);
         if (client) {
             // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 보낸다(규격 3.3절 4번).
             assertThat(afterPeerHello)
@@ -272,25 +305,45 @@ final class VectorRunner {
             assertThat(afterPeerHello).as("수립: 상대 HELLO에 대한 ACK").containsExactly(FrameKind.expected(helloAck));
         }
         deliver(FrameKind.encode(helloAck));
-        assertThat(endpoint.drainMessages()).as("수립: ACK 뒤의 출력").isEmpty();
+        assertThat(driver.flush()).as("수립: ACK 뒤의 출력").isEmpty();
         if (client) {
             deliver(FrameKind.encode(authAck));
         } else {
             deliver(FrameKind.encode(authFrame));
-            assertThat(describeMessages(endpoint.drainMessages(), false))
+            assertThat(describeMessages(driver.flush(), false))
                     .as("수립: AUTH에 대한 AUTH(ACK)")
                     .containsExactly(FrameKind.expected(authAck));
         }
-        assertThat(endpoint.drainMessages()).as("수립: AUTH 관문 통과 뒤의 출력").isEmpty();
-        assertThat(describe(endpoint.drainEvents())).as("수립: 이벤트").isEmpty();
+        assertThat(driver.flush()).as("수립: AUTH 관문 통과 뒤의 출력").isEmpty();
+        assertThat(describe(driver.takeEvents())).as("수립: 이벤트").isEmpty();
+    }
+
+    /**
+     * WebSocket 전송 모듈이 WebSocket Close 1000을 보낼지. core의 전송 종료 지시가 닫으라고 하고(남은 출력을 다 넘겼으므로 이 단계에서 끝난
+     * 연결이다) 종료 원인이 {@code NO_ERROR} 연결 종료일 때다. core는 WebSocket을 모르므로 이 판단은 전송 모듈의 일이고, 예제의 WebSocket
+     * 통로가 같은 판단을 한다. 벡터의 {@code WEBSOCKET_CLOSE} 기대 항목은 이 판단으로 확인한다.
+     */
+    private boolean webSocketCloses(List<Event> events) {
+        if (!webSocket || endpoint.transportClose() == Endpoint.TransportClose.NONE) {
+            return false;
+        }
+        for (Event event : events) {
+            if (event.kind() == Event.Kind.CLOSED
+                    && event.closeReason()
+                            .map(r -> r.kind() == CloseReason.Kind.CLOSE)
+                            .orElse(false)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 수립에 쓰는 입력 하나를 전송 방식에 맞게 넣는다. WebSocket이면 메시지 하나로, 바이트 스트림이면 바이트로 넣는다. */
     private void deliver(byte[] bytes) {
         if (webSocket) {
-            endpoint.receiveMessage(WebSocketMessageKind.BINARY, bytes);
+            driver.receiveUnit(bytes);
         } else {
-            endpoint.receive(bytes);
+            driver.receiveStream(bytes);
         }
     }
 
@@ -307,7 +360,7 @@ final class VectorRunner {
     }
 
     private void apply(JsonObject step, Map<String, Long> requestTickets) {
-        StepKind.of(step).execute(endpoint, step, requestTickets);
+        StepKind.of(step).execute(driver, step, requestTickets);
     }
 
     private void advanceVirtualCredentialClock(JsonObject step) {
@@ -355,8 +408,7 @@ final class VectorRunner {
 
         private static boolean isAuthAck(OutboundMessage message) {
             byte[] bytes = message.bytes();
-            return message.kind() == OutboundMessage.Kind.BINARY
-                    && bytes.length >= Protocol.HEADER_SIZE
+            return bytes.length >= Protocol.HEADER_SIZE
                     && Protocol.frameType(bytes) == Protocol.TYPE_AUTH
                     && (Protocol.frameFlags(bytes) & Protocol.ACK_FLAG) != 0;
         }
@@ -398,26 +450,17 @@ final class VectorRunner {
     }
 
     /**
-     * 엔드포인트가 보낸 메시지를 벡터의 `send`와 같은 표기로 바꾼다. WebSocket에서는 바이너리 메시지마다 프레임이 정확히 하나여야 하고
-     * (벡터 형식 6.1절), WebSocket Close는 자기 항목이다. 바이트 스트림에서는 메시지를 이어 붙여 프레임으로 푼다.
+     * 엔드포인트가 보낸 메시지를 벡터의 `send`와 같은 표기로 바꾼다. WebSocket에서는 바이너리 메시지마다 프레임이 정확히 하나여야 한다
+     * (벡터 형식 6.1절). WebSocket Close는 core의 출력이 아니라 {@link #webSocketCloses}가 판단한다. 바이트 스트림에서는 메시지를 이어 붙여 프레임으로 푼다.
      */
     List<String> describeMessages(List<OutboundMessage> messages, boolean startsWithPreface) {
         List<String> result = new ArrayList<>();
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         boolean first = true;
         for (OutboundMessage message : messages) {
-            if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE
-                    && message.webSocketCloseCode() != Protocol.NORMAL_CLOSURE) {
-                // 1000이 아닌 상태 코드는 규격이 정하지 않아 관측하지 않는다(벡터 형식 6.1절).
-                continue;
-            }
             boolean withPreface = startsWithPreface && first;
             first = false;
-            if (message.kind() == OutboundMessage.Kind.WEBSOCKET_CLOSE) {
-                result.addAll(FrameKind.describe(stream.toByteArray(), startsWithPreface && result.isEmpty(), client));
-                stream.reset();
-                result.add(FrameKind.webSocketClose(message.webSocketCloseCode()));
-            } else if (webSocket) {
+            if (webSocket) {
                 List<String> frames = FrameKind.describe(message.bytes(), withPreface, client);
                 assertThat(frames).as("WebSocket 메시지마다 프레임이 하나").hasSize(1);
                 result.addAll(frames);

@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -56,7 +55,7 @@ class ConnectionDriverTest {
 
             @Override
             EndpointConfig config() {
-                return EndpointConfig.defaults().webSocket();
+                return EndpointConfig.defaults();
             }
         };
 
@@ -441,11 +440,11 @@ class ConnectionDriverTest {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
+        public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
             if (failWrites.get()) {
                 throw new IOException("쓸 수 없음");
             }
-            return delegate.write(message, offset);
+            return delegate.writeBytes(bytes, offset, length);
         }
 
         @Override
@@ -491,7 +490,7 @@ class ConnectionDriverTest {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
+        public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
             writing.countDown();
             try {
                 release.await();
@@ -710,18 +709,52 @@ class ConnectionDriverTest {
 
     @Test
     void anInputTheEndpointRejectsEndsTheConnectionAndPendingRequestsGetTheCoreResult() throws Exception {
-        // 서버는 메시지 통로 설정인데 통로는 바이트 스트림이라 receive가 IllegalStateException을 던진다.
-        InMemoryPassage.Pair link = InMemoryPassage.streams();
-        ConnectionDriver server =
-                start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), link.second()));
+        // 스트림 입력으로 받아 둔 바이트가 남아 있는데 한 단위 입력이 오면 core가 IllegalStateException을 던진다.
+        MixedInputPassage passage = new MixedInputPassage();
+        ConnectionDriver server = start(ConnectionDriver.server(EndpointConfig.defaults(), passage));
         CompletableFuture<RequestResult> pending =
                 server.request(APPLICATION_TYPE, bytes("never-sent")).result();
-        // 요청 명령이 아직 큐에 있는 채 서버가 오류로 멈춰도, 멈추기 전에 큐를 소진해 core 결과로 끝나므로 순서를 맞출 필요가 없다.
-        client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
 
         RequestResult result = await(pending);
 
         assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
         assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+    }
+
+    /** 연결 서문의 앞 3바이트를 스트림 입력으로 내고 이어서 한 단위 입력을 내는 통로. core는 두 입력을 섞는 것을 거부한다. */
+    private static final class MixedInputPassage implements Passage {
+        private final java.util.concurrent.BlockingQueue<Inbound> inbox =
+                new java.util.concurrent.LinkedBlockingQueue<>();
+
+        MixedInputPassage() {
+            inbox.add(Inbound.bytes(new byte[3]));
+            inbox.add(Inbound.unit(new byte[8]));
+        }
+
+        @Override
+        public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
+            if (!waitForRead) {
+                return Inbound.none();
+            }
+            try {
+                Inbound next =
+                        timeoutMs == 0 ? inbox.poll() : inbox.poll(Math.max(timeoutMs, 1), TimeUnit.MILLISECONDS);
+                return next == null ? Inbound.none() : next;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(e);
+            }
+        }
+
+        @Override
+        public int writeBytes(byte[] bytes, int offset, int length) {
+            return length;
+        }
+
+        @Override
+        public void wakeup() {}
+
+        @Override
+        public void close() {}
     }
 }

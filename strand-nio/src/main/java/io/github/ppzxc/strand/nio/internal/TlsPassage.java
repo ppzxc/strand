@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.nio.internal;
 
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
@@ -151,12 +150,6 @@ public final class TlsPassage implements Passage {
         afterResult(result);
         flush();
         return result.bytesConsumed();
-    }
-
-    @Override
-    public int write(OutboundMessage message, int offset) throws IOException {
-        byte[] bytes = message.bytes();
-        return writeBytes(bytes, offset, bytes.length - offset);
     }
 
     /**

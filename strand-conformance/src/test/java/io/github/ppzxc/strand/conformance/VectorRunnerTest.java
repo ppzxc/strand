@@ -9,7 +9,6 @@ import com.google.gson.JsonParser;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -314,9 +313,18 @@ class VectorRunnerTest {
     }
 
     @Test
-    void corePreflightReportsTheTransportWriteControlAsUnsupported() {
+    void corePreflightAcceptsWriteLimitOnAByteStream() {
         ConformanceVector v =
                 vector(ESTABLISHED, step("request", "\"type\":257,\"write_limit_bytes\":10,", "[]", "[]"));
+
+        assertThat(VectorRunner.unsupportedFeatures(v)).isEmpty();
+    }
+
+    @Test
+    void corePreflightReportsWriteLimitOnAMessageTransportAsUnsupported() {
+        ConformanceVector v = vector(
+                "{\"role\":\"client\",\"established\":true,\"transport\":\"websocket\"}",
+                step("request", "\"type\":257,\"write_limit_bytes\":10,", "[]", "[]"));
 
         assertThat(VectorRunner.unsupportedFeatures(v)).containsExactly("request.write_limit_bytes");
     }
@@ -324,7 +332,7 @@ class VectorRunnerTest {
     @Test
     void corePreflightReportsEveryUnsupportedRequestFeature() {
         ConformanceVector v = vector(
-                "{\"role\":\"client\",\"established\":true}",
+                "{\"role\":\"client\",\"established\":true,\"transport\":\"websocket\"}",
                 step(
                         "request",
                         "\"type\":257,\"write_limit_bytes\":10,\"extensions\":[{\"tag\":1,\"value\":\"aa\"}],",
@@ -333,6 +341,34 @@ class VectorRunnerTest {
 
         assertThat(VectorRunner.unsupportedFeatures(v))
                 .containsExactly("request.write_limit_bytes", "request.extensions");
+    }
+
+    /** 부분 쓰기를 관찰하는 벡터는 core 러너가 출력 진행 보고로 같은 상황을 만들어 통과한다. */
+    @Test
+    void partialWriteVectorPassesThroughProgressReports() {
+        ConformanceVector v = VectorLoader.load(java.nio.file.Paths.get(
+                        System.getProperty("strand.conformance.vectors.dir"), "partial-write-cancel.json"))
+                .get(0);
+
+        assertThat(VectorRunner.evaluate(v).status()).isEqualTo(VectorOutcome.Status.PASS);
+    }
+
+    /** 러너는 일괄 수거 방식의 입력·수거와 동기 인증기를 부르지 않는다(스펙 #362). */
+    @Test
+    void runnerSourcesDoNotUseTheBatchDrivingMode() throws java.io.IOException {
+        java.nio.file.Path dir = java.nio.file.Paths.get("src/test/java/io/github/ppzxc/strand/conformance");
+        for (String file : new String[] {"VectorRunner.java", "StepKind.java", "ProgressDriver.java"}) {
+            String source = new String(
+                    java.nio.file.Files.readAllBytes(dir.resolve(file)), java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(source)
+                    .as(file)
+                    .doesNotContain(".drainMessages(")
+                    .doesNotContain(".receive(")
+                    .doesNotContain(".receiveMessage(")
+                    .doesNotContain(".advance(")
+                    .doesNotContain(".authenticator(")
+                    .doesNotContain(".drainEvents()");
+        }
     }
 
     @Test
@@ -485,28 +521,10 @@ class VectorRunnerTest {
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }
 
-    /** 규격이 정하지 않아 관측하지 않는 WebSocket Close(1000이 아닌 상태 코드). 엔드포인트는 내지 않으므로 직접 만든다. */
-    private static OutboundMessage unobservedWebSocketClose() throws ReflectiveOperationException {
-        Constructor<OutboundMessage> constructor =
-                OutboundMessage.class.getDeclaredConstructor(OutboundMessage.Kind.class, byte[].class, int.class);
-        constructor.setAccessible(true);
-        return constructor.newInstance(OutboundMessage.Kind.WEBSOCKET_CLOSE, new byte[0], 1001);
-    }
-
     private static OutboundMessage binaryMessage(byte[] bytes) throws ReflectiveOperationException {
         Method binary = OutboundMessage.class.getDeclaredMethod("binary", byte[].class);
         binary.setAccessible(true);
         return (OutboundMessage) binary.invoke(null, (Object) bytes);
-    }
-
-    @Test
-    void skippingAnUnobservedWebSocketCloseKeepsTheNextMessageAsTheFirst() throws ReflectiveOperationException {
-        VectorRunner runner =
-                new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
-        List<OutboundMessage> messages =
-                Arrays.asList(unobservedWebSocketClose(), binaryMessage(Bytes.fromHex("c0de535452300000")));
-
-        assertThat(runner.describeMessages(messages, true)).containsExactly("PREFACE");
     }
 
     private static final String PING_FRAME = "00000018000200000000000000000000" + "00000000" + "0102030405060708";

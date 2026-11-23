@@ -97,7 +97,7 @@ class ConnectionObservationTest {
     @Test
     void onAMessagePassageEveryWrittenMessageButThePrefaceIsAFrame() throws Exception {
         InMemoryPassage.Pair link = InMemoryPassage.messages();
-        EndpointConfig config = EndpointConfig.defaults().webSocket();
+        EndpointConfig config = EndpointConfig.defaults();
         ConnectionDriver server = start(ConnectionDriver.server(
                         config, link.second().manualTime())
                 .handler(handlers, request -> request.respond(0, new byte[0]).join()));
@@ -116,7 +116,7 @@ class ConnectionObservationTest {
     @Test
     void aVeryFarCoreDeadlineStaysWithinTheIntRangeOfThePassageWait() {
         InMemoryPassage.Pair link = InMemoryPassage.messages();
-        EndpointConfig config = EndpointConfig.defaults().webSocket().idleIntervalMs(Long.MAX_VALUE / 2);
+        EndpointConfig config = EndpointConfig.defaults().idleIntervalMs(Long.MAX_VALUE / 2);
         start(ConnectionDriver.server(config, link.second().manualTime()));
         start(ConnectionDriver.client(config, link.first().manualTime()));
 

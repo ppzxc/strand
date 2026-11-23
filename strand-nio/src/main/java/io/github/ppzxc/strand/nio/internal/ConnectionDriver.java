@@ -1,18 +1,24 @@
 package io.github.ppzxc.strand.nio.internal;
 
+import io.github.ppzxc.strand.core.internal.AuthDecision;
 import io.github.ppzxc.strand.core.internal.CloseReason;
+import io.github.ppzxc.strand.core.internal.CollectionSpace;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
+import io.github.ppzxc.strand.core.internal.EndpointOutput;
+import io.github.ppzxc.strand.core.internal.ErrorCode;
 import io.github.ppzxc.strand.core.internal.Event;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
+import io.github.ppzxc.strand.core.internal.ReceiveProgress;
+import io.github.ppzxc.strand.core.internal.WriteQueueLimit;
 import java.io.EOFException;
 import java.io.IOException;
-import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -26,24 +32,22 @@ import org.jspecify.annotations.Nullable;
  * #request}, {@link RequestHandle#cancel() cancel}, {@link #respond}, {@link #ping}, {@link #closeConnection}, {@link #abortClosing},
  * {@link #close})은 명령으로 큐에 넣고 전송 스레드를 깨운다. {@code Endpoint}를 잠금으로 감싸지 않는다.
  *
- * <p>전송 스레드가 한 번 도는 순서는 읽기와 기다림, {@code receive}/{@code receiveMessage}, 시계 진행({@code advance}), 명령 처리, 이벤트
- * 배출, core 쓰기 대기열에서 메시지 꺼내기, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을
- * 잡는다. 기다림은 core의 {@code nextDeadline}, (CLOSED 뒤라면) 마무리 기한, 읽을 것, (쓰기 대기열이 남았으면) 통로의 쓰기 가능, 깨움 가운데 먼저
- * 오는 것까지이고, 기한이 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
+ * <p>전송 스레드가 한 번 도는 순서는 읽기와 기다림, 입력({@code receiveBounded}, {@code receiveUnit}), 시계 진행({@code advanceTo}), 명령 처리,
+ * 사건 수거, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을 잡는다. 기다림은 core의 {@code
+ * nextDeadlineNanos}, (CLOSED 뒤라면) 마무리 기한, 읽을 것, (쓸 출력이 남았으면) 통로의 쓰기 가능, 깨움 가운데 먼저 오는 것까지이고, 기한이 없으면
+ * 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다. core는 진행 보고 방식 하나로 구동한다. 바이트 스트림 통로의 입력은
+ * 어디서 잘라도 되는 바이트로, 메시지 통로의 입력은 한 단위(또는 바이트로 넘길 수 없는 입력)로 넣는다.
  *
- * <p><b>쓰기 대기열.</b> 드라이버는 쓰기 대기열을 든다. core 쓰기 대기열에서는 매 스텝 메시지를 모두 꺼내 이 대기열에 붙이고, 통로가 받아 주는 만큼만
- * 쓴다(비블로킹·부분 쓰기). 쓰기가 막혀도(상대가 읽지 않아 소켓 버퍼가 찬 경우) 전송 스레드는 쓰기에서 기다리지 않고 읽기, 시계, 명령 처리를 계속
- * 돈다. 그래서 읽지 않는 상대는 core의 기존 규칙(확인 대기, 요청 기한, 유휴 PING)으로 끊기고, 막힘이 풀린 뒤 흐른 시간이 한꺼번에 {@code advance}되지
- * 않는다. {@link #writtenBytes()}와 {@link #writtenFrames()}는 메시지를 끝까지 다 썼을 때 는다.
+ * <p><b>쓰기.</b> 드라이버는 core가 내는 출력을 하나씩 통로가 받아 주는 만큼만 쓰고(비블로킹·부분 쓰기) 받아 준 바이트 수를 core에 보고한다. 쓰기가
+ * 막혀도(상대가 읽지 않아 소켓 버퍼가 찬 경우) 전송 스레드는 쓰기에서 기다리지 않고 읽기, 시계, 명령 처리를 계속 돈다. 그래서 읽지 않는 상대는 core의
+ * 기존 규칙(확인 대기, 요청 기한, 유휴 PING)으로 끊기고, 막힘이 풀린 뒤 흐른 시간이 한꺼번에 시계에 보내지지 않는다. {@link #writtenBytes()}와
+ * {@link #writtenFrames()}는 출력을 끝까지 다 썼을 때 는다.
  *
- * <p><b>꺼낸 요청의 결과 확정성.</b> core는 쓰기 대기열에서 꺼낸 시점을 "전송 계층에 넘김"으로 본다. 확인 대기는 그때 시작되고, 꺼냈지만 아직 다 쓰지
- * 못한 요청은 연결이 끊기면 처리 안 됨이 아니라 결과 모름이 된다(안전한 쪽을 받아들인 대가다). 확인 대기 시간에는 드라이버 쓰기 대기열이 비는 시간이
- * 포함된다.
+ * <p><b>결과 확정성.</b> 결과 확정성과 확인 대기가 시작되는 때는 core가 정한다(쓰기를 시작함과 넘김). 쓰기를 시작했지만 다 쓰지 못한 요청은 연결이
+ * 끊기면 처리 안 됨이 아니라 결과 모름이 된다.
  *
- * <p><b>{@code Authenticator}는 전송 스레드에서 불리며 블로킹하면 안 된다.</b> core가 {@code receive} 안에서 동기로 부르므로 {@code
- * EndpointConfig.authenticator}에 넣은 구현은 전송 스레드에서 돈다. 블로킹하는 인증(원격 조회 등)을 넣으면 그 연결 전체가 멈추므로, 블로킹하지
- * 않는 {@code Authenticator}만 지원한다. "전송 스레드는 블로킹하는 사용자 코드를 부르지 않는다"의 유일한 예외다. 요청 Future는 전송 스레드에서
- * 완료되므로, 그 위에 건 동기 콜백도 블로킹하면 안 된다.
+ * <p><b>인증.</b> 서버가 받은 {@code AUTH}의 판단은 {@link ConnectionAuthenticator}에 맡긴다. 인증기는 전송 스레드에서 불리므로 블로킹하면 안
+ * 되고, 판단이 늦으면 {@code CompletionStage}를 늦게 완료한다. 요청 Future는 전송 스레드에서 완료되므로, 그 위에 건 동기 콜백도 블로킹하면 안 된다.
  *
  * <p>끝내는 방법은 셋이다. {@link #closeConnection}은 연결 종료(CLOSE)를 보내고 대기 중인 스트림이 끝나길 기다리고, {@link #abortClosing}은
  * 종료 중인 연결에서 기다림을 그만두고, {@link #close}는 즉시 끊는다. 연결이 끝나면 core가 낸 결과로 남은 Future가 모두 끝나고, 종료 알림이 핸들러
@@ -72,7 +76,7 @@ import org.jspecify.annotations.Nullable;
  * <p><b>범위 밖 출력과 넘침.</b> 정상 범위 밖의 출력(이미 취소한 요청의 프레임과 RESET, 애플리케이션이 따로 낸 PING 등)이 겹쳐 상한을 넘으면, 읽는
  * 상대라도 대기열이 내려갈 때까지 읽기가 멈춘다. 두 끝이 동시에 그러면 서로 기다리므로, 유휴 PING 확인 대기로 끊기거나 기한이 없으면 풀리지 않는다. 읽기
  * 멈춤 판단은 스텝이 시작될 때 한 번 하므로, 상한은 한 스텝에서 받은 입력이 만든 출력만큼 넘을 수 있다. 그 양은 한 스텝에서 받는 입력의 양, 곧 통로의 읽기 한
- * 번의 크기 × {@value #MAX_RECEIVES_PER_STEP}번에 비례해 막힌다(입력 프레임 하나가 만드는 출력이 입력보다 조금 클 수 있다). 바이트 스트림 통로에서는 읽기 한 번이 여러 프레임이다.
+ * 번의 크기에 비례해 막힌다(입력 프레임 하나가 만드는 출력이 입력보다 조금 클 수 있다). 바이트 스트림 통로에서는 읽기 한 번이 여러 프레임이다.
  *
  * <p><b>읽기 멈춤의 한계.</b> 읽기를 멈추면 그동안 상대의 EOF, CLOSE, ACK도 읽지 않는다. 시계는 계속 가므로 멈춘 사이 확인 대기가 지날 수 있고, 읽기는 하지만 대기열을 비우는 데 확인 대기보다 오래 걸리는 느린 상대도 끊길 수 있다. 기한이
  * 없는 연결에서는 읽지 않는 상대가 연결을 끊게 하지 못한다. 유휴 PING 간격이 0인 설정이 그렇다. 이때는 요청 기한과 애플리케이션의 {@link #close}에
@@ -81,24 +85,19 @@ import org.jspecify.annotations.Nullable;
  */
 public final class ConnectionDriver implements AutoCloseable {
 
-    private static final int NO_ERROR = 0;
     /** 프레임 헤더 크기(규격 2.1절). 이보다 짧은 바이너리 메시지는 8바이트 연결 서문이라 프레임으로 세지 않는다. */
     private static final int FRAME_HEADER_BYTES = Endpoint.FRAME_HEADER_SIZE;
-    /** 한 스텝에서 받는 입력의 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
+    /** 한 스텝에서 받는 입력(통로에서 읽어 온 것)의 개수 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
     private static final int MAX_RECEIVES_PER_STEP = 64;
-    /** 쓰기 대기열 상한의 기본 절대 한도. 상대가 HELLO로 알린 큰 값이 상한을 사실상 없애지 못하게 한다. */
-    static final long DEFAULT_MAX_WRITE_QUEUE_BYTES = 64L * 1024 * 1024;
+    /** 한 번에 core에 넣는 입력의 단위 수 상한. 이를 넘게 쌓였어도 사이에 사건을 수거하고 출력을 쓴 뒤 나머지를 넣는다. */
+    private static final int MAX_UNITS_PER_STEP = 64;
+    /** 한 번에 수거하는 사건 수. */
+    private static final int EVENT_BATCH = 1024;
+    /** 사건·출력 수거 공간. 한 단위가 만드는 양보다 충분히 크고, 넘치면 사건 수거와 쓰기를 진행한 뒤 입력을 이어 넣는다. */
+    private static final CollectionSpace COLLECTION_SPACE = CollectionSpace.of(1 << 16, 1 << 16);
 
-    /**
-     * 쓰기 대기열 상한(바이트). 규칙을 지키는 상대와의 정상 흐름 제어 범위다. 내 요청(상대가 알린 동시 스트림 × 상대가 알린 최대 프레임)과 상대 요청에
-     * 대한 응답(내가 알린 동시 스트림 × 상대가 알린 최대 프레임), 거기에 제어 프레임 몇 개를 위한 프레임 하나를 더한다. 상대가 알린 값은 상대가 정하므로
-     * 절대 한도(기본 {@link #DEFAULT_MAX_WRITE_QUEUE_BYTES}, {@link Builder#maxWriteQueueBytes}로 바꾼다)로 막는다.
-     */
-    public static long writeQueueLimit(
-            long peerMaxFrameSize, long peerMaxConcurrentStreams, long ownMaxConcurrentStreams, long absoluteLimit) {
-        long range = (peerMaxConcurrentStreams + ownMaxConcurrentStreams) * peerMaxFrameSize + peerMaxFrameSize;
-        return Math.max(peerMaxFrameSize, Math.min(range, absoluteLimit));
-    }
+    private static final long NANOS_PER_MILLI = 1_000_000L;
+    private static final byte[] NO_BYTES = new byte[0];
 
     /** CLOSED 뒤 마무리 시간 상한의 기본값(밀리초). */
     private static final long DEFAULT_CLOSED_FINISH_LIMIT_MS = 5000;
@@ -116,8 +115,9 @@ public final class ConnectionDriver implements AutoCloseable {
         private @Nullable Executor handlerExecutor;
         private @Nullable RequestHandler handler;
         private @Nullable ConnectionListener listener;
+        private ConnectionAuthenticator authenticator = ConnectionAuthenticator.anonymousOnly();
         private LongSupplier clock = () -> System.nanoTime() / 1_000_000L;
-        private long maxWriteQueueBytes = DEFAULT_MAX_WRITE_QUEUE_BYTES;
+        private long maxWriteQueueBytes = WriteQueueLimit.DEFAULT_ABSOLUTE_LIMIT;
         private long closedFinishLimitMs = DEFAULT_CLOSED_FINISH_LIMIT_MS;
 
         private Builder(Role role, EndpointConfig config, Passage passage) {
@@ -165,6 +165,17 @@ public final class ConnectionDriver implements AutoCloseable {
         }
 
         /**
+         * 서버가 받은 {@code AUTH}를 판단하는 인증기를 정한다. 정하지 않으면 익명만 통과시킨다. 클라이언트에서는 쓰이지 않는다.
+         *
+         * @param connectionAuthenticator 인증기. 전송 스레드에서 불리므로 블로킹하면 안 된다
+         * @return 이 빌더
+         */
+        public Builder authenticator(ConnectionAuthenticator connectionAuthenticator) {
+            this.authenticator = connectionAuthenticator;
+            return this;
+        }
+
+        /**
          * 단조 시계(밀리초)를 주입한다. 전송 스레드가 매번 흐른 시간을 재서 엔드포인트의 {@code advance}를 부른다. 정하지 않으면 {@link System#nanoTime()}이다.
          *
          * @param monotonicMillis 단조 시계
@@ -177,7 +188,7 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /**
          * 쓰기 대기열 상한의 절대 한도(바이트)를 정한다. 상한은 협상 값에서 셈하지만 상대가 알린 큰 값이 상한을 없애지 못하게 이 한도로 막는다. 정상 흐름
-         * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임에 프레임 하나를 더한 값이 기본값 {@value #DEFAULT_MAX_WRITE_QUEUE_BYTES}을
+         * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임에 프레임 하나를 더한 값이 기본값 {@value WriteQueueLimit#DEFAULT_ABSOLUTE_LIMIT}을
          * 넘는 설정에서는, 그 범위를 꽉 채워 주고받는 두 끝이 읽기 멈춤에 걸리지 않도록 이 값을 그 값 이상으로 올린다. 정하지 않으면 기본값이다.
          *
          * @param bytes 절대 한도. 규격이 허용하는 가장 작은 {@code max_frame_size}({@value EndpointConfig#MAX_FRAME_SIZE_LOWER_LIMIT}) 이상이어야 한다. 프레임 하나는 대기열에 담겨야 하므로 이 하한을 그대로 쓴다. 상한은 이 값이 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다
@@ -226,6 +237,7 @@ public final class ConnectionDriver implements AutoCloseable {
                     handlerExecutor,
                     handler,
                     listener,
+                    authenticator,
                     clock,
                     maxWriteQueueBytes,
                     closedFinishLimitMs);
@@ -267,6 +279,7 @@ public final class ConnectionDriver implements AutoCloseable {
     private final @Nullable Executor handlerExecutor;
     private final @Nullable RequestHandler handler;
     private final @Nullable ConnectionListener listener;
+    private final ConnectionAuthenticator authenticator;
     private final LongSupplier clock;
     private final long maxWriteQueueBytes;
     private final long closedFinishLimitMs;
@@ -292,6 +305,7 @@ public final class ConnectionDriver implements AutoCloseable {
             @Nullable Executor handlerExecutor,
             @Nullable RequestHandler handler,
             @Nullable ConnectionListener listener,
+            ConnectionAuthenticator authenticator,
             LongSupplier clock,
             long maxWriteQueueBytes,
             long closedFinishLimitMs) {
@@ -301,6 +315,7 @@ public final class ConnectionDriver implements AutoCloseable {
         this.handlerExecutor = handlerExecutor;
         this.handler = handler;
         this.listener = listener;
+        this.authenticator = authenticator;
         this.clock = clock;
         this.maxWriteQueueBytes = maxWriteQueueBytes;
         this.closedFinishLimitMs = closedFinishLimitMs;
@@ -311,7 +326,7 @@ public final class ConnectionDriver implements AutoCloseable {
     /**
      * 클라이언트 연결 드라이버를 만든다.
      *
-     * @param config 엔드포인트 설정. 메시지 통로면 {@code webSocket()}을 켠 설정이어야 한다
+     * @param config 엔드포인트 설정. 통로 종류와 무관하다
      * @param passage 서버에 이어진 통로
      * @return 빌더
      */
@@ -322,7 +337,7 @@ public final class ConnectionDriver implements AutoCloseable {
     /**
      * 서버 연결 드라이버를 만든다.
      *
-     * @param config 엔드포인트 설정. 메시지 통로면 {@code webSocket()}을 켠 설정이어야 한다
+     * @param config 엔드포인트 설정. 통로 종류와 무관하다
      * @param passage 맺어진 클라이언트에 이어진 통로
      * @return 빌더
      */
@@ -443,7 +458,7 @@ public final class ConnectionDriver implements AutoCloseable {
      * #abortClosing}으로 그만둔다.
      */
     public void closeConnection() {
-        submit(new EndpointCall(endpoint -> endpoint.close(NO_ERROR)));
+        submit(new EndpointCall(endpoint -> endpoint.close(ErrorCode.NO_ERROR)));
     }
 
     /**
@@ -664,29 +679,34 @@ public final class ConnectionDriver implements AutoCloseable {
         boolean finished;
         // core가 CLOSED를 냈다. 종료 알림은 이때 한 번만 나간다.
         private boolean closed;
+        private @Nullable CloseReason closeReason;
         // CLOSED 뒤 마무리 기한(주입 시계 값). CLOSED를 낸 시점에 정해진다.
         private long closedFinishDeadline;
         // 읽기나 쓰기가 실패했거나 상대가 끊었다. 더 읽을 것이 없다.
         private boolean transportGone;
         private boolean outputShutdown;
-        // core 쓰기 대기열에서 꺼냈지만 아직 다 쓰지 못한 메시지. 맨 앞 메시지는 writeOffset바이트까지 통로가 받았다.
-        private final ArrayDeque<OutboundMessage> writeQueue = new ArrayDeque<>();
-        private int writeOffset;
-        // writeQueue에 남은 바이트 수(맨 앞 메시지는 이미 쓴 만큼 뺀다). 읽기 멈춤 판단에 쓴다.
-        private long queuedBytes;
+        // 받아 두고 아직 core에 다 넣지 못한 입력. 바이트 스트림 입력은 input의 inputPos부터, 한 단위나 잘못된 입력은 pendingUnit이다.
+        private byte[] input = NO_BYTES;
+        private int inputPos;
+        private @Nullable Inbound pendingUnit;
+        // 지금 쓰는 출력과 그 바이트, 통로가 받아 준 만큼의 위치. core가 출력을 철회하거나 우선순위를 바꾸면 식별자가 달라진다.
+        private @Nullable EndpointOutput writing;
+        private byte[] writingBytes = NO_BYTES;
+        private int writingOffset;
+        // 인증 판단 도중 난 애플리케이션 인증기의 실패. 종료 알림에 싣는다.
+        private @Nullable Throwable authenticatorFailure;
         // 연결을 끊게 한 첫 입출력 예외. 종료 알림에 싣는다.
         private @Nullable IOException ioFailure;
         // 엔드포인트의 가상 시계는 0에서 시작한다. startedAt은 그 0에 해당하는 주입 시계 값이고, advancedTo까지 advance했다.
         private final long startedAt;
-        private long advancedTo;
+        private long lastElapsedNanos;
 
         Loop(Endpoint endpoint) {
             this.endpoint = endpoint;
             this.startedAt = clock.getAsLong();
-            this.advancedTo = startedAt;
         }
 
-        /** 읽기, 받기, 시계 진행({@code advance}), 명령 처리, 이벤트 배출, 쓰기를 한 번 돈다. */
+        /** 읽기와 받기, 시계 진행, 명령 처리, 사건 수거, 쓰기를 한 번 돈다. */
         void step() {
             try {
                 receiveAvailable();
@@ -696,41 +716,125 @@ public final class ConnectionDriver implements AutoCloseable {
             advanceClock();
             runCommands();
             if (closeRequested) {
-                endpoint.disconnect();
+                disconnect();
                 finished = true;
             }
             settle();
         }
 
         /**
-         * 기다렸다가, 지금 읽을 수 있는 것을 최대 {@link #MAX_RECEIVES_PER_STEP}개까지 받는다. 같은 읽기에 도착해 있던 ACK가 시계를 보내기 전에
-         * 받아지므로 확인 대기 초과로 오판되지 않는데, 이는 그 입력이 한 스텝 상한 이내일 때만 보장한다. 상한에 걸리면 남은 입력은 다음 스텝에서
-         * 읽히므로 그 사이 시계가 기한을 넘으면 오판할 수 있다. 상대가 계속 보내도 시계와 명령 처리가 굶지 않게 하려는 설계상 절충이다.
+         * 기다렸다가, 지금 읽을 수 있는 것을 최대 {@value #MAX_RECEIVES_PER_STEP}개까지 받아 core에 넣는다. 같은 읽기에 도착해 있던 ACK가 시계를
+         * 보내기 전에 받아지므로 확인 대기 초과로 오판되지 않는데, 이는 그 입력이 한 스텝 상한 이내일 때만 보장한다. 상한에 걸리면 남은 입력은 다음
+         * 스텝에서 읽히므로 그 사이 시계가 기한을 넘으면 오판할 수 있다. 상대가 계속 보내도 시계와 명령 처리가 굶지 않게 하려는 설계상 절충이다. 입력은 한
+         * 번에 최대 {@value #MAX_UNITS_PER_STEP}단위씩 넣고, 그 사이에 사건을 수거하고 출력을 쓴다. 다 넣지 못한 입력이 남았으면 새로 읽지 않는다.
          */
         private void receiveAvailable() throws IOException {
+            boolean pendingInput = hasPendingInput();
             // 쓰기 대기열이 상한을 넘으면 읽기를 멈춘다. 이때는 쓰기 가능, 깨움, 기한으로만 깨어나므로 읽을 것이 남아 있어도 빈 깨어남이 없다.
-            Inbound inbound = passage.await(waitLimit(), !readPaused(), !writeQueue.isEmpty());
-            int received = 0;
-            while (inbound.kind() != Inbound.Kind.NONE) {
-                receive(inbound);
-                received++;
-                if (inbound.kind() == Inbound.Kind.END || received >= MAX_RECEIVES_PER_STEP) {
+            Inbound inbound =
+                    passage.await(pendingInput ? 0 : waitLimit(), !pendingInput && !readPaused(), wantsWrite());
+            accept(inbound);
+            processInput();
+            int received = inbound.kind() == Inbound.Kind.NONE ? 0 : 1;
+            while (received > 0
+                    && received < MAX_RECEIVES_PER_STEP
+                    && inbound.kind() != Inbound.Kind.END
+                    && !hasPendingInput()) {
+                inbound = passage.await(0);
+                if (inbound.kind() == Inbound.Kind.NONE) {
                     return;
                 }
-                inbound = passage.await(0);
+                accept(inbound);
+                processInput();
+                received++;
             }
+        }
+
+        private boolean hasPendingInput() {
+            return inputPos < input.length || pendingUnit != null;
+        }
+
+        /** 읽어 온 것을 받아 둔다. 끝남이면 통로가 끊긴 것으로 core에 알린다. */
+        private void accept(Inbound inbound) {
+            switch (inbound.kind()) {
+                case BYTES:
+                    input = inbound.data();
+                    inputPos = 0;
+                    break;
+                case UNIT:
+                case UNSUPPORTED:
+                    pendingUnit = inbound;
+                    break;
+                case END:
+                    transportFailed(new EOFException("상대가 연결을 끊었다"));
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        private boolean wantsWrite() {
+            return endpoint.nextOutput() != null || passage.pendingOutput();
         }
 
         /** 쓰기 대기열이 상한을 넘어 읽기를 멈춰야 하는가. 상한 아래로 내려가면 다시 읽는다. */
         private boolean readPaused() {
-            // 상한이 늘 프레임 하나 이상이라 빈 대기열은 어차피 상한을 넘지 않는다. 그 불변식이 깨져도 멈춘 채 쓰기 가능을 기다리다 아무것도 깨우지 못하는 일이 없게 하는 방어다.
-            return !writeQueue.isEmpty()
-                    && queuedBytes
-                            > writeQueueLimit(
-                                    endpoint.peerMaxFrameSize(),
-                                    endpoint.peerMaxConcurrentStreams(),
-                                    endpoint.ownMaxConcurrentStreams(),
-                                    maxWriteQueueBytes);
+            // 상한이 늘 프레임 하나 이상이라 빈 대기열은 어차피 상한을 넘지 않는다.
+            return endpoint.pendingOutputBytes()
+                    > WriteQueueLimit.of(
+                            endpoint.peerMaxFrameSize(),
+                            endpoint.peerMaxConcurrentStreams(),
+                            endpoint.ownMaxConcurrentStreams(),
+                            maxWriteQueueBytes);
+        }
+
+        /**
+         * 받아 둔 입력을 유한 단위로 core에 넣는다. 수거 공간이 모자라 멈추면 사건을 수거하고 출력을 쓴 뒤 소비 위치부터 다시 넣는다. 출력이 막혀 공간이
+         * 비지 않으면 남은 입력을 두고 돌아온다(다음 스텝이 쓰기 가능을 기다렸다가 이어 넣는다).
+         */
+        private void processInput() {
+            for (; ; ) {
+                ReceiveProgress progress;
+                Inbound unit = pendingUnit;
+                if (unit != null) {
+                    progress = unit.kind() == Inbound.Kind.UNIT
+                            ? endpoint.receiveUnit(unit.data(), 0, unit.data().length, COLLECTION_SPACE)
+                            : endpoint.receiveUnsupportedInput(COLLECTION_SPACE);
+                    if (!progress.collectionRequired()) {
+                        pendingUnit = null;
+                        if (unit.kind() == Inbound.Kind.UNIT) {
+                            receivedBytes.addAndGet(unit.data().length);
+                        }
+                    }
+                } else if (inputPos < input.length) {
+                    progress = endpoint.receiveBounded(
+                            input, inputPos, input.length - inputPos, MAX_UNITS_PER_STEP, COLLECTION_SPACE);
+                    inputPos += progress.consumed();
+                    receivedBytes.addAndGet(progress.consumed());
+                    if (!progress.collectionRequired() && progress.consumed() == 0) {
+                        // 연결이 이미 끝나 core가 입력을 받지 않는다. 남은 입력은 버린다.
+                        inputPos = input.length;
+                    }
+                } else {
+                    return;
+                }
+                if (progress.collectionRequired()) {
+                    // 수거 공간이 찼다. 사건을 내보내고 출력을 써서 공간을 비운다. 그 밖에는 사건을 스텝 끝(settle)에서 내보내므로, 같은 읽기에 온
+                    // 입력이 모두 core에 들어간 뒤에 내보낸다.
+                    dispatchEvents();
+                    boolean progressed;
+                    try {
+                        progressed = flushOutputs();
+                    } catch (IOException e) {
+                        recordTransportFailure(e);
+                        return;
+                    }
+                    dispatchEvents();
+                    if (!progressed) {
+                        return;
+                    }
+                }
+            }
         }
 
         /**
@@ -738,9 +842,9 @@ public final class ConnectionDriver implements AutoCloseable {
          */
         private long waitLimit() {
             long limit = -1;
-            OptionalLong next = endpoint.nextDeadline();
+            OptionalLong next = endpoint.nextDeadlineNanos();
             if (next.isPresent()) {
-                limit = clampWait(next.getAsLong() - (clock.getAsLong() - startedAt));
+                limit = clampWait(next.getAsLong() / NANOS_PER_MILLI - (clock.getAsLong() - startedAt));
             }
             long untilFinish = untilFinish();
             if (untilFinish >= 0) {
@@ -765,31 +869,19 @@ public final class ConnectionDriver implements AutoCloseable {
             return Math.min(Math.max(0, remainingMs), Integer.MAX_VALUE);
         }
 
-        /** 주입 시계로 흐른 시간만큼 엔드포인트의 시계를 보낸다. */
+        /** 주입 시계로 흐른 시간만큼 엔드포인트의 시계를 옮긴다. */
         private void advanceClock() {
-            long now = clock.getAsLong();
-            if (now > advancedTo) {
-                endpoint.advance(now - advancedTo);
-                advancedTo = now;
-            }
+            long elapsedMs = clock.getAsLong() - startedAt;
+            long elapsedNanos =
+                    elapsedMs > Long.MAX_VALUE / NANOS_PER_MILLI ? Long.MAX_VALUE : elapsedMs * NANOS_PER_MILLI;
+            lastElapsedNanos = Math.max(lastElapsedNanos, elapsedNanos);
+            endpoint.advanceTo(lastElapsedNanos);
         }
 
-        private void receive(Inbound inbound) {
-            switch (inbound.kind()) {
-                case BYTES:
-                    endpoint.receive(inbound.data());
-                    receivedBytes.addAndGet(inbound.data().length);
-                    break;
-                case MESSAGE:
-                    endpoint.receiveMessage(inbound.messageKind(), inbound.data());
-                    receivedBytes.addAndGet(inbound.data().length);
-                    break;
-                case END:
-                    transportFailed(new EOFException("상대가 연결을 끊었다"));
-                    break;
-                default:
-                    break;
-            }
+        /** 보내지 못하고 남은 출력을 세고 끊는다. 끊긴 core는 남은 출력을 버린다. */
+        private void disconnect() {
+            discardedBytes.addAndGet(endpoint.pendingOutputBytes());
+            endpoint.disconnect();
         }
 
         /** 통로가 끊겼다. 연결이 아직 끝나지 않았다면 CLOSE 없이 끊긴 것으로 core에 알린다. */
@@ -802,7 +894,7 @@ public final class ConnectionDriver implements AutoCloseable {
                 recordTransportFailure(cause);
                 // 스스로 끊는 중이면 이미 낸 명령을 처리한 뒤 한 번에 끊는다. 통로를 먼저 닫았다고 명령보다 앞서 끊으면 안 된다.
                 if (!closed && !closeRequested) {
-                    endpoint.disconnect();
+                    disconnect();
                 }
             }
         }
@@ -864,15 +956,25 @@ public final class ConnectionDriver implements AutoCloseable {
             if (!write()) {
                 // 스스로 끊는 중이면 통로를 먼저 닫아서 난 실패다. 낸 명령을 처리한 뒤 step이 끊는다.
                 if (!closeRequested) {
-                    endpoint.disconnect();
+                    disconnect();
                     dispatchEvents();
                     write();
                     finished = true;
                 }
-            } else if (closed && !finished && !outputShutdown && writeQueue.isEmpty()) {
+            } else if (closed && !finished && !outputShutdown && outputsDone()) {
                 outputShutdown = true;
-                passage.shutdownOutput();
+                // core의 전송 종료 지시가 닫으라고 하고(NONE이 아님) 남은 출력을 다 넘겼다. 종료 원인은 통로가 닫는 방식을 고를 때 쓴다.
+                if (endpoint.transportClose() != Endpoint.TransportClose.NONE && closeReason != null) {
+                    passage.shutdownOutput(closeReason);
+                } else {
+                    passage.shutdownOutput();
+                }
             }
+        }
+
+        /** 쓸 출력이 없고 통로 안에 남은 출력도 없다. */
+        private boolean outputsDone() {
+            return endpoint.nextOutput() == null && !passage.pendingOutput();
         }
 
         /**
@@ -881,7 +983,7 @@ public final class ConnectionDriver implements AutoCloseable {
          */
         void abort(Throwable original) {
             try {
-                endpoint.disconnect();
+                disconnect();
                 dispatchEvents();
                 write();
             } catch (RuntimeException e) {
@@ -889,88 +991,98 @@ public final class ConnectionDriver implements AutoCloseable {
             }
         }
 
-        /** core 쓰기 대기열에서 메시지를 모두 꺼내 드라이버의 쓰기 대기열 뒤에 붙인다. 꺼낸 시점이 core가 보는 "전송 계층에 넘김"이다. */
-        private void takeOutput() {
-            for (OutboundMessage message : endpoint.drainMessages()) {
-                writeQueue.add(message);
-                queuedBytes += message.length();
-            }
-        }
-
         /**
-         * 쓰기 대기열을 통로가 받아 주는 만큼만 비운다. 기다리지 않는다. 메시지를 끝까지 다 쓴 것만 쓴 양에 더한다.
+         * 출력을 통로가 받아 주는 만큼 쓰고 받아 준 바이트 수를 core에 보고한다. 기다리지 않는다. 출력 하나를 끝까지 다 쓴 것만 쓴 양에 더한다. 바이트
+         * 스트림 통로는 실제로 쓴 만큼, 메시지 통로는 메시지 전체를 받아 주면 그 전체 길이를 보고한다.
          *
-         * @return 입출력 오류 없이 돌아왔으면 true(다 못 쓰고 남았어도 true)
+         * @return 한 바이트라도 받아 줬거나 쓸 출력이 없으면 true, 통로가 받아 주지 않아 막혔으면 false
+         * @throws IOException 입출력 오류
          */
-        private boolean flush() {
-            try {
-                OutboundMessage head = writeQueue.peek();
-                while (head != null) {
-                    int length = head.length();
-                    // 내용이 없는 메시지(WebSocket 닫기)는 호출 한 번으로 끝난다.
-                    int accepted = passage.write(head, writeOffset);
-                    writeOffset += accepted;
-                    queuedBytes -= accepted;
-                    if (writeOffset < length) {
-                        setWriteBlocked(true);
-                        return true;
+        private boolean flushOutputs() throws IOException {
+            boolean progressed = false;
+            for (; ; ) {
+                EndpointOutput output = endpoint.nextOutput();
+                if (output == null) {
+                    writing = null;
+                    setWriteBlocked(false);
+                    return true;
+                }
+                if (writing == null || writing.id() != output.id()) {
+                    writing = output;
+                    writingBytes = output.readOnlyBytes();
+                    writingOffset = 0;
+                }
+                int remaining = writingBytes.length - writingOffset;
+                int accepted = passage.writeBytes(writingBytes, writingOffset, remaining);
+                if (accepted > 0) {
+                    endpoint.outputProgress(output.id(), accepted);
+                    writingOffset += accepted;
+                    progressed = true;
+                    if (writingOffset == writingBytes.length) {
+                        completeOutput(writingBytes.length);
+                        writing = null;
                     }
-                    completeHead(head);
-                    head = writeQueue.peek();
                 }
-                setWriteBlocked(false);
-                return true;
-            } catch (IOException e) {
-                try {
-                    recordTransportFailure(e);
-                } finally {
-                    discardQueued();
-                }
-                return false;
-            }
-        }
-
-        /** 대기열 맨 앞 메시지를 끝까지 다 썼을 때 대기열에서 빼고 쓴 양에 더한다. */
-        private void completeHead(OutboundMessage head) {
-            writeQueue.poll();
-            writeOffset = 0;
-            if (head.kind() == OutboundMessage.Kind.BINARY) {
-                int length = head.length();
-                writtenBytes.addAndGet(length);
-                if (length >= FRAME_HEADER_BYTES) {
-                    writtenFrames.incrementAndGet();
+                if (accepted < remaining) {
+                    setWriteBlocked(true);
+                    return progressed;
                 }
             }
         }
 
-        /** 쓰기 대기열에 남은 메시지를 버리고 남은 바이트를 센다. */
+        /** 출력 하나를 끝까지 다 썼을 때 쓴 양에 더한다. */
+        private void completeOutput(int length) {
+            writtenBytes.addAndGet(length);
+            if (length >= FRAME_HEADER_BYTES) {
+                writtenFrames.incrementAndGet();
+            }
+        }
+
+        /** 통로가 끝났으니 남은 출력을 버린다. 끊긴 core가 버리므로 버릴 양을 먼저 센다. */
         void discardQueued() {
             try {
-                // 끊긴 엔드포인트가 마지막으로 낸 메시지(명령 소진 중 난 것)도 보내지 못한 것이다.
-                takeOutput();
-                discardedBytes.addAndGet(queuedBytes);
-                writeQueue.clear();
-                writeOffset = 0;
-                queuedBytes = 0;
+                disconnect();
+                writing = null;
+                writingOffset = 0;
             } finally {
                 // 버리기를 마친 뒤에 막힘 신호를 푼다. 풀린 것을 본 쪽이 집계를 온전히 보게 하며, 중간에 예외가 나도 푼다.
                 setWriteBlocked(false);
             }
         }
 
+        /**
+         * 출력을 쓴다. 쓰다 입출력 오류가 나면 끊김으로 기록한다.
+         *
+         * @return 입출력 오류 없이 돌아왔으면 true(다 못 쓰고 남았어도 true)
+         */
         private boolean write() {
-            takeOutput();
-            return flush();
+            try {
+                flushOutputs();
+                return true;
+            } catch (IOException e) {
+                try {
+                    recordTransportFailure(e);
+                } finally {
+                    setWriteBlocked(false);
+                }
+                return false;
+            }
         }
 
         private void dispatchEvents() {
             RuntimeException deliveryFailure = null;
-            for (Event event : endpoint.drainEvents()) {
-                // 같은 묶음의 다른 이벤트(결과, 종료)를 잃지 않도록 넘기다 난 실패를 모았다가 다 내보낸 뒤 던진다.
-                try {
-                    dispatch(event);
-                } catch (RuntimeException e) {
-                    deliveryFailure = e;
+            for (; ; ) {
+                List<Event> batch = endpoint.drainEvents(EVENT_BATCH);
+                if (batch.isEmpty()) {
+                    break;
+                }
+                for (Event event : batch) {
+                    // 같은 묶음의 다른 이벤트(결과, 종료)를 잃지 않도록 넘기다 난 실패를 모았다가 다 내보낸 뒤 던진다.
+                    try {
+                        dispatch(event);
+                    } catch (RuntimeException e) {
+                        deliveryFailure = e;
+                    }
                 }
             }
             if (deliveryFailure != null) {
@@ -989,6 +1101,9 @@ public final class ConnectionDriver implements AutoCloseable {
                 case AUTHENTICATED:
                     notifyAuthenticated(event);
                     break;
+                case AUTHENTICATION_REQUIRED:
+                    authenticate(event);
+                    break;
                 case CLOSED:
                     // 알림이 실패해도 한 번만 나가도록 먼저 표시한다.
                     if (!closed) {
@@ -999,6 +1114,7 @@ public final class ConnectionDriver implements AutoCloseable {
                                 : closedAtMs + closedFinishLimitMs;
                     }
                     closed = true;
+                    closeReason = event.closeReason().orElse(null);
                     if (transportGone || isDisconnection(event)) {
                         finished = true;
                     }
@@ -1055,8 +1171,37 @@ public final class ConnectionDriver implements AutoCloseable {
                 return;
             }
             ConnectionClosed notice = new ConnectionClosed(
-                    event.closeReason().get(), ioFailure, event.cause().orElse(null));
+                    event.closeReason().get(), ioFailure, event.cause().orElse(authenticatorFailure));
             executor.execute(() -> target.onClosed(notice));
+        }
+
+        /**
+         * 받은 AUTH의 판단을 애플리케이션 인증기에 맡긴다. 인증기가 판단을 늦게 내도 전송 스레드는 기다리지 않고, 판단이 나오면 명령으로 돌아와 core에
+         * 입력한다. 인증기가 던지거나 실패로 끝나면 일시 실패로 본다.
+         */
+        private void authenticate(Event event) {
+            long id = event.authenticationId();
+            CompletionStage<AuthDecision> decision;
+            try {
+                decision = authenticator.authenticate(
+                        event.authenticationMechanism().get(), event.body());
+            } catch (RuntimeException e) {
+                failAuthentication(id, e);
+                return;
+            }
+            decision.whenComplete((value, failure) -> submit(new EndpointCall(endpoint -> {
+                if (failure != null || value == null) {
+                    failAuthentication(id, failure != null ? failure : new NullPointerException("인증 판단이 비어 있다"));
+                } else {
+                    endpoint.completeAuthentication(id, value);
+                }
+            })));
+        }
+
+        /** 인증기 실패를 기록하고 일시 실패로 core에 알린다. */
+        private void failAuthentication(long id, Throwable cause) {
+            authenticatorFailure = cause;
+            endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
         }
 
         // 최후 수단. core가 낸 결과로 끝나지 않고 남은 Future만 예외로 끝낸다. 연결 종료(CLOSE)와 abort 뒤에는 비어 있다.

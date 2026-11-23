@@ -11,8 +11,8 @@ class EndpointOutputProgressTest {
         server.request(257, new byte[0]);
         EndpointOutput request = server.nextOutput();
         server.outputProgress(request.id(), 1);
-        server.receive(Frames.close(ErrorCode.NO_ERROR, 2, new byte[0]));
-        assertThat(server.drainEvents())
+        Drive.receive(server, Frames.close(ErrorCode.NO_ERROR, 2, new byte[0]));
+        assertThat(Drive.drainEvents(server))
                 .last()
                 .satisfies(event -> assertThat(event.closeReason())
                         .get()
@@ -27,10 +27,10 @@ class EndpointOutputProgressTest {
         EndpointOutput request = server.nextOutput();
         server.outputProgress(request.id(), 1);
         server.cancelRequest(ticket);
-        server.drainEvents();
+        Drive.drainEvents(server);
         server.outputProgress(request.id(), request.bytes().length - 1);
-        server.receive(Frames.close(ErrorCode.NO_ERROR, 2, new byte[0]));
-        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        Drive.receive(server, Frames.close(ErrorCode.NO_ERROR, 2, new byte[0]));
+        assertThat(Drive.drainEvents(server)).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
     }
 
     @Test
@@ -40,21 +40,21 @@ class EndpointOutputProgressTest {
         client.outputProgress(preface.id(), preface.bytes().length);
         EndpointOutput hello = client.nextOutput();
         client.outputProgress(hello.id(), 1);
-        client.advance(6000);
-        assertThat(client.drainEvents()).isEmpty();
+        Drive.advance(client, 6000);
+        assertThat(Drive.drainEvents(client)).isEmpty();
         client.outputProgress(hello.id(), hello.bytes().length - 1);
-        client.advance(5001);
-        assertThat(client.drainEvents()).extracting(Event::kind).contains(Event.Kind.CLOSED);
+        Drive.advance(client, 5001);
+        assertThat(Drive.drainEvents(client)).extracting(Event::kind).contains(Event.Kind.CLOSED);
     }
 
     private Endpoint openServer() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        server.drainEvents();
-        server.drainMessages();
+        Endpoint server = Drive.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        Drive.drainEvents(server);
+        Drive.drainMessages(server);
         return server;
     }
 
@@ -87,7 +87,7 @@ class EndpointOutputProgressTest {
         EndpointOutput request = server.nextOutput();
         server.outputProgress(request.id(), 1);
         server.disconnect();
-        assertThat(server.drainEvents())
+        assertThat(Drive.drainEvents(server))
                 .first()
                 .satisfies(e -> assertThat(e.certainty()).hasValue(Certainty.NOT_PROCESSED));
         assertThat(server.nextOutput()).isNull();
@@ -100,7 +100,7 @@ class EndpointOutputProgressTest {
         EndpointOutput request = server.nextOutput();
         server.outputProgress(request.id(), request.bytes().length);
         server.disconnect();
-        assertThat(server.drainEvents())
+        assertThat(Drive.drainEvents(server))
                 .first()
                 .satisfies(e -> assertThat(e.certainty()).hasValue(Certainty.UNKNOWN));
     }
@@ -120,14 +120,14 @@ class EndpointOutputProgressTest {
     void duplicateOrLateRequestCompletionDoesNotProduceASecondResult() {
         Endpoint server = openServer();
         long ticket = server.request(257, new byte[0]);
-        server.drainMessages();
-        server.receive(Frames.response(257, 2, 0));
-        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.RESULT);
+        Drive.drainMessages(server);
+        Drive.receive(server, Frames.response(257, 2, 0));
+        assertThat(Drive.drainEvents(server)).extracting(Event::kind).containsExactly(Event.Kind.RESULT);
 
-        server.receive(Frames.response(257, 2, 0));
+        Drive.receive(server, Frames.response(257, 2, 0));
         server.cancelRequest(ticket);
 
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test

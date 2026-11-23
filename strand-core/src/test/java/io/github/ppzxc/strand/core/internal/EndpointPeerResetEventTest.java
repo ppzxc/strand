@@ -17,18 +17,18 @@ class EndpointPeerResetEventTest {
     private static final byte[] NO_BYTES = new byte[0];
 
     private static Endpoint establishedServer() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().knownTypes(Collections.singleton(REQUEST_TYPE)));
-        server.receive(Frames.preface());
-        server.receive(Frames.hello(EndpointConfig.defaults()));
-        server.receive(Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
-        server.receive(Frames.auth("ANONYMOUS", NO_BYTES));
-        server.drainMessages();
-        server.drainEvents();
+        Endpoint server = Drive.server(EndpointConfig.defaults().knownTypes(Collections.singleton(REQUEST_TYPE)));
+        Drive.receive(server, Frames.preface());
+        Drive.receive(server, Frames.hello(EndpointConfig.defaults()));
+        Drive.receive(server, Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
+        Drive.receive(server, Frames.auth("ANONYMOUS", NO_BYTES));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
         return server;
     }
 
     private static void receiveRequest(Endpoint server, long streamId) {
-        server.receive(Frames.request(REQUEST_TYPE, streamId, NO_BYTES));
+        Drive.receive(server, Frames.request(REQUEST_TYPE, streamId, NO_BYTES));
     }
 
     private static List<Event.Kind> kinds(List<Event> events) {
@@ -41,17 +41,17 @@ class EndpointPeerResetEventTest {
     void resetOfADeliveredRequestIsReportedWithItsStreamAndErrorCode() {
         Endpoint server = establishedServer();
         receiveRequest(server, 1);
-        server.drainEvents();
+        Drive.drainEvents(server);
 
-        server.receive(Frames.reset(1, 4));
+        Drive.receive(server, Frames.reset(1, 4));
 
-        List<Event> events = server.drainEvents();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).singleElement().satisfies(event -> {
             assertThat(event.kind()).isEqualTo(Event.Kind.REQUEST_RESET);
             assertThat(event.streamId()).isEqualTo(1);
             assertThat(event.resetErrorCode()).isEqualTo(OptionalLong.of(4));
         });
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     @Test
@@ -59,11 +59,11 @@ class EndpointPeerResetEventTest {
         for (long code : new long[] {0, 1, 5, 7, 8, 0xffffffffL}) {
             Endpoint server = establishedServer();
             receiveRequest(server, 1);
-            server.drainEvents();
+            Drive.drainEvents(server);
 
-            server.receive(Frames.reset(1, (int) code));
+            Drive.receive(server, Frames.reset(1, (int) code));
 
-            assertThat(server.drainEvents())
+            assertThat(Drive.drainEvents(server))
                     .singleElement()
                     .satisfies(event -> assertThat(event.resetErrorCode()).isEqualTo(OptionalLong.of(code)));
         }
@@ -74,41 +74,42 @@ class EndpointPeerResetEventTest {
         Endpoint server = establishedServer();
         receiveRequest(server, 1);
 
-        server.receive(Frames.reset(1, 4));
+        Drive.receive(server, Frames.reset(1, 4));
 
-        assertThat(kinds(server.drainEvents())).containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.REQUEST_RESET);
+        assertThat(kinds(Drive.drainEvents(server)))
+                .containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.REQUEST_RESET);
     }
 
     @Test
     void anAnsweredStreamAndAnUnknownStreamAreNotReported() {
         Endpoint server = establishedServer();
         receiveRequest(server, 1);
-        server.drainEvents();
+        Drive.drainEvents(server);
         server.respond(1, 0, NO_BYTES);
 
-        server.receive(Frames.reset(1, 4));
-        server.receive(Frames.reset(3, 4));
+        Drive.receive(server, Frames.reset(1, 4));
+        Drive.receive(server, Frames.reset(3, 4));
 
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
     void aRefusedRequestIsNotReportedWhenThePeerResetsItToo() {
         Endpoint server = establishedServer();
         receiveRequest(server, 1);
-        server.drainEvents();
+        Drive.drainEvents(server);
         server.refuseRequest(1);
 
-        server.receive(Frames.reset(1, 4));
+        Drive.receive(server, Frames.reset(1, 4));
 
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
     void theBoundedDrainKeepsTheOrderOfARequestAndItsReset() {
         Endpoint server = establishedServer();
         receiveRequest(server, 1);
-        server.receive(Frames.reset(1, 4));
+        Drive.receive(server, Frames.reset(1, 4));
 
         List<Event> first = server.drainEvents(1);
         List<Event> second = server.drainEvents(1);

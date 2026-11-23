@@ -1,7 +1,6 @@
 package io.github.ppzxc.strand.examples;
 
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
-import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
+import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.Passage;
 import java.io.ByteArrayOutputStream;
@@ -23,21 +22,23 @@ import java.util.concurrent.TimeoutException;
 import org.jspecify.annotations.Nullable;
 
 /**
- * JDK 11 {@code java.net.http.WebSocket} 위의 메시지 통로. WebSocket은 메시지 하나가 프레임 하나이므로 {@link Inbound#message}로 넘기고, 연결
- * 드라이버는 {@code EndpointConfig.webSocket()}으로 설정해 쓴다. JDK 11 API가 필요해서 core·nio 모듈이 아니라 예제 모듈에 둔다.
+ * JDK 11 {@code java.net.http.WebSocket} 위의 메시지 통로. WebSocket은 메시지 하나가 프레임 하나이므로 바이너리 메시지는 {@link Inbound#unit}으로
+ * 넘긴다. 텍스트 메시지는 바이트로 넘길 수 없는 입력이라 {@link Inbound#unsupported()}로 알린다. WebSocket에만 있는 일(텍스트 구분, 종료 원인에 따른
+ * Close 상태 코드)은 이 통로가 맡고 core는 통로의 종류를 모른다. JDK 11 API가 필요해서 core·nio 모듈이 아니라 예제 모듈에 둔다.
  *
  * <p>JDK는 콜백으로 메시지를 밀어 넣으므로 {@link #listener()}가 큐에 쌓고 {@link #await}가 꺼낸다. 메시지 조각은 하나로 모아 넘긴다. 다음 메시지는
  * 앞서 넘긴 메시지를 {@code await}가 꺼낸 뒤에야 요청하므로 읽지 않는 쪽으로 메시지가 무한히 쌓이지 않는다. 조각이 이어지는 동안에는 다음 조각을 바로
  * 요청한다.
  *
- * <p>쓰기는 비블로킹이다. JDK는 보내기가 끝나기 전에 다음 보내기를 받지 않으므로, 앞선 보내기가 끝나지 않았으면 {@link #write}는 0을 돌려주고
+ * <p>쓰기는 비블로킹이다. JDK는 보내기가 끝나기 전에 다음 보내기를 받지 않으므로, 앞선 보내기가 끝나지 않았으면 {@link #writeBytes}는 0을 돌려주고
  * 보내기가 끝나면 쓰기를 기다리던 {@link #await}가 깨어난다. 메시지는 JDK가 한 번에 받으므로 받아 주면 메시지 하나를 통째로 받은 것이다.
  *
- * <p>{@link #await}와 {@link #write}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
+ * <p>{@link #await}와 {@link #writeBytes}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
 public final class WebSocketPassage implements Passage {
 
     private static final int NORMAL_CLOSURE = 1000;
+    private static final int INTERNAL_ERROR_CLOSURE = 1011;
     private static final long BACKSTOP_MILLIS = 1000;
 
     /** 연결(핸드셰이크 완료)을 기다리는 기본 상한. */
@@ -52,7 +53,8 @@ public final class WebSocketPassage implements Passage {
     private final ArrayDeque<Object> queue = new ArrayDeque<>();
     private boolean wakeRequested;
     private final ByteArrayOutputStream pendingBinary = new ByteArrayOutputStream();
-    private final ByteArrayOutputStream pendingText = new ByteArrayOutputStream();
+    // 텍스트 메시지는 내용을 넘기지 않으므로 상한 검사를 위해 모은 UTF-8 바이트 수만 센다.
+    private long pendingTextBytes;
     private final WebSocket.Listener listener = new Receiver();
     private final int maxMessageBytes;
     private volatile WebSocket socket;
@@ -303,33 +305,25 @@ public final class WebSocketPassage implements Passage {
         });
     }
 
+    /**
+     * 출력 하나(프레임 하나)의 남은 바이트를 바이너리 메시지 하나로 보낸다. JDK가 받아 주면 메시지 전체 길이를 보고하고, 앞선 보내기가 끝나지 않았으면
+     * 0을 보고한다. 부분만 받아 주는 일은 없다.
+     */
     @Override
-    public int write(OutboundMessage message, int offset) throws IOException {
+    public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
         WebSocket open = socket;
         if (open == null) {
             throw new IOException("아직 열리지 않은 통로");
         }
         throwIfClosedOrFailed();
-        CompletableFuture<?> last = sending;
-        boolean busy = !writable();
-        if (message.kind() == OutboundMessage.Kind.BINARY) {
-            if (busy) {
-                // 보내기가 끝나면 쓰기 대기가 깨운다.
-                return 0;
-            }
-            CompletableFuture<?> send = open.sendBinary(ByteBuffer.wrap(message.bytes()), true);
-            failIfAlreadyFailed(send);
-            watch(send);
-            return message.length();
+        if (!writable()) {
+            // 보내기가 끝나면 쓰기 대기가 깨운다.
+            return 0;
         }
-        if (!open.isOutputClosed()) {
-            // Close는 앞선 보내기가 끝난 뒤에 보낸다. JDK는 보내기가 겹치면 거부한다.
-            int code = message.webSocketCloseCode();
-            CompletableFuture<?> send = busy ? afterPrevious(last, open, code) : open.sendClose(code, "");
-            failIfAlreadyFailed(send);
-            watch(send);
-        }
-        return 0;
+        CompletableFuture<?> send = open.sendBinary(ByteBuffer.wrap(bytes, offset, length), true);
+        failIfAlreadyFailed(send);
+        watch(send);
+        return length;
     }
 
     /** 바로 실패로 끝난 보내기는 이 호출에서 알린다. 나중에 실패하는 것은 {@link #await}가 알린다. */
@@ -354,18 +348,32 @@ public final class WebSocketPassage implements Passage {
         }
     }
 
-    /**
-     * 아직 Close를 보내지 않았다면 NORMAL_CLOSURE Close를 보낸다. 상대의 Close 응답을 읽는 것은 {@link #await}가 한다. Close를 보내지 못하면 Close 교환을
-     * 할 수 없으므로 소켓을 끊는다.
-     */
+    /** 연결이 어떻게 끝났는지 모를 때의 닫기. {@link #closeOutput(int)}를 {@code NORMAL_CLOSURE}로 부른다. */
     @Override
     public void shutdownOutput() {
+        closeOutput(NORMAL_CLOSURE);
+    }
+
+    /**
+     * 종료 원인으로 상태 코드를 고른다. {@code NO_ERROR} 연결 종료(CLOSE 교환)로 끝났으면 {@code 1000 Normal Closure}로, 오류 CLOSE나 CLOSE
+     * 없는 끊김이면 1000이 아닌 {@code 1011}로 닫는다(규격 1.2.1절: 오류 종료의 상태 코드는 정하지 않되 1000은 쓰지 않는다).
+     * 1011은 이 예제가 고른 값일 뿐 규격이 정한 값이 아니다.
+     */
+    @Override
+    public void shutdownOutput(CloseReason reason) {
+        closeOutput(reason.kind() == CloseReason.Kind.CLOSE ? NORMAL_CLOSURE : INTERNAL_ERROR_CLOSURE);
+    }
+
+    /**
+     * 아직 Close를 보내지 않았다면 주어진 상태 코드의 Close를 보낸다. 상대의 Close 응답을 읽는 것은 {@link #await}가 한다. Close를 보내지 못하면
+     * Close 교환을 할 수 없으므로 소켓을 끊는다.
+     */
+    private void closeOutput(int code) {
         WebSocket open = socket;
         if (open != null && !open.isOutputClosed()) {
-            // 앞선 보내기(마지막 프레임이나 write가 이어 붙인 Close)가 끝난 뒤에 보낸다. 겹치면 JDK가 거부해 abort로 번진다.
+            // 앞선 보내기(마지막 프레임)가 끝난 뒤에 보낸다. 겹치면 JDK가 거부해 abort로 번진다.
             CompletableFuture<?> last = sending;
-            CompletableFuture<?> close =
-                    !writable() ? afterPrevious(last, open, NORMAL_CLOSURE) : closeOnce(open, NORMAL_CLOSURE);
+            CompletableFuture<?> close = !writable() ? afterPrevious(last, open, code) : closeOnce(open, code);
             watch(close);
             close.whenComplete((sent, failure) -> {
                 if (failure != null) {
@@ -417,7 +425,7 @@ public final class WebSocketPassage implements Passage {
         private void overflow(WebSocket webSocket) {
             overflowed = true;
             pendingBinary.reset();
-            pendingText.reset();
+            pendingTextBytes = 0;
             enqueue(new IOException("메시지가 상한 " + maxMessageBytes + "바이트를 넘었다"));
             webSocket.abort();
         }
@@ -438,7 +446,7 @@ public final class WebSocketPassage implements Passage {
             if (last) {
                 byte[] message = pendingBinary.toByteArray();
                 pendingBinary.reset();
-                enqueue(Inbound.message(WebSocketMessageKind.BINARY, message));
+                enqueue(Inbound.unit(message));
             } else {
                 webSocket.request(1);
             }
@@ -460,15 +468,14 @@ public final class WebSocketPassage implements Passage {
             }
             byte[] encoded = text.getBytes(StandardCharsets.UTF_8);
             encodedChars += text.length();
-            if ((long) pendingText.size() + encoded.length > maxMessageBytes) {
+            if (pendingTextBytes + encoded.length > maxMessageBytes) {
                 overflow(webSocket);
                 return null;
             }
-            pendingText.write(encoded, 0, encoded.length);
+            pendingTextBytes += encoded.length;
             if (last) {
-                byte[] message = pendingText.toByteArray();
-                pendingText.reset();
-                enqueue(Inbound.message(WebSocketMessageKind.TEXT, message));
+                pendingTextBytes = 0;
+                enqueue(Inbound.unsupported());
             } else {
                 webSocket.request(1);
             }

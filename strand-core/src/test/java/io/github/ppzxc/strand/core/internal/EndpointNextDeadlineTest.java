@@ -15,32 +15,22 @@ class EndpointNextDeadlineTest {
     @Test
     void negativeElapsedTimeIsRejectedWithoutChangingTheClock() {
         Endpoint server = open(quiet());
-        server.advance(100);
+        Drive.advance(server, 100);
         server.request(257, new byte[0], 500);
 
-        assertThatIllegalArgumentException().isThrownBy(() -> server.advance(-1));
+        assertThatIllegalArgumentException().isThrownBy(() -> Drive.advance(server, -1));
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(601));
     }
 
     @Test
     void requestDeadlineDoesNotWrapIntoThePast() {
         Endpoint server = open(quiet());
-        server.advance(100);
+        Drive.advance(server, 100);
         server.request(257, new byte[0], Long.MAX_VALUE);
 
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(Long.MAX_VALUE));
-        server.advance(1);
-        assertThat(server.drainEvents()).isEmpty();
-    }
-
-    @Test
-    void elapsedClockDoesNotWrapIntoThePast() {
-        Endpoint server = open(quiet());
-        server.advance(Long.MAX_VALUE - 1);
-        server.advance(2);
-        server.request(257, new byte[0], 10);
-
-        assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(Long.MAX_VALUE));
+        Drive.advance(server, 1);
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
@@ -48,13 +38,13 @@ class EndpointNextDeadlineTest {
         Endpoint server = open(quiet());
         server.advanceTo(100_000_000L);
         server.request(257, new byte[0], 500);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
         assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(601_000_000L));
         server.advanceTo(600_999_999L);
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
         server.advanceTo(601_000_000L);
-        assertThat(server.drainEvents()).hasSize(1);
+        assertThat(Drive.drainEvents(server)).hasSize(1);
         assertThat(server.nextDeadlineNanos()).isEmpty();
     }
 
@@ -66,7 +56,7 @@ class EndpointNextDeadlineTest {
 
         server.advanceTo(5_000_000L);
 
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
         assertThat(server.nextDeadlineNanos()).isEqualTo(OptionalLong.of(16_000_000L));
     }
 
@@ -110,13 +100,13 @@ class EndpointNextDeadlineTest {
 
     /** 서버: 상대 HELLO에 ACK를 보냈고 상대 ACK도 받았으며 AUTH도 통과했다. 보낼 것은 비웠다. */
     private static Endpoint open(EndpointConfig config) {
-        Endpoint server = Endpoint.server(config);
-        server.receive(bytes(PREFACE));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.receive(bytes(AUTH_ANONYMOUS));
-        server.drainMessages();
-        server.drainEvents();
+        Endpoint server = Drive.server(config);
+        Drive.receive(server, bytes(PREFACE));
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
         return server;
     }
 
@@ -130,7 +120,7 @@ class EndpointNextDeadlineTest {
     @Test
     void reflectsARequestDeadline() {
         Endpoint server = open(quiet());
-        server.advance(100);
+        Drive.advance(server, 100);
         server.request(257, new byte[0], 500);
 
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(601));
@@ -139,30 +129,30 @@ class EndpointNextDeadlineTest {
     @Test
     void advancingToTheRequestDeadlineEndsTheRequest() {
         Endpoint server = open(quiet());
-        server.advance(100);
+        Drive.advance(server, 100);
         server.request(257, new byte[0], 500);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.advance(499);
-        assertThat(server.drainEvents()).isEmpty();
-        server.advance(2);
+        Drive.advance(server, 499);
+        assertThat(Drive.drainEvents(server)).isEmpty();
+        Drive.advance(server, 2);
 
-        assertThat(server.drainEvents()).hasSize(1);
+        assertThat(Drive.drainEvents(server)).hasSize(1);
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.empty());
     }
 
     @Test
     void reflectsTheAckWaitOfTheHelloAndEndingItClosesTheConnection() {
-        Endpoint server = Endpoint.server(
+        Endpoint server = Drive.server(
                 EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000).authTimeoutMs(FAR));
-        server.receive(bytes(PREFACE));
-        server.drainMessages();
+        Drive.receive(server, bytes(PREFACE));
+        Drive.drainMessages(server);
 
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(1001));
-        server.advance(1000);
-        assertThat(server.drainEvents()).isEmpty();
-        server.advance(1);
-        assertThat(server.drainEvents()).isNotEmpty();
+        Drive.advance(server, 1000);
+        assertThat(Drive.drainEvents(server)).isEmpty();
+        Drive.advance(server, 1);
+        assertThat(Drive.drainEvents(server)).isNotEmpty();
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.empty());
     }
 
@@ -170,12 +160,12 @@ class EndpointNextDeadlineTest {
     void reflectsTheAckWaitOfThePing() {
         Endpoint server = open(
                 EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000).authTimeoutMs(FAR));
-        server.advance(300);
+        Drive.advance(server, 300);
         server.ping(PING_PAYLOAD);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(1301));
-        server.receive(bytes(PING_ACK));
+        Drive.receive(server, bytes(PING_ACK));
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.empty());
     }
 
@@ -183,54 +173,54 @@ class EndpointNextDeadlineTest {
     void reflectsTheAckWaitOfTheAuth() {
         Endpoint client =
                 Endpoint.client(EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(1000));
-        client.drainMessages();
-        client.advance(200);
-        client.receive(bytes(HELLO));
-        client.drainMessages();
+        Drive.drainMessages(client);
+        Drive.advance(client, 200);
+        Drive.receive(client, bytes(HELLO));
+        Drive.drainMessages(client);
 
         // 클라이언트 HELLO의 대기는 0에서 시작했다.
         assertThat(client.nextDeadline()).isEqualTo(OptionalLong.of(1001));
-        client.receive(bytes(HELLO_ACK));
-        client.drainMessages();
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.drainMessages(client);
         // AUTH의 대기는 AUTH를 넘긴 때(200)부터다.
         assertThat(client.nextDeadline()).isEqualTo(OptionalLong.of(1201));
     }
 
     @Test
     void reflectsTheServerAuthWait() {
-        Endpoint server = Endpoint.server(
+        Endpoint server = Drive.server(
                 EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(FAR).authTimeoutMs(700));
-        server.receive(bytes(PREFACE));
-        server.advance(50);
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        Drive.receive(server, bytes(PREFACE));
+        Drive.advance(server, 50);
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
 
         // AUTH 대기는 상대 HELLO를 받은 때(50)부터 센다.
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(751));
-        server.advance(700);
-        assertThat(server.drainEvents()).isEmpty();
-        server.advance(1);
-        assertThat(server.drainEvents()).isNotEmpty();
+        Drive.advance(server, 700);
+        assertThat(Drive.drainEvents(server)).isEmpty();
+        Drive.advance(server, 1);
+        assertThat(Drive.drainEvents(server)).isNotEmpty();
     }
 
     @Test
     void reflectsTheIdlePingSchedule() {
         Endpoint server = open(quiet().idleIntervalMs(3000));
-        server.advance(100);
+        Drive.advance(server, 100);
 
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(3000));
-        server.advance(2899);
-        assertThat(server.drainMessages()).isEmpty();
-        server.advance(1);
-        assertThat(server.drainMessages()).isNotEmpty();
+        Drive.advance(server, 2899);
+        assertThat(Drive.drainMessages(server)).isEmpty();
+        Drive.advance(server, 1);
+        assertThat(Drive.drainMessages(server)).isNotEmpty();
     }
 
     @Test
     void anIdlePingWaitsForItsAckBeforeTheNextIdlePing() {
         Endpoint server = open(quiet().idleIntervalMs(3000));
-        server.advance(3000);
-        server.drainMessages();
+        Drive.advance(server, 3000);
+        Drive.drainMessages(server);
 
         // 보낸 PING의 확인 대기는 FAR라 기한은 멀다. 유휴 PING은 ACK 전에는 다시 일정에 없다.
         assertThat(server.nextDeadline().getAsLong()).isGreaterThan(3000 + 3000);
@@ -244,9 +234,9 @@ class EndpointNextDeadlineTest {
                 .authTimeoutMs(FAR)
                 .idleIntervalMs(5000));
         server.request(257, new byte[0], 4000);
-        server.advance(200);
+        Drive.advance(server, 200);
         server.ping(PING_PAYLOAD);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(1201));
     }

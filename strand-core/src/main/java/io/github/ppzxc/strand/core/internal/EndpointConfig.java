@@ -24,7 +24,7 @@ public final class EndpointConfig {
     /** 유휴 PING 간격의 기본값(30초). 0이면 끈다. */
     public static final long DEFAULT_IDLE_INTERVAL_MS = 30_000L;
     /** 인증이 필요 없는 연결의 메커니즘(규격 3.3.1절). */
-    static final String ANONYMOUS = "ANONYMOUS";
+    public static final String ANONYMOUS = "ANONYMOUS";
 
     private final long maxFrameSize;
     private final long maxConcurrentStreams;
@@ -38,14 +38,10 @@ public final class EndpointConfig {
     private final @Nullable Set<Integer> knownTypes;
     /** 다음에 쓸 스트림 번호. null이면 역할의 첫 번호다(규격 2.2.5절). */
     private final @Nullable Long nextStreamId;
-    /** WebSocket 위에서 쓴다(규격 1.2절). */
-    private final boolean webSocket;
     /** 클라이언트가 {@code AUTH}로 보낼 메커니즘(규격 3.3.1절). */
     private final String authMechanism;
     /** 클라이언트가 {@code AUTH}로 보낼 자격 증명. */
     private final byte[] authCredentials;
-    /** 서버가 받은 {@code AUTH}를 넘길 애플리케이션. */
-    private final Authenticator authenticator;
     /** 적합성·호스트 인증 환경이 서버 AUTH(ACK)에 알릴 자격 증명 수명(초). */
     private final OptionalLong credentialLifetimeSeconds;
 
@@ -58,10 +54,8 @@ public final class EndpointConfig {
         this.authTimeoutMs = draft.authTimeoutMs;
         this.knownTypes = draft.knownTypes;
         this.nextStreamId = draft.nextStreamId;
-        this.webSocket = draft.webSocket;
         this.authMechanism = draft.authMechanism;
         this.authCredentials = draft.authCredentials;
-        this.authenticator = draft.authenticator;
         this.credentialLifetimeSeconds = draft.credentialLifetimeSeconds;
     }
 
@@ -80,10 +74,8 @@ public final class EndpointConfig {
         @Nullable
         Long nextStreamId;
 
-        boolean webSocket;
         String authMechanism = ANONYMOUS;
         byte[] authCredentials = new byte[0];
-        Authenticator authenticator = EndpointConfig::passesAnonymousOnly;
 
         OptionalLong credentialLifetimeSeconds = OptionalLong.empty();
     }
@@ -98,10 +90,8 @@ public final class EndpointConfig {
         draft.authTimeoutMs = authTimeoutMs;
         draft.knownTypes = knownTypes;
         draft.nextStreamId = nextStreamId;
-        draft.webSocket = webSocket;
         draft.authMechanism = authMechanism;
         draft.authCredentials = authCredentials;
-        draft.authenticator = authenticator;
         draft.credentialLifetimeSeconds = credentialLifetimeSeconds;
         return draft;
     }
@@ -241,18 +231,6 @@ public final class EndpointConfig {
     }
 
     /**
-     * WebSocket 위에서 쓰는 복사본. 바이트 스트림이 아니라 메시지 하나가 프레임 하나이며, 입력은 {@link Endpoint#receiveMessage}로
-     * 넣는다(규격 1.2절).
-     *
-     * @return 새 설정
-     */
-    public EndpointConfig webSocket() {
-        ConfigDraft draft = draft();
-        draft.webSocket = true;
-        return new EndpointConfig(draft);
-    }
-
-    /**
      * 클라이언트가 {@code AUTH}로 보낼 메커니즘과 자격 증명을 정한 복사본. 정하지 않으면 {@code ANONYMOUS}와 빈 자격 증명이다(규격
      * 3.3.1절).
      *
@@ -268,18 +246,6 @@ public final class EndpointConfig {
         ConfigDraft draft = draft();
         draft.authMechanism = mechanism;
         draft.authCredentials = credentials.clone();
-        return new EndpointConfig(draft);
-    }
-
-    /**
-     * 서버가 받은 {@code AUTH}를 넘길 애플리케이션을 정한 복사본. 정하지 않으면 {@code ANONYMOUS}와 빈 자격 증명만 통과시킨다.
-     *
-     * @param value 판단하는 애플리케이션
-     * @return 새 설정
-     */
-    public EndpointConfig authenticator(Authenticator value) {
-        ConfigDraft draft = draft();
-        draft.authenticator = value;
         return new EndpointConfig(draft);
     }
 
@@ -305,10 +271,6 @@ public final class EndpointConfig {
                 && AUTH_MECHANISM_GRAMMAR.matcher(mechanism).matches();
     }
 
-    private static AuthDecision passesAnonymousOnly(String mechanism, byte[] credentials) {
-        return mechanism.equals(ANONYMOUS) && credentials.length == 0 ? AuthDecision.PASS : AuthDecision.REJECT;
-    }
-
     String authMechanism() {
         return authMechanism;
     }
@@ -317,16 +279,8 @@ public final class EndpointConfig {
         return authCredentials.clone();
     }
 
-    Authenticator authenticator() {
-        return authenticator;
-    }
-
     OptionalLong credentialLifetimeSeconds() {
         return credentialLifetimeSeconds;
-    }
-
-    boolean isWebSocket() {
-        return webSocket;
     }
 
     boolean knows(int type) {

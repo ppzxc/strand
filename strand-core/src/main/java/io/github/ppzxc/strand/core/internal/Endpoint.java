@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -20,23 +21,18 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * 엔드포인트(서버 또는 클라이언트 역할). 입출력을 하지 않는 순수 상태 기계다. 받은 바이트는 {@link #receive}, 애플리케이션의 호출은
- * {@link #request}·{@link #ping}·{@link #close}, 시간은 {@link #advance}로 넣는다. 그러면 보낼 바이트와 애플리케이션 이벤트가
- * 쌓이고, {@link #drainMessages}와 {@link #drainEvents}로 한 번씩 꺼낸다. 스레드·소켓·실제 시계에 접근하지 않는다.
+ * 엔드포인트(서버 또는 클라이언트 역할). 입출력을 하지 않는 순수 상태 기계다. 받은 바이트는 {@link #receiveBounded}와 {@link
+ * #receiveUnit}, 애플리케이션의 호출은 {@link #request}·{@link #ping}·{@link #close}, 시간은 {@link #advanceTo}로 넣는다. 그러면 보낼
+ * 출력과 애플리케이션 이벤트가 쌓이고, 출력은 {@link #nextOutput}으로 보고 {@link #outputProgress}로 넘긴 만큼 알리고, 이벤트는 {@link
+ * #drainEvents(int)}로 꺼낸다. 스레드·소켓·실제 시계에 접근하지 않는다. 인증 판단은 {@link Event.Kind#AUTHENTICATION_REQUIRED} 사건으로
+ * 위임하고 {@link #completeAuthentication}으로 돌려받는다.
  */
 public final class Endpoint {
 
     /** 프레임 헤더 크기(규격 2.1절). 전송 모듈이 바이트 수를 셀 때 쓰도록 {@code Frames}의 값을 그대로 노출한다. */
     public static final int FRAME_HEADER_SIZE = Frames.HEADER_SIZE;
 
-    private static final int PREFACE_PREFIX_LENGTH = 6;
     private static final byte[] NO_BYTES = new byte[0];
-    /** 경계에 걸친 단위를 모으는 버퍼의 처음 크기. */
-    private static final int PENDING_MIN_CAPACITY = 64;
-    /** 다 비웠을 때 이 크기를 넘는 버퍼는 놓는다. 큰 프레임 하나 때문에 연결이 그 크기를 계속 붙잡지 않게 한다. */
-    private static final int PENDING_RELEASE_ABOVE = 65_536;
-
-    private static final int MAX_WEBSOCKET_STATUS_CODE = 0xFFFF;
     /** 서버는 짝수, 클라이언트는 홀수 번호를 쓰고 첫 번호는 각각 2와 1이다(규격 2.2.5절). */
     private static final int FIRST_SERVER_STREAM_ID = 2;
 
@@ -61,7 +57,7 @@ public final class Endpoint {
 
     private final EndpointConfig config;
     private final Outbox outbox = new Outbox();
-    /** 애플리케이션에 낼 이벤트. 쌓기만 하고 고치지 않는다. 돌려보낸 요청의 거름은 꺼낼 때({@link #drainEvents()}) 한다. */
+    /** 애플리케이션에 낼 이벤트. 쌓기만 하고 고치지 않는다. 돌려보낸 요청의 거름은 꺼낼 때({@link #drainEvents(int)}) 한다. */
     private final List<Event> events = new ArrayList<>();
     /**
      * 이벤트를 마지막으로 꺼낸 때의 {@link #highestPeerStreamId}. 상대 요청 번호는 늘어나기만 하므로, 이보다 큰 번호의 대기 중인 요청이 아직
@@ -72,8 +68,8 @@ public final class Endpoint {
     private final Set<Long> refusedRequests = new HashSet<>();
     /**
      * 내 요청(번호표를 받은 뒤 결과가 나올 때까지)의 장부. 번호를 받기 전(AUTH 관문 전에 미룬 요청)과 번호를 받은 뒤(쓰기 전, 쓰기 시작)를
-     * 모두 가진다. 프레임 하나가 메시지 하나이므로 {@link #drainMessages()}로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 보고 장부에 쓰기
-     * 시작을 알린다(규격 3.5절 "연결이 끝날 때").
+     * 모두 가진다. 출력 진행에서 프레임의 첫 바이트를 넘기면 쓰기 시작을, 마지막 바이트를 넘기면 넘김을 장부에 알린다(규격
+     * 1.3절, 3.5절 "연결이 끝날 때").
      *
      * <p>장부의 닫는 중({@code onClosing})과 연결 단계의 CLOSE 교환은 같은 사건이다. 연결이 계속 열려 있을 수 있는 두 곳({@link #close},
      * {@link #handleClose})은 {@link #endQueuedRequests}로 장부에 알린다. 나머지(형태가 잘못된 CLOSE, 연결 오류, 너무 큰 AUTH)는 곧바로
@@ -88,15 +84,10 @@ public final class Endpoint {
      */
     private final Deque<DeferredPing> deferredPings = new ArrayDeque<>();
 
-    /**
-     * 받은 바이트 가운데 아직 한 단위(서문 또는 프레임)가 되지 못한 앞부분. 청크 경계에 걸친 단위 하나만 모으므로 비어 있는 때가 대부분이다.
-     * 한 청크 안에 통째로 든 단위는 들어온 배열에서 바로 처리해 복사하지 않는다.
-     */
-    private byte[] pending = NO_BYTES;
-    /** {@link #pending}에서 쓰인 바이트 수. 0이면 모은 것이 없다. */
-    private int pendingLength;
-    /** {@link #consumeUnit}이 0을 돌려줄 때, 진행하려면 단위의 앞에서부터 있어야 하는 총 바이트 수. */
-    private int wantedLength;
+    /** 받은 바이트를 단위로 자르고 경계에 걸친 단위 하나를 모은다. 이 상태 기계는 프레임 하나와 경계 위반만 받는다. */
+    private final UnitSlicer slicer;
+
+    private final UnitSink unitSink = new UnitSink();
     /** 입력 처리 중이다. 애플리케이션 콜백이 같은 엔드포인트에 다시 입력하는 것을 막는다. */
     private boolean receiving;
 
@@ -118,33 +109,10 @@ public final class Endpoint {
     /** 한 단위가 만들 수 있는 제어 프레임(HELLO 응답, AUTH, CLOSE 등)의 상한. */
     private static final int OUTPUT_CONTROL_RESERVE = 4;
 
-    private boolean deferredAuthentication;
     private boolean authenticationPending;
-    private boolean handlerReady;
-    private Outbox.@Nullable Node selectedOutput;
-    private @Nullable EndpointOutput currentOutput;
-    private long nextOutputId;
-    private int outputWritten;
-    private long outputWaitId = LivenessTimers.NO_WAIT;
-    private boolean incrementalOutput;
-    private boolean outputDisconnected;
+    private final OutputProgress output;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
     private long highestPeerStreamId;
-
-    /** 조각으로 조립 중인 WebSocket 메시지가 열려 있는가. */
-    private boolean messageOpen;
-
-    private @Nullable WebSocketMessageKind messageKind;
-    private byte[] messageBuffer = NO_BYTES;
-    private int messageLength;
-    /** 지금까지 본 메시지의 바이트 수. 모아 두지 않은 것도 센다. */
-    private long messageTotal;
-    /** 판정이 끝나 나머지 조각을 버리는 중인가. */
-    private boolean messageDiscard;
-
-    private boolean messageHeaderChecked;
-    /** 헤더가 알린 프레임의 전체 크기({@code 4 + length}). 헤더를 확인한 뒤에만 의미가 있다. */
-    private long messageExpected;
 
     private Endpoint(boolean server, EndpointConfig config) {
         this.config = config;
@@ -156,12 +124,15 @@ public final class Endpoint {
                     "nextStreamId " + firstStreamId + "는 " + (server ? "서버(짝수)" : "클라이언트(홀수)") + "의 번호 공간이 아니다");
         }
         this.ledger = new OwnRequestLedger(outbox, firstStreamId, ownParity);
+        this.slicer = new UnitSlicer(config.maxFrameSize());
+        this.output = new OutputProgress(outbox, timers, ledger);
         this.server = server;
         this.phase = server ? ConnectionPhase.server() : ConnectionPhase.client();
     }
 
     /**
-     * 서버 역할 엔드포인트를 만든다. 연결 서문을 받으면 HELLO를 보낸다.
+     * 서버 역할 엔드포인트를 만든다. 연결 서문을 받으면 HELLO를 보낸다. 받은 AUTH의 판단은 {@link Event.Kind#AUTHENTICATION_REQUIRED}
+     * 사건으로 애플리케이션에 맡기고 {@link #completeAuthentication}으로 돌려받는다.
      *
      * @param config 엔드포인트의 설정
      * @return 연결 서문을 기다리는 엔드포인트
@@ -169,13 +140,6 @@ public final class Endpoint {
      */
     public static Endpoint server(EndpointConfig config) {
         return new Endpoint(true, config);
-    }
-
-    /** 사용자 인증 판단을 사건으로 위임하는 내부 서버 엔드포인트. */
-    public static Endpoint serverWithDeferredAuthentication(EndpointConfig config) {
-        Endpoint endpoint = new Endpoint(true, config);
-        endpoint.deferredAuthentication = true;
-        return endpoint;
     }
 
     /**
@@ -193,41 +157,12 @@ public final class Endpoint {
     }
 
     /**
-     * 상대에게서 받은 바이트를 넣는다. 프레임 경계와 무관하게 어느 위치에서 잘라도 된다. 이 호출 안에서 읽고 끝내며 {@code bytes}를 붙잡지
-     * 않으므로, 돌아온 뒤에는 호출자가 배열을 다시 써도 된다.
-     *
-     * <p>입력을 처리하는 동안 애플리케이션 콜백({@code Authenticator})에서 같은 엔드포인트에 다시 입력할 수 없다. 오동작하지 않도록 상태를 건드리지
-     * 않고 던진다. 콜백이 던진 예외는 엔드포인트가 받아 연결을 닫으므로 이 호출 밖으로 나오지 않는다.
-     *
-     * @param bytes 받은 바이트
-     * @throws IllegalStateException WebSocket 엔드포인트일 때, 또는 입력을 처리하는 중에 다시 불렀을 때
-     */
-    public void receive(byte[] bytes) {
-        if (config.isWebSocket()) {
-            throw new IllegalStateException("WebSocket 엔드포인트는 receiveMessage로 입력한다");
-        }
-        if (!enterReceive()) {
-            return;
-        }
-        try {
-            receiveBytes(bytes);
-        } finally {
-            receiving = false;
-        }
-    }
-
-    /** 최대 단위 수만큼 입력을 처리하고 소비한 바이트 수를 반환한다. 수거 공간에는 한도를 두지 않는다. */
-    public int receiveBounded(byte[] bytes, int offset, int length, int maximumUnits) {
-        return receiveBounded(bytes, offset, length, maximumUnits, CollectionSpace.UNLIMITED)
-                .consumed();
-    }
-
-    /**
-     * 최대 단위 수만큼, 그리고 한 단위가 만들 수 있는 사건·출력을 넣을 공간이 확보된 만큼만 입력을 처리한다. 단위를 처리하기 전에 최악의 경우 필요한
+     * 상대에게서 받은 바이트를 최대 단위 수만큼, 그리고 한 단위가 만들 수 있는 사건·출력을 넣을 공간이 확보된 만큼만 처리한다. 프레임 경계와 무관하게
+     * 어느 위치에서 잘라도 된다. 입력을 처리하는 동안 애플리케이션 콜백에서 같은 엔드포인트에 다시 입력할 수 없다. 단위를 처리하기 전에 최악의 경우 필요한
      * 공간을 확인하므로 상태가 절반만 바뀌지 않는다. 모자라면 그 단위 앞에서 멈추고 수거가 필요하다고 알린다. 호출자는 사건과 출력을 수거하고 돌려준
      * 소비 위치부터 다시 입력한다.
      *
-     * @throws IllegalStateException 수거할 것이 하나도 없는데도 공간이 한 단위를 처리하기에 모자랄 때
+     * @throws IllegalStateException 수거할 것이 하나도 없는데도 공간이 한 단위를 처리하기에 모자랄 때, 입력을 처리하는 중에 다시 불렀을 때
      */
     public ReceiveProgress receiveBounded(
             byte[] bytes, int offset, int length, int maximumUnits, CollectionSpace space) {
@@ -236,55 +171,12 @@ public final class Endpoint {
         if (offset < 0 || length < 0 || offset > bytes.length - length || maximumUnits < 0) {
             throw new IllegalArgumentException("유효하지 않은 입력 범위 또는 처리 한도");
         }
-        if (config.isWebSocket()) {
-            throw new IllegalStateException("WebSocket 엔드포인트는 메시지 단위로 입력한다");
-        }
         if (maximumUnits == 0 || !enterReceive()) {
             return new ReceiveProgress(0, false);
         }
         try {
-            int at = offset;
-            int end = offset + length;
-            int units = 0;
-            boolean collectionRequired = false;
-            while (!phase.isEnded() && units < maximumUnits) {
-                if (pendingLength == 0 && at == end) {
-                    break;
-                }
-                if (!hasSpace(space)) {
-                    collectionRequired = true;
-                    break;
-                }
-                if (pendingLength > 0) {
-                    int consumed = consumeUnit(pending, 0, pendingLength);
-                    if (consumed > 0) {
-                        releasePending();
-                        units++;
-                    } else if (phase.isEnded() || at == end) {
-                        break;
-                    } else {
-                        int take = Math.min(wantedLength - pendingLength, end - at);
-                        if (take <= 0) {
-                            throw new IllegalStateException("더 필요한 바이트 수가 정해지지 않았다");
-                        }
-                        appendPending(bytes, at, take);
-                        at += take;
-                    }
-                } else {
-                    int consumed = consumeUnit(bytes, at, end - at);
-                    if (consumed > 0) {
-                        at += consumed;
-                        units++;
-                    } else {
-                        if (!phase.isEnded()) {
-                            appendPending(bytes, at, end - at);
-                            at = end;
-                        }
-                        break;
-                    }
-                }
-            }
-            return new ReceiveProgress(at - offset, collectionRequired);
+            unitSink.space = space;
+            return slicer.slice(bytes, offset, length, maximumUnits, unitSink);
         } finally {
             receiving = false;
         }
@@ -348,353 +240,69 @@ public final class Endpoint {
     }
 
     /**
-     * 받은 바이트를 처리한다. 먼저 경계에 걸친 단위를 모아서 끝내고, 그 뒤로는 들어온 배열에서 바로 처리한다. 남은 꼬리만 복사해 둔다.
-     * 어디서 잘라 넣어도 {@link #consumeUnit}이 보는 바이트는 같으므로 결과가 같다.
-     */
-    private void receiveBytes(byte[] bytes) {
-        int at = 0;
-        int end = bytes.length;
-        while (pendingLength > 0) {
-            int consumed = consumeUnit(pending, 0, pendingLength);
-            if (phase.isEnded()) {
-                return;
-            }
-            if (consumed > 0) {
-                // 모은 바이트는 정확히 한 단위다. wantedLength는 처리 중인 단위의 크기를 넘지 않고, 그만큼까지만 모으기 때문이다.
-                releasePending();
-                continue;
-            }
-            if (at == end) {
-                return;
-            }
-            // 판정에 필요한 만큼만 더 모은다. 헤더가 알린 길이만큼 미리 잡지 않는다(상대가 정하는 값이다).
-            if (wantedLength <= pendingLength) {
-                throw new IllegalStateException("더 필요한 바이트 수가 정해지지 않았다");
-            }
-            int take = Math.min(wantedLength - pendingLength, end - at);
-            appendPending(bytes, at, take);
-            at += take;
-        }
-        while (!phase.isEnded() && at < end) {
-            int consumed = consumeUnit(bytes, at, end - at);
-            if (consumed == 0) {
-                break;
-            }
-            at += consumed;
-        }
-        if (!phase.isEnded() && at < end) {
-            appendPending(bytes, at, end - at);
-        }
-    }
-
-    private void appendPending(byte[] bytes, int at, int length) {
-        int needed = pendingLength + length;
-        if (needed > pending.length) {
-            // 받은 만큼에 맞춰 두 배씩 키운다. 상한은 처리 중인 단위의 크기(wantedLength, 최대 max_frame_size)다.
-            int doubled = Math.max(PENDING_MIN_CAPACITY, pending.length * 2);
-            pending = Arrays.copyOf(pending, Math.max(needed, Math.min(doubled, wantedLength)));
-        }
-        System.arraycopy(bytes, at, pending, pendingLength, length);
-        pendingLength = needed;
-    }
-
-    /** 모은 바이트를 모두 처리했다. 큰 버퍼는 놓는다. */
-    private void releasePending() {
-        pendingLength = 0;
-        if (pending.length > PENDING_RELEASE_ABOVE) {
-            pending = NO_BYTES;
-        }
-    }
-
-    /**
-     * WebSocket 메시지 하나를 넣는다. 서문은 첫 바이너리 메시지, 그 뒤로는 메시지 하나가 프레임 하나다(규격 1.2절). 바이너리가 아닌
-     * 메시지, 크기가 {@code 4 + length}가 아닌 메시지는 연결 오류다. type이 CLOSE이면 크기가 어긋나도 받은 CLOSE로 본다.
+     * 정확히 한 단위(서문 또는 프레임 하나)라고 주장하는 바이트를 넣는다. 크기가 한 단위와 같으면 같은 바이트를 스트림으로 넣었을 때와 같은 사건과
+     * 출력을 낸다. 다르면 연결 단계에 맞게 반응한다: 서문 단계와 첫 프레임 단계는 아무것도 보내지 않고 닫고, 그 뒤는 연결 오류이며, {@code
+     * type}이 CLOSE이면 CLOSE 없이 닫는다(규격 3.5절, 5.1절).
      *
-     * <p>입력을 처리하는 동안 애플리케이션 콜백에서 같은 엔드포인트에 다시 입력할 수 없다({@link #receive(byte[])}와 같다).
+     * <p>수거 공간 계약은 {@link #receiveBounded(byte[], int, int, int, CollectionSpace)}와 같다. 공간이 모자라면 아무것도 소비하지 않고
+     * 수거가 필요하다고 알리며, 호출자는 수거한 뒤 같은 단위를 다시 넣는다. 연결이 이미 끝났으면 아무것도 소비하지 않는다. 이 호출 안에서 읽고
+     * 끝내며 {@code bytes}를 붙잡지 않는다.
      *
-     * @param kind 메시지 종류
-     * @param message 메시지 내용
-     * @throws IllegalStateException 바이트 스트림 엔드포인트일 때, 또는 입력을 처리하는 중에 다시 불렀을 때
-     */
-    public void receiveMessage(WebSocketMessageKind kind, byte[] message) {
-        if (!config.isWebSocket()) {
-            throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
-        }
-        if (!enterReceive()) {
-            return;
-        }
-        try {
-            receiveWebSocketMessage(kind, message);
-        } finally {
-            receiving = false;
-        }
-    }
-
-    private void receiveWebSocketMessage(WebSocketMessageKind kind, byte[] message) {
-        if (phase.awaitingPreface()) {
-            if (kind == WebSocketMessageKind.BINARY
-                    && message.length == Frames.preface().length
-                    && matchesPrefacePrefix(message, 0, message.length)) {
-                phase.prefaceVerified();
-                sendHello();
-            } else {
-                closeWithoutClose();
-            }
-            return;
-        }
-        if (phase.awaitingFirstFrame() && !checkFirstMessage(kind, message, message.length)) {
-            closeWithoutClose();
-            return;
-        }
-        if (kind != WebSocketMessageKind.BINARY || message.length < Frames.TYPE_END) {
-            connectionError();
-            return;
-        }
-        long length = Frames.readUnsignedInt(message, 0);
-        if (length < Frames.MIN_LENGTH
-                || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE
-                || message.length != Frames.LENGTH_FIELD_SIZE + length) {
-            rejectBadLength(message, 0);
-            return;
-        }
-        handle(message, 0, message.length);
-    }
-
-    /**
-     * WebSocket 메시지 하나의 조각을 넣는다. 메시지의 종류와 시작·끝을 보존하며, 메시지 전체를 전송 모듈이 미리 모을 필요가 없다. 메시지 끝에서
-     * 정확한 길이를 검증한 뒤에만 프레임의 효과(요청 전달, 결과 확정 등)를 적용한다(규격 1.2절). 조립 공간은 프레임 크기 상한
-     * ({@code max_frame_size})을 넘지 않는다. 프레임 헤더가 상한을 넘는 길이를 알리거나 메시지가 알린 길이를 넘으면 끝을 기다리지 않고 오류로
-     * 처리하며, 그 메시지의 나머지 조각은 모으지 않고 버린다. 텍스트 메시지는 시작에서 오류로 처리한다.
-     *
-     * <p>이 호출 안에서 읽고 끝내며 {@code bytes}를 붙잡지 않는다. 사건·출력 공간이 모자라면 아무것도 소비하지 않고 수거가 필요하다고 알린다.
-     * 호출자는 수거한 뒤 같은 조각(같은 {@code start}·{@code end})을 다시 넣는다. 소비는 조각 단위이며 조각 안에서 일부만 소비하지 않는다.
-     * 연결이 이미 끝났으면 아무것도 소비하지 않는다.
-     *
-     * @param kind 메시지 종류. 한 메시지의 모든 조각에서 같아야 한다
-     * @param start 메시지의 첫 조각이면 참
-     * @param end 메시지의 마지막 조각이면 참
-     * @param bytes 조각을 담은 배열
-     * @param offset 조각의 시작 위치
-     * @param length 조각의 길이
+     * @param bytes 단위를 담은 배열
+     * @param offset 단위의 시작 위치
+     * @param length 단위의 길이
      * @param space 수거 전에 쌓아 둘 수 있는 사건·출력의 한도
      * @return 소비한 바이트 수와 수거 필요 여부
-     * @throws IllegalArgumentException 범위가 유효하지 않거나 메시지 안에서 종류가 바뀔 때
-     * @throws IllegalStateException 바이트 스트림 엔드포인트일 때, 시작 없이 이어지거나 열린 메시지 안에서 다시 시작할 때, 입력을 처리하는 중에
-     *     다시 불렀을 때, 수거할 것이 하나도 없는데도 공간이 모자랄 때
+     * @throws IllegalArgumentException 범위가 유효하지 않을 때
+     * @throws IllegalStateException 스트림 입력으로 받아 두고 처리하지 못한 바이트가 남아 있을 때, 입력을 처리하는 중에 다시 불렀을 때, 수거할
+     *     것이 하나도 없는데도 공간이 모자랄 때
      */
-    public ReceiveProgress receiveMessageFragment(
-            WebSocketMessageKind kind,
-            boolean start,
-            boolean end,
-            byte[] bytes,
-            int offset,
-            int length,
-            CollectionSpace space) {
-        Objects.requireNonNull(kind, "kind");
+    public ReceiveProgress receiveUnit(byte[] bytes, int offset, int length, CollectionSpace space) {
         Objects.requireNonNull(bytes, "bytes");
         Objects.requireNonNull(space, "space");
         if (offset < 0 || length < 0 || offset > bytes.length - length) {
             throw new IllegalArgumentException("유효하지 않은 입력 범위");
         }
-        if (!config.isWebSocket()) {
-            throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
+        return receiveWholeUnit(bytes, offset, length, true, space);
+    }
+
+    /**
+     * 바이트로 넘길 수 없는 입력(예: 텍스트 메시지)을 받았다고 알린다. 반응은 크기가 어긋난 단위 입력과 같다. 수거 공간 계약도 같다: {@code
+     * collectionRequired}가 참이면 아무것도 하지 않은 것이므로, 수거한 뒤 다시 부른다. 연결이 이미 끝났으면 아무것도 하지 않는다. 소비한 바이트는
+     * 늘 0이다.
+     *
+     * @param space 수거 전에 쌓아 둘 수 있는 사건·출력의 한도
+     * @return 수거 필요 여부
+     */
+    public ReceiveProgress receiveUnsupportedInput(CollectionSpace space) {
+        Objects.requireNonNull(space, "space");
+        return receiveWholeUnit(NO_BYTES, 0, 0, false, space);
+    }
+
+    private ReceiveProgress receiveWholeUnit(
+            byte[] bytes, int offset, int length, boolean supported, CollectionSpace space) {
+        if (slicer.hasBuffered()) {
+            throw new IllegalStateException("스트림 입력으로 받아 둔 바이트가 남아 있어 단위로 입력할 수 없다");
         }
         if (!enterReceive()) {
-            dropMessage();
             return new ReceiveProgress(0, false);
         }
         try {
-            if (start == messageOpen) {
-                throw new IllegalStateException(start ? "열린 메시지 안에서 다시 시작할 수 없다" : "시작 없이 조각이 이어질 수 없다");
-            }
-            if (!start && kind != messageKind) {
-                throw new IllegalArgumentException("한 메시지 안에서 종류가 바뀔 수 없다");
-            }
             if (!hasSpace(space)) {
                 return new ReceiveProgress(0, true);
             }
-            if (start) {
-                messageOpen = true;
-                messageKind = kind;
-                messageLength = 0;
-                messageTotal = 0;
-                messageDiscard = false;
-                messageHeaderChecked = false;
-            }
-            if (!messageDiscard) {
-                if (kind == WebSocketMessageKind.TEXT) {
-                    receiveWebSocketMessage(kind, NO_BYTES);
-                    discardMessage();
-                } else {
-                    takeBinaryFragment(bytes, offset, length);
-                }
-            }
-            if (end) {
-                if (!messageDiscard) {
-                    finishMessage();
-                }
-                dropMessage();
-            }
-            return new ReceiveProgress(length, false);
+            slicer.sliceWhole(bytes, offset, length, supported, unitSink);
+            return new ReceiveProgress(supported ? length : 0, false);
         } finally {
             receiving = false;
         }
     }
 
-    /** 바이너리 조각을 조립한다. 판정할 수 있게 되면 끝을 기다리지 않고 오류로 처리한다. 모으는 바이트는 판정에 필요한 만큼으로 한정한다. */
-    private void takeBinaryFragment(byte[] bytes, int offset, int length) {
-        int at = offset;
-        int end = offset + length;
-        messageTotal += length;
-        if (phase.awaitingPreface()) {
-            if (messageTotal > Frames.preface().length) {
-                closeWithoutClose();
-                discardMessage();
-                return;
-            }
-            appendMessage(bytes, at, length);
-            return;
-        }
-        if (!messageHeaderChecked) {
-            int take = Math.min(end - at, Frames.HEADER_SIZE - messageLength);
-            appendMessage(bytes, at, take);
-            at += take;
-            if (messageLength < Frames.HEADER_SIZE) {
-                return;
-            }
-            if (!inspectMessageHeader()) {
-                discardMessage();
-                return;
-            }
-        }
-        if (messageTotal > messageExpected) {
-            rejectBadLength(messageBuffer, 0);
-            discardMessage();
-            return;
-        }
-        appendMessage(bytes, at, end - at);
-    }
-
-    /**
-     * 헤더가 모였다. 첫 프레임 검사(규격 3.2.4절)와 {@code length} 범위를 확인한다.
-     *
-     * @return 계속 모아도 되면 참
-     */
-    private boolean inspectMessageHeader() {
-        if (phase.awaitingFirstFrame()
-                && !checkFirstMessage(WebSocketMessageKind.BINARY, messageBuffer, messageLength)) {
-            closeWithoutClose();
-            return false;
-        }
-        long length = Frames.readUnsignedInt(messageBuffer, 0);
-        if (length < Frames.MIN_LENGTH || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE) {
-            rejectBadLength(messageBuffer, 0);
-            return false;
-        }
-        messageExpected = Frames.LENGTH_FIELD_SIZE + length;
-        messageHeaderChecked = true;
-        return true;
-    }
-
-    /** 마지막 조각까지 모였다. 정확한 길이를 확인한 뒤에야 프레임의 효과를 적용한다. */
-    private void finishMessage() {
-        if (!messageHeaderChecked) {
-            receiveWebSocketMessage(WebSocketMessageKind.BINARY, Arrays.copyOf(messageBuffer, messageLength));
-        } else if (messageTotal == messageExpected) {
-            handle(messageBuffer, 0, messageLength);
-        } else {
-            rejectBadLength(messageBuffer, 0);
-        }
-    }
-
-    private void appendMessage(byte[] bytes, int at, int length) {
-        if (length == 0) {
-            return;
-        }
-        int needed = messageLength + length;
-        if (needed > messageBuffer.length) {
-            int grown = Math.max(PENDING_MIN_CAPACITY, messageBuffer.length * 2);
-            // 조립 공간은 프레임 크기 상한을 넘기지 않는다.
-            int cap = (int) Math.min(config.maxFrameSize(), Integer.MAX_VALUE);
-            messageBuffer = Arrays.copyOf(messageBuffer, Math.max(needed, Math.min(grown, cap)));
-        }
-        System.arraycopy(bytes, at, messageBuffer, messageLength, length);
-        messageLength = needed;
-    }
-
-    /** 이 메시지의 나머지 조각은 모으지 않고 버린다. */
-    private void discardMessage() {
-        messageDiscard = true;
-        messageLength = 0;
-        messageBuffer = NO_BYTES;
-    }
-
-    /** 조립 중인 메시지를 놓는다. */
-    private void dropMessage() {
-        messageOpen = false;
-        messageDiscard = false;
-        messageHeaderChecked = false;
-        messageLength = 0;
-        messageTotal = 0;
-        if (messageBuffer.length > PENDING_RELEASE_ABOVE) {
-            messageBuffer = NO_BYTES;
-        }
-    }
-
-    /** 조립 중인 메시지에 모아 둔 바이트 수. */
-    int messageAssemblyLength() {
-        return messageLength;
-    }
-
-    /**
-     * WebSocket 출력 하나가 WebSocket 계층에 메시지 전체로 접수됐음을 보고한다. 이 호출이 쓰기 시작과 전체 전달을 함께 뜻한다. 접수 전에는 철회할
-     * 수 있고 접수 뒤에는 메시지를 유지한 채 필요한 RESET을 뒤에 보낸다. 전송 모듈 내부 대기열에 넣은 것, 소켓에 쓴 것, TLS가 평문을 소비한 것은
-     * 접수가 아니다. 상대의 수신·처리를 보장하지 않는다. 전송 모듈은 {@link #nextOutput()}으로 확인한 뒤 이 호출까지 같은 엔드포인트의 다른 명령을
-     * 처리하지 않아야 한다.
-     *
-     * @param id {@link #nextOutput()}이 돌려준 출력의 식별자
-     * @throws IllegalStateException WebSocket 엔드포인트가 아닐 때
-     * @throws IllegalArgumentException 식별자가 현재 출력의 것이 아닐 때(철회·교체·이미 접수한 출력)
-     */
-    public void outputAccepted(long id) {
-        if (!config.isWebSocket()) {
-            throw new IllegalStateException("바이트 스트림 엔드포인트는 outputProgress로 보고한다");
-        }
-        EndpointOutput output = nextOutput();
-        if (output == null || output.id() != id) {
-            throw new IllegalArgumentException("유효하지 않은 출력 접수");
-        }
-        startOutput();
-        timers.outputProgressed(now);
-        completeOutput();
-    }
-
-    /**
-     * WebSocket Close를 받았거나 WebSocket이 닫혔음을 알린다. 전송 종료 입력이다. 상태 코드가 1000이어도 Strand {@code CLOSE}나 {@code
-     * last_stream_id}를 만들지 않으며, 응답·RESET을 받지 못한 요청은 메시지를 접수했는지에 따라 결과 모름 또는 처리 안 됨으로 확정한다(규격 3.5절).
-     * 요청 결과는 종료 사건보다 먼저 남는다. WebSocket 닫기 응답과 실제 통로 정리는 전송 모듈이 맡는다. 조립 중이던 메시지는 효과 없이 버린다. 이미
-     * 끝났다면 아무것도 하지 않는다.
-     *
-     * @param statusCode 받은 WebSocket 상태 코드(0~65535). 결과에 영향을 주지 않는다
-     * @throws IllegalStateException WebSocket 엔드포인트가 아닐 때
-     * @throws IllegalArgumentException 상태 코드가 범위 밖일 때
-     */
-    public void webSocketClosed(int statusCode) {
-        if (!config.isWebSocket()) {
-            throw new IllegalStateException("바이트 스트림 엔드포인트는 disconnect로 알린다");
-        }
-        if (statusCode < 0 || statusCode > MAX_WEBSOCKET_STATUS_CODE) {
-            throw new IllegalArgumentException("WebSocket 상태 코드는 0~65535여야 한다: " + statusCode);
-        }
-        disconnect();
-        dropMessage();
-    }
-
-    /** 전송 모듈이 연결을 어떻게 닫아야 하는지에 대한 core의 지시. Strand CLOSE·WebSocket Close 메시지와는 별개다. */
+    /** 전송 모듈이 연결을 어떻게 닫아야 하는지에 대한 core의 지시. Strand CLOSE 프레임과는 별개다. */
     public enum TransportClose {
         /** 연결이 끝나지 않았다. 닫지 않는다. */
         NONE,
-        /** 연결이 끝났다. 남은 출력(Strand CLOSE, WebSocket Close 포함)을 처리한 뒤 닫는다. */
+        /** 연결이 끝났다. 남은 출력(Strand CLOSE 포함)을 처리한 뒤 닫는다. */
         AFTER_PENDING_OUTPUT,
         /** 연결이 끝났고 보낼 것이 없거나 보낼 수 없다. 기다리지 않고 닫는다(EOF·쓰기 실패·abort 포함). */
         IMMEDIATE
@@ -711,20 +319,31 @@ public final class Endpoint {
         if (!phase.isEnded()) {
             return TransportClose.NONE;
         }
-        boolean outputPending = !outputDisconnected && (outputWritten > 0 || outbox.size() > 0);
+        boolean outputPending = output.isPending();
         return outputPending ? TransportClose.AFTER_PENDING_OUTPUT : TransportClose.IMMEDIATE;
     }
 
     /**
-     * 가상 시계를 앞으로 보낸다. 확인 대기 시간이 지나도록 ACK가 없으면 연결 오류로 닫는다.
+     * 연결을 시작한 때부터 흐른 나노초로 시계를 옮긴다. 같은 값은 허용하고 처리할 것이 없으면 아무 일도 하지 않는다. 시계는 밀리초 단위로 처리하므로
+     * 밀리초 미만은 버린다.
      *
-     * @param ms 음수가 아닌 경과 밀리초
-     * @throws IllegalArgumentException 경과 시간이 음수일 때
+     * @param elapsedNanos 연결을 시작한 때부터 흐른, 이전 값보다 작지 않은 나노초
+     * @throws IllegalArgumentException 음수이거나 이전에 준 값보다 작을 때. 상태를 바꾸지 않는다
      */
-    public void advance(long ms) {
-        if (ms < 0) {
-            throw new IllegalArgumentException("경과 시간은 음수일 수 없다: " + ms);
+    public void advanceTo(long elapsedNanos) {
+        if (elapsedNanos < 0 || elapsedNanos < this.elapsedNanos) {
+            throw new IllegalArgumentException("경과 나노초는 음수이거나 이전 값보다 작을 수 없다: " + elapsedNanos);
         }
+        long target = elapsedNanos / Deadlines.NANOS_PER_MILLI;
+        long delta = target - now;
+        this.elapsedNanos = elapsedNanos;
+        if (delta > 0) {
+            advanceMillis(delta);
+        }
+    }
+
+    /** 가상 시계를 밀리초만큼 앞으로 보낸다. 확인 대기 시간이 지나도록 ACK가 없으면 연결 오류로 닫는다. */
+    private void advanceMillis(long ms) {
         if (phase.isEnded()) {
             return;
         }
@@ -744,25 +363,6 @@ public final class Endpoint {
         if (idlePing != null) {
             // 넘기지 못한 유휴 PING의 기한(규격 3.3절): 쓰기 대기열에 든 때부터 센다.
             timers.idlePingQueued(sendPing(idlePing), now);
-        }
-    }
-
-    /**
-     * 연결을 시작한 때부터 흐른 나노초로 시계를 옮긴다. 같은 값은 허용하고 처리할 것이 없으면 아무 일도 하지 않는다. 시계는 밀리초 단위로 처리하므로
-     * 밀리초 미만은 버린다.
-     *
-     * @param elapsedNanos 연결을 시작한 때부터 흐른, 이전 값보다 작지 않은 나노초
-     * @throws IllegalArgumentException 음수이거나 이전에 준 값보다 작을 때. 상태를 바꾸지 않는다
-     */
-    public void advanceTo(long elapsedNanos) {
-        if (elapsedNanos < 0 || elapsedNanos < this.elapsedNanos) {
-            throw new IllegalArgumentException("경과 나노초는 음수이거나 이전 값보다 작을 수 없다: " + elapsedNanos);
-        }
-        long target = elapsedNanos / Deadlines.NANOS_PER_MILLI;
-        long delta = target - now;
-        this.elapsedNanos = elapsedNanos;
-        if (delta > 0) {
-            advance(delta);
         }
     }
 
@@ -805,7 +405,7 @@ public final class Endpoint {
     }
 
     /**
-     * 시계를 다음으로 진행해야 하는 가장 이른 가상 시각(마지막 {@link #advance(long)}까지 흐른 시각부터 센 절대 시각)을 돌려준다. 대상은 요청 기한,
+     * 시계를 다음으로 진행해야 하는 가장 이른 가상 시각(마지막 {@link #advanceTo}까지 흐른 시각부터 센 절대 시각)을 돌려준다. 대상은 요청 기한,
      * 확인 대기(HELLO, AUTH, PING), 서버의 AUTH 대기, 유휴 PING이다. 이 시각까지 {@code advance}하면 그 기한이 처리된다. 기한은 정각이 지나야
      * 처리되므로 기한 다음 밀리초를 돌려준다. 아무 기한도 없거나 연결이 끝났으면 비어 있다.
      */
@@ -908,11 +508,11 @@ public final class Endpoint {
     }
 
     /**
-     * 요청 기한을 두고 요청을 보낸다(규격 4.4.1절). 기한은 로컬 설정이고, 기한이 지난 뒤 {@link #advance(long)}가 요청을 끝낸다. 쓰기 전(번호
+     * 요청 기한을 두고 요청을 보낸다(규격 4.4.1절). 기한은 로컬 설정이고, 기한이 지난 뒤 {@link #advanceTo}가 요청을 끝낸다. 쓰기 전(번호
      * 유무 무관)이면 {@code RESET} 없이 프레임을 버리고 {@code DEADLINE_EXCEEDED}(처리 안 됨), 쓰기를 시작했으면 {@code RESET(CANCEL)}을
      * 보내고 {@code DEADLINE_EXCEEDED}(결과 모름)를 넘긴다. 요청 확장 영역의 {@code timeout}은 받는 쪽에 주는 힌트일 뿐 이 기한이 아니다.
      *
-     * <p>"지금"은 실제 시각이 아니라 마지막 {@link #advance(long)}까지 흐른 가상 시계다. 이 엔드포인트는 실제 시계를 읽지 않으므로, 호출자는 기한이
+     * <p>"지금"은 실제 시각이 아니라 마지막 {@link #advanceTo}까지 흐른 가상 시계다. 이 엔드포인트는 실제 시계를 읽지 않으므로, 호출자는 기한이
      * 있는 요청을 보내기 직전에 {@code advance}로 시계를 맞춘다. {@code AUTH} 대기와 확인 대기의 기준 시각도 같은 가상 시계다.
      *
      * @param deadlineMs 지금부터 센 기한(밀리초, 1 이상)
@@ -940,13 +540,16 @@ public final class Endpoint {
      * 애플리케이션이 상대의 요청에 응답하게 한다. 스트림이 끝나고 종료 중이었다면 닫는다. 대기 중이 아닌 스트림이면 아무것도 하지 않는다.
      *
      * @param streamId 상대가 연 스트림 번호
-     * @param status 규격 2.5.1절의 status 값
+     * @param status 규격 2.5.1절의 status 값(0~16)
      * @param payload 본문
      * @return 응답을 쌓았으면 true. 대기 중인 스트림이 아니어서(이미 응답했거나, 상대가 RESET했거나, 연결이 끝나서) 아무것도 하지 않았으면 false
-     * @throws IllegalArgumentException 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런 프레임을 보내지 못하게 하고
+     * @throws IllegalArgumentException status가 0~16이 아닐 때(예약 값은 보내지 않는다), 또는 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런 프레임을 보내지 못하게 하고
      *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
     public boolean respond(long streamId, int status, byte[] payload) {
+        if (!Status.isValid(status)) {
+            throw new IllegalArgumentException("status는 0~16이어야 한다: " + status);
+        }
         Integer type = peerPendingStreams.get(streamId);
         if (type == null) {
             return false;
@@ -1040,7 +643,8 @@ public final class Endpoint {
     /**
      * 애플리케이션이 연결을 닫게 한다. 이미 CLOSE를 보냈거나 받았다면 아무것도 하지 않는다(규격 3.5절).
      *
-     * @param errorCode 규격 2.5.2절의 error_code 값
+     * @param errorCode CLOSE에 쓸 수 있는 error_code({@link ErrorCode#isCloseCode})
+     * @throws IllegalArgumentException CLOSE에 쓸 수 없는 error_code일 때. 아무것도 보내지 않고 상태도 바꾸지 않는다
      */
     public void close(int errorCode) {
         close(errorCode, "");
@@ -1049,12 +653,16 @@ public final class Endpoint {
     /**
      * 애플리케이션이 UTF-8 설명과 함께 연결을 닫게 한다. 프레임 상한에 맞춰 reason을 자른다.
      *
-     * @param errorCode 규격 2.5.2절의 error_code 값
+     * @param errorCode CLOSE에 쓸 수 있는 error_code({@link ErrorCode#isCloseCode})
      * @param reason non-null UTF-8 close reason; 빈 문자열은 허용한다
      * @throws NullPointerException reason이 {@code null}일 때
+     * @throws IllegalArgumentException CLOSE에 쓸 수 없는 error_code일 때. 아무것도 보내지 않고 상태도 바꾸지 않는다
      */
     public void close(int errorCode, String reason) {
         Objects.requireNonNull(reason, "reason");
+        if (!ErrorCode.isCloseCode(errorCode)) {
+            throw new IllegalArgumentException("CLOSE에 쓸 수 없는 error_code: " + errorCode);
+        }
         if (!phase.isActive()) {
             return;
         }
@@ -1090,20 +698,13 @@ public final class Endpoint {
     }
 
     /**
-     * 전송 계층이 CLOSE 없이 끊겼음을 알리는 입력이다(TCP EOF·RST, WebSocket close). 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다.
+     * 전송 계층이 CLOSE 없이 끊겼음을 알리는 입력이다(통로가 닫힘). 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다.
      * 이미 닫혔다면 아무것도 하지 않는다(규격 3.5절).
      */
     public void disconnect() {
         phase.transportDisconnected();
         conclude();
-        outputDisconnected = true;
-        if (incrementalOutput) {
-            selectedOutput = null;
-            currentOutput = null;
-            outputWritten = 0;
-            outputWaitId = LivenessTimers.NO_WAIT;
-            outbox.discard();
-        }
+        output.disconnect();
     }
 
     /**
@@ -1122,119 +723,37 @@ public final class Endpoint {
     }
 
     /**
-     * 지금까지 쌓인, 상대에게 보낼 메시지를 보낸 순서대로 꺼낸다. 프레임 하나가 메시지 하나다. 바이트 스트림 전송은 메시지를 이어 붙여 보내면
-     * 된다.
-     *
-     * @return 보낼 메시지. 없으면 빈 목록
-     */
-    public List<OutboundMessage> drainMessages() {
-        if (incrementalOutput) {
-            throw new IllegalStateException("진행 보고 방식과 일괄 수거 방식을 섞을 수 없다");
-        }
-        // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
-        long drainedAt = now;
-        List<OutboundMessage> drained = outbox.drain(id -> timers.started(id, drainedAt));
-        if (!drained.isEmpty()) {
-            timers.outputProgressed(drainedAt);
-        }
-        ledger.onWriteStarted();
-        return drained;
-    }
-
-    /**
-     * 아직 상대에게 다 내보내지 못한 출력의 바이트 합. 쓰기 대기열에 든 것과 쓰기를 시작해 남은 부분을 더한다. 진행 보고 방식에서 전송 모듈이 읽기를
-     * 멈출지 판단할 때 쓴다.
+     * 아직 상대에게 다 내보내지 못한 출력의 바이트 합. 쓰기 대기열에 든 것과 쓰기를 시작해 남은 부분을 더한다. 전송 모듈이 읽기를 멈출지 판단할 때 쓴다.
      *
      * @return 남은 출력 바이트
      */
     public long pendingOutputBytes() {
-        long writing = currentOutput != null && outputWritten > 0 ? currentOutput.length() - outputWritten : 0;
-        return outbox.bytes() + writing;
+        return outbox.bytes() + output.writingRemaining();
     }
 
     /** 현재 쓸 출력. 철회 또는 우선순위 변경 뒤에는 새 식별자가 발급된다. */
     public @Nullable EndpointOutput nextOutput() {
-        incrementalOutput = true;
-        if (outputDisconnected) {
-            return null;
-        }
-        Outbox.Node head = outbox.first();
-        if (outputWritten == 0 && selectedOutput != head) {
-            selectedOutput = head;
-            currentOutput = head == null ? null : new EndpointOutput(++nextOutputId, head.message);
-        }
-        return currentOutput;
+        return output.next();
     }
 
     /** 선택한 출력에 전송된 바이트 수를 보고한다. */
     public void outputProgress(long id, int count) {
-        EndpointOutput output = nextOutput();
-        if (output == null || output.id() != id || count < 0 || count > output.length() - outputWritten) {
-            throw new IllegalArgumentException("유효하지 않은 출력 진행");
-        }
-        if (count == 0) {
-            return;
-        }
-        if (config.isWebSocket()) {
-            throw new IllegalStateException("WebSocket 출력은 메시지 전체 접수만 보고한다(outputAccepted)");
-        }
-        if (outputWritten == 0) {
-            startOutput();
-        }
-        timers.outputProgressed(now);
-        outputWritten += count;
-        if (outputWritten == output.length()) {
-            completeOutput();
-        }
-    }
-
-    /** 선택한 출력의 쓰기를 시작한 것으로 한다. 이제 철회할 수 없다. */
-    private void startOutput() {
-        Outbox.Node node = Objects.requireNonNull(selectedOutput);
-        outputWaitId = node.waitId;
-        ledger.onWriteStarted(node);
-        outbox.removeForWriting(node);
-    }
-
-    /** 선택한 출력이 전체 전달된 것으로 한다. */
-    private void completeOutput() {
-        if (outputWaitId != LivenessTimers.NO_WAIT) {
-            timers.started(outputWaitId, now);
-            outputWaitId = LivenessTimers.NO_WAIT;
-        }
-        ledger.onWriteCompleted(Objects.requireNonNull(selectedOutput));
-        outputWritten = 0;
-        selectedOutput = null;
-        currentOutput = null;
+        output.progress(id, count, now);
     }
 
     /**
-     * 지금까지 쌓인 애플리케이션 이벤트를 꺼낸다.
+     * 최대 개수만큼 사건을 순서대로 수거한다. 돌려보낸 요청의 {@code REQUEST_RECEIVED}는 걸러 내므로 돌려준 개수가 한도보다 적을 수 있다.
      *
-     * @return 이벤트 목록. 없으면 빈 목록
+     * @param maximum 한 번에 꺼낼 사건 수의 상한
+     * @return 사건 목록. 없으면 빈 목록
+     * @throws IllegalArgumentException 한도가 음수일 때
      */
-    public List<Event> drainEvents() {
-        List<Event> drained;
-        if (refusedRequests.isEmpty()) {
-            drained = new ArrayList<>(events);
-        } else {
-            drained = new ArrayList<>(events.size());
-            for (Event event : events) {
-                if (event.kind() != Event.Kind.REQUEST_RECEIVED || !refusedRequests.contains(event.streamId())) {
-                    drained.add(event);
-                }
-            }
-        }
-        events.clear();
-        drainedPeerStreamId = highestPeerStreamId;
-        refusedRequests.clear();
-        return drained;
-    }
-
-    /** 최대 개수만큼 사건을 순서대로 수거한다. */
     public List<Event> drainEvents(int maximum) {
         if (maximum < 0) {
             throw new IllegalArgumentException("사건 수거 한도는 음수일 수 없다");
+        }
+        if (events.isEmpty()) {
+            return Collections.emptyList();
         }
         List<Event> drained = new ArrayList<>();
         int consumed = 0;
@@ -1249,102 +768,7 @@ public final class Endpoint {
             drained.add(event);
         }
         events.subList(0, consumed).clear();
-        return drained;
-    }
-
-    /**
-     * {@code off}에서 시작하는 {@code available}바이트에서 한 단위(서문 또는 프레임)를 처리한다. 처리했으면 소비한 바이트 수를 돌려준다.
-     * 모자라면 0을 돌려주고 {@link #wantedLength}에 진행하려면 있어야 하는 총 바이트 수를 둔다. 판정이 나서 닫았으면 0을 돌려준다. 도착 단위에
-     * 따라 결과가 달라지면 안 되므로, 판정에 필요한 바이트가 모이기 전에는 아무것도 하지 않는다.
-     */
-    private int consumeUnit(byte[] bytes, int off, int available) {
-        if (phase.awaitingPreface()) {
-            return consumePreface(bytes, off, available);
-        }
-        if (available < Frames.LENGTH_FIELD_SIZE) {
-            wantedLength = Frames.LENGTH_FIELD_SIZE;
-            return 0;
-        }
-        long length = Frames.readUnsignedInt(bytes, off);
-        if (phase.awaitingFirstFrame()) {
-            // 첫 프레임 검사(규격 3.2.4절): 헤더를 읽을 수 없거나 HELLO가 아니면 아무것도 보내지 않고 닫는다.
-            if (length < Frames.MIN_LENGTH) {
-                closeWithoutClose();
-                return 0;
-            }
-            if (available < Frames.HEADER_SIZE) {
-                wantedLength = Frames.HEADER_SIZE;
-                return 0;
-            }
-            if (!isFirstFrameHeader(bytes, off)) {
-                closeWithoutClose();
-                return 0;
-            }
-            phase.firstFrameVerified();
-        }
-        if (length < Frames.MIN_LENGTH || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE) {
-            if (available < Frames.TYPE_END) {
-                // type을 읽을 때까지 기다린다. CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫아야 하므로 도착 단위에 따라 결과가 달라지면 안 된다.
-                wantedLength = Frames.TYPE_END;
-                return 0;
-            }
-            rejectBadLength(bytes, off);
-            return 0;
-        }
-        int frameSize = (int) (Frames.LENGTH_FIELD_SIZE + length);
-        if (available < frameSize) {
-            wantedLength = frameSize;
-            return 0;
-        }
-        handle(bytes, off, frameSize);
-        return frameSize;
-    }
-
-    /** 서문의 앞 6바이트를 비교한다(규격 3.1절). 판정할 만큼 모였으면 서문 8바이트를 건너뛴다. 서문은 8바이트를 모두 받은 뒤 건너뛴다. */
-    private int consumePreface(byte[] bytes, int off, int available) {
-        byte[] preface = Frames.preface();
-        if (!matchesPrefacePrefix(bytes, off, available)) {
-            closeWithoutClose();
-            return 0;
-        }
-        if (available < preface.length) {
-            wantedLength = preface.length;
-            return 0;
-        }
-        phase.prefaceVerified();
-        sendHello();
-        return preface.length;
-    }
-
-    /** 서문의 앞 6바이트와, 받은 만큼의 앞부분이 일치하는가. */
-    private static boolean matchesPrefacePrefix(byte[] bytes, int off, int available) {
-        byte[] preface = Frames.preface();
-        int compared = Math.min(available, PREFACE_PREFIX_LENGTH);
-        for (int i = 0; i < compared; i++) {
-            if (bytes[off + i] != preface[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** 첫 프레임의 헤더가 첫 프레임 검사(규격 3.2.4절)를 통과하는가: HELLO이고 stream_id 0, flags 0. */
-    private static boolean isFirstFrameHeader(byte[] bytes, int off) {
-        return Frames.typeOf(bytes, off) == FrameType.HELLO
-                && Frames.streamIdOf(bytes, off) == 0
-                && Frames.flagsOf(bytes, off) == 0;
-    }
-
-    /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 연결 단계에 알린다. */
-    private boolean checkFirstMessage(WebSocketMessageKind kind, byte[] message, int available) {
-        boolean valid = kind == WebSocketMessageKind.BINARY
-                && available >= Frames.HEADER_SIZE
-                && Frames.readUnsignedInt(message, 0) >= Frames.MIN_LENGTH
-                && isFirstFrameHeader(message, 0);
-        if (valid) {
-            phase.firstFrameVerified();
-        }
-        return valid;
+        return Collections.unmodifiableList(drained);
     }
 
     /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */
@@ -1491,8 +915,7 @@ public final class Endpoint {
             // CLOSE를 보냈거나 받은 뒤의 새 요청은 끝까지 읽고 조용히 버린다. 어떤 프레임도 보내지 않는다(규격 3.5절).
             return;
         }
-        if ((deferredAuthentication && !handlerReady)
-                || peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
+        if (peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
             send(Frames.reset(streamId, ErrorCode.REFUSED));
         } else if (!config.knows(type)) {
             send(Frames.response(type, streamId, Status.UNIMPLEMENTED));
@@ -1657,20 +1080,8 @@ public final class Endpoint {
         }
         // 자격 증명은 애플리케이션으로 넘어가므로 복사한다.
         byte[] credentials = Arrays.copyOfRange(bytes, payloadAt + 1 + mechanismLength, payloadAt + payloadSize);
-        if (deferredAuthentication) {
-            authenticationPending = true;
-            events.add(Event.authenticationRequired(mechanism, credentials));
-            return;
-        }
-        AuthDecision decision;
-        try {
-            decision = config.authenticator().authenticate(mechanism, credentials);
-        } catch (RuntimeException e) {
-            // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다. 원인은 CLOSED 이벤트에 싣는다.
-            phase.causedBy(e);
-            decision = AuthDecision.TRANSIENT_FAILURE;
-        }
-        finishAuthentication(decision, config.credentialLifetimeSeconds());
+        authenticationPending = true;
+        events.add(Event.authenticationRequired(mechanism, credentials));
     }
 
     /** 인증 판단 식별자에 대한 결과를 입력한다. 통과여도 수명은 알리지 않는다. 늦거나 중복된 결과는 무시한다. */
@@ -1698,13 +1109,6 @@ public final class Endpoint {
         }
         authenticationPending = false;
         finishAuthentication(decision, credentialLifetime);
-    }
-
-    /** 인증을 마친 연결에서 핸들러 준비가 완료되었음을 알린다. */
-    public void handlerReady() {
-        if (deferredAuthentication && phase.isActive() && phase.hasPassedAuthGate()) {
-            handlerReady = true;
-        }
     }
 
     private void finishAuthentication(AuthDecision decision, OptionalLong credentialLifetime) {
@@ -1835,7 +1239,7 @@ public final class Endpoint {
             phase.connectionFailed();
             return;
         }
-        if (phase.closeReceived(Frames.readUnsignedInt(bytes, off + Frames.HEADER_SIZE))) {
+        if (phase.closeReceived(ErrorCode.normalizeReceived(Frames.readUnsignedInt(bytes, off + Frames.HEADER_SIZE)))) {
             for (OwnRequestLedger.Outcome outcome : ledger.endAfter(lastStreamId)) {
                 applyOutcome(outcome);
             }
@@ -1858,8 +1262,8 @@ public final class Endpoint {
      * RESET(REFUSED)}로 돌려보내고 스트림을 끝낸다. 오류 CLOSE보다 먼저 호출한다.
      *
      * <p>암묵 불변식: {@code drainedPeerStreamId}보다 큰 번호의 대기 스트림은 항상 아직 꺼내지 않은 REQUEST_RECEIVED 이벤트와 짝이다
-     * ({@link #handleRequest}가 둘을 함께 만들고, 이벤트는 {@link #drainEvents}가 {@code drainedPeerStreamId}를 올릴 때만 사라진다).
-     * 그래서 여기서 돌려보낸 요청의 이벤트를 {@link #drainEvents}가 가려낼 수 있다.
+     * ({@link #handleRequest}가 둘을 함께 만들고, 이벤트는 {@link #drainEvents(int)}가 {@code drainedPeerStreamId}를 올릴 때만 사라진다).
+     * 그래서 여기서 돌려보낸 요청의 이벤트를 {@link #drainEvents(int)}가 가려낼 수 있다.
      */
     private void refuseUnhandedRequests() {
         Iterator<Long> pending = peerPendingStreams.keySet().iterator();
@@ -1903,8 +1307,7 @@ public final class Endpoint {
 
     /**
      * 종료 경로: 전송 계층을 닫는 유일한 곳이다. 대기 중인 스트림이 0개이면 그 사건을 단계에 알리고, 단계가 닫을 때라고 하면 닫아 연결을 끝낸다.
-     * {@code NO_ERROR}로 끝나는 WebSocket 연결이면 마지막 프레임 뒤에 WebSocket Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket
-     * 상태 코드는 규격이 정하지 않아 모델링하지 않는다. 연결이 끝날 때 내 요청 장부와 생존 확인 타이머에 알리고, 결과를 받지 못한 요청마다 로컬
+     * 연결이 끝날 때 내 요청 장부와 생존 확인 타이머에 알리고, 결과를 받지 못한 요청마다 로컬
      * UNAVAILABLE을 한 번씩 넘긴 뒤 상대가 연 스트림을 비우고 닫은 로컬 원인과 함께 closed를 낸다(규격 3.5절). 이후 받은 바이트와 시간은
      * 처리하지 않는다.
      */
@@ -1918,21 +1321,15 @@ public final class Endpoint {
         if (!phase.shouldCloseTransport()) {
             return;
         }
-        if (phase.endsNormally() && config.isWebSocket()) {
-            outbox.addLast(OutboundMessage.normalWebSocketClose());
-        }
         phase.transportClosed();
-        pending = NO_BYTES;
-        pendingLength = 0;
-        messageBuffer = NO_BYTES;
-        messageLength = 0;
+        slicer.discard();
         timers.clear();
         for (OwnRequestLedger.Outcome outcome : ledger.onTransportClosed(phase.endedByDisconnect())) {
             applyOutcome(outcome);
         }
         deferredPings.clear();
         peerPendingStreams.clear();
-        events.add(Event.closed(phase.closeCause(), phase.closeReason()));
+        events.add(Event.closed(phase.closeReason()));
     }
 
     private void sendHello() {
@@ -1991,11 +1388,66 @@ public final class Endpoint {
         return outbox.addControl(message);
     }
 
-    /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
+    /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 프레임의 마지막 바이트를 넘긴 때 시작한다. */
     private long sendAwaitingAck(byte[] frame, LivenessTimers.Kind kind, byte @Nullable [] payload) {
         Outbox.Node node = send(frame);
         node.waitId = timers.await(kind, payload);
         return node.waitId;
+    }
+
+    /** {@link UnitSlicer}가 자른 결과를 이 상태 기계의 동작으로 옮긴다. */
+    private final class UnitSink implements UnitSlicer.Sink {
+        /** 지금 처리 중인 입력 호출이 준 수거 공간. */
+        private @Nullable CollectionSpace space;
+
+        @Override
+        public boolean isEnded() {
+            return phase.isEnded();
+        }
+
+        @Override
+        public UnitSlicer.Stage stage() {
+            if (phase.awaitingPreface()) {
+                return UnitSlicer.Stage.PREFACE;
+            }
+            return phase.awaitingFirstFrame() ? UnitSlicer.Stage.FIRST_FRAME : UnitSlicer.Stage.FRAME;
+        }
+
+        @Override
+        public boolean hasSpace() {
+            return Endpoint.this.hasSpace(Objects.requireNonNull(space));
+        }
+
+        @Override
+        public void prefaceReceived() {
+            phase.prefaceVerified();
+            sendHello();
+        }
+
+        @Override
+        public void firstFrameVerified() {
+            phase.firstFrameVerified();
+        }
+
+        @Override
+        public void frame(byte[] bytes, int off, int size) {
+            handle(bytes, off, size);
+        }
+
+        @Override
+        public void closeWithoutClose() {
+            Endpoint.this.closeWithoutClose();
+        }
+
+        @Override
+        public void badLength(byte[] bytes, int off) {
+            rejectBadLength(bytes, off);
+        }
+
+        @Override
+        public void connectionError() {
+            Endpoint.this.connectionError();
+        }
     }
 
     /** AUTH 관문을 통과할 때까지 미룬 PING 하나. */

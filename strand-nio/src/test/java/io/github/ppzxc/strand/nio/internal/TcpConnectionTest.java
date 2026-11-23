@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.StandardSocketOptions;
@@ -179,8 +178,8 @@ class TcpConnectionTest {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
-            return delegate.write(message, offset);
+        public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
+            return delegate.writeBytes(bytes, offset, length);
         }
 
         @Override

@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.integration.netty;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
+import io.github.ppzxc.strand.nio.internal.TestMessages;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,15 +26,15 @@ final class OpenEndpoint {
             boolean moved = relay(client, server) | relay(server, client);
             if (!moved) break;
         }
-        server.drainEvents();
-        client.drainEvents();
+        TestMessages.drainEvents(server);
+        TestMessages.drainEvents(client);
         return server;
     }
 
     private static boolean relay(Endpoint from, Endpoint to) {
         boolean moved = false;
-        for (OutboundMessage message : from.drainMessages()) {
-            to.receive(message.bytes());
+        for (OutboundMessage message : TestMessages.takeOutputs(from)) {
+            TestMessages.deliver(to, message.bytes());
             moved = true;
         }
         return moved;

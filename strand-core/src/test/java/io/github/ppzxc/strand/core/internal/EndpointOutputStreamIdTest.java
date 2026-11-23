@@ -41,13 +41,13 @@ class EndpointOutputStreamIdTest {
     }
 
     private Endpoint openServer() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        server.drainEvents();
-        server.drainMessages();
+        Endpoint server = Drive.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        Drive.drainEvents(server);
+        Drive.drainMessages(server);
         return server;
     }
 }

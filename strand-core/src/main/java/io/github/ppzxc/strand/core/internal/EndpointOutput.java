@@ -20,7 +20,7 @@ public final class EndpointOutput {
     }
 
     /**
-     * 이 출력이 애플리케이션 프레임(요청·응답)이면 그 {@code stream_id}, 아니면(제어 프레임·연결 서문·WebSocket Close) 0이다. 복사하지 않는다.
+     * 이 출력이 애플리케이션 프레임(요청·응답)이면 그 {@code stream_id}, 아니면(제어 프레임·연결 서문) 0이다. 복사하지 않는다.
      *
      * @return 스트림 번호 또는 0
      */
@@ -30,6 +30,11 @@ public final class EndpointOutput {
 
     public byte[] bytes() {
         return message.bytes();
+    }
+
+    /** 복사하지 않는 읽기 전용 내용. 호출자는 배열을 바꾸면 안 된다({@link OutboundMessage#readOnlyBytes()}). */
+    public byte[] readOnlyBytes() {
+        return message.readOnlyBytes();
     }
 
     public int length() {

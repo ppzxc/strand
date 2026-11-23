@@ -112,11 +112,6 @@ final class ConnectionPhase {
         boolean due() {
             return this == DRAINED || this == FAILED || this == DISCONNECTED;
         }
-
-        /** {@code NO_ERROR}로 끝나는가. */
-        boolean normal() {
-            return this == CLOSING || this == DRAINED;
-        }
     }
 
     private final boolean server;
@@ -128,8 +123,6 @@ final class ConnectionPhase {
     private boolean closeReceived;
     /** 전송 계층이 닫혀 연결이 끝났다. 끝나도 {@link #ending}은 남아 어떻게 끝났는지 답한다. */
     private boolean closed;
-    /** 연결을 닫게 한 로컬 원인. {@code CLOSED} 이벤트에 싣는다(규격 3.5절). */
-    private @Nullable Throwable cause;
     /** 처음 보냈거나 받은 CLOSE를 보낸 쪽. CLOSE를 주고받은 적이 없으면 null이다. */
     private CloseReason.@Nullable Sender firstCloseSender;
     /** 처음 보냈거나 받은 오류 CLOSE의 {@code error_code}와 보낸 쪽. 오류 CLOSE를 주고받은 적이 없으면 보낸 쪽이 null이다. */
@@ -209,17 +202,6 @@ final class ConnectionPhase {
     /** 지금 전송 계층을 닫아야 하는가. 닫은 뒤에는 {@link #transportClosed()}를 알린다. */
     boolean shouldCloseTransport() {
         return !closed && ending.due();
-    }
-
-    /** 닫는 일이 {@code NO_ERROR}로 끝나는가. 이미 오류로 끝나기로 했으면 이후 NO_ERROR CLOSE가 겹쳐도 아니다. 참이면 WebSocket Close(1000)를 덧붙인다(규격 1.2절). */
-    boolean endsNormally() {
-        return ending.normal();
-    }
-
-    /** 연결을 닫게 한 로컬 원인. 없으면 null이다. */
-    @Nullable
-    Throwable closeCause() {
-        return cause;
     }
 
     /** 연결이 어떻게 끝났는지. 끝나기 전에 부르면 지금까지의 판단이다. */
@@ -358,7 +340,7 @@ final class ConnectionPhase {
         ending = ending.afterError();
     }
 
-    /** 상대가 CLOSE 없이 전송 계층을 끊었다(TCP EOF·RST, WebSocket close). 곧 닫을 때가 되고 연결 종료(CLOSE)로 끝난 것이 아니다. */
+    /** 상대가 CLOSE 없이 전송 계층을 끊었다(통로가 닫힘). 곧 닫을 때가 되고 연결 종료(CLOSE)로 끝난 것이 아니다. */
     void transportDisconnected() {
         if (closed) {
             return;
@@ -371,23 +353,12 @@ final class ConnectionPhase {
 
     /**
      * 대기 중인 스트림이 0개다. 연결 종료(CLOSE)로 닫는 중이면 닫을 때가 된다(규격 3.5절). 닫는 중이 아니거나 이미 오류로 끝나기로 했으면 아무것도 바꾸지 않는다(오류 종료는 이미 닫을 때이며 연결 종료(CLOSE)로 되돌리지 않는다). 애플리케이션이 종료 중인 연결을 더
-     * 기다리지 않기로 했을 때도 같다. 그러면 {@code NO_ERROR}로 끝난 연결로 남는다(WebSocket Close(1000)를 덧붙인다).
+     * 기다리지 않기로 했을 때도 같다. 그러면 {@code NO_ERROR}로 끝난 연결로 남는다.
      */
     void pendingStreamsReachedZero() {
         if (!closed) {
             ending = ending.afterPendingStreamsZero();
         }
-    }
-
-    /**
-     * 연결을 닫게 한 로컬 원인을 기록한다. {@code CLOSED} 이벤트에 싣는다. 종료 쪽 사건은 끝난 뒤에는 모두 무시한다는 규칙에 따라, 연결이 끝난 뒤
-     * 들어온 원인은 의도적으로 버린다(이미 낸 {@code CLOSED} 이벤트를 바꿀 수 없고 두 번째 {@code CLOSED}도 내지 않는다).
-     */
-    void causedBy(Throwable cause) {
-        if (closed) {
-            return;
-        }
-        this.cause = cause;
     }
 
     /** 전송 계층이 CLOSE 없이 끊겨서 연결이 끝나는가({@link #transportDisconnected}). 내 쪽 판단으로 끝나는 경우는 거짓이다. */

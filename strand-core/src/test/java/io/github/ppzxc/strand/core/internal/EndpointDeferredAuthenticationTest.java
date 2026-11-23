@@ -9,35 +9,34 @@ import org.junit.jupiter.api.Test;
 class EndpointDeferredAuthenticationTest {
     @Test
     void partialEventCollectionLeavesLaterRequestsEligibleForRefusal() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        server.completeAuthentication(server.drainEvents().get(0).authenticationId(), AuthDecision.PASS);
-        server.handlerReady();
-        server.drainMessages();
-        server.receive(Frames.request(257, 1, new byte[0]));
-        server.receive(Frames.request(257, 3, new byte[0]));
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        server.completeAuthentication(Drive.drainEvents(server).get(0).authenticationId(), AuthDecision.PASS);
+        Drive.drainMessages(server);
+        Drive.receive(server, Frames.request(257, 1, new byte[0]));
+        Drive.receive(server, Frames.request(257, 3, new byte[0]));
 
         assertThat(server.drainEvents(1))
                 .singleElement()
                 .satisfies(e -> assertThat(e.streamId()).isEqualTo(1));
         server.close(ErrorCode.INTERNAL_ERROR);
         assertThat(server.drainEvents(1)).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
-        assertThat(server.drainMessages())
+        assertThat(Drive.drainMessages(server))
                 .anySatisfy(message -> assertThat(message.bytes()).isEqualTo(Frames.reset(3, ErrorCode.REFUSED)));
     }
 
     @Test
     void boundedEventCollectionPreservesRemainingEventsInOrder() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
         byte[] auth = EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553");
-        server.receive(auth);
-        server.receive(auth);
+        Drive.receive(server, auth);
+        Drive.receive(server, auth);
 
         assertThat(server.drainEvents(1)).extracting(Event::kind).containsExactly(Event.Kind.AUTHENTICATION_REQUIRED);
         assertThat(server.drainEvents(1)).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
@@ -45,90 +44,86 @@ class EndpointDeferredAuthenticationTest {
     }
 
     @Test
-    void requestBeforeHandlerReadyIsRefused() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        long id = server.drainEvents().get(0).authenticationId();
+    void requestAfterAuthenticationIsReportedWithoutAnyAutomaticRefusal() {
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        long id = Drive.drainEvents(server).get(0).authenticationId();
         server.completeAuthentication(id, AuthDecision.PASS);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.receive(Frames.request(257, 1, new byte[0]));
+        Drive.receive(server, Frames.request(257, 1, new byte[0]));
 
-        assertThat(server.drainEvents()).isEmpty();
-        assertThat(server.drainMessages())
+        assertThat(Drive.drainEvents(server)).extracting(Event::kind).containsExactly(Event.Kind.REQUEST_RECEIVED);
+        assertThat(Drive.drainMessages(server)).isEmpty();
+        server.refuseRequest(1);
+        assertThat(Drive.drainMessages(server))
                 .singleElement()
                 .satisfies(message -> assertThat(message.bytes()).isEqualTo(Frames.reset(1, ErrorCode.REFUSED)));
-        server.handlerReady();
-        server.receive(Frames.request(257, 3, new byte[0]));
-        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
     @Test
     void lateAuthenticationDoesNotReopenClosedConnection() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        long id = server.drainEvents().get(0).authenticationId();
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        long id = Drive.drainEvents(server).get(0).authenticationId();
         server.close(ErrorCode.NO_ERROR);
-        server.drainEvents();
-        server.drainMessages();
+        Drive.drainEvents(server);
+        Drive.drainMessages(server);
 
         server.completeAuthentication(id, AuthDecision.PASS);
 
-        assertThat(server.drainEvents()).isEmpty();
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     @Test
     void duplicateAuthenticationWhileDecisionPendingClosesConnection() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
         byte[] auth = EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553");
-        server.receive(auth);
-        server.drainEvents();
-        server.receive(auth);
+        Drive.receive(server, auth);
+        Drive.drainEvents(server);
+        Drive.receive(server, auth);
 
-        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        assertThat(Drive.drainEvents(server)).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
     }
 
     @Test
     void authenticationIsRequestedWithoutCallingUserCode() {
-        EndpointConfig config = EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
-            throw new AssertionError("authenticator must execute outside core");
-        });
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(config);
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.drainMessages();
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.drainMessages(server);
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
 
-        Event event = server.drainEvents().get(0);
+        Event event = Drive.drainEvents(server).get(0);
         assertThat(event.kind()).isEqualTo(Event.Kind.AUTHENTICATION_REQUIRED);
         assertThat(event.authenticationMechanism()).hasValue("ANONYMOUS");
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
         server.completeAuthentication(2, AuthDecision.PASS);
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
         server.completeAuthentication(event.authenticationId(), AuthDecision.PASS);
-        assertThat(server.drainMessages()).hasSize(1);
+        assertThat(Drive.drainMessages(server)).hasSize(1);
         server.completeAuthentication(event.authenticationId(), AuthDecision.PASS);
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     private static Endpoint authPending() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        server.drainMessages();
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        Drive.drainMessages(server);
         return server;
     }
 
@@ -136,24 +131,24 @@ class EndpointDeferredAuthenticationTest {
     void specInputIsStillProcessedWhileTheHandlerIsPreparing() {
         Endpoint server = authPending();
         server.completeAuthentication(1, AuthDecision.PASS);
-        server.drainMessages();
-        server.drainEvents();
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
-        server.receive(EndpointTest.bytes("00000018 0002 00 00 0000000000000000 0000 0000 0102030405060708"));
+        Drive.receive(server, EndpointTest.bytes("00000018 0002 00 00 0000000000000000 0000 0000 0102030405060708"));
 
-        assertThat(server.drainMessages())
+        assertThat(Drive.drainMessages(server))
                 .singleElement()
                 .satisfies(message -> assertThat(message.bytes()[5]).isEqualTo((byte) 2));
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
     void requestBeforeTheAuthGateOpensIsAProtocolErrorWhileTheDecisionIsPending() {
         Endpoint server = authPending();
 
-        server.receive(Frames.request(257, 1, new byte[0]));
+        Drive.receive(server, Frames.request(257, 1, new byte[0]));
 
-        assertThat(server.drainEvents())
+        assertThat(Drive.drainEvents(server))
                 .extracting(Event::kind)
                 .containsExactly(Event.Kind.AUTHENTICATION_REQUIRED, Event.Kind.CLOSED);
     }
@@ -164,25 +159,25 @@ class EndpointDeferredAuthenticationTest {
 
         server.completeAuthentication(1, AuthDecision.REJECT);
 
-        assertThat(server.drainEvents()).extracting(Event::kind).contains(Event.Kind.CLOSED);
+        assertThat(Drive.drainEvents(server)).extracting(Event::kind).contains(Event.Kind.CLOSED);
         server.completeAuthentication(1, AuthDecision.PASS);
-        assertThat(server.drainMessages())
+        assertThat(Drive.drainMessages(server))
                 .noneSatisfy(message -> assertThat(message.bytes()).hasSize(20));
     }
 
     private static final String AUTH_ACK_NO_LIFETIME = "0000001000050100000000000000000000000000";
 
     private static String passAndCollectAck(OptionalLong lifetime, EndpointConfig config) {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(config);
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        long id = server.drainEvents().get(0).authenticationId();
-        server.drainMessages();
+        Endpoint server = Endpoint.server(config);
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        long id = Drive.drainEvents(server).get(0).authenticationId();
+        Drive.drainMessages(server);
         server.completeAuthentication(id, AuthDecision.PASS, lifetime);
         StringBuilder sent = new StringBuilder();
-        for (OutboundMessage message : server.drainMessages()) {
+        for (OutboundMessage message : Drive.drainMessages(server)) {
             sent.append(EndpointTest.hex(message.bytes()));
         }
         return sent.toString();
@@ -218,7 +213,7 @@ class EndpointDeferredAuthenticationTest {
 
     @Test
     void lifetimeOutOfUnsigned32BitRangeIsRejected() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         assertThatThrownBy(() -> server.completeAuthentication(1, AuthDecision.PASS, OptionalLong.of(-1)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> server.completeAuthentication(1, AuthDecision.PASS, OptionalLong.of(0x1_0000_0000L)))
@@ -227,18 +222,17 @@ class EndpointDeferredAuthenticationTest {
 
     @Test
     void lifetimeExpiringDoesNotCloseTheConnection() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        long id = server.drainEvents().get(0).authenticationId();
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        long id = Drive.drainEvents(server).get(0).authenticationId();
         server.completeAuthentication(id, AuthDecision.PASS, OptionalLong.of(1));
-        server.handlerReady();
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.advance(3_600_000);
+        Drive.advance(server, 3_600_000);
 
-        assertThat(server.drainEvents()).noneMatch(e -> e.kind() == Event.Kind.CLOSED);
+        assertThat(Drive.drainEvents(server)).noneMatch(e -> e.kind() == Event.Kind.CLOSED);
     }
 }

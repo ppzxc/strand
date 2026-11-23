@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.nio;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.EndpointOutput;
+import io.github.ppzxc.strand.nio.internal.TestMessages;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -46,8 +47,8 @@ final class CoalescingPeer implements AutoCloseable {
             while ((count = in.read(buffer)) >= 0) {
                 byte[] received = new byte[count];
                 System.arraycopy(buffer, 0, received, 0, count);
-                endpoint.receive(received);
-                endpoint.drainEvents();
+                TestMessages.deliver(endpoint, received);
+                TestMessages.drainEvents(endpoint);
                 ByteArrayOutputStream burst = new ByteArrayOutputStream();
                 for (EndpointOutput output = endpoint.nextOutput(); output != null; output = endpoint.nextOutput()) {
                     burst.write(output.bytes());

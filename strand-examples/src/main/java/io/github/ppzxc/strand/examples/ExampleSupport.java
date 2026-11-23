@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.examples;
 
 import io.github.ppzxc.strand.core.internal.AuthDecision;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
+import io.github.ppzxc.strand.nio.internal.ConnectionAuthenticator;
 import io.github.ppzxc.strand.nio.internal.ConnectionClosed;
 import io.github.ppzxc.strand.nio.internal.ConnectionListener;
 import io.github.ppzxc.strand.nio.internal.RequestResult;
@@ -37,9 +38,9 @@ final class ExampleSupport {
         return config.auth(AUTH_MECHANISM, AUTH_CREDENTIALS);
     }
 
-    /** 서버 설정에 AUTH 판단을 넣는다. 예제의 토큰만 통과시키고 나머지는 거부한다. */
-    static EndpointConfig withAuthenticator(EndpointConfig config) {
-        return config.authenticator((mechanism, credentials) ->
+    /** 서버의 AUTH 판단. 예제의 토큰만 통과시키고 나머지는 거부한다. */
+    static ConnectionAuthenticator authenticator() {
+        return (mechanism, credentials) -> CompletableFuture.completedFuture(
                 AUTH_MECHANISM.equals(mechanism) && Arrays.equals(AUTH_CREDENTIALS, credentials)
                         ? AuthDecision.PASS
                         : AuthDecision.REJECT);

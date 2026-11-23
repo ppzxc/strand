@@ -12,6 +12,7 @@ import io.github.ppzxc.strand.nio.internal.OwnerBudgets;
 import io.github.ppzxc.strand.nio.internal.Passage;
 import io.github.ppzxc.strand.nio.internal.ProgressSpace;
 import io.github.ppzxc.strand.nio.internal.SerialExecutor;
+import io.github.ppzxc.strand.nio.internal.TestMessages;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
@@ -53,11 +54,6 @@ final class EngineRig implements AutoCloseable {
                 }
             }
             return delegate.await(timeoutMs, waitForRead, waitForWrite);
-        }
-
-        @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
-            return delegate.write(message, offset);
         }
 
         @Override
@@ -222,7 +218,7 @@ final class EngineRig implements AutoCloseable {
         try {
             for (Inbound inbound = peerEnd.await(0); ; inbound = peerEnd.await(0)) {
                 if (inbound.kind() == Inbound.Kind.BYTES) {
-                    peer.receive(inbound.data());
+                    TestMessages.deliver(peer, inbound.data());
                     any = true;
                 } else if (inbound.kind() == Inbound.Kind.END) {
                     peerSawEnd = true;
@@ -234,16 +230,16 @@ final class EngineRig implements AutoCloseable {
         } catch (IOException e) {
             peerSawEnd = true;
         }
-        List<OutboundMessage> messages = peer.drainMessages();
+        List<OutboundMessage> messages = TestMessages.takeOutputs(peer);
         for (OutboundMessage message : messages) {
             try {
-                peerEnd.write(message, 0);
+                TestMessages.write(peerEnd, message, 0);
             } catch (IOException e) {
                 peerSawEnd = true;
             }
             any = true;
         }
-        List<Event> events = peer.drainEvents();
+        List<Event> events = TestMessages.drainEvents(peer);
         peerEvents.addAll(events);
         return any || !events.isEmpty();
     }

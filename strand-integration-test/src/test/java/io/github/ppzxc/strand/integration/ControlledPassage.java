@@ -1,12 +1,11 @@
 package io.github.ppzxc.strand.integration;
 
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.Passage;
-import io.github.ppzxc.strand.nio.internal.PassageContract;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.jspecify.annotations.Nullable;
@@ -22,8 +21,8 @@ final class ControlledPassage implements Passage {
     private final Passage delegate;
     private final Object lock = new Object();
     private final List<Integer> writtenFrameTypes = new ArrayList<>();
-    private final List<OutboundMessage> deferred = new ArrayList<>();
-    private @Nullable OutboundMessage lastRecorded;
+    private final List<byte[]> deferred = new ArrayList<>();
+    private byte @Nullable [] lastRecorded;
     private boolean deferWrites;
     private boolean holdWakeups;
     private boolean waiting;
@@ -53,24 +52,19 @@ final class ControlledPassage implements Passage {
     }
 
     @Override
-    public int write(OutboundMessage message, int offset) throws IOException {
+    public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
         synchronized (lock) {
-            // 막혀서 같은 메시지로 다시 부르는 호출은 한 번만 적는다.
-            if (message != lastRecorded
-                    && message.kind() == OutboundMessage.Kind.BINARY
-                    && message.length() >= FRAME_HEADER_BYTES) {
-                byte[] bytes = message.bytes();
+            // 막혀서 같은 출력으로 다시 부르는 호출은 한 번만 적는다. 드라이버는 출력 하나를 같은 배열로 이어 쓴다.
+            if (bytes != lastRecorded && bytes.length >= FRAME_HEADER_BYTES) {
                 writtenFrameTypes.add(((bytes[4] & 0xff) << 8) | (bytes[5] & 0xff));
-                lastRecorded = message;
+                lastRecorded = bytes;
             }
             if (deferWrites) {
-                // 미뤄 둔 메시지는 통로가 다 받은 것으로 돌려준다. 나중에 releaseWrites가 내보낸다. 드라이버는 메시지를 순서대로 쓰므로 마지막에 모은 것과 같은 신원인지만 본다.
-                if (deferred.isEmpty() || deferred.get(deferred.size() - 1) != message) {
-                    deferred.add(message);
-                }
-                return message.length() - offset;
+                // 미뤄 둔 출력은 통로가 다 받은 것으로 돌려준다. 나중에 releaseWrites가 내보낸다.
+                deferred.add(Arrays.copyOfRange(bytes, offset, offset + length));
+                return length;
             }
-            return delegate.write(message, offset);
+            return delegate.writeBytes(bytes, offset, length);
         }
     }
 
@@ -145,8 +139,15 @@ final class ControlledPassage implements Passage {
         synchronized (lock) {
             deferWrites = false;
             try {
-                for (OutboundMessage message : deferred) {
-                    PassageContract.writeFully(delegate, message);
+                for (byte[] bytes : deferred) {
+                    int written = 0;
+                    while (written < bytes.length) {
+                        int accepted = delegate.writeBytes(bytes, written, bytes.length - written);
+                        written += accepted;
+                        if (accepted == 0) {
+                            delegate.await(-1, false, true);
+                        }
+                    }
                 }
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
