@@ -69,6 +69,14 @@ final class Peer implements AutoCloseable {
             this.handle = handle;
         }
 
+        /**
+         * 제품이 보존한 결과가 이미 확정되었는지. 규격 3.5절은 종료 알림이 마지막 스트림의 결과 다음이라고 정하며(req-close-closed-after-last-result), 이 순서는 보존된
+         * 결과에 대한 것이다. {@link #result()}의 Future는 앱 실행기를 한 번 더 거쳐 완료되므로 종료 알림과의 순서가 정해져 있지 않다.
+         */
+        boolean isResultRetained() {
+            return handle.result().isDone();
+        }
+
         CompletableFuture<RequestResult> result() {
             return handle.result().toCompletionStage(HANDLERS).toCompletableFuture();
         }
