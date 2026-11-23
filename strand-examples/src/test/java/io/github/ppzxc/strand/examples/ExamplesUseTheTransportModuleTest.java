@@ -44,14 +44,21 @@ class ExamplesUseTheTransportModuleTest {
     void theTcpExamplesAndTheAppApiExamplesExist() throws IOException {
         assertThat(exampleSources())
                 .extracting(path -> path.getFileName().toString())
-                .contains("TcpClientExample.java", "ServerExample.java", "NioAppExample.java", "NettyAppExample.java");
+                .contains(
+                        "TcpClientExample.java",
+                        "ServerExample.java",
+                        "NioAppExample.java",
+                        "NettyAppExample.java",
+                        "NettyWebSocketExample.java");
     }
 
     @Test
-    void noExampleHasAWebSocketDemo() throws IOException {
+    void onlyTheNettyModuleHasAWebSocketExample() throws IOException {
+        // strand-nio는 WebSocket을 지원하지 않는다(ADR 0007). WebSocket 예제는 Netty 예제 하나뿐이다.
         assertThat(exampleSources())
                 .extracting(path -> path.getFileName().toString())
-                .noneMatch(name -> name.contains("WebSocket"));
+                .filteredOn(name -> name.contains("WebSocket"))
+                .containsExactly("NettyWebSocketExample.java");
     }
 
     @Test

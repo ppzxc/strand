@@ -169,7 +169,7 @@ _Avoid_: 과부하, `OVERLOAD`(이전 이름이다. 자기 과부하는 연결�
 _Avoid_: 코덱 모듈, 엔진
 
 **전송 모듈 (Transport Module)**:
-연결 수명주기와 스레드를 관리하며 `core`를 실제 네트워크 소켓 위에서 구동하는 모듈 (예: JDK NIO 기반 `strand-nio`).
+연결 수명주기와 스레드를 관리하며 `core`를 실제 네트워크 소켓 위에서 구동하는 모듈 (예: JDK NIO 기반 `strand-nio`, Netty 기반 `strand-netty`). WebSocket은 `strand-netty`만 지원한다([ADR 0007](docs/adr/0007-WebSocket은-strand-netty만-지원한다.md)).
 _Avoid_: 트랜스포트 어댑터, 전송 어댑터
 
 **연결 드라이버 (Connection Driver)**:
@@ -199,6 +199,10 @@ _Avoid_: I/O 스레드, 워커 스레드
 **통로 (Passage)**:
 연결 드라이버가 상대와 바이트나 메시지를 주고받는 갈아 끼울 수 있는 입출구다. 바이트 스트림 통로(TCP)와 메시지 통로(WebSocket)가 있다. core는 통로의 종류를 모른다: 통로가 어느 쪽이든 core에는 스트림 입력이나 단위 입력으로 들어간다. 모듈이 아니다.
 _Avoid_: 어댑터(외부 프레임워크 브릿지다), TCP 어댑터, WebSocket 어댑터, 채널(JDK의 소켓 채널과 혼동된다)
+
+**전송 방식 (Transport)**:
+`strand-netty`의 공개 값 객체 `Transport`(`Transport.tcp()`, `Transport.webSocket(path)`)가 listener·연결마다 고르는 통로의 종류다. 전송 모듈(Transport Module)과 다르다: 전송 모듈은 `strand-netty` 같은 모듈이고, 전송 방식은 그 모듈 안에서 바이트 스트림 통로와 메시지 통로 중 어느 쪽으로 연결할지 정하는 값이다. 통로를 끼우는 공개 SPI가 아니다.
+_Avoid_: 전송 모듈(모듈과 혼동된다), 프로토콜(Strand 규격이 프로토콜이다), 모드
 
 **핸들러 (Handler)**:
 받은 요청을 처리하고 스트림 번호로 응답하는 애플리케이션 코드다. 사용자가 준 실행기에서 돌고, 응답은 어느 스레드에서든 보낼 수 있다. 종료 알림과 AUTH 관문 통과 알림도 같은 실행기로 넘어간다.

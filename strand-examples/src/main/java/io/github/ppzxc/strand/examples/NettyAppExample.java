@@ -19,6 +19,7 @@ import io.github.ppzxc.strand.netty.NettyStrandClient;
 import io.github.ppzxc.strand.netty.NettyStrandConnection;
 import io.github.ppzxc.strand.netty.NettyStrandServer;
 import io.github.ppzxc.strand.netty.PreparedHandler;
+import io.github.ppzxc.strand.netty.Transport;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.Future;
@@ -53,6 +54,16 @@ public final class NettyAppExample {
      * @param clientSecurity 클라이언트 쪽 채널 보안
      */
     static AppExampleSupport.Outcome run(NettySecurity serverSecurity, NettySecurity clientSecurity) throws Exception {
+        return run(serverSecurity, clientSecurity, Transport.tcp());
+    }
+
+    /**
+     * @param serverSecurity 서버 쪽 채널 보안(TLS 또는 외부에서 보호된 채널)
+     * @param clientSecurity 클라이언트 쪽 채널 보안
+     * @param transport 전송 방식: {@link Transport#tcp()} 또는 {@link Transport#webSocket(String)}
+     */
+    static AppExampleSupport.Outcome run(
+            NettySecurity serverSecurity, NettySecurity clientSecurity, Transport transport) throws Exception {
         AppExampleSupport.Outcome outcome = new AppExampleSupport.Outcome();
         // 앱이 소유하는 실행기: 인증·팩터리·핸들러·알림이 여기서 돈다. 끝나면 앱이 종료한다.
         ExecutorService appExecutor = AppExampleSupport.newAppExecutor("strand-netty-app-example");
@@ -132,7 +143,7 @@ public final class NettyAppExample {
                     })
                     .onConnectionFailure(failure -> System.err.println("준비 실패: " + failure))
                     .build();
-            Listener listener = server.listen(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
+            Listener listener = server.listen(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), transport)
                     .get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
             InetSocketAddress address = new InetSocketAddress(
                     InetAddress.getLoopbackAddress(), ((InetSocketAddress) listener.localAddress()).getPort());
@@ -154,7 +165,7 @@ public final class NettyAppExample {
                     .build();
 
             // 4) 취소 가능한 연결 시도. 성공은 보안·HELLO·연결 인증·서버 팩터리 준비 뒤다.
-            NettyConnectAttempt attempt = client.connectAttempt(address);
+            NettyConnectAttempt attempt = client.connectAttempt(address, transport);
             NettyStrandConnection connection = attempt.result().get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
             attempt.transportReleased().get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
 

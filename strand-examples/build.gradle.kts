@@ -11,6 +11,8 @@ dependencies {
   // 앱 공개 API 예제(NettyAppExample)는 Netty 전송 모듈과 앱이 제공하는 Netty를 쓴다.
   implementation(project(":strand-netty"))
   implementation("io.netty:netty-transport:${nettyVersion.get()}")
+  // WebSocket 전송(Transport.webSocket)은 앱이 netty-codec-http를 제공해야 쓸 수 있다.
+  implementation("io.netty:netty-codec-http:${nettyVersion.get()}")
   // 앱 공개 API 예제 테스트가 TLS 시험용 컨텍스트(TestTls)를 쓴다.
   testImplementation(testFixtures(project(":strand-nio")))
 }
