@@ -120,12 +120,7 @@ public final class Endpoint {
     private static final int OUTPUT_CONTROL_RESERVE = 4;
 
     private boolean authenticationPending;
-    private Outbox.@Nullable Node selectedOutput;
-    private @Nullable EndpointOutput currentOutput;
-    private long nextOutputId;
-    private int outputWritten;
-    private long outputWaitId = LivenessTimers.NO_WAIT;
-    private boolean outputDisconnected;
+    private final OutputProgress output;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
     private long highestPeerStreamId;
 
@@ -139,6 +134,7 @@ public final class Endpoint {
                     "nextStreamId " + firstStreamId + "는 " + (server ? "서버(짝수)" : "클라이언트(홀수)") + "의 번호 공간이 아니다");
         }
         this.ledger = new OwnRequestLedger(outbox, firstStreamId, ownParity);
+        this.output = new OutputProgress(outbox, timers, ledger);
         this.server = server;
         this.phase = server ? ConnectionPhase.server() : ConnectionPhase.client();
     }
@@ -427,7 +423,7 @@ public final class Endpoint {
         if (!phase.isEnded()) {
             return TransportClose.NONE;
         }
-        boolean outputPending = !outputDisconnected && (outputWritten > 0 || outbox.size() > 0);
+        boolean outputPending = output.isPending();
         return outputPending ? TransportClose.AFTER_PENDING_OUTPUT : TransportClose.IMMEDIATE;
     }
 
@@ -812,12 +808,7 @@ public final class Endpoint {
     public void disconnect() {
         phase.transportDisconnected();
         conclude();
-        outputDisconnected = true;
-        selectedOutput = null;
-        currentOutput = null;
-        outputWritten = 0;
-        outputWaitId = LivenessTimers.NO_WAIT;
-        outbox.discard();
+        output.disconnect();
     }
 
     /**
@@ -841,60 +832,17 @@ public final class Endpoint {
      * @return 남은 출력 바이트
      */
     public long pendingOutputBytes() {
-        long writing = currentOutput != null && outputWritten > 0 ? currentOutput.length() - outputWritten : 0;
-        return outbox.bytes() + writing;
+        return outbox.bytes() + output.writingRemaining();
     }
 
     /** 현재 쓸 출력. 철회 또는 우선순위 변경 뒤에는 새 식별자가 발급된다. */
     public @Nullable EndpointOutput nextOutput() {
-        if (outputDisconnected) {
-            return null;
-        }
-        Outbox.Node head = outbox.first();
-        if (outputWritten == 0 && selectedOutput != head) {
-            selectedOutput = head;
-            currentOutput = head == null ? null : new EndpointOutput(++nextOutputId, head.message);
-        }
-        return currentOutput;
+        return output.next();
     }
 
     /** 선택한 출력에 전송된 바이트 수를 보고한다. */
     public void outputProgress(long id, int count) {
-        EndpointOutput output = nextOutput();
-        if (output == null || output.id() != id || count < 0 || count > output.length() - outputWritten) {
-            throw new IllegalArgumentException("유효하지 않은 출력 진행");
-        }
-        if (count == 0) {
-            return;
-        }
-        if (outputWritten == 0) {
-            startOutput();
-        }
-        timers.outputProgressed(now);
-        outputWritten += count;
-        if (outputWritten == output.length()) {
-            completeOutput();
-        }
-    }
-
-    /** 선택한 출력의 쓰기를 시작한 것으로 한다. 이제 철회할 수 없다. */
-    private void startOutput() {
-        Outbox.Node node = Objects.requireNonNull(selectedOutput);
-        outputWaitId = node.waitId;
-        ledger.onWriteStarted(node);
-        outbox.removeForWriting(node);
-    }
-
-    /** 선택한 출력이 전체 전달된 것으로 한다. */
-    private void completeOutput() {
-        if (outputWaitId != LivenessTimers.NO_WAIT) {
-            timers.started(outputWaitId, now);
-            outputWaitId = LivenessTimers.NO_WAIT;
-        }
-        ledger.onWriteCompleted(Objects.requireNonNull(selectedOutput));
-        outputWritten = 0;
-        selectedOutput = null;
-        currentOutput = null;
+        output.progress(id, count, now);
     }
 
     /**
