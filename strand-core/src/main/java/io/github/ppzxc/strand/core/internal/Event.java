@@ -43,7 +43,6 @@ public final class Event {
     private final int type;
     private final long credentialLifetime;
     private final @Nullable Certainty certainty;
-    private final @Nullable Throwable cause;
     private final @Nullable CloseReason closeReason;
     private final long ticket;
     private final byte[] body;
@@ -58,11 +57,10 @@ public final class Event {
             int type,
             long credentialLifetime,
             @Nullable Certainty certainty,
-            @Nullable Throwable cause,
             @Nullable CloseReason closeReason,
             long ticket,
             byte[] body) {
-        this(kind, streamId, status, type, credentialLifetime, certainty, cause, closeReason, ticket, body, null);
+        this(kind, streamId, status, type, credentialLifetime, certainty, closeReason, ticket, body, null);
     }
 
     private Event(
@@ -72,7 +70,6 @@ public final class Event {
             int type,
             long credentialLifetime,
             @Nullable Certainty certainty,
-            @Nullable Throwable cause,
             @Nullable CloseReason closeReason,
             long ticket,
             byte[] body,
@@ -84,7 +81,6 @@ public final class Event {
                 type,
                 credentialLifetime,
                 certainty,
-                cause,
                 closeReason,
                 ticket,
                 body,
@@ -99,7 +95,6 @@ public final class Event {
             int type,
             long credentialLifetime,
             @Nullable Certainty certainty,
-            @Nullable Throwable cause,
             @Nullable CloseReason closeReason,
             long ticket,
             byte[] body,
@@ -112,7 +107,6 @@ public final class Event {
                 type,
                 credentialLifetime,
                 certainty,
-                cause,
                 closeReason,
                 ticket,
                 body,
@@ -128,7 +122,6 @@ public final class Event {
             int type,
             long credentialLifetime,
             @Nullable Certainty certainty,
-            @Nullable Throwable cause,
             @Nullable CloseReason closeReason,
             long ticket,
             byte[] body,
@@ -138,7 +131,6 @@ public final class Event {
         this.resetErrorCode = resetErrorCode;
         this.closeReason = closeReason;
         this.certainty = certainty;
-        this.cause = cause;
         this.kind = kind;
         this.streamId = streamId;
         this.status = status;
@@ -159,7 +151,6 @@ public final class Event {
                 credentialLifetime.isPresent() ? credentialLifetime.getAsLong() : NO_CREDENTIAL_LIFETIME,
                 null,
                 null,
-                null,
                 NO_TICKET,
                 NO_BODY);
     }
@@ -171,7 +162,6 @@ public final class Event {
                 0,
                 0,
                 NO_CREDENTIAL_LIFETIME,
-                null,
                 null,
                 null,
                 NO_TICKET,
@@ -200,7 +190,6 @@ public final class Event {
                 NO_CREDENTIAL_LIFETIME,
                 null,
                 null,
-                null,
                 NO_TICKET,
                 NO_BODY,
                 NO_BODY,
@@ -209,12 +198,12 @@ public final class Event {
     }
 
     static Event closed(CloseReason closeReason) {
-        return new Event(Kind.CLOSED, 0, 0, 0, NO_CREDENTIAL_LIFETIME, null, null, closeReason, NO_TICKET, NO_BODY);
+        return new Event(Kind.CLOSED, 0, 0, 0, NO_CREDENTIAL_LIFETIME, null, closeReason, NO_TICKET, NO_BODY);
     }
 
     /** @param body 응답 본문. 호출자가 이후 바꾸지 않는 배열이어야 한다(복사해서 넘긴다). */
     static Event result(long ticket, long streamId, int status, Certainty certainty, byte[] body) {
-        return new Event(Kind.RESULT, streamId, status, 0, NO_CREDENTIAL_LIFETIME, certainty, null, null, ticket, body);
+        return new Event(Kind.RESULT, streamId, status, 0, NO_CREDENTIAL_LIFETIME, certainty, null, ticket, body);
     }
 
     /** 스트림을 열기 전에 로컬에서 실패한 요청의 결과. 스트림 번호가 없다(규격 2.2.5절, 3.2.1절, 3.5절). */
@@ -226,7 +215,6 @@ public final class Event {
                 0,
                 NO_CREDENTIAL_LIFETIME,
                 Certainty.NOT_PROCESSED,
-                null,
                 null,
                 ticket,
                 NO_BODY);
@@ -248,7 +236,6 @@ public final class Event {
                 0,
                 type,
                 NO_CREDENTIAL_LIFETIME,
-                null,
                 null,
                 null,
                 NO_TICKET,
@@ -305,17 +292,8 @@ public final class Event {
     }
 
     /**
-     * {@link Kind#CLOSED}의 로컬 원인. core는 채우지 않으므로 항상 비어 있다.
-     *
-     * @return 닫힌 원인
-     */
-    public Optional<Throwable> cause() {
-        return Optional.ofNullable(cause);
-    }
-
-    /**
      * {@link Kind#CLOSED}의 종료 원인: 연결 종료(CLOSE)로 끝났는지, 오류 CLOSE로 끝났는지, CLOSE 없이 끊겼는지와 error_code, CLOSE를 보낸 쪽.
-     * 다른 종류의 이벤트면 비어 있다. {@link #cause()}와 별개이며 둘 다 올 수 있다.
+     * 다른 종류의 이벤트면 비어 있다.
      *
      * @return 종료 원인
      */

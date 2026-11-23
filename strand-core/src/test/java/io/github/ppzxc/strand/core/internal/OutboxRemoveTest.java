@@ -14,7 +14,7 @@ class OutboxRemoveTest {
 
     @Test
     void aNodeWithoutAWaitCanBeRemoved() {
-        Outbox.Node node = outbox.addControl(OutboundMessage.binary(CONTROL_FRAME));
+        Outbox.Node node = outbox.addControl(OutboundMessage.of(CONTROL_FRAME));
 
         outbox.remove(node);
 
@@ -23,7 +23,7 @@ class OutboxRemoveTest {
 
     @Test
     void aNodeCarryingAWaitCannotBeRemoved() {
-        Outbox.Node node = outbox.addControl(OutboundMessage.binary(CONTROL_FRAME));
+        Outbox.Node node = outbox.addControl(OutboundMessage.of(CONTROL_FRAME));
         node.waitId = 1;
 
         assertThatThrownBy(() -> outbox.remove(node)).isInstanceOf(IllegalStateException.class);

@@ -1332,9 +1332,7 @@ final class ConnectionEngine {
 
         private void onClosed(Event event) {
             CloseReason reason = event.closeReason().get();
-            Throwable cause = ioFailure != null
-                    ? ioFailure
-                    : endCause != null ? endCause : event.cause().orElse(null);
+            Throwable cause = ioFailure != null ? ioFailure : endCause;
             CloseNotice notice = notice(reason, cause);
             finalNotice = notice;
             finishDeadline = Saturating.add(p.nanoClock.getAsLong(), p.closeFinishNanos);
