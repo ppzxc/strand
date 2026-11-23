@@ -5,6 +5,7 @@ import io.github.ppzxc.strand.api.ResourceLimits;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.WriteQueueLimit;
 import io.github.ppzxc.strand.nio.internal.OwnerBudgets;
+import io.github.ppzxc.strand.nio.internal.PassageWrapping;
 import io.github.ppzxc.strand.nio.internal.ProgressSpace;
 import io.github.ppzxc.strand.nio.internal.SerialExecutor;
 import io.github.ppzxc.strand.nio.internal.TlsEngines;
@@ -40,6 +41,7 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
     private Duration idlePingInterval = Duration.ofMillis(EndpointConfig.DEFAULT_IDLE_INTERVAL_MS);
     private Duration ackTimeout = Duration.ofMillis(EndpointConfig.DEFAULT_ACK_TIMEOUT_MS);
     private LongSupplier nanoClock = System::nanoTime;
+    private PassageWrapping.@Nullable Wrapper passageWrapper;
 
     abstract B self();
 
@@ -166,6 +168,12 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         return self();
     }
 
+    /** 테스트가 이 builder가 만드는 연결의 통로를 감싸는 지점을 주입한다. 이 builder의 연결에만 적용되며 공개 API에는 나타나지 않는다. */
+    B passageWrapper(PassageWrapping.Wrapper value) {
+        this.passageWrapper = Objects.requireNonNull(value);
+        return self();
+    }
+
     /** 테스트가 단조 시계를 주입한다. */
     B nanoClock(LongSupplier value) {
         this.nanoClock = Objects.requireNonNull(value);
@@ -254,7 +262,8 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
                 deadline,
                 nanoClock,
                 idleIntervalMs,
-                ackTimeoutMs);
+                ackTimeoutMs,
+                passageWrapper);
     }
 
     /** core 설정이 받는 범위(밀리초)로 바꾸고, 벗어나면 거절한다. 범위 검사는 core가 한다. */
@@ -307,6 +316,7 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         final LongSupplier nanoClock;
         final long idleIntervalMs;
         final long ackTimeoutMs;
+        final PassageWrapping.@Nullable Wrapper passageWrapper;
 
         Common(
                 Executor executor,
@@ -323,7 +333,8 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
                 Duration shutdownDeadline,
                 LongSupplier nanoClock,
                 long idleIntervalMs,
-                long ackTimeoutMs) {
+                long ackTimeoutMs,
+                PassageWrapping.@Nullable Wrapper passageWrapper) {
             this.executor = executor;
             this.limits = limits;
             this.owner = owner;
@@ -339,6 +350,7 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
             this.nanoClock = nanoClock;
             this.idleIntervalMs = idleIntervalMs;
             this.ackTimeoutMs = ackTimeoutMs;
+            this.passageWrapper = passageWrapper;
         }
 
         /** 이 소유 객체의 core 설정: 받을 수 있는 프레임 크기와 동시 스트림 수(받는 요청 수 한도). */

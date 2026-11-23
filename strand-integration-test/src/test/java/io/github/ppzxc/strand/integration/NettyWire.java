@@ -144,7 +144,6 @@ final class NettyWire implements Wire {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
-                .closeFinishDeadline(TestNio.CLOSE_FINISH_DEADLINE)
                 .security(NettySecurity.externallySecured())
                 .authenticate(credentials -> AuthenticationResult.accepted("peer"))
                 .handlerFactory(connection -> PreparedHandler.of(handler(handlers.apply(new Conn(connection)))))
@@ -184,7 +183,6 @@ final class NettyWire implements Wire {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
-                .closeFinishDeadline(TestNio.CLOSE_FINISH_DEADLINE)
                 .security(NettySecurity.externallySecured())
                 .handler(handler(handler));
         if (idlePingInterval != null) {

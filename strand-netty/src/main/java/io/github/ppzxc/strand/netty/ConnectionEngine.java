@@ -1580,6 +1580,12 @@ final class ConnectionEngine {
                         input, inputPos, input.length - inputPos, MAX_UNITS_PER_STEP, collectionSpace);
                 inputPos += progress.consumed();
                 collectEvents();
+                if (closedSeen) {
+                    // 연결이 끝난 뒤의 입력은 core가 받지 않는다. 남겨 두면 읽기가 꺼진 채 상대의 TCP 종료를 보지 못한다.
+                    inputPos = input.length;
+                    inputQueue.clear();
+                    return;
+                }
                 if (progress.collectionRequired()) {
                     boolean progressed = writeOutputs();
                     collectEvents();

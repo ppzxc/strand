@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.nio;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.nio.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.nio.internal.Passage;
+import io.github.ppzxc.strand.nio.internal.PassageWrapping;
 import io.github.ppzxc.strand.nio.internal.ProgressSpace;
 import io.github.ppzxc.strand.nio.internal.SerialExecutor;
 import java.io.IOException;
@@ -77,6 +78,8 @@ final class ConnectionParams {
     /** 라이브러리가 보관한 준비 데이터의 바이트 예약. 클라이언트 연결에만 있다. */
     @Nullable
     PreparationBytes preparationBytes;
+    /** 테스트 전용: 엔진이 연 통로를 감싸는 지점. 이 연결을 만든 builder에서 온 것이며 없으면 통로 그대로다. */
+    PassageWrapping.@Nullable Wrapper passageWrapper;
     /** 전송 스레드가 모든 정리를 마친 맨 마지막에 한 번 부른다. 소유 객체가 전체 종료를 위해 연결을 기록에서 뺀다. */
     Runnable terminated = () -> {};
     /** 시도가 소유한 통로 정리 완료를 알린다. 클라이언트 연결에만 있다. */

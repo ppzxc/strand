@@ -2,8 +2,7 @@
  * 실제 TCP 위에서 전송 모듈({@code strand-nio}, {@code strand-netty})의 제품 공개 API가 클라이언트·서버 {@code Endpoint}를 맞물려 돌리는지 확인하는 통합 테스트.
  *
  * <p>시나리오는 {@code @TransportTest}로 nio와 netty에서 각각 한 번씩 돈다(본문 한 벌, {@code Transport} 매개변수). 호출 이름이 {@code [nio] ...},
- * {@code [netty] ...}라 리포트에 전송별 결과가 따로 나온다. 전송을 감싼 중립 모양은 {@code Wire}이고 구현은 {@code NioWire}, {@code NettyWire}다. 설정 값은 두 전송이 같다
- * (netty도 {@code closeFinishDeadline}을 1초로 둔다. 양쪽이 동시에 CLOSE를 보내면 마무리 기한까지 기다릴 수 있어서다).
+ * {@code [netty] ...}라 리포트에 전송별 결과가 따로 나온다. 전송을 감싼 중립 모양은 {@code Wire}이고 구현은 {@code NioWire}, {@code NettyWire}다. 설정 값은 두 전송이 같다.
  *
  * <p>nio에서만 도는 시나리오({@code [nio 전용]}). 엔진의 테스트 전용 통로 감싸기 지점({@code PassageWrapping})이 nio 엔진에만 있어서 netty에는 같은 관찰·조절 수단이 없다.
  * <ul>

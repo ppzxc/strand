@@ -30,11 +30,6 @@ public final class TestNio {
     private static final long BODY_BYTES = 1 << 20;
     private static final long OWNER_BODY_BYTES = 1 << 24;
 
-    /**
-     * 종료 마무리 기한. 양쪽이 동시에 CLOSE를 보내면 제품 엔진에서 한쪽이 상대의 끊김을 보지 못하고 마무리 기한까지 기다릴 수 있어, 기본 5초 대신 짧게 둔다.
-     */
-    public static final Duration CLOSE_FINISH_DEADLINE = Duration.ofSeconds(1);
-
     private TestNio() {}
 
     /**
@@ -123,7 +118,6 @@ public final class TestNio {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
-                .closeFinishDeadline(CLOSE_FINISH_DEADLINE)
                 .security(NioSecurity.externallySecured())
                 .authenticate(credentials -> AuthenticationResult.accepted("peer"));
     }
@@ -141,7 +135,6 @@ public final class TestNio {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
-                .closeFinishDeadline(CLOSE_FINISH_DEADLINE)
                 .security(NioSecurity.externallySecured());
     }
 }

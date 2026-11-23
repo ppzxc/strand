@@ -1051,6 +1051,7 @@ final class ConnectionEngine {
         stage = passage instanceof TlsPassage ? PreparationStage.SECURITY : PreparationStage.HELLO;
         // 테스트 전용 감싸기 지점. 설치된 것이 없으면 통로 그대로다.
         return PassageWrapping.wrap(
+                p.passageWrapper,
                 p.role == ConnectionParams.Role.CLIENT ? PassageWrapping.Side.CLIENT : PassageWrapping.Side.SERVER,
                 passage);
     }
@@ -1105,6 +1106,9 @@ final class ConnectionEngine {
         private @Nullable Throwable endCause;
         private byte[] input = EMPTY;
         private int inputPos;
+        /** 처리하지 못한 입력이 남은 까닭이 막힌 출력(수거 공간이 차고 쓰기가 막힘)인가. 그렇다면 쓰기가 풀릴 때까지 기다린다. */
+        private boolean inputStalled;
+
         private @Nullable EndpointOutput writing;
         private byte[] writingBytes = EMPTY;
         private int writingOffset;
@@ -1167,7 +1171,8 @@ final class ConnectionEngine {
             boolean pendingInput = inputPos < input.length;
             boolean readEnabled = !pendingInput && !backlogged();
             boolean wantWrite = writing != null || endpoint.nextOutput() != null || passage.pendingOutput();
-            Inbound inbound = passage.await(pendingInput ? 0 : waitLimitMs(), readEnabled, wantWrite);
+            // 처리하지 못한 입력이 있어도 출력이 막혀 멈춘 것이면 기다리지 않고 되풀이할 이유가 없다. 쓰기 가능·깨움·기한을 기다린다.
+            Inbound inbound = passage.await(pendingInput && !inputStalled ? 0 : waitLimitMs(), readEnabled, wantWrite);
             switch (inbound.kind()) {
                 case BYTES:
                     input = inbound.data();
@@ -1194,16 +1199,23 @@ final class ConnectionEngine {
 
         /** 받은 입력을 유한 단위로 처리한다. 수거 공간이 모자라 멈추면 사건을 수거하고 쓰기를 진행한 뒤 소비 위치부터 다시 입력한다. */
         private void processInput() throws IOException {
+            inputStalled = false;
             while (inputPos < input.length && !transportGone && !abandoned) {
                 ReceiveProgress progress = endpoint.receiveBounded(
                         input, inputPos, input.length - inputPos, MAX_UNITS_PER_STEP, collectionSpace);
                 inputPos += progress.consumed();
                 collectEvents();
+                if (closedSeen) {
+                    // 연결이 끝난 뒤의 입력은 core가 받지 않는다. 남겨 두면 읽기가 꺼진 채 상대의 TCP 종료를 보지 못한다.
+                    inputPos = input.length;
+                    return;
+                }
                 if (progress.collectionRequired()) {
                     boolean progressed = writeOutputs();
                     collectEvents();
                     if (!progressed) {
                         // 출력이 막혀 수거할 수 없다. 쓰기 가능을 기다렸다가 같은 위치에서 재개한다.
+                        inputStalled = true;
                         return;
                     }
                 } else if (progress.consumed() == 0) {

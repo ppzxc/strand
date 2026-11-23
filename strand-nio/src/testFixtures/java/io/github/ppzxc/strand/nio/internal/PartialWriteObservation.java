@@ -8,6 +8,7 @@ import io.github.ppzxc.strand.nio.Listener;
 import io.github.ppzxc.strand.nio.NioStrandClient;
 import io.github.ppzxc.strand.nio.NioStrandConnection;
 import io.github.ppzxc.strand.nio.NioStrandServer;
+import io.github.ppzxc.strand.nio.PassageWrapped;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
@@ -67,14 +68,17 @@ public final class PartialWriteObservation {
         ExecutorService executor = TestNio.newExecutor("partial-write-observer");
         BlockingQueue<ControlledPassage> clientPassages = new LinkedBlockingQueue<>();
         BlockingQueue<ControlledPassage> serverPassages = new LinkedBlockingQueue<>();
-        NioStrandServer server =
-                TestNio.serverBuilder(executor).handler(request -> {}).build();
-        NioStrandClient client = TestNio.clientBuilder(executor).build();
-        try (PassageWrapping.Installation installed = PassageWrapping.install((side, passage) -> {
+        PassageWrapping.Wrapper wrapper = (side, passage) -> {
             ControlledPassage controlled = new ControlledPassage(passage);
             (side == PassageWrapping.Side.CLIENT ? clientPassages : serverPassages).add(controlled);
             return controlled;
-        })) {
+        };
+        NioStrandServer server = PassageWrapped.server(TestNio.serverBuilder(executor), wrapper)
+                .handler(request -> {})
+                .build();
+        NioStrandClient client =
+                PassageWrapped.client(TestNio.clientBuilder(executor), wrapper).build();
+        try {
             Listener listener = server.listen(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
                     .toCompletableFuture()
                     .get(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
