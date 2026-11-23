@@ -1,7 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
 /**
- * 전송 모듈이 읽기를 멈출 기준인 쓰기 대기열 상한(바이트). 연결 드라이버와 두 제품 엔진이 같은 셈을 쓰도록 어느 한쪽 전송 모듈이 아니라 core에 둔다.
+ * 전송 모듈이 읽기를 멈출 기준인 쓰기 대기열 상한(바이트). 두 제품 엔진이 같은 셈을 쓰도록 어느 한쪽 전송 모듈이 아니라 core에 둔다.
  * core는 이 값으로 아무것도 하지 않는다.
  */
 public final class WriteQueueLimit {

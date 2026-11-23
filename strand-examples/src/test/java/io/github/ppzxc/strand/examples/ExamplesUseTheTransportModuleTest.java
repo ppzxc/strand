@@ -22,7 +22,7 @@ class ExamplesUseTheTransportModuleTest {
 
     private static final Path SOURCES = Paths.get("src", "main", "java", "io", "github", "ppzxc", "strand", "examples");
 
-    /** {@code Endpoint}의 드라이브용 동작. 요청과 응답은 연결 드라이버가 낸다. */
+    /** {@code Endpoint}의 드라이브용 동작. 요청과 응답은 전송 모듈의 연결 엔진이 낸다. */
     private static final List<String> DRIVE_CALLS = Arrays.asList(
             "Endpoint.client(",
             "Endpoint.server(",

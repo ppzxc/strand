@@ -53,7 +53,7 @@ class TcpPassageTest {
     }
 
     /**
-     * 연결 드라이버처럼 한 스레드에서 메시지들을 쓰면서 읽는다. 쓰기가 막히면 쓰기 가능과 읽기를 함께 기다리고, 다 쓴 뒤에는 상대가 보낸 만큼 읽어
+     * 연결 엔진처럼 한 스레드에서 메시지들을 쓰면서 읽는다. 쓰기가 막히면 쓰기 가능과 읽기를 함께 기다리고, 다 쓴 뒤에는 상대가 보낸 만큼 읽어
      * 모은다. 읽은 바이트를 돌려준다.
      */
     private static byte[] writeWhileReading(Passage passage, List<OutboundMessage> messages) throws IOException {
