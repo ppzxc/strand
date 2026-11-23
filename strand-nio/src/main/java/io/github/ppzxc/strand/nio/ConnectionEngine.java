@@ -559,6 +559,8 @@ final class ConnectionEngine {
                     returnIncoming(state);
                 }
             } catch (IllegalArgumentException e) {
+                // status는 IncomingRequest.respond가 먼저 검증하므로 여기서 남는 원인은 프레임 크기뿐이다.
+                assert status >= 0 && status <= 16 : "검증을 지난 status여야 한다: " + status;
                 // 협상한 프레임 크기를 넘는 응답. 본문을 보관하지 않고 응답 권한도 소비하지 않는다.
                 acceptance = ResponseAcceptance.resourceExhausted(Resource.PEER_FRAME_SIZE);
             }
