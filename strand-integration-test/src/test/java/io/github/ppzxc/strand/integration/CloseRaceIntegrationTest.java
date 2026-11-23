@@ -9,7 +9,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.ppzxc.strand.api.Certainty;
 import io.github.ppzxc.strand.api.CloseNotice;
 import io.github.ppzxc.strand.api.RequestResult;
-import io.github.ppzxc.strand.nio.IncomingRequest;
 import io.github.ppzxc.strand.nio.internal.ControlledPassage;
 import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
@@ -41,14 +40,15 @@ class CloseRaceIntegrationTest {
      * 않게 하려는 것이다.
      */
     @Test
-    @DisplayName("대기 요청이 있는 채 NO_ERROR CLOSE를 보내도 응답을 받은 뒤에 닫힌다 (규격 3.5)")
+    @DisplayName("[nio 전용] 대기 요청이 있는 채 NO_ERROR CLOSE를 보내도 응답을 받은 뒤에 닫힌다 (규격 3.5)")
     void noErrorCloseWaitsForPendingResponse() throws Exception {
-        try (TcpServer server = TcpServer.start();
-                Peer client = Peer.connect(server.port(), null)) {
+        Transport transport = Transport.NIO;
+        try (TcpServer server = TcpServer.start(transport);
+                Peer client = Peer.connect(transport, server.port(), null)) {
             Peer serverSide = server.awaitPeer();
             CompletableFuture<RequestResult> result =
                     client.request(APPLICATION_TYPE, Fixtures.payload("hello")).result();
-            IncomingRequest received = serverSide.awaitRequest();
+            Wire.Incoming received = serverSide.awaitRequest();
             long receivedBeforeClose = serverSide.passage().readBytes();
 
             client.closeConnection();
@@ -75,10 +75,11 @@ class CloseRaceIntegrationTest {
      * 경로를 시험할 수 없다.
      */
     @Test
-    @DisplayName("대기 스트림이 있는 양쪽이 서로의 CLOSE를 보기 전에 CLOSE를 보내도 CLOSE는 각자 하나뿐이다 (규격 3.5)")
+    @DisplayName("[nio 전용] 대기 스트림이 있는 양쪽이 서로의 CLOSE를 보기 전에 CLOSE를 보내도 CLOSE는 각자 하나뿐이다 (규격 3.5)")
     void crossedCloseWhileClosingSendsOneCloseEach() throws Exception {
-        try (TcpServer server = TcpServer.start()) {
-            try (Peer client = Peer.connect(server.port(), null)) {
+        Transport transport = Transport.NIO;
+        try (TcpServer server = TcpServer.start(transport)) {
+            try (Peer client = Peer.connect(transport, server.port(), null)) {
                 Peer serverSide = server.awaitPeer();
                 ControlledPassage clientPassage = client.passage();
                 ControlledPassage serverPassage = serverSide.passage();
@@ -88,8 +89,8 @@ class CloseRaceIntegrationTest {
                 CompletableFuture<RequestResult> fromServer = serverSide
                         .request(APPLICATION_TYPE, Fixtures.payload("from-server"))
                         .result();
-                IncomingRequest requestAtServer = serverSide.awaitRequest();
-                IncomingRequest requestAtClient = client.awaitRequest();
+                Wire.Incoming requestAtServer = serverSide.awaitRequest();
+                Wire.Incoming requestAtClient = client.awaitRequest();
                 long clientFramesBefore = clientPassage.writtenFrames().size();
                 long serverFramesBefore = serverPassage.writtenFrames().size();
                 long clientReceivedBefore = clientPassage.readBytes();
@@ -133,13 +134,13 @@ class CloseRaceIntegrationTest {
      * 타이밍에서 양쪽이 엇갈리는지는 보장되지 않으므로 시작 신호로 동시에 출발시켜 {@value #REPEATS}번 되풀이한다. 엇갈림을 확정해서 보는 시험은 {@link
      * #crossedCloseWhileClosingSendsOneCloseEach()}가 맡는다.
      */
-    @Test
+    @TransportTest
     @DisplayName("양쪽이 동시에 CLOSE를 보내도 종료 알림은 양쪽에서 한 번씩만 온다 (규격 3.5)")
-    void simultaneousCloseNotifiesOncePerSide() throws Exception {
+    void simultaneousCloseNotifiesOncePerSide(Transport transport) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(2);
-        try (TcpServer server = TcpServer.start(type -> STATUS_OK)) {
+        try (TcpServer server = TcpServer.start(transport, type -> STATUS_OK)) {
             for (int round = 0; round < REPEATS; round++) {
-                try (Peer client = Peer.connect(server.port(), null)) {
+                try (Peer client = Peer.connect(transport, server.port(), null)) {
                     Peer serverSide = server.awaitPeer();
                     await(client.request(APPLICATION_TYPE, Fixtures.payload("hello"))
                             .result());

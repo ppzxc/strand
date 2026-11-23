@@ -1,13 +1,7 @@
 package io.github.ppzxc.strand.integration;
 
 import io.github.ppzxc.strand.api.Resource;
-import io.github.ppzxc.strand.nio.Listener;
-import io.github.ppzxc.strand.nio.NioStrandServer;
-import io.github.ppzxc.strand.nio.PreparedHandler;
-import io.github.ppzxc.strand.nio.internal.PassageWrapping;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,47 +13,41 @@ import java.util.function.IntUnaryOperator;
 import org.jspecify.annotations.Nullable;
 
 /**
- * 포트 0에 바인딩한 제품 서버({@link NioStrandServer}). 연결 인증을 통과한 연결마다 서버 쪽 {@link Peer}를 만든다. 연결을 받고 돌리는 일은 모두 제품 엔진이 한다.
+ * 포트 0에 바인딩한 제품 서버(nio 또는 netty). 연결 인증을 통과한 연결마다 서버 쪽 {@link Peer}를 만든다. 연결을 받고 돌리는 일은 모두 제품 엔진이 한다.
  */
 final class TcpServer implements AutoCloseable {
 
     private static final ConcurrentHashMap<Integer, TcpServer> BY_PORT = new ConcurrentHashMap<>();
 
-    private final NioStrandServer server;
-    private final Listener listener;
+    private final Wire.Server server;
     private final int port;
     private final List<Peer> peers = new CopyOnWriteArrayList<>();
     private final BlockingQueue<Peer> accepted = new LinkedBlockingQueue<>();
     private final AtomicInteger connectsCompleted = new AtomicInteger();
     private final AtomicInteger prepared = new AtomicInteger();
 
-    private TcpServer(@Nullable IntUnaryOperator statusForType) throws Exception {
-        this.server = io.github.ppzxc.strand.nio.internal.TestNio.serverBuilder(Peer.HANDLERS)
-                .handlerFactory(connection -> {
-                    Peer.Inbox inbox = new Peer.Inbox();
-                    Peer peer =
-                            new Peer(connection, null, PassageObservation.claim(PassageWrapping.Side.SERVER), inbox);
-                    peers.add(peer);
-                    accepted.add(peer);
-                    prepared.incrementAndGet();
-                    return PreparedHandler.of(inbox.handler(statusForType));
-                })
-                .build();
-        this.listener = server.listen(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
-                .toCompletableFuture()
-                .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        this.port = ((InetSocketAddress) listener.localAddress()).getPort();
+    private TcpServer(Transport transport, @Nullable IntUnaryOperator statusForType) throws Exception {
+        Wire wire = transport.wire();
+        this.server = wire.startServer(connection -> {
+            Peer.Inbox inbox = new Peer.Inbox();
+            Peer peer = new Peer(connection, null, wire.claimPassage(true), inbox);
+            peers.add(peer);
+            accepted.add(peer);
+            prepared.incrementAndGet();
+            return inbox.handler(statusForType);
+        });
+        this.port = server.port();
         BY_PORT.put(port, this);
     }
 
     /** 요청을 받아도 응답하지 않는 서버. */
-    static TcpServer start() throws Exception {
-        return start(null);
+    static TcpServer start(Transport transport) throws Exception {
+        return start(transport, null);
     }
 
     /** 받은 요청마다 응답하는 서버. 응답 {@code status}는 요청 {@code type}에서 {@code statusForType}으로 정한다({@code null}이면 응답하지 않는다). */
-    static TcpServer start(@Nullable IntUnaryOperator statusForType) throws Exception {
-        return new TcpServer(statusForType);
+    static TcpServer start(Transport transport, @Nullable IntUnaryOperator statusForType) throws Exception {
+        return new TcpServer(transport, statusForType);
     }
 
     /** 이 포트에서 도는 서버. 날것의 상대가 연 포트면 null이다. */
@@ -80,7 +68,7 @@ final class TcpServer implements AutoCloseable {
         int expected = connectsCompleted.incrementAndGet();
         Peer.awaitUntil(() -> prepared.get() >= expected, "서버가 연결 " + expected + "의 핸들러를 준비하지 못했다");
         Peer.awaitUntil(
-                () -> server.resourceUsage(Resource.FACTORY_TASKS).current() == 0,
+                () -> server.usage(Resource.FACTORY_TASKS).current() == 0,
                 "서버의 핸들러 팩터리 작업이 " + Fixtures.TIMEOUT_MS + "ms 안에 끝나지 않았다");
         for (Peer peer : peers) {
             peer.awaitEngineTurn();
@@ -106,12 +94,12 @@ final class TcpServer implements AutoCloseable {
     @Override
     public void close() throws IOException {
         BY_PORT.remove(port);
-        listener.close();
+        server.closeListener();
         for (Peer peer : peers) {
             peer.close();
         }
         try {
-            server.shutdown().toCompletableFuture().get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            server.shutdown().get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {

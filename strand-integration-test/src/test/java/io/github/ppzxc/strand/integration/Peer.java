@@ -5,12 +5,7 @@ import io.github.ppzxc.strand.api.Request;
 import io.github.ppzxc.strand.api.RequestHandle;
 import io.github.ppzxc.strand.api.RequestOptions;
 import io.github.ppzxc.strand.api.RequestResult;
-import io.github.ppzxc.strand.nio.IncomingRequest;
-import io.github.ppzxc.strand.nio.NioStrandClient;
-import io.github.ppzxc.strand.nio.NioStrandConnection;
-import io.github.ppzxc.strand.nio.RequestHandler;
 import io.github.ppzxc.strand.nio.internal.ControlledPassage;
-import io.github.ppzxc.strand.nio.internal.PassageWrapping;
 import io.github.ppzxc.strand.nio.internal.TestNio;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -33,7 +28,7 @@ import java.util.function.IntUnaryOperator;
 import org.jspecify.annotations.Nullable;
 
 /**
- * 제품 공개 API({@code NioStrandServer}, {@code NioStrandClient})가 맺어 준 연결 하나와 그 알림(받은 요청, 종료)을 모아 두는 통합 테스트용 껍데기. 연결을 돌리는 일은
+ * 제품 공개 API(nio 또는 netty 서버·클라이언트)가 맺어 준 연결 하나와 그 알림(받은 요청, 종료)을 모아 두는 통합 테스트용 껍데기. 연결을 돌리는 일은
  * 모두 제품 엔진이 한다. 여기에는 드라이브 루프가 없다.
  *
  * <p>연결을 감싼 통로({@link ControlledPassage})는 {@link PassageObservation}이 설치돼 있을 때만 있다. 이 통로로 오간 프레임과 바이트를 본다.
@@ -51,11 +46,11 @@ final class Peer implements AutoCloseable {
 
     /** 연결이 앱에 보이기 전부터 받는 요청과 기록. 서버가 연결을 인증한 직후나 클라이언트 연결이 준비된 직후에 상대가 먼저 요청을 낼 수 있어서 연결과 따로 만든다. */
     static final class Inbox {
-        final BlockingQueue<IncomingRequest> requests = new LinkedBlockingQueue<>();
+        final BlockingQueue<Wire.Incoming> requests = new LinkedBlockingQueue<>();
         final List<String> log = Collections.synchronizedList(new ArrayList<>());
 
         /** 받은 요청을 기록하고 {@code statusForType}의 status로 응답한다({@code null}이면 응답하지 않는다). */
-        RequestHandler handler(@Nullable IntUnaryOperator statusForType) {
+        Wire.Handler handler(@Nullable IntUnaryOperator statusForType) {
             return request -> {
                 log.add(REQUEST_RECEIVED);
                 requests.add(request);
@@ -83,19 +78,15 @@ final class Peer implements AutoCloseable {
         }
     }
 
-    private final NioStrandConnection connection;
-    private final @Nullable NioStrandClient owner;
+    private final Wire.Conn connection;
+    private final Wire.@Nullable Client owner;
     private final @Nullable ControlledPassage passage;
     private final Inbox inbox;
     private final CompletableFuture<CloseNotice> closed = new CompletableFuture<>();
     private final List<CloseNotice> closedNotices = new CopyOnWriteArrayList<>();
     private final List<CompletableFuture<Void>> resultsLogged = new CopyOnWriteArrayList<>();
 
-    Peer(
-            NioStrandConnection connection,
-            @Nullable NioStrandClient owner,
-            @Nullable ControlledPassage passage,
-            Inbox inbox) {
+    Peer(Wire.Conn connection, Wire.@Nullable Client owner, @Nullable ControlledPassage passage, Inbox inbox) {
         this.connection = connection;
         this.owner = owner;
         this.passage = passage;
@@ -108,50 +99,55 @@ final class Peer implements AutoCloseable {
     }
 
     /** 서버에 TCP로 연결하는 클라이언트. 받은 요청마다 {@code statusForType}으로 응답한다({@code null}이면 응답하지 않는다). */
-    static Peer connect(int port, @Nullable IntUnaryOperator statusForType) throws Exception {
-        return connectLater(port, statusForType).get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
+    static Peer connect(Transport transport, int port, @Nullable IntUnaryOperator statusForType) throws Exception {
+        return connectLater(transport, port, statusForType).get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
 
     /**
      * {@link #connect}와 같되 연결이 준비되기를 기다리지 않는다. 제품 클라이언트의 연결은 AUTH 관문까지 마쳐야 앱에 보이므로 날것의 상대가 말을 걸어 줘야 끝나는 시험이 쓴다.
      */
-    static CompletableFuture<Peer> connectLater(int port, @Nullable IntUnaryOperator statusForType) {
-        return connectLater(port, statusForType, null);
+    static CompletableFuture<Peer> connectLater(
+            Transport transport, int port, @Nullable IntUnaryOperator statusForType) {
+        return connectLater(transport, port, statusForType, null);
     }
 
     /** {@link #connect}와 같되, 연결이 놀고 있을 때 클라이언트가 PING을 내는 간격을 정한다. 시험이 PING이 나가는 때를 시간으로 정하려고 쓴다. */
-    static Peer connect(int port, @Nullable IntUnaryOperator statusForType, Duration idlePingInterval)
+    static Peer connect(
+            Transport transport, int port, @Nullable IntUnaryOperator statusForType, Duration idlePingInterval)
             throws Exception {
-        return connectLater(port, statusForType, idlePingInterval).get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        return connectLater(transport, port, statusForType, idlePingInterval)
+                .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
 
     private static CompletableFuture<Peer> connectLater(
-            int port, @Nullable IntUnaryOperator statusForType, @Nullable Duration idlePingInterval) {
+            Transport transport,
+            int port,
+            @Nullable IntUnaryOperator statusForType,
+            @Nullable Duration idlePingInterval) {
         Inbox inbox = new Inbox();
-        NioStrandClient.Builder builder = TestNio.clientBuilder(HANDLERS).handler(inbox.handler(statusForType));
-        if (idlePingInterval != null) {
-            builder.idlePingInterval(idlePingInterval);
-        }
-        NioStrandClient client = builder.build();
+        Wire wire = transport.wire();
+        Wire.Client client = wire.newClient(inbox.handler(statusForType), idlePingInterval);
         TcpServer server = TcpServer.byPort(port);
         CompletableFuture<Peer> ready = new CompletableFuture<>();
         client.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port))
-                .whenComplete((connection, failure) -> {
-                    if (failure != null) {
-                        ready.completeExceptionally(failure);
-                        return;
-                    }
-                    try {
-                        if (server != null) {
-                            // 서버가 핸들러를 준비하기 전에 온 요청은 거절되므로(규격 4.5절) 서버 쪽 연결이 준비된 뒤에 시험에 돌려준다.
-                            server.awaitPrepared();
-                        }
-                        ready.complete(new Peer(
-                                connection, client, PassageObservation.claim(PassageWrapping.Side.CLIENT), inbox));
-                    } catch (RuntimeException | AssertionError e) {
-                        ready.completeExceptionally(e);
-                    }
-                });
+                .whenCompleteAsync(
+                        (connection, failure) -> {
+                            if (failure != null) {
+                                ready.completeExceptionally(failure);
+                                return;
+                            }
+                            try {
+                                if (server != null) {
+                                    // 서버가 핸들러를 준비하기 전에 온 요청은 거절되므로(규격 4.5절) 서버 쪽 연결이 준비된 뒤에 시험에 돌려준다.
+                                    server.awaitPrepared();
+                                }
+                                ready.complete(new Peer(connection, client, wire.claimPassage(false), inbox));
+                            } catch (RuntimeException | AssertionError e) {
+                                ready.completeExceptionally(e);
+                            }
+                            // 준비를 기다리는 동안 막으므로 전송의 이벤트 루프가 아니라 앱 실행기에서 돈다.
+                        },
+                        HANDLERS);
         return ready;
     }
 
@@ -164,8 +160,9 @@ final class Peer implements AutoCloseable {
         return wrapped;
     }
 
-    NioStrandConnection connection() {
-        return connection;
+    /** 이 전송이 통로를 관찰하게 해 주는가. 관찰하지 못하면 {@link #passage()}는 실패한다. */
+    boolean observesPassage() {
+        return passage != null;
     }
 
     Sent request(int type, byte[] payload) {
@@ -193,8 +190,8 @@ final class Peer implements AutoCloseable {
     }
 
     /** 받은 요청을 받은 순서대로 하나 기다려 꺼낸다. 상한 안에 오지 않으면 실패한다. */
-    IncomingRequest awaitRequest() throws InterruptedException {
-        IncomingRequest request = inbox.requests.poll(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
+    Wire.Incoming awaitRequest() throws InterruptedException {
+        Wire.Incoming request = inbox.requests.poll(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
         if (request == null) {
             throw new AssertionError("요청을 " + Fixtures.TIMEOUT_MS + "ms 안에 받지 못했다");
         }
@@ -202,8 +199,8 @@ final class Peer implements AutoCloseable {
     }
 
     /** 아직 꺼내지 않은 받은 요청을 모두 꺼낸다. */
-    List<IncomingRequest> drainRequests() {
-        List<IncomingRequest> drained = new ArrayList<>();
+    List<Wire.Incoming> drainRequests() {
+        List<Wire.Incoming> drained = new ArrayList<>();
         inbox.requests.drainTo(drained);
         return drained;
     }
@@ -291,7 +288,7 @@ final class Peer implements AutoCloseable {
                     .toCompletableFuture()
                     .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
             if (owner != null) {
-                owner.shutdown().toCompletableFuture().get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                owner.shutdown().get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

@@ -12,7 +12,6 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 /** 한 연결에서 양쪽이 서로 요청을 내는 경우를 실제 TCP 위에서 확인한다. */
@@ -35,11 +34,12 @@ class BidirectionalIntegrationTest {
      * 2, 4, 6)가 섞이지 않아야 한다. 번호 공간을 혼동하면 도착한 요청의 {@code stream_id}나 결과의 {@code status}가 어긋난다. 요청을 세 건씩 번갈아 내서 같은
      * 방향의 요청이 여러 건일 때도 번호가 2씩 늘어나는지, 각 결과가 자기 요청의 응답인지 함께 본다.
      */
-    @Test
+    @TransportTest
     @DisplayName("서버와 클라이언트가 번갈아 요청을 내도 홀수·짝수 stream_id가 섞이지 않는다 (규격 4.2)")
-    void bothSidesRequestWithoutMixingStreamNumbers() throws Exception {
-        try (TcpServer server = TcpServer.start(type -> type - APPLICATION_TYPE);
-                Peer client = Peer.connect(server.port(), type -> type - APPLICATION_TYPE + CLIENT_STATUS_OFFSET)) {
+    void bothSidesRequestWithoutMixingStreamNumbers(Transport transport) throws Exception {
+        try (TcpServer server = TcpServer.start(transport, type -> type - APPLICATION_TYPE);
+                Peer client = Peer.connect(
+                        transport, server.port(), type -> type - APPLICATION_TYPE + CLIENT_STATUS_OFFSET)) {
             Peer serverSide = server.awaitPeer();
             List<CompletableFuture<RequestResult>> fromClient = new ArrayList<>();
             List<CompletableFuture<RequestResult>> fromServer = new ArrayList<>();
@@ -58,6 +58,10 @@ class BidirectionalIntegrationTest {
                 assertThat(serverResult.certainty()).isEqualTo(Certainty.RESPONSE);
                 assertThat(clientResult.status()).isEqualTo(i);
                 assertThat(serverResult.status()).isEqualTo(i + CLIENT_STATUS_OFFSET);
+            }
+            // 스트림 번호는 통로를 관찰할 수 있는 전송(nio)에서만 본다. netty에서는 위의 방향별 응답 매칭까지만 본다.
+            if (!transport.observesPassage()) {
+                return;
             }
             // 요청을 받은 쪽 통로가 읽은 프레임의 번호로 본다. 제품 API는 받은 요청의 스트림 번호를 드러내지 않는다.
             for (int i = 0; i < REQUESTS_PER_SIDE; i++) {
