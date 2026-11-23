@@ -5,6 +5,7 @@ import static io.github.ppzxc.strand.conformance.Protocol.statusCode;
 import static io.github.ppzxc.strand.conformance.Protocol.streamId;
 
 import com.google.gson.JsonObject;
+import io.github.ppzxc.strand.core.internal.EndpointDriver;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -180,7 +181,7 @@ final class StepKind {
         this.execution = execution;
     }
 
-    private static StepKind define(String name, Shape shape, BiConsumer<ProgressDriver, JsonObject> execution) {
+    private static StepKind define(String name, Shape shape, BiConsumer<EndpointDriver, JsonObject> execution) {
         return register(name, shape, (driver, step, requestTickets) -> execution.accept(driver, step));
     }
 
@@ -264,7 +265,7 @@ final class StepKind {
     }
 
     /** 단계를 진행 보고 구동기로 엔드포인트에 적용한다. */
-    void execute(ProgressDriver driver, JsonObject step, Map<String, Long> requestTickets) {
+    void execute(EndpointDriver driver, JsonObject step, Map<String, Long> requestTickets) {
         execution.execute(driver, step, requestTickets);
     }
 
@@ -311,6 +312,6 @@ final class StepKind {
 
     @FunctionalInterface
     private interface StepExecution {
-        void execute(ProgressDriver driver, JsonObject step, Map<String, Long> requestTickets);
+        void execute(EndpointDriver driver, JsonObject step, Map<String, Long> requestTickets);
     }
 }
