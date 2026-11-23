@@ -124,6 +124,9 @@ final class ConnectionEngine {
     private volatile boolean stopped;
     private volatile @Nullable RequestHandler activeHandler;
 
+    /** 핸들러 준비(팩터리 완료 또는 핸들러 등록)가 끝났는가. 끝나기 전에 온 요청은 애플리케이션에 넘기기 전에 거절한다(규격 4.5절). */
+    private volatile boolean handlerPrepared;
+
     // 이벤트 루프에서만 읽고 쓰는 상태.
     private @Nullable Loop active;
     private PreparationStage stage;
@@ -1198,7 +1201,7 @@ final class ConnectionEngine {
 
     private void activate(Loop loop, @Nullable RequestHandler handler) {
         activeHandler = handler;
-        loop.endpoint.handlerReady();
+        handlerPrepared = true;
         becomeReady(loop);
     }
 
@@ -1254,6 +1257,11 @@ final class ConnectionEngine {
         long streamId = event.streamId();
         byte[] body = event.body();
         byte[] wireExtensions = event.extensions();
+        if (!handlerPrepared) {
+            // 준비 전 요청은 애플리케이션에 넘기지 않고 거절한다. 전송 모듈의 정책이다(규격 4.5절).
+            loop.endpoint.refuseRequest(streamId);
+            return;
+        }
         RequestHandler handler = activeHandler;
         if (handler == null) {
             // 핸들러를 등록하지 않은 쪽이 받은 요청은 구현하지 않은 것으로 답한다.
