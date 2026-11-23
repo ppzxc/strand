@@ -61,7 +61,9 @@ class EndpointInputValidationTest {
             server.receive(Frames.request(REQUEST_TYPE, 1, new byte[0]));
             server.drainEvents();
 
-            assertThat(server.respond(1, status, new byte[0])).as("status %d", status).isTrue();
+            assertThat(server.respond(1, status, new byte[0]))
+                    .as("status %d", status)
+                    .isTrue();
         }
         for (int status : new int[] {17, 255, 256, -1}) {
             Endpoint server = openServer();
