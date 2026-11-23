@@ -16,6 +16,7 @@ dependencies {
   api(project(":strand-api"))
   // 공개 API가 Netty 타입(Future, EventLoopGroup)을 노출한다. 런타임에는 앱의 Netty가 쓰인다.
   compileOnlyApi("io.netty:netty-transport:$nettyCompileVersion")
+  testImplementation(testFixtures(project(":strand-core")))
   testImplementation("io.netty:netty-transport:${nettyVersion.get()}")
 }
 

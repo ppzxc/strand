@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
   testImplementation(project(":strand-core"))
+  testImplementation(testFixtures(project(":strand-core")))
   testImplementation(testFixtures(project(":strand-nio")))
   testImplementation(libs.gson)
 }

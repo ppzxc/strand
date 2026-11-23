@@ -8,8 +8,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.github.ppzxc.strand.core.internal.AuthDecision;
 import io.github.ppzxc.strand.core.internal.CloseReason;
+import io.github.ppzxc.strand.core.internal.CollectionSpace;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
+import io.github.ppzxc.strand.core.internal.EndpointDriver;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.ByteArrayOutputStream;
@@ -37,7 +39,7 @@ final class VectorRunner {
      */
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(VectorSchema.setupKeys());
 
-    private static final class AuthScenario implements ProgressDriver.AuthPolicy {
+    private static final class AuthScenario implements EndpointDriver.Authentication {
         private final String mechanism;
         private final String credentialsHex;
         private final OptionalLong lifetimeSeconds;
@@ -92,7 +94,7 @@ final class VectorRunner {
     private final boolean client;
     private final boolean webSocket;
     private final Endpoint endpoint;
-    private final ProgressDriver driver;
+    private final EndpointDriver driver;
     private final VirtualCredentialLifetime credentialLifetime;
 
     VectorRunner(boolean client, boolean webSocket, Endpoint endpoint, OptionalLong credentialLifetimeSeconds) {
@@ -108,7 +110,12 @@ final class VectorRunner {
         this.client = client;
         this.webSocket = webSocket;
         this.endpoint = endpoint;
-        this.driver = new ProgressDriver(endpoint, webSocket, auth);
+        this.driver = EndpointDriver.of(endpoint)
+                .authentication(auth)
+                .space(CollectionSpace.of(64, 1 << 16))
+                .eventBatch(8)
+                .eagerEvents(true)
+                .messageChannel(webSocket);
         this.credentialLifetime = new VirtualCredentialLifetime(credentialLifetimeSeconds);
     }
 
@@ -143,7 +150,7 @@ final class VectorRunner {
         AuthScenario auth = AuthScenario.from(setup);
         boolean webSocket = isWebSocket(setup);
         EndpointConfig config = configOf(setup, webSocket, auth);
-        // 인증 판단은 사건으로 위임되고, 러너가 벡터의 인증 설정으로 답한다(ProgressDriver).
+        // 인증 판단은 사건으로 위임되고, 러너가 벡터의 인증 설정으로 답한다(EndpointDriver).
         VectorRunner runner = new VectorRunner(
                 client,
                 webSocket,
