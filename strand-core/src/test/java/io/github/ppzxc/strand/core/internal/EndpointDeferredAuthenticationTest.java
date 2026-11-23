@@ -15,7 +15,6 @@ class EndpointDeferredAuthenticationTest {
         server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
         server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
         server.completeAuthentication(server.drainEvents().get(0).authenticationId(), AuthDecision.PASS);
-        server.handlerReady();
         server.drainMessages();
         server.receive(Frames.request(257, 1, new byte[0]));
         server.receive(Frames.request(257, 3, new byte[0]));
@@ -45,7 +44,7 @@ class EndpointDeferredAuthenticationTest {
     }
 
     @Test
-    void requestBeforeHandlerReadyIsRefused() {
+    void requestAfterAuthenticationIsReportedWithoutAnyAutomaticRefusal() {
         Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
         server.receive(EndpointTest.bytes("c0de535452300000"));
         server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
@@ -57,13 +56,12 @@ class EndpointDeferredAuthenticationTest {
 
         server.receive(Frames.request(257, 1, new byte[0]));
 
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.REQUEST_RECEIVED);
+        assertThat(server.drainMessages()).isEmpty();
+        server.refuseRequest(1);
         assertThat(server.drainMessages())
                 .singleElement()
                 .satisfies(message -> assertThat(message.bytes()).isEqualTo(Frames.reset(1, ErrorCode.REFUSED)));
-        server.handlerReady();
-        server.receive(Frames.request(257, 3, new byte[0]));
-        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
     @Test
@@ -234,7 +232,6 @@ class EndpointDeferredAuthenticationTest {
         server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
         long id = server.drainEvents().get(0).authenticationId();
         server.completeAuthentication(id, AuthDecision.PASS, OptionalLong.of(1));
-        server.handlerReady();
         server.drainMessages();
 
         server.advance(3_600_000);

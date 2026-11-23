@@ -161,9 +161,5 @@ final class ProgressDriver {
     private void decideAuthentication(Event event) {
         AuthDecision decision = auth.decide(event.authenticationMechanism().orElse(""), event.body());
         endpoint.completeAuthentication(event.authenticationId(), decision, auth.credentialLifetimeSeconds());
-        if (decision == AuthDecision.PASS) {
-            // 핸들러는 인증 직후 준비돼 있다고 본다. 준비 전 거절은 전송 모듈의 정책이다.
-            endpoint.handlerReady();
-        }
     }
 }

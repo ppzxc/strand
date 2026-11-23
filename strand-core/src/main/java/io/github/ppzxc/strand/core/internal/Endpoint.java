@@ -120,7 +120,6 @@ public final class Endpoint {
 
     private boolean deferredAuthentication;
     private boolean authenticationPending;
-    private boolean handlerReady;
     private Outbox.@Nullable Node selectedOutput;
     private @Nullable EndpointOutput currentOutput;
     private long nextOutputId;
@@ -1594,8 +1593,7 @@ public final class Endpoint {
             // CLOSE를 보냈거나 받은 뒤의 새 요청은 끝까지 읽고 조용히 버린다. 어떤 프레임도 보내지 않는다(규격 3.5절).
             return;
         }
-        if ((deferredAuthentication && !handlerReady)
-                || peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
+        if (peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
             send(Frames.reset(streamId, ErrorCode.REFUSED));
         } else if (!config.knows(type)) {
             send(Frames.response(type, streamId, Status.UNIMPLEMENTED));
@@ -1801,13 +1799,6 @@ public final class Endpoint {
         }
         authenticationPending = false;
         finishAuthentication(decision, credentialLifetime);
-    }
-
-    /** 인증을 마친 연결에서 핸들러 준비가 완료되었음을 알린다. */
-    public void handlerReady() {
-        if (deferredAuthentication && phase.isActive() && phase.hasPassedAuthGate()) {
-            handlerReady = true;
-        }
     }
 
     private void finishAuthentication(AuthDecision decision, OptionalLong credentialLifetime) {
