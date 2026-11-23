@@ -1493,7 +1493,6 @@ final class ConnectionEngine {
         }
 
         private MessageWire createWire() throws IOException {
-            WireFactory.requireCodec();
             int maxMessage = (int) p.maxFrameSize;
             String path = Objects.requireNonNull(p.transport.path());
             if (p.role == ConnectionParams.Role.SERVER) {
@@ -1576,9 +1575,7 @@ final class ConnectionEngine {
             collectEvents();
             blocked = writing != null
                     || wireBytes != null
-                    || (wire != null
-                            ? wire.established() && endpoint.nextOutput() != null
-                            : endpoint.nextOutput() != null)
+                    || ((wire == null || wire.established()) && endpoint.nextOutput() != null)
                     || (wire != null && wire.wirePending())
                     || (tls != null && tls.pendingOutput());
             finishClosing();

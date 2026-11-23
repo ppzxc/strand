@@ -32,9 +32,11 @@ import io.netty.handler.codec.http.websocketx.WebSocketHandshakeException;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.util.ReferenceCountUtil;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayDeque;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -186,6 +188,9 @@ public final class WebSocketWire implements MessageWire {
 
     @Override
     public byte @Nullable [] pollWire() {
+        if (!wirePending()) {
+            return null;
+        }
         ByteBuf out = Unpooled.buffer();
         try {
             // 업그레이드를 마친 뒤 handshake 채널이 스스로 쓰는 것(Netty가 프로토콜 위반에 내는 Close 등)은 연결에 보내지 않는다.
@@ -214,7 +219,7 @@ public final class WebSocketWire implements MessageWire {
                 }
                 buffer.release();
             } else {
-                io.netty.util.ReferenceCountUtil.release(next);
+                ReferenceCountUtil.release(next);
             }
             next = channel.readOutbound();
         }
@@ -287,7 +292,7 @@ public final class WebSocketWire implements MessageWire {
                     broken = true;
                 }
             } finally {
-                io.netty.util.ReferenceCountUtil.release(next);
+                ReferenceCountUtil.release(next);
             }
             if (broken) {
                 break;
@@ -304,11 +309,11 @@ public final class WebSocketWire implements MessageWire {
     // ---------------------------------------------------------------- 업그레이드 핸들러
 
     private static final class ServerUpgrade extends ChannelInboundHandlerAdapter {
-        private final java.util.function.Supplier<WebSocketWire> wire;
+        private final Supplier<WebSocketWire> wire;
         private final String path;
         private final int maxMessageBytes;
 
-        ServerUpgrade(java.util.function.Supplier<WebSocketWire> wire, String path, int maxMessageBytes) {
+        ServerUpgrade(Supplier<WebSocketWire> wire, String path, int maxMessageBytes) {
             this.wire = wire;
             this.path = path;
             this.maxMessageBytes = maxMessageBytes;
@@ -317,7 +322,7 @@ public final class WebSocketWire implements MessageWire {
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object message) {
             if (!(message instanceof FullHttpRequest)) {
-                io.netty.util.ReferenceCountUtil.release(message);
+                ReferenceCountUtil.release(message);
                 return;
             }
             FullHttpRequest request = (FullHttpRequest) message;
@@ -400,10 +405,10 @@ public final class WebSocketWire implements MessageWire {
     }
 
     private static final class ClientUpgrade extends ChannelInboundHandlerAdapter {
-        private final java.util.function.Supplier<WebSocketWire> wire;
+        private final Supplier<WebSocketWire> wire;
         private final WebSocketClientHandshaker handshaker;
 
-        ClientUpgrade(java.util.function.Supplier<WebSocketWire> wire, WebSocketClientHandshaker handshaker) {
+        ClientUpgrade(Supplier<WebSocketWire> wire, WebSocketClientHandshaker handshaker) {
             this.wire = wire;
             this.handshaker = handshaker;
         }
@@ -411,7 +416,7 @@ public final class WebSocketWire implements MessageWire {
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object message) {
             if (!(message instanceof FullHttpResponse)) {
-                io.netty.util.ReferenceCountUtil.release(message);
+                ReferenceCountUtil.release(message);
                 return;
             }
             FullHttpResponse response = (FullHttpResponse) message;

@@ -91,13 +91,10 @@ public final class TlsEngines {
      * @return 클라이언트 엔진
      */
     public static SSLEngine clientWithoutAlpn(SSLContext context, String host, int port) {
-        SSLEngine engine = context.createSSLEngine(host, port);
-        engine.setUseClientMode(true);
-        configure(engine, true, null);
-        return engine;
+        return client(context, host, port, null);
     }
 
-    static SSLEngine client(SSLContext context, String host, int port, Alpn alpn) {
+    static SSLEngine client(SSLContext context, String host, int port, @Nullable Alpn alpn) {
         SSLEngine engine = context.createSSLEngine(host, port);
         engine.setUseClientMode(true);
         configure(engine, true, alpn);
@@ -122,13 +119,10 @@ public final class TlsEngines {
      * @return 서버 엔진
      */
     public static SSLEngine serverWithoutAlpn(SSLContext context) {
-        SSLEngine engine = context.createSSLEngine();
-        engine.setUseClientMode(false);
-        configure(engine, false, null);
-        return engine;
+        return server(context, null);
     }
 
-    static SSLEngine server(SSLContext context, Alpn alpn) {
+    static SSLEngine server(SSLContext context, @Nullable Alpn alpn) {
         SSLEngine engine = context.createSSLEngine();
         engine.setUseClientMode(false);
         configure(engine, false, alpn);
