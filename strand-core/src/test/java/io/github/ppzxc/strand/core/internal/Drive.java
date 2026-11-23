@@ -30,6 +30,9 @@ final class Drive {
         }
     }
 
+    /** 테스트가 수거 한도에 걸리지 않게 하는 넉넉한 수거 공간. */
+    static final CollectionSpace ROOMY = CollectionSpace.of(Integer.MAX_VALUE, Integer.MAX_VALUE);
+
     private static final Map<Endpoint, Session> SESSIONS = new WeakHashMap<>();
 
     private Drive() {}
@@ -45,7 +48,7 @@ final class Drive {
     }
 
     static Endpoint server(EndpointConfig config, Authentication authentication) {
-        Endpoint endpoint = Endpoint.serverWithDeferredAuthentication(config);
+        Endpoint endpoint = Endpoint.server(config);
         SESSIONS.put(endpoint, new Session(config, authentication));
         return endpoint;
     }
@@ -59,8 +62,7 @@ final class Drive {
         Session session = session(endpoint);
         int offset = 0;
         while (true) {
-            ReceiveProgress progress =
-                    endpoint.receiveBounded(bytes, offset, bytes.length - offset, 1, CollectionSpace.UNLIMITED);
+            ReceiveProgress progress = endpoint.receiveBounded(bytes, offset, bytes.length - offset, 1, Drive.ROOMY);
             offset += progress.consumed();
             if (session.authentication != null && !session.answered) {
                 answerAuthentication(endpoint, session);

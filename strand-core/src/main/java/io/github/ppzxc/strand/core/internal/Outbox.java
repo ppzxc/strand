@@ -1,12 +1,9 @@
 package io.github.ppzxc.strand.core.internal;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.LongConsumer;
 import org.jspecify.annotations.Nullable;
 
 /**
- * 상대에게 보낼, 아직 쓰기를 시작하지 않은 메시지의 쓰기 대기열(규격 3.6절). 꺼낸 메시지가 쓰기를 시작한 것이므로 대기열에 남은 메시지는 모두
+ * 상대에게 보낼, 아직 쓰기를 시작하지 않은 메시지의 쓰기 대기열(규격 3.6절). 쓰기를 시작한 메시지는 대기열에서 빠지므로 대기열에 남은 메시지는 모두
  * 쓰기 전이다.
  *
  * <p>순서 규칙은 이렇다.
@@ -77,7 +74,7 @@ final class Outbox {
 
     /**
      * 애플리케이션 노드를 대기열에서 거둔다. 첫 애플리케이션 노드였다면 그 뒤에 이어진 비애플리케이션 노드(앞서 보내지 못해 남은 CLOSE 등)가
-     * 제어 구간에 들어온다. 확인 대기가 붙은 노드(HELLO·AUTH·PING)는 거두지 않는다. 대기는 {@link #drain}이 시작시키므로, 거두면 시작하지 못한 채 남는다.
+     * 제어 구간에 들어온다. 확인 대기가 붙은 노드(HELLO·AUTH·PING)는 거두지 않는다. 대기는 쓰기를 마칠 때 시작하므로, 거두면 시작하지 못한 채 남는다.
      *
      * @throws IllegalStateException 노드에 확인 대기가 붙어 있을 때
      */
@@ -143,28 +140,6 @@ final class Outbox {
         }
         node.waitId = LivenessTimers.NO_WAIT;
         remove(node);
-    }
-
-    /**
-     * 쌓인 메시지를 순서대로 모두 꺼내 대기열을 비운다. 확인 대기가 매인 메시지는 그 대기 식별자를 {@code onWaitingDrained}에 알린다(대기를
-     * 시작하는 일은 받는 쪽 몫이다, 규격 3.3절).
-     *
-     * @param onWaitingDrained 꺼낸 메시지의 확인 대기 식별자를 받는다
-     */
-    List<OutboundMessage> drain(LongConsumer onWaitingDrained) {
-        List<OutboundMessage> drained = new ArrayList<>(size);
-        for (Node node = head; node != null; node = node.next) {
-            drained.add(node.message);
-            if (node.waitId != LivenessTimers.NO_WAIT) {
-                onWaitingDrained.accept(node.waitId);
-            }
-        }
-        head = null;
-        tail = null;
-        lastControl = null;
-        size = 0;
-        bytes = 0;
-        return drained;
     }
 
     /** {@code anchor} 바로 뒤에 잇는다. {@code anchor}가 null이면 맨 앞이다. */

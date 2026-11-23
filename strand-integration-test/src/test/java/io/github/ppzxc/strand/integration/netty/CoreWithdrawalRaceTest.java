@@ -129,7 +129,7 @@ class CoreWithdrawalRaceTest {
                             fixture.endpoint,
                             payload);
                     awaitIdle(pending);
-                    List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+                    List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
                     fixture.closeAndSettle();
                     int[] outcome = verify(wire.get(10, TimeUnit.SECONDS), events);
                     assertThat(fixture.onLoop(fixture.driver::allReleased)).isTrue();
@@ -181,7 +181,7 @@ class CoreWithdrawalRaceTest {
                             fixture.endpoint,
                             payload);
                     awaitIdle(pending);
-                    List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+                    List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
                     fixture.driver.closeGracefully();
                     int[] outcome = verify(wire.get(10, TimeUnit.SECONDS), events);
                     fixture.channel.closeFuture().sync();

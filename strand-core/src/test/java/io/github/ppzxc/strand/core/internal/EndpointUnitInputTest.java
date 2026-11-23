@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 class EndpointUnitInputTest {
 
     private static final int REQUEST_TYPE = 257;
-    private static final CollectionSpace SPACE = CollectionSpace.UNLIMITED;
+    private static final CollectionSpace SPACE = Drive.ROOMY;
 
     private static Endpoint server() {
         return Drive.server(EndpointConfig.defaults());

@@ -624,8 +624,7 @@ public final class ConnectionDriver implements AutoCloseable {
     /** 전송 스레드의 본체. */
     private void run() {
         try {
-            drive(new Loop(
-                    role == Role.CLIENT ? Endpoint.client(config) : Endpoint.serverWithDeferredAuthentication(config)));
+            drive(new Loop(role == Role.CLIENT ? Endpoint.client(config) : Endpoint.server(config)));
         } finally {
             stopped = true;
             // 어떤 경로로 끝났든 스레드가 끝나면 쓰기 막힘 신호는 풀려 있다.

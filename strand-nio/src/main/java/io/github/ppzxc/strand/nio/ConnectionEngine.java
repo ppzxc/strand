@@ -1055,9 +1055,8 @@ final class ConnectionEngine {
         Loop(Passage passage) {
             this.passage = passage;
             this.origin = p.nanoClock.getAsLong();
-            this.endpoint = p.role == ConnectionParams.Role.CLIENT
-                    ? Endpoint.client(p.config)
-                    : Endpoint.serverWithDeferredAuthentication(p.config);
+            this.endpoint =
+                    p.role == ConnectionParams.Role.CLIENT ? Endpoint.client(p.config) : Endpoint.server(p.config);
         }
 
         void drive() {

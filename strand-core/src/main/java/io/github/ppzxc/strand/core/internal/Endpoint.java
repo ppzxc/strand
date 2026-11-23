@@ -20,9 +20,11 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * 엔드포인트(서버 또는 클라이언트 역할). 입출력을 하지 않는 순수 상태 기계다. 받은 바이트는 {@link #receive}, 애플리케이션의 호출은
- * {@link #request}·{@link #ping}·{@link #close}, 시간은 {@link #advance}로 넣는다. 그러면 보낼 바이트와 애플리케이션 이벤트가
- * 쌓이고, {@link #drainMessages}와 {@link #drainEvents}로 한 번씩 꺼낸다. 스레드·소켓·실제 시계에 접근하지 않는다.
+ * 엔드포인트(서버 또는 클라이언트 역할). 입출력을 하지 않는 순수 상태 기계다. 받은 바이트는 {@link #receiveBounded}와 {@link
+ * #receiveUnit}, 애플리케이션의 호출은 {@link #request}·{@link #ping}·{@link #close}, 시간은 {@link #advanceTo}로 넣는다. 그러면 보낼
+ * 출력과 애플리케이션 이벤트가 쌓이고, 출력은 {@link #nextOutput}으로 보고 {@link #outputProgress}로 넘긴 만큼 알리고, 이벤트는 {@link
+ * #drainEvents(int)}로 꺼낸다. 스레드·소켓·실제 시계에 접근하지 않는다. 인증 판단은 {@link Event.Kind#AUTHENTICATION_REQUIRED} 사건으로
+ * 위임하고 {@link #completeAuthentication}으로 돌려받는다.
  */
 public final class Endpoint {
 
@@ -60,7 +62,7 @@ public final class Endpoint {
 
     private final EndpointConfig config;
     private final Outbox outbox = new Outbox();
-    /** 애플리케이션에 낼 이벤트. 쌓기만 하고 고치지 않는다. 돌려보낸 요청의 거름은 꺼낼 때({@link #drainEvents()}) 한다. */
+    /** 애플리케이션에 낼 이벤트. 쌓기만 하고 고치지 않는다. 돌려보낸 요청의 거름은 꺼낼 때({@link #drainEvents(int)}) 한다. */
     private final List<Event> events = new ArrayList<>();
     /**
      * 이벤트를 마지막으로 꺼낸 때의 {@link #highestPeerStreamId}. 상대 요청 번호는 늘어나기만 하므로, 이보다 큰 번호의 대기 중인 요청이 아직
@@ -71,8 +73,8 @@ public final class Endpoint {
     private final Set<Long> refusedRequests = new HashSet<>();
     /**
      * 내 요청(번호표를 받은 뒤 결과가 나올 때까지)의 장부. 번호를 받기 전(AUTH 관문 전에 미룬 요청)과 번호를 받은 뒤(쓰기 전, 쓰기 시작)를
-     * 모두 가진다. 프레임 하나가 메시지 하나이므로 {@link #drainMessages()}로 메시지를 꺼내면 마지막 바이트가 넘어간 것으로 보고 장부에 쓰기
-     * 시작을 알린다(규격 3.5절 "연결이 끝날 때").
+     * 모두 가진다. 출력 진행에서 프레임의 첫 바이트를 넘기면 쓰기 시작을, 마지막 바이트를 넘기면 넘김을 장부에 알린다(규격
+     * 1.3절, 3.5절 "연결이 끝날 때").
      *
      * <p>장부의 닫는 중({@code onClosing})과 연결 단계의 CLOSE 교환은 같은 사건이다. 연결이 계속 열려 있을 수 있는 두 곳({@link #close},
      * {@link #handleClose})은 {@link #endQueuedRequests}로 장부에 알린다. 나머지(형태가 잘못된 CLOSE, 연결 오류, 너무 큰 AUTH)는 곧바로
@@ -117,14 +119,12 @@ public final class Endpoint {
     /** 한 단위가 만들 수 있는 제어 프레임(HELLO 응답, AUTH, CLOSE 등)의 상한. */
     private static final int OUTPUT_CONTROL_RESERVE = 4;
 
-    private boolean deferredAuthentication;
     private boolean authenticationPending;
     private Outbox.@Nullable Node selectedOutput;
     private @Nullable EndpointOutput currentOutput;
     private long nextOutputId;
     private int outputWritten;
     private long outputWaitId = LivenessTimers.NO_WAIT;
-    private boolean incrementalOutput;
     private boolean outputDisconnected;
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
     private long highestPeerStreamId;
@@ -144,7 +144,8 @@ public final class Endpoint {
     }
 
     /**
-     * 서버 역할 엔드포인트를 만든다. 연결 서문을 받으면 HELLO를 보낸다.
+     * 서버 역할 엔드포인트를 만든다. 연결 서문을 받으면 HELLO를 보낸다. 받은 AUTH의 판단은 {@link Event.Kind#AUTHENTICATION_REQUIRED}
+     * 사건으로 애플리케이션에 맡기고 {@link #completeAuthentication}으로 돌려받는다.
      *
      * @param config 엔드포인트의 설정
      * @return 연결 서문을 기다리는 엔드포인트
@@ -152,13 +153,6 @@ public final class Endpoint {
      */
     public static Endpoint server(EndpointConfig config) {
         return new Endpoint(true, config);
-    }
-
-    /** 사용자 인증 판단을 사건으로 위임하는 내부 서버 엔드포인트. */
-    public static Endpoint serverWithDeferredAuthentication(EndpointConfig config) {
-        Endpoint endpoint = new Endpoint(true, config);
-        endpoint.deferredAuthentication = true;
-        return endpoint;
     }
 
     /**
@@ -176,38 +170,12 @@ public final class Endpoint {
     }
 
     /**
-     * 상대에게서 받은 바이트를 넣는다. 프레임 경계와 무관하게 어느 위치에서 잘라도 된다. 이 호출 안에서 읽고 끝내며 {@code bytes}를 붙잡지
-     * 않으므로, 돌아온 뒤에는 호출자가 배열을 다시 써도 된다.
-     *
-     * <p>입력을 처리하는 동안 애플리케이션 콜백({@code Authenticator})에서 같은 엔드포인트에 다시 입력할 수 없다. 오동작하지 않도록 상태를 건드리지
-     * 않고 던진다. 콜백이 던진 예외는 엔드포인트가 받아 연결을 닫으므로 이 호출 밖으로 나오지 않는다.
-     *
-     * @param bytes 받은 바이트
-     * @throws IllegalStateException 입력을 처리하는 중에 다시 불렀을 때
-     */
-    public void receive(byte[] bytes) {
-        if (!enterReceive()) {
-            return;
-        }
-        try {
-            receiveBytes(bytes);
-        } finally {
-            receiving = false;
-        }
-    }
-
-    /** 최대 단위 수만큼 입력을 처리하고 소비한 바이트 수를 반환한다. 수거 공간에는 한도를 두지 않는다. */
-    public int receiveBounded(byte[] bytes, int offset, int length, int maximumUnits) {
-        return receiveBounded(bytes, offset, length, maximumUnits, CollectionSpace.UNLIMITED)
-                .consumed();
-    }
-
-    /**
-     * 최대 단위 수만큼, 그리고 한 단위가 만들 수 있는 사건·출력을 넣을 공간이 확보된 만큼만 입력을 처리한다. 단위를 처리하기 전에 최악의 경우 필요한
+     * 상대에게서 받은 바이트를 최대 단위 수만큼, 그리고 한 단위가 만들 수 있는 사건·출력을 넣을 공간이 확보된 만큼만 처리한다. 프레임 경계와 무관하게
+     * 어느 위치에서 잘라도 된다. 입력을 처리하는 동안 애플리케이션 콜백에서 같은 엔드포인트에 다시 입력할 수 없다. 단위를 처리하기 전에 최악의 경우 필요한
      * 공간을 확인하므로 상태가 절반만 바뀌지 않는다. 모자라면 그 단위 앞에서 멈추고 수거가 필요하다고 알린다. 호출자는 사건과 출력을 수거하고 돌려준
      * 소비 위치부터 다시 입력한다.
      *
-     * @throws IllegalStateException 수거할 것이 하나도 없는데도 공간이 한 단위를 처리하기에 모자랄 때
+     * @throws IllegalStateException 수거할 것이 하나도 없는데도 공간이 한 단위를 처리하기에 모자랄 때, 입력을 처리하는 중에 다시 불렀을 때
      */
     public ReceiveProgress receiveBounded(
             byte[] bytes, int offset, int length, int maximumUnits, CollectionSpace space) {
@@ -322,46 +290,6 @@ public final class Endpoint {
         }
         receiving = true;
         return true;
-    }
-
-    /**
-     * 받은 바이트를 처리한다. 먼저 경계에 걸친 단위를 모아서 끝내고, 그 뒤로는 들어온 배열에서 바로 처리한다. 남은 꼬리만 복사해 둔다.
-     * 어디서 잘라 넣어도 {@link #consumeUnit}이 보는 바이트는 같으므로 결과가 같다.
-     */
-    private void receiveBytes(byte[] bytes) {
-        int at = 0;
-        int end = bytes.length;
-        while (pendingLength > 0) {
-            int consumed = consumeUnit(pending, 0, pendingLength);
-            if (phase.isEnded()) {
-                return;
-            }
-            if (consumed > 0) {
-                // 모은 바이트는 정확히 한 단위다. wantedLength는 처리 중인 단위의 크기를 넘지 않고, 그만큼까지만 모으기 때문이다.
-                releasePending();
-                continue;
-            }
-            if (at == end) {
-                return;
-            }
-            // 판정에 필요한 만큼만 더 모은다. 헤더가 알린 길이만큼 미리 잡지 않는다(상대가 정하는 값이다).
-            if (wantedLength <= pendingLength) {
-                throw new IllegalStateException("더 필요한 바이트 수가 정해지지 않았다");
-            }
-            int take = Math.min(wantedLength - pendingLength, end - at);
-            appendPending(bytes, at, take);
-            at += take;
-        }
-        while (!phase.isEnded() && at < end) {
-            int consumed = consumeUnit(bytes, at, end - at);
-            if (consumed == 0) {
-                break;
-            }
-            at += consumed;
-        }
-        if (!phase.isEnded() && at < end) {
-            appendPending(bytes, at, end - at);
-        }
     }
 
     private void appendPending(byte[] bytes, int at, int length) {
@@ -504,15 +432,26 @@ public final class Endpoint {
     }
 
     /**
-     * 가상 시계를 앞으로 보낸다. 확인 대기 시간이 지나도록 ACK가 없으면 연결 오류로 닫는다.
+     * 연결을 시작한 때부터 흐른 나노초로 시계를 옮긴다. 같은 값은 허용하고 처리할 것이 없으면 아무 일도 하지 않는다. 시계는 밀리초 단위로 처리하므로
+     * 밀리초 미만은 버린다.
      *
-     * @param ms 음수가 아닌 경과 밀리초
-     * @throws IllegalArgumentException 경과 시간이 음수일 때
+     * @param elapsedNanos 연결을 시작한 때부터 흐른, 이전 값보다 작지 않은 나노초
+     * @throws IllegalArgumentException 음수이거나 이전에 준 값보다 작을 때. 상태를 바꾸지 않는다
      */
-    public void advance(long ms) {
-        if (ms < 0) {
-            throw new IllegalArgumentException("경과 시간은 음수일 수 없다: " + ms);
+    public void advanceTo(long elapsedNanos) {
+        if (elapsedNanos < 0 || elapsedNanos < this.elapsedNanos) {
+            throw new IllegalArgumentException("경과 나노초는 음수이거나 이전 값보다 작을 수 없다: " + elapsedNanos);
         }
+        long target = elapsedNanos / Deadlines.NANOS_PER_MILLI;
+        long delta = target - now;
+        this.elapsedNanos = elapsedNanos;
+        if (delta > 0) {
+            advanceMillis(delta);
+        }
+    }
+
+    /** 가상 시계를 밀리초만큼 앞으로 보낸다. 확인 대기 시간이 지나도록 ACK가 없으면 연결 오류로 닫는다. */
+    private void advanceMillis(long ms) {
         if (phase.isEnded()) {
             return;
         }
@@ -532,25 +471,6 @@ public final class Endpoint {
         if (idlePing != null) {
             // 넘기지 못한 유휴 PING의 기한(규격 3.3절): 쓰기 대기열에 든 때부터 센다.
             timers.idlePingQueued(sendPing(idlePing), now);
-        }
-    }
-
-    /**
-     * 연결을 시작한 때부터 흐른 나노초로 시계를 옮긴다. 같은 값은 허용하고 처리할 것이 없으면 아무 일도 하지 않는다. 시계는 밀리초 단위로 처리하므로
-     * 밀리초 미만은 버린다.
-     *
-     * @param elapsedNanos 연결을 시작한 때부터 흐른, 이전 값보다 작지 않은 나노초
-     * @throws IllegalArgumentException 음수이거나 이전에 준 값보다 작을 때. 상태를 바꾸지 않는다
-     */
-    public void advanceTo(long elapsedNanos) {
-        if (elapsedNanos < 0 || elapsedNanos < this.elapsedNanos) {
-            throw new IllegalArgumentException("경과 나노초는 음수이거나 이전 값보다 작을 수 없다: " + elapsedNanos);
-        }
-        long target = elapsedNanos / Deadlines.NANOS_PER_MILLI;
-        long delta = target - now;
-        this.elapsedNanos = elapsedNanos;
-        if (delta > 0) {
-            advance(delta);
         }
     }
 
@@ -593,7 +513,7 @@ public final class Endpoint {
     }
 
     /**
-     * 시계를 다음으로 진행해야 하는 가장 이른 가상 시각(마지막 {@link #advance(long)}까지 흐른 시각부터 센 절대 시각)을 돌려준다. 대상은 요청 기한,
+     * 시계를 다음으로 진행해야 하는 가장 이른 가상 시각(마지막 {@link #advanceTo}까지 흐른 시각부터 센 절대 시각)을 돌려준다. 대상은 요청 기한,
      * 확인 대기(HELLO, AUTH, PING), 서버의 AUTH 대기, 유휴 PING이다. 이 시각까지 {@code advance}하면 그 기한이 처리된다. 기한은 정각이 지나야
      * 처리되므로 기한 다음 밀리초를 돌려준다. 아무 기한도 없거나 연결이 끝났으면 비어 있다.
      */
@@ -696,11 +616,11 @@ public final class Endpoint {
     }
 
     /**
-     * 요청 기한을 두고 요청을 보낸다(규격 4.4.1절). 기한은 로컬 설정이고, 기한이 지난 뒤 {@link #advance(long)}가 요청을 끝낸다. 쓰기 전(번호
+     * 요청 기한을 두고 요청을 보낸다(규격 4.4.1절). 기한은 로컬 설정이고, 기한이 지난 뒤 {@link #advanceTo}가 요청을 끝낸다. 쓰기 전(번호
      * 유무 무관)이면 {@code RESET} 없이 프레임을 버리고 {@code DEADLINE_EXCEEDED}(처리 안 됨), 쓰기를 시작했으면 {@code RESET(CANCEL)}을
      * 보내고 {@code DEADLINE_EXCEEDED}(결과 모름)를 넘긴다. 요청 확장 영역의 {@code timeout}은 받는 쪽에 주는 힌트일 뿐 이 기한이 아니다.
      *
-     * <p>"지금"은 실제 시각이 아니라 마지막 {@link #advance(long)}까지 흐른 가상 시계다. 이 엔드포인트는 실제 시계를 읽지 않으므로, 호출자는 기한이
+     * <p>"지금"은 실제 시각이 아니라 마지막 {@link #advanceTo}까지 흐른 가상 시계다. 이 엔드포인트는 실제 시계를 읽지 않으므로, 호출자는 기한이
      * 있는 요청을 보내기 직전에 {@code advance}로 시계를 맞춘다. {@code AUTH} 대기와 확인 대기의 기준 시각도 같은 가상 시계다.
      *
      * @param deadlineMs 지금부터 센 기한(밀리초, 1 이상)
@@ -893,13 +813,11 @@ public final class Endpoint {
         phase.transportDisconnected();
         conclude();
         outputDisconnected = true;
-        if (incrementalOutput) {
-            selectedOutput = null;
-            currentOutput = null;
-            outputWritten = 0;
-            outputWaitId = LivenessTimers.NO_WAIT;
-            outbox.discard();
-        }
+        selectedOutput = null;
+        currentOutput = null;
+        outputWritten = 0;
+        outputWaitId = LivenessTimers.NO_WAIT;
+        outbox.discard();
     }
 
     /**
@@ -918,28 +836,7 @@ public final class Endpoint {
     }
 
     /**
-     * 지금까지 쌓인, 상대에게 보낼 메시지를 보낸 순서대로 꺼낸다. 프레임 하나가 메시지 하나다. 바이트 스트림 전송은 메시지를 이어 붙여 보내면
-     * 된다.
-     *
-     * @return 보낼 메시지. 없으면 빈 목록
-     */
-    public List<OutboundMessage> drainMessages() {
-        if (incrementalOutput) {
-            throw new IllegalStateException("진행 보고 방식과 일괄 수거 방식을 섞을 수 없다");
-        }
-        // 확인 대기는 프레임을 전송 계층에 넘긴 때부터 센다(규격 3.3절). 넘긴 때는 꺼낸 때로 본다.
-        long drainedAt = now;
-        List<OutboundMessage> drained = outbox.drain(id -> timers.started(id, drainedAt));
-        if (!drained.isEmpty()) {
-            timers.outputProgressed(drainedAt);
-        }
-        ledger.onWriteStarted();
-        return drained;
-    }
-
-    /**
-     * 아직 상대에게 다 내보내지 못한 출력의 바이트 합. 쓰기 대기열에 든 것과 쓰기를 시작해 남은 부분을 더한다. 진행 보고 방식에서 전송 모듈이 읽기를
-     * 멈출지 판단할 때 쓴다.
+     * 아직 상대에게 다 내보내지 못한 출력의 바이트 합. 쓰기 대기열에 든 것과 쓰기를 시작해 남은 부분을 더한다. 전송 모듈이 읽기를 멈출지 판단할 때 쓴다.
      *
      * @return 남은 출력 바이트
      */
@@ -950,7 +847,6 @@ public final class Endpoint {
 
     /** 현재 쓸 출력. 철회 또는 우선순위 변경 뒤에는 새 식별자가 발급된다. */
     public @Nullable EndpointOutput nextOutput() {
-        incrementalOutput = true;
         if (outputDisconnected) {
             return null;
         }
@@ -1002,29 +898,12 @@ public final class Endpoint {
     }
 
     /**
-     * 지금까지 쌓인 애플리케이션 이벤트를 꺼낸다.
+     * 최대 개수만큼 사건을 순서대로 수거한다. 돌려보낸 요청의 {@code REQUEST_RECEIVED}는 걸러 내므로 돌려준 개수가 한도보다 적을 수 있다.
      *
-     * @return 이벤트 목록. 없으면 빈 목록
+     * @param maximum 한 번에 꺼낼 사건 수의 상한
+     * @return 사건 목록. 없으면 빈 목록
+     * @throws IllegalArgumentException 한도가 음수일 때
      */
-    public List<Event> drainEvents() {
-        List<Event> drained;
-        if (refusedRequests.isEmpty()) {
-            drained = new ArrayList<>(events);
-        } else {
-            drained = new ArrayList<>(events.size());
-            for (Event event : events) {
-                if (event.kind() != Event.Kind.REQUEST_RECEIVED || !refusedRequests.contains(event.streamId())) {
-                    drained.add(event);
-                }
-            }
-        }
-        events.clear();
-        drainedPeerStreamId = highestPeerStreamId;
-        refusedRequests.clear();
-        return drained;
-    }
-
-    /** 최대 개수만큼 사건을 순서대로 수거한다. */
     public List<Event> drainEvents(int maximum) {
         if (maximum < 0) {
             throw new IllegalArgumentException("사건 수거 한도는 음수일 수 없다");
@@ -1437,20 +1316,8 @@ public final class Endpoint {
         }
         // 자격 증명은 애플리케이션으로 넘어가므로 복사한다.
         byte[] credentials = Arrays.copyOfRange(bytes, payloadAt + 1 + mechanismLength, payloadAt + payloadSize);
-        if (deferredAuthentication) {
-            authenticationPending = true;
-            events.add(Event.authenticationRequired(mechanism, credentials));
-            return;
-        }
-        AuthDecision decision;
-        try {
-            decision = config.authenticator().authenticate(mechanism, credentials);
-        } catch (RuntimeException e) {
-            // 애플리케이션이 던지면 일시 실패로 본다. 연결을 매달아 두지 않는다. 원인은 CLOSED 이벤트에 싣는다.
-            phase.causedBy(e);
-            decision = AuthDecision.TRANSIENT_FAILURE;
-        }
-        finishAuthentication(decision, config.credentialLifetimeSeconds());
+        authenticationPending = true;
+        events.add(Event.authenticationRequired(mechanism, credentials));
     }
 
     /** 인증 판단 식별자에 대한 결과를 입력한다. 통과여도 수명은 알리지 않는다. 늦거나 중복된 결과는 무시한다. */
@@ -1631,8 +1498,8 @@ public final class Endpoint {
      * RESET(REFUSED)}로 돌려보내고 스트림을 끝낸다. 오류 CLOSE보다 먼저 호출한다.
      *
      * <p>암묵 불변식: {@code drainedPeerStreamId}보다 큰 번호의 대기 스트림은 항상 아직 꺼내지 않은 REQUEST_RECEIVED 이벤트와 짝이다
-     * ({@link #handleRequest}가 둘을 함께 만들고, 이벤트는 {@link #drainEvents}가 {@code drainedPeerStreamId}를 올릴 때만 사라진다).
-     * 그래서 여기서 돌려보낸 요청의 이벤트를 {@link #drainEvents}가 가려낼 수 있다.
+     * ({@link #handleRequest}가 둘을 함께 만들고, 이벤트는 {@link #drainEvents(int)}가 {@code drainedPeerStreamId}를 올릴 때만 사라진다).
+     * 그래서 여기서 돌려보낸 요청의 이벤트를 {@link #drainEvents(int)}가 가려낼 수 있다.
      */
     private void refuseUnhandedRequests() {
         Iterator<Long> pending = peerPendingStreams.keySet().iterator();
@@ -1699,7 +1566,7 @@ public final class Endpoint {
         }
         deferredPings.clear();
         peerPendingStreams.clear();
-        events.add(Event.closed(phase.closeCause(), phase.closeReason()));
+        events.add(Event.closed(phase.closeReason()));
     }
 
     private void sendHello() {
@@ -1758,7 +1625,7 @@ public final class Endpoint {
         return outbox.addControl(message);
     }
 
-    /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 {@link #drainMessages}가 이 프레임을 돌려줄 때 시작한다. */
+    /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 프레임의 마지막 바이트를 넘긴 때 시작한다. */
     private long sendAwaitingAck(byte[] frame, LivenessTimers.Kind kind, byte @Nullable [] payload) {
         Outbox.Node node = send(frame);
         node.waitId = timers.await(kind, payload);

@@ -128,8 +128,6 @@ final class ConnectionPhase {
     private boolean closeReceived;
     /** 전송 계층이 닫혀 연결이 끝났다. 끝나도 {@link #ending}은 남아 어떻게 끝났는지 답한다. */
     private boolean closed;
-    /** 연결을 닫게 한 로컬 원인. {@code CLOSED} 이벤트에 싣는다(규격 3.5절). */
-    private @Nullable Throwable cause;
     /** 처음 보냈거나 받은 CLOSE를 보낸 쪽. CLOSE를 주고받은 적이 없으면 null이다. */
     private CloseReason.@Nullable Sender firstCloseSender;
     /** 처음 보냈거나 받은 오류 CLOSE의 {@code error_code}와 보낸 쪽. 오류 CLOSE를 주고받은 적이 없으면 보낸 쪽이 null이다. */
@@ -214,12 +212,6 @@ final class ConnectionPhase {
     /** 닫는 일이 {@code NO_ERROR}로 끝나는가. 이미 오류로 끝나기로 했으면 이후 NO_ERROR CLOSE가 겹쳐도 아니다. */
     boolean endsNormally() {
         return ending.normal();
-    }
-
-    /** 연결을 닫게 한 로컬 원인. 없으면 null이다. */
-    @Nullable
-    Throwable closeCause() {
-        return cause;
     }
 
     /** 연결이 어떻게 끝났는지. 끝나기 전에 부르면 지금까지의 판단이다. */
@@ -377,17 +369,6 @@ final class ConnectionPhase {
         if (!closed) {
             ending = ending.afterPendingStreamsZero();
         }
-    }
-
-    /**
-     * 연결을 닫게 한 로컬 원인을 기록한다. {@code CLOSED} 이벤트에 싣는다. 종료 쪽 사건은 끝난 뒤에는 모두 무시한다는 규칙에 따라, 연결이 끝난 뒤
-     * 들어온 원인은 의도적으로 버린다(이미 낸 {@code CLOSED} 이벤트를 바꿀 수 없고 두 번째 {@code CLOSED}도 내지 않는다).
-     */
-    void causedBy(Throwable cause) {
-        if (closed) {
-            return;
-        }
-        this.cause = cause;
     }
 
     /** 전송 계층이 CLOSE 없이 끊겨서 연결이 끝나는가({@link #transportDisconnected}). 내 쪽 판단으로 끝나는 경우는 거짓이다. */

@@ -208,8 +208,8 @@ public final class Event {
                 errorCode);
     }
 
-    static Event closed(@Nullable Throwable cause, CloseReason closeReason) {
-        return new Event(Kind.CLOSED, 0, 0, 0, NO_CREDENTIAL_LIFETIME, null, cause, closeReason, NO_TICKET, NO_BODY);
+    static Event closed(CloseReason closeReason) {
+        return new Event(Kind.CLOSED, 0, 0, 0, NO_CREDENTIAL_LIFETIME, null, null, closeReason, NO_TICKET, NO_BODY);
     }
 
     /** @param body 응답 본문. 호출자가 이후 바꾸지 않는 배열이어야 한다(복사해서 넘긴다). */
@@ -305,8 +305,7 @@ public final class Event {
     }
 
     /**
-     * {@link Kind#CLOSED}의 로컬 원인. 서버의 {@link Authenticator}가 예외를 던져 닫았을 때 그 예외다. 와이어로는 알리지 않는 정보이며,
-     * 다른 이유로 닫혔거나 다른 종류의 이벤트면 비어 있다.
+     * {@link Kind#CLOSED}의 로컬 원인. core는 채우지 않으므로 항상 비어 있다.
      *
      * @return 닫힌 원인
      */

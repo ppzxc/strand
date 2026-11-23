@@ -46,8 +46,8 @@ final class CoalescingPeer implements AutoCloseable {
             while ((count = in.read(buffer)) >= 0) {
                 byte[] received = new byte[count];
                 System.arraycopy(buffer, 0, received, 0, count);
-                endpoint.receive(received);
-                endpoint.drainEvents();
+                EndpointFeed.receive(endpoint, received);
+                EndpointFeed.drain(endpoint);
                 ByteArrayOutputStream burst = new ByteArrayOutputStream();
                 for (EndpointOutput output = endpoint.nextOutput(); output != null; output = endpoint.nextOutput()) {
                     burst.write(output.bytes());

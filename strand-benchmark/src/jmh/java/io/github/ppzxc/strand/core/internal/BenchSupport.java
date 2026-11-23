@@ -18,7 +18,7 @@ final class BenchSupport {
     /** 두 엔드포인트가 서문, HELLO, AUTH 관문까지 마친 상태로 만든다. 송신 대기열과 이벤트는 비운다. */
     static Endpoint[] establish(EndpointConfig config) {
         Endpoint client = Endpoint.client(config);
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(config);
+        Endpoint server = Endpoint.server(config);
         for (int round = 0; round < 6; round++) {
             pump(client, server);
             answerAuthentication(server);
@@ -52,7 +52,11 @@ final class BenchSupport {
         int offset = 0;
         while (offset < bytes.length) {
             ReceiveProgress progress = endpoint.receiveBounded(
-                    bytes, offset, bytes.length - offset, Integer.MAX_VALUE, CollectionSpace.UNLIMITED);
+                    bytes,
+                    offset,
+                    bytes.length - offset,
+                    Integer.MAX_VALUE,
+                    CollectionSpace.of(Integer.MAX_VALUE, Integer.MAX_VALUE));
             if (progress.consumed() == 0) {
                 return;
             }

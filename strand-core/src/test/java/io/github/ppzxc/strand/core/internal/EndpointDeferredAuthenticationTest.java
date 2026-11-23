@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class EndpointDeferredAuthenticationTest {
     @Test
     void partialEventCollectionLeavesLaterRequestsEligibleForRefusal() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
@@ -30,7 +30,7 @@ class EndpointDeferredAuthenticationTest {
 
     @Test
     void boundedEventCollectionPreservesRemainingEventsInOrder() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
@@ -45,7 +45,7 @@ class EndpointDeferredAuthenticationTest {
 
     @Test
     void requestAfterAuthenticationIsReportedWithoutAnyAutomaticRefusal() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
@@ -66,7 +66,7 @@ class EndpointDeferredAuthenticationTest {
 
     @Test
     void lateAuthenticationDoesNotReopenClosedConnection() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
@@ -84,7 +84,7 @@ class EndpointDeferredAuthenticationTest {
 
     @Test
     void duplicateAuthenticationWhileDecisionPendingClosesConnection() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
@@ -98,7 +98,7 @@ class EndpointDeferredAuthenticationTest {
 
     @Test
     void authenticationIsRequestedWithoutCallingUserCode() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
@@ -118,7 +118,7 @@ class EndpointDeferredAuthenticationTest {
     }
 
     private static Endpoint authPending() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
@@ -168,7 +168,7 @@ class EndpointDeferredAuthenticationTest {
     private static final String AUTH_ACK_NO_LIFETIME = "0000001000050100000000000000000000000000";
 
     private static String passAndCollectAck(OptionalLong lifetime, EndpointConfig config) {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(config);
+        Endpoint server = Endpoint.server(config);
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
@@ -213,7 +213,7 @@ class EndpointDeferredAuthenticationTest {
 
     @Test
     void lifetimeOutOfUnsigned32BitRangeIsRejected() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         assertThatThrownBy(() -> server.completeAuthentication(1, AuthDecision.PASS, OptionalLong.of(-1)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> server.completeAuthentication(1, AuthDecision.PASS, OptionalLong.of(0x1_0000_0000L)))
@@ -222,7 +222,7 @@ class EndpointDeferredAuthenticationTest {
 
     @Test
     void lifetimeExpiringDoesNotCloseTheConnection() {
-        Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
+        Endpoint server = Endpoint.server(EndpointConfig.defaults());
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));

@@ -2,9 +2,6 @@ package io.github.ppzxc.strand.core.internal;
 
 /** 전송 모듈이 사건과 출력을 아직 수거하지 못한 채 core에 남겨 둘 수 있는 최대 개수. 내부 계약이며 제품 공개 API가 아니다. */
 public final class CollectionSpace {
-    /** 한도가 없다. */
-    public static final CollectionSpace UNLIMITED = new CollectionSpace(Integer.MAX_VALUE, Integer.MAX_VALUE);
-
     private final int events;
     private final int outputs;
 

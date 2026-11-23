@@ -42,8 +42,6 @@ public final class EndpointConfig {
     private final String authMechanism;
     /** 클라이언트가 {@code AUTH}로 보낼 자격 증명. */
     private final byte[] authCredentials;
-    /** 서버가 받은 {@code AUTH}를 넘길 애플리케이션. */
-    private final Authenticator authenticator;
     /** 적합성·호스트 인증 환경이 서버 AUTH(ACK)에 알릴 자격 증명 수명(초). */
     private final OptionalLong credentialLifetimeSeconds;
 
@@ -58,7 +56,6 @@ public final class EndpointConfig {
         this.nextStreamId = draft.nextStreamId;
         this.authMechanism = draft.authMechanism;
         this.authCredentials = draft.authCredentials;
-        this.authenticator = draft.authenticator;
         this.credentialLifetimeSeconds = draft.credentialLifetimeSeconds;
     }
 
@@ -79,7 +76,6 @@ public final class EndpointConfig {
 
         String authMechanism = ANONYMOUS;
         byte[] authCredentials = new byte[0];
-        Authenticator authenticator = EndpointConfig::passesAnonymousOnly;
 
         OptionalLong credentialLifetimeSeconds = OptionalLong.empty();
     }
@@ -96,7 +92,6 @@ public final class EndpointConfig {
         draft.nextStreamId = nextStreamId;
         draft.authMechanism = authMechanism;
         draft.authCredentials = authCredentials;
-        draft.authenticator = authenticator;
         draft.credentialLifetimeSeconds = credentialLifetimeSeconds;
         return draft;
     }
@@ -254,18 +249,6 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
-    /**
-     * 서버가 받은 {@code AUTH}를 넘길 애플리케이션을 정한 복사본. 정하지 않으면 {@code ANONYMOUS}와 빈 자격 증명만 통과시킨다.
-     *
-     * @param value 판단하는 애플리케이션
-     * @return 새 설정
-     */
-    public EndpointConfig authenticator(Authenticator value) {
-        ConfigDraft draft = draft();
-        draft.authenticator = value;
-        return new EndpointConfig(draft);
-    }
-
     /** 서버 {@code AUTH(ACK)}에 알릴 자격 증명 수명을 정한 복사본. 생략하면 수명 항목을 싣지 않는다. */
     public EndpointConfig credentialLifetimeSeconds(long value) {
         if (value < 0 || value > 0xFFFF_FFFFL) {
@@ -288,20 +271,12 @@ public final class EndpointConfig {
                 && AUTH_MECHANISM_GRAMMAR.matcher(mechanism).matches();
     }
 
-    private static AuthDecision passesAnonymousOnly(String mechanism, byte[] credentials) {
-        return mechanism.equals(ANONYMOUS) && credentials.length == 0 ? AuthDecision.PASS : AuthDecision.REJECT;
-    }
-
     String authMechanism() {
         return authMechanism;
     }
 
     byte[] authCredentials() {
         return authCredentials.clone();
-    }
-
-    Authenticator authenticator() {
-        return authenticator;
     }
 
     OptionalLong credentialLifetimeSeconds() {

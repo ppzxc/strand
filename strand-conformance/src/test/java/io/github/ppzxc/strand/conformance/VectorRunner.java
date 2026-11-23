@@ -147,7 +147,7 @@ final class VectorRunner {
         VectorRunner runner = new VectorRunner(
                 client,
                 webSocket,
-                client ? Endpoint.client(config) : Endpoint.serverWithDeferredAuthentication(config),
+                client ? Endpoint.client(config) : Endpoint.server(config),
                 auth.lifetimeSeconds,
                 auth);
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.

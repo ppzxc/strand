@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.nio.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ppzxc.strand.core.internal.AuthDecision;
 import io.github.ppzxc.strand.core.internal.CollectionSpace;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
@@ -11,7 +12,10 @@ import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.core.internal.ReceiveProgress;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 /** 통로 시험이 쓰는 메시지 재료. 엔드포인트에서 얻어 오므로 실제 프레임이다. */
 public final class TestMessages {
@@ -22,6 +26,7 @@ public final class TestMessages {
 
     private static final CollectionSpace SPACE = CollectionSpace.of(1 << 16, 1 << 16);
     private static final int EVENT_BATCH = 1024;
+    private static final Map<Endpoint, List<Event>> STASH = Collections.synchronizedMap(new WeakHashMap<>());
 
     private TestMessages() {}
 
@@ -41,7 +46,8 @@ public final class TestMessages {
     }
 
     /**
-     * 받은 바이트를 한도 있는 입력으로 엔드포인트에 모두 넣는다. 수거 공간이 차면 사건을 수거하고 이어 넣으며, 수거한 사건은 버린다.
+     * 받은 바이트를 한도 있는 입력으로 엔드포인트에 모두 넣는다. 위임된 인증 판단({@code AUTHENTICATION_REQUIRED})은 익명 인증만 통과시키는
+     * 정책으로 곧바로 입력하고, 나머지 사건은 {@link #drainEvents}가 돌려주도록 맡아 둔다.
      *
      * @param endpoint 엔드포인트
      * @param bytes 받은 바이트
@@ -51,27 +57,43 @@ public final class TestMessages {
         while (position < bytes.length) {
             ReceiveProgress progress = endpoint.receiveBounded(bytes, position, bytes.length - position, 64, SPACE);
             position += progress.consumed();
-            if (progress.collectionRequired()) {
-                drainEvents(endpoint);
-            } else if (progress.consumed() == 0) {
+            settle(endpoint);
+            if (!progress.collectionRequired() && progress.consumed() == 0) {
                 return;
             }
         }
     }
 
+    /** 쌓인 사건을 수거해 인증 판단은 입력하고 나머지는 맡아 둔다. */
+    private static void settle(Endpoint endpoint) {
+        List<Event> stash = STASH.computeIfAbsent(endpoint, e -> new ArrayList<>());
+        for (List<Event> batch = endpoint.drainEvents(EVENT_BATCH);
+                !batch.isEmpty();
+                batch = endpoint.drainEvents(EVENT_BATCH)) {
+            for (Event event : batch) {
+                if (event.kind() == Event.Kind.AUTHENTICATION_REQUIRED) {
+                    boolean anonymous =
+                            event.authenticationMechanism().orElse("").equals("ANONYMOUS") && event.body().length == 0;
+                    endpoint.completeAuthentication(
+                            event.authenticationId(), anonymous ? AuthDecision.PASS : AuthDecision.REJECT);
+                } else {
+                    stash.add(event);
+                }
+            }
+        }
+    }
+
     /**
-     * 쌓인 사건을 한도 있게 모두 수거한다.
+     * 쌓인 사건을 한도 있게 모두 수거한다. {@link #deliver}가 맡아 둔 사건이 먼저다.
      *
      * @param endpoint 엔드포인트
      * @return 수거한 사건
      */
     public static List<Event> drainEvents(Endpoint endpoint) {
-        List<Event> all = new ArrayList<>();
-        for (List<Event> batch = endpoint.drainEvents(EVENT_BATCH);
-                !batch.isEmpty();
-                batch = endpoint.drainEvents(EVENT_BATCH)) {
-            all.addAll(batch);
-        }
+        settle(endpoint);
+        List<Event> stash = STASH.get(endpoint);
+        List<Event> all = new ArrayList<>(stash);
+        stash.clear();
         return all;
     }
 

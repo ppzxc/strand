@@ -27,7 +27,7 @@ class CoreTcpDeliveryTest {
             assertThat(fixture.onLoop(fixture.driver::zeroWrites)).isPositive();
 
             fixture.driver.command(() -> fixture.endpoint.cancelRequest(ticket.get()));
-            List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+            List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
             assertThat(events).hasSize(1);
             assertThat(events.get(0).certainty()).hasValue(Certainty.NOT_PROCESSED);
 
@@ -53,7 +53,7 @@ class CoreTcpDeliveryTest {
             assertThat(reported.get(reported.size() - 1)).isZero();
 
             fixture.driver.command(() -> fixture.endpoint.cancelRequest(ticket.get()));
-            List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+            List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
             assertThat(events.get(0).certainty()).hasValue(Certainty.UNKNOWN);
 
             byte[] wire = fixture.read(frameLength + 24);
@@ -75,7 +75,7 @@ class CoreTcpDeliveryTest {
             fixture.driver.command(() -> ticket.set(fixture.endpoint.request(OpenEndpoint.REQUEST_TYPE, new byte[10])));
             assertThat(fixture.onLoop(fixture.driver::reported)).containsExactly(4 + 16 + 10);
             fixture.driver.command(() -> fixture.endpoint.cancelRequest(ticket.get()));
-            List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+            List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
             assertThat(events.get(0).certainty()).hasValue(Certainty.UNKNOWN);
             List<byte[]> frames = OpenEndpoint.frames(fixture.read(30 + 24));
             assertThat(frames).hasSize(2);
@@ -92,7 +92,7 @@ class CoreTcpDeliveryTest {
             fixture.driver.command(() -> fixture.endpoint.request(OpenEndpoint.REQUEST_TYPE, payload));
             assertThat(fixture.onLoop(fixture.driver::reported).get(0)).isPositive();
             fixture.closeAndSettle();
-            List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+            List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
             assertThat(events).first().satisfies(e -> assertThat(e.certainty()).hasValue(Certainty.NOT_PROCESSED));
             assertThat(fixture.onLoop(fixture.driver::allReleased)).isTrue();
         }

@@ -423,14 +423,6 @@ class ConnectionPhaseTest {
         assertThat(ended(Phase.OPEN).isActive()).isFalse();
     }
 
-    /** 끝난 연결은 닫은 로컬 원인 기록을 포함해 어떤 종료 쪽 사건에도 반응하지 않는다. */
-    @Test
-    void endedConnectionKeepsItsCauseAgainstLateRecords() {
-        ConnectionPhase subject = ended(Phase.OPEN);
-        subject.causedBy(new IllegalStateException("late"));
-        assertThat(subject.closeCause()).isNull();
-    }
-
     /** 끝난 연결은 어떤 종료 쪽 사건에도 반응하지 않는다. */
     @ParameterizedTest
     @EnumSource(CloseEvent.class)
@@ -506,17 +498,5 @@ class ConnectionPhaseTest {
         assertThat(disconnected.closeExchanged()).isFalse();
         assertThat(disconnected.endsNormally()).isFalse();
         assertThat(disconnected.shouldCloseTransport()).isTrue();
-    }
-
-    /** 닫은 로컬 원인은 단계가 보관하고 끝난 뒤에도 읽는다(규격 3.5절, #199). */
-    @Test
-    void localCauseIsKept() {
-        ConnectionPhase subject = server(Phase.AUTH);
-        assertThat(subject.closeCause()).isNull();
-        IllegalStateException cause = new IllegalStateException("x");
-        subject.causedBy(cause);
-        subject.connectionFailed();
-        subject.transportClosed();
-        assertThat(subject.closeCause()).isSameAs(cause);
     }
 }

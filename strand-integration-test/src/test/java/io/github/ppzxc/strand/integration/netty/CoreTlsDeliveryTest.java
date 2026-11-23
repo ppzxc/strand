@@ -100,7 +100,7 @@ class CoreTlsDeliveryTest {
             assertThat(sum(plain)).isPositive().isLessThan(frameLength);
 
             fixture.driver.command(() -> fixture.endpoint.cancelRequest(ticket.get()));
-            List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+            List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
             assertThat(events.get(0).certainty()).hasValue(Certainty.UNKNOWN);
 
             byte[] wire = fixture.read(frameLength + 24);
@@ -129,7 +129,7 @@ class CoreTlsDeliveryTest {
                 return true;
             });
             if (!withdrawnAtZero) return false;
-            List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+            List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
             assertThat(events).hasSize(1);
             assertThat(events.get(0).certainty()).hasValue(Certainty.NOT_PROCESSED);
 
@@ -182,7 +182,7 @@ class CoreTlsDeliveryTest {
             assertThat(fixture.onLoop(fixture.driver::tlsOutboundDone)).isTrue();
             assertThat(fixture.channel.isOpen()).isFalse();
             assertThat(fixture.onLoop(fixture.driver::allReleased)).isTrue();
-            List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+            List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
             assertThat(events).extracting(Event::kind).contains(Event.Kind.RESULT, Event.Kind.CLOSED);
             return true;
         });
@@ -202,7 +202,7 @@ class CoreTlsDeliveryTest {
             });
             if (!consumedButUnsent) return false;
             fixture.closeAndSettle();
-            List<Event> events = fixture.onLoop(fixture.endpoint::drainEvents);
+            List<Event> events = fixture.onLoop(() -> fixture.endpoint.drainEvents(Integer.MAX_VALUE));
             Event result = events.stream()
                     .filter(e -> e.kind() == Event.Kind.RESULT)
                     .findFirst()
