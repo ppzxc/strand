@@ -376,6 +376,18 @@ public final class InMemoryPassage implements Passage {
         }
     }
 
+    /**
+     * 이 통로가 닫혔는가. 엔진은 전송 스레드가 끝나기 전의 마무리(남은 결과 확정, 종료 알림 확정)를 통로를 닫은 뒤에 하므로, 닫혔다고 해서 그 마무리까지 끝난
+     * 것은 아니다.
+     *
+     * @return 닫혔으면 true
+     */
+    public boolean isClosed() {
+        synchronized (lock) {
+            return closed;
+        }
+    }
+
     private long activity() {
         synchronized (lock) {
             return activity;

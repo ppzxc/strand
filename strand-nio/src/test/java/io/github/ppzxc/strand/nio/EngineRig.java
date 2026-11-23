@@ -264,11 +264,29 @@ final class EngineRig implements AutoCloseable {
     void settle() {
         for (int round = 0; round < 200; round++) {
             InMemoryPassage.awaitQuiescence(client);
+            awaitTeardownIfClosed();
             if (!pumpPeer()) {
                 return;
             }
         }
         throw new AssertionError("주고받음이 끝나지 않았다");
+    }
+
+    /**
+     * 엔진이 통로를 닫았으면 마무리(남은 결과 확정, 종료 알림 확정)가 끝나 종료 알림이 나올 때까지 기다린다. 통로 닫힘은 가라앉음으로 읽히지만 엔진은 통로를 닫은
+     * 뒤에 마무리하므로, 가라앉음만으로는 그 결과를 볼 수 없다.
+     */
+    private void awaitTeardownIfClosed() {
+        if (!client.isClosed()) {
+            return;
+        }
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(AppFixture.WAIT_SECONDS);
+        while (!connection.closed().isDone()) {
+            if (System.nanoTime() > limit) {
+                throw new AssertionError("통로를 닫은 엔진이 마무리하지 않았다");
+            }
+            java.util.concurrent.locks.LockSupport.parkNanos(50_000L);
+        }
     }
 
     /** 엔진이 쓴 것을 상대에게 먹이고 상대가 쓰려는 것을 엔진 쪽 편지함에 넣는다. 한 일이 있었으면 true. */
