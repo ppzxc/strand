@@ -49,7 +49,8 @@ class ReservedCloseCodeTest {
         }));
         App.Lsn listener = Rig.get(server.listen());
         closeables.add(listener::close);
-        Socket socket = new Socket(listener.address().getAddress(), listener.address().getPort());
+        Socket socket =
+                new Socket(listener.address().getAddress(), listener.address().getPort());
         closeables.add(socket);
         socket.setSoTimeout(200);
         Endpoint client = Endpoint.client(EndpointConfig.defaults());

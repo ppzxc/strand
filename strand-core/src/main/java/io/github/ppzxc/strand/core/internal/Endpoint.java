@@ -1375,7 +1375,7 @@ public final class Endpoint {
      * 먼저)는 CLOSE를 보내는 때에 이미 대기열에 들어 있는 RESET과 HELLO가 CLOSE 앞에 남으므로 지켜진다.
      */
     private Outbox.Node send(byte[] frame) {
-        OutboundMessage message = OutboundMessage.binary(frame);
+        OutboundMessage message = OutboundMessage.of(frame);
         if (message.isApplication()) {
             return outbox.addApplication(message);
         }

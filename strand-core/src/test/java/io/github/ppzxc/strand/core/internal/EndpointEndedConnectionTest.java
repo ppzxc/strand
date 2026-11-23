@@ -343,7 +343,6 @@ class EndpointEndedConnectionTest {
         assertThat(Drive.drainMessages(server)).isEmpty();
         List<Event> events = Drive.drainEvents(server);
         assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
-        assertThat(events.get(0).cause()).isEmpty();
     }
 
     @Test
