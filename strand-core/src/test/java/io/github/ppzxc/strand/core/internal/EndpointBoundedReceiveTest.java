@@ -11,14 +11,16 @@ class EndpointBoundedReceiveTest {
     void borrowedPartialInputIsCopiedAndResumed() {
         Endpoint server = Drive.server(EndpointConfig.defaults());
         byte[] first = EndpointTest.bytes("c0de5354");
-        assertThat(server.receiveBounded(first, 0, first.length, 1, Drive.ROOMY).consumed())
+        assertThat(server.receiveBounded(first, 0, first.length, 1, EndpointDriver.ROOMY)
+                        .consumed())
                 .isEqualTo(4);
         java.util.Arrays.fill(first, (byte) 0);
         byte[] rest = EndpointTest.bytes("52300000" + "0000001000010000000000000000000000000000");
-        assertThat(server.receiveBounded(rest, 0, rest.length, 1, Drive.ROOMY).consumed())
+        assertThat(server.receiveBounded(rest, 0, rest.length, 1, EndpointDriver.ROOMY)
+                        .consumed())
                 .isEqualTo(4);
         assertThat(Drive.drainMessages(server)).hasSize(1);
-        assertThat(server.receiveBounded(rest, 4, rest.length - 4, 1, Drive.ROOMY)
+        assertThat(server.receiveBounded(rest, 4, rest.length - 4, 1, EndpointDriver.ROOMY)
                         .consumed())
                 .isEqualTo(20);
         assertThat(Drive.drainMessages(server)).hasSize(1);
@@ -29,11 +31,11 @@ class EndpointBoundedReceiveTest {
         Endpoint server = Drive.server(EndpointConfig.defaults());
         byte[] input = EndpointTest.bytes("c0de535452300000" + "0000001000010000000000000000000000000000");
 
-        int first =
-                server.receiveBounded(input, 0, input.length, 1, Drive.ROOMY).consumed();
+        int first = server.receiveBounded(input, 0, input.length, 1, EndpointDriver.ROOMY)
+                .consumed();
         assertThat(first).isEqualTo(8);
         assertThat(Drive.drainMessages(server)).hasSize(1);
-        int second = server.receiveBounded(input, first, input.length - first, 1, Drive.ROOMY)
+        int second = server.receiveBounded(input, first, input.length - first, 1, EndpointDriver.ROOMY)
                 .consumed();
         assertThat(second).isEqualTo(20);
         assertThat(Drive.drainMessages(server)).hasSize(1);

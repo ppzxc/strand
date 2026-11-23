@@ -357,7 +357,7 @@ class VectorRunnerTest {
     @Test
     void runnerSourcesDoNotUseTheBatchDrivingMode() throws java.io.IOException {
         java.nio.file.Path dir = java.nio.file.Paths.get("src/test/java/io/github/ppzxc/strand/conformance");
-        for (String file : new String[] {"VectorRunner.java", "StepKind.java", "ProgressDriver.java"}) {
+        for (String file : new String[] {"VectorRunner.java", "StepKind.java"}) {
             String source = new String(
                     java.nio.file.Files.readAllBytes(dir.resolve(file)), java.nio.charset.StandardCharsets.UTF_8);
             assertThat(source)
