@@ -5,8 +5,6 @@ import static io.github.ppzxc.strand.conformance.Protocol.statusCode;
 import static io.github.ppzxc.strand.conformance.Protocol.streamId;
 
 import com.google.gson.JsonObject;
-import io.github.ppzxc.strand.core.internal.CollectionSpace;
-import io.github.ppzxc.strand.core.internal.Endpoint;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -50,8 +48,8 @@ final class StepKind {
     private static final StepKind RECV = define(
                     "recv",
                     BASE.require("hex", Check::hex),
-                    (endpoint, step) ->
-                            endpoint.receive(Bytes.fromHex(step.get("hex").getAsString())))
+                    (driver, step) ->
+                            driver.receiveStream(Bytes.fromHex(step.get("hex").getAsString())))
             .inbound(Inbound.STREAM)
             .onlyOnTransport(VectorSchema.TCP);
 
@@ -59,13 +57,12 @@ final class StepKind {
                     "recv_message",
                     BASE.require("opcode", FieldCheck.oneOf(VectorSchema.OPCODES))
                             .require("hex", Check::hex),
-                    (endpoint, step) -> {
+                    (driver, step) -> {
                         // 메시지 하나는 한 단위다. 텍스트 메시지는 바이트로 넘길 수 없는 입력이다.
                         if (step.get("opcode").getAsString().equals("binary")) {
-                            byte[] message = Bytes.fromHex(step.get("hex").getAsString());
-                            endpoint.receiveUnit(message, 0, message.length, CollectionSpace.UNLIMITED);
+                            driver.receiveUnit(Bytes.fromHex(step.get("hex").getAsString()));
                         } else {
-                            endpoint.receiveUnsupportedInput(CollectionSpace.UNLIMITED);
+                            driver.receiveUnsupportedInput();
                         }
                     })
             .inbound(Inbound.MESSAGE)
@@ -74,8 +71,8 @@ final class StepKind {
     private static final StepKind PING = define(
                     "ping",
                     BASE.require("payload", Check::pingPayload),
-                    (endpoint, step) ->
-                            endpoint.ping(Bytes.fromHex(step.get("payload").getAsString())))
+                    (driver, step) -> driver.endpoint()
+                            .ping(Bytes.fromHex(step.get("payload").getAsString())))
             .pingSending();
 
     private static final StepKind REQUEST = register(
@@ -87,22 +84,20 @@ final class StepKind {
                             .allow("extensions", Check::extensions)
                             .allow("payload", Check::hex)
                             .allow("deadline_ms", VectorSchema.POSITIVE_U32),
-                    (endpoint, step, requestTickets) -> {
+                    (driver, step, requestTickets) -> {
                         byte[] payload = Bytes.fromHex(VectorSchema.hexOrEmpty(step, "payload"));
                         long ticket = step.has("deadline_ms")
-                                ? endpoint.request(
-                                        step.get("type").getAsInt(),
-                                        payload,
-                                        step.get("deadline_ms").getAsLong())
-                                : endpoint.request(step.get("type").getAsInt(), payload);
+                                ? driver.endpoint()
+                                        .request(
+                                                step.get("type").getAsInt(),
+                                                payload,
+                                                step.get("deadline_ms").getAsLong())
+                                : driver.endpoint().request(step.get("type").getAsInt(), payload);
                         if (step.has("name"))
                             requestTickets.put(step.get("name").getAsString(), ticket);
                     })
             .unsupportedParts(step -> {
                 List<String> unsupported = new ArrayList<>();
-                if (step.has("write_limit_bytes")) {
-                    unsupported.add("request.write_limit_bytes");
-                }
                 if (step.has("extensions") && step.getAsJsonArray("extensions").size() > 0) {
                     unsupported.add("request.extensions");
                 }
@@ -115,20 +110,22 @@ final class StepKind {
                     .require("status", VectorSchema.STATUS)
                     .allow("extensions", Check::extensions)
                     .allow("payload", Check::hex),
-            (endpoint, step) -> endpoint.respond(
-                    streamId(step.get("stream_id")),
-                    statusCode(step.get("status")),
-                    Bytes.fromHex(VectorSchema.hexOrEmpty(step, "payload"))));
+            (driver, step) -> driver.endpoint()
+                    .respond(
+                            streamId(step.get("stream_id")),
+                            statusCode(step.get("status")),
+                            Bytes.fromHex(VectorSchema.hexOrEmpty(step, "payload"))));
 
     private static final StepKind CANCEL = register(
             CANCEL_NAME,
             BASE.allow("stream_id", VectorSchema.STREAM_ID).allow("request", Check::string),
-            (endpoint, step, requestTickets) -> {
+            (driver, step, requestTickets) -> {
                 if (step.has("request")) {
-                    endpoint.cancelRequest(
-                            requestTickets.get(step.get("request").getAsString()));
+                    driver.endpoint()
+                            .cancelRequest(
+                                    requestTickets.get(step.get("request").getAsString()));
                 } else {
-                    endpoint.cancel(streamId(step.get("stream_id")));
+                    driver.endpoint().cancel(streamId(step.get("stream_id")));
                 }
             });
 
@@ -136,26 +133,32 @@ final class StepKind {
     private static final StepKind CLOSE = define(
             "close",
             BASE.require("error_code", VectorSchema.ERROR_CODE).allow("reason", Check::string),
-            (endpoint, step) -> endpoint.close(
-                    errorCode(step.get("error_code")),
-                    step.has("reason") ? step.get("reason").getAsString() : ""));
+            (driver, step) -> driver.endpoint()
+                    .close(
+                            errorCode(step.get("error_code")),
+                            step.has("reason") ? step.get("reason").getAsString() : ""));
 
     private static final StepKind CREDENTIAL_EXPIRED = define(
-                    CREDENTIAL_EXPIRED_NAME, BASE, (endpoint, step) -> endpoint.credentialExpired())
+                    CREDENTIAL_EXPIRED_NAME,
+                    BASE,
+                    (driver, step) -> driver.endpoint().credentialExpired())
             .credentialNotification();
 
     private static final StepKind CREDENTIAL_REVOKED = define(
-                    CREDENTIAL_REVOKED_NAME, BASE, (endpoint, step) -> endpoint.credentialRevoked())
+                    CREDENTIAL_REVOKED_NAME,
+                    BASE,
+                    (driver, step) -> driver.endpoint().credentialRevoked())
             .credentialNotification();
 
     private static final StepKind ADVANCE = define(
                     "advance",
                     BASE.require(TIME_ADVANCE_FIELD, VectorSchema.POSITIVE_U32),
-                    (endpoint, step) ->
-                            endpoint.advance(step.get(TIME_ADVANCE_FIELD).getAsLong()))
+                    (driver, step) -> driver.advanceMilliseconds(
+                            step.get(TIME_ADVANCE_FIELD).getAsLong()))
             .timeAdvancing();
 
-    private static final StepKind DISCONNECT = define("disconnect", BASE, (endpoint, step) -> endpoint.disconnect())
+    private static final StepKind DISCONNECT = define(
+                    "disconnect", BASE, (driver, step) -> driver.endpoint().disconnect())
             .connectionEnding();
 
     private static final Map<String, Shape> SHAPES_BY_NAME = shapes();
@@ -177,8 +180,8 @@ final class StepKind {
         this.execution = execution;
     }
 
-    private static StepKind define(String name, Shape shape, BiConsumer<Endpoint, JsonObject> execution) {
-        return register(name, shape, (endpoint, step, requestTickets) -> execution.accept(endpoint, step));
+    private static StepKind define(String name, Shape shape, BiConsumer<ProgressDriver, JsonObject> execution) {
+        return register(name, shape, (driver, step, requestTickets) -> execution.accept(driver, step));
     }
 
     private static StepKind register(String name, Shape shape, StepExecution execution) {
@@ -260,9 +263,9 @@ final class StepKind {
         return name;
     }
 
-    /** 단계를 엔드포인트에 적용한다. */
-    void execute(Endpoint endpoint, JsonObject step, Map<String, Long> requestTickets) {
-        execution.execute(endpoint, step, requestTickets);
+    /** 단계를 진행 보고 구동기로 엔드포인트에 적용한다. */
+    void execute(ProgressDriver driver, JsonObject step, Map<String, Long> requestTickets) {
+        execution.execute(driver, step, requestTickets);
     }
 
     /** 지원 종류여도 러너가 실행하지 못하는 단계 내용(예: request의 확장). */
@@ -308,6 +311,6 @@ final class StepKind {
 
     @FunctionalInterface
     private interface StepExecution {
-        void execute(Endpoint endpoint, JsonObject step, Map<String, Long> requestTickets);
+        void execute(ProgressDriver driver, JsonObject step, Map<String, Long> requestTickets);
     }
 }
