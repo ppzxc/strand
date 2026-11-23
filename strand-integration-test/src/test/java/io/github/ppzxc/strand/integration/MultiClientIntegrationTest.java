@@ -18,7 +18,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
@@ -34,8 +33,8 @@ class MultiClientIntegrationTest {
     /** 규격 4.2절: 클라이언트가 처음 여는 스트림은 1번이다. 연결마다 번호 공간이 따로라 모든 클라이언트가 1번을 쓴다. */
     private static final long FIRST_CLIENT_STREAM_ID = 1L;
 
-    private static TcpServer startServer() throws Exception {
-        return TcpServer.start(type -> type - APPLICATION_TYPE);
+    private static TcpServer startServer(Transport transport) throws Exception {
+        return TcpServer.start(transport, type -> type - APPLICATION_TYPE);
     }
 
     private static CompletableFuture<RequestResult> requestFor(Peer client, int index) {
@@ -53,16 +52,16 @@ class MultiClientIntegrationTest {
      * {@code type}으로 요청을 내고, 각 클라이언트가 자기 요청에 해당하는 {@code status}를 받는지, 서버가 받은 요청이 모두 스트림 1번인지 본다. 모든
      * 클라이언트가 같은 {@code stream_id} 1을 쓰므로, 연결 사이에 번호 공간이 섞이면 실패한다.
      */
-    @Test
+    @TransportTest
     @DisplayName("클라이언트 16개가 동시에 연결해도 응답이 자기 연결로만 돌아온다 (규격 4.2)")
-    void concurrentClientsEachGetTheirOwnResponse() throws Exception {
+    void concurrentClientsEachGetTheirOwnResponse(Transport transport) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(CLIENT_COUNT);
-        try (TcpServer server = startServer()) {
+        try (TcpServer server = startServer(transport)) {
             CountDownLatch start = new CountDownLatch(1);
             List<Future<RequestResult>> results = new ArrayList<>();
             for (int i = 0; i < CLIENT_COUNT; i++) {
                 int index = i;
-                results.add(pool.submit(() -> connectAndRequest(server.port(), index, start)));
+                results.add(pool.submit(() -> connectAndRequest(transport, server.port(), index, start)));
             }
             start.countDown();
 
@@ -70,6 +69,10 @@ class MultiClientIntegrationTest {
                 RequestResult result = results.get(i).get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 assertThat(result.certainty()).as("클라이언트 %d의 결과 확정성", i).isEqualTo(Certainty.RESPONSE);
                 assertThat(result.status()).as("클라이언트 %d의 status", i).isEqualTo(i);
+            }
+            // 스트림 번호는 통로를 관찰할 수 있는 전송(nio)에서만 본다. netty에서는 위의 응답 매칭까지만 본다.
+            if (!transport.observesPassage()) {
+                return;
             }
             // 서버 통로들이 읽은 요청 프레임의 번호로 본다. 제품 API는 받은 요청의 스트림 번호를 드러내지 않는다.
             // 연결과 통로를 동시에 짝짓기 어려우므로 type이 서로 다른 요청을 모든 서버 쪽 통로에서 모은다.
@@ -92,9 +95,10 @@ class MultiClientIntegrationTest {
     }
 
     /** 신호가 올 때까지 기다렸다가 연결하고 요청을 내서, 연결과 요청이 한꺼번에 몰리게 한다. */
-    private static RequestResult connectAndRequest(int port, int index, CountDownLatch start) throws Exception {
+    private static RequestResult connectAndRequest(Transport transport, int port, int index, CountDownLatch start)
+            throws Exception {
         start.await();
-        try (Peer client = Peer.connect(port, null)) {
+        try (Peer client = Peer.connect(transport, port, null)) {
             return await(requestFor(client, index));
         }
     }
@@ -105,15 +109,15 @@ class MultiClientIntegrationTest {
      * 연결마다 받은 요청 수와 종료 알림을 비교한다. 끊긴 쪽은 요청 한 건을 받고 CLOSE 없이 끊김으로 한 번, 나머지는 자기 연결 종료(CLOSE)로 한 번만 알림을 받아야
      * 한다. 알림이 늦게 번져 한 번 더 오는 것도 연결을 모두 닫은 뒤의 알림 수로 놓치지 않는다(규격 3.5절, 4.2절).
      */
-    @Test
+    @TransportTest
     @DisplayName("수립된 연결 하나가 비정상 종료돼도 나머지 연결은 영향을 받지 않는다 (규격 3.5, 4.2)")
-    void oneAbruptDisconnectDoesNotAffectOthers() throws Exception {
+    void oneAbruptDisconnectDoesNotAffectOthers(Transport transport) throws Exception {
         int aborted = 0;
         List<Peer> clients = new ArrayList<>();
         List<Peer> serverSides = new ArrayList<>();
-        try (TcpServer server = startServer()) {
+        try (TcpServer server = startServer(transport)) {
             for (int i = 0; i < CLIENT_COUNT; i++) {
-                clients.add(Peer.connect(server.port(), null));
+                clients.add(Peer.connect(transport, server.port(), null));
                 // 연결을 하나씩 맺고 바로 받으므로, 받은 서버 쪽 연결은 방금 연결한 클라이언트의 짝이다.
                 serverSides.add(server.awaitPeer());
             }
