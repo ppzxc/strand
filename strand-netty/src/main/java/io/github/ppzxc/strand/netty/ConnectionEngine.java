@@ -122,6 +122,13 @@ final class ConnectionEngine {
     private @Nullable Loop active;
     private PreparationStage stage;
     private boolean preparing = true;
+    private static final long EARLY_REQUEST_OVERHEAD = 64;
+
+    /** 핸들러 준비 전에 도착해 활성화를 기다리는 요청. 활성화되면 도착 순서대로 넘기고, 준비가 실패하면 연결과 함께 끝난다. 전송 스레드에서만 쓴다. */
+    private final ArrayDeque<Event> earlyRequests = new ArrayDeque<>();
+    /** 보관한 요청을 준비 실패 때 돌려보내려고 잡아 둔 엔드포인트. 전송 스레드에서만 쓴다. */
+    private @Nullable Endpoint loopEndpoint;
+
     private boolean preparingSlotHeld = true;
     private boolean releasedNotified;
     private long resolvedBytes;
@@ -620,6 +627,7 @@ final class ConnectionEngine {
     }
 
     private void releaseSlots() {
+        dropEarlyRequests(false);
         returnAllHeldBytes();
         if (p.preparationBytes != null) {
             p.preparationBytes.releaseAll();
@@ -1122,6 +1130,7 @@ final class ConnectionEngine {
     private void failPreparation(PreparationStage at, Throwable cause) {
         if (preparing) {
             preparing = false;
+            dropEarlyRequests(true);
             confirmAttempt();
             releasePreparingSlot();
             PreparationFailure failure = new PreparationFailure(p.remoteAddress, at, cause);
@@ -1196,6 +1205,36 @@ final class ConnectionEngine {
         activeHandler = handler;
         handlerPrepared = true;
         becomeReady(loop);
+        Event early;
+        while ((early = earlyRequests.poll()) != null) {
+            p.budgets.release(Resource.PREPARATION_BYTES, earlyCost(early));
+            onRequestReceived(loop, early);
+        }
+    }
+
+    private static long earlyCost(Event event) {
+        return (long) event.body().length + event.extensions().length + EARLY_REQUEST_OVERHEAD;
+    }
+
+    /** 준비 중에 도착한 요청을 활성화까지 보관한다. 준비 바이트 예약을 얻지 못하면 false이고, 그때는 앱에 넘기기 전에 거절한다(규격 4.5절). */
+    private boolean holdEarlyRequest(Event event) {
+        if (!preparing || !p.budgets.tryReserve(Resource.PREPARATION_BYTES, earlyCost(event))) {
+            return false;
+        }
+        earlyRequests.add(event);
+        return true;
+    }
+
+    /** 준비가 실패해 활성화되지 못한 보관 요청을 버린다. {@code refuse}이면 앱에 넘기지 않은 요청이므로 {@code RESET(REFUSED)}로 돌려보낸다(규격 4.5절). */
+    private void dropEarlyRequests(boolean refuse) {
+        Endpoint endpoint = loopEndpoint;
+        Event early;
+        while ((early = earlyRequests.poll()) != null) {
+            if (refuse && endpoint != null) {
+                endpoint.refuseRequest(early.streamId());
+            }
+            p.budgets.release(Resource.PREPARATION_BYTES, earlyCost(early));
+        }
     }
 
     private void startFactory(Loop loop) {
@@ -1251,8 +1290,10 @@ final class ConnectionEngine {
         byte[] body = event.body();
         byte[] wireExtensions = event.extensions();
         if (!handlerPrepared) {
-            // 준비 전 요청은 애플리케이션에 넘기지 않고 거절한다. 전송 모듈의 정책이다(규격 4.5절).
-            loop.endpoint.refuseRequest(streamId);
+            // 준비 전 요청은 애플리케이션에 넘기기 전에만 거절할 수 있다(규격 4.5절). 준비 중이면 활성화까지 보관하고, 보관하지 못할 때만 거절한다.
+            if (!holdEarlyRequest(event)) {
+                loop.endpoint.refuseRequest(streamId);
+            }
             return;
         }
         RequestHandler handler = activeHandler;
@@ -1290,6 +1331,15 @@ final class ConnectionEngine {
      * 시작하지 않는다. 이미 응답을 접수했거나 끝난 요청이면 core가 이 사건을 내지 않는다.
      */
     private void onRequestReset(Event event) {
+        if (earlyRequests.removeIf(early -> {
+            boolean same = early.streamId() == event.streamId();
+            if (same) {
+                p.budgets.release(Resource.PREPARATION_BYTES, earlyCost(early));
+            }
+            return same;
+        })) {
+            return;
+        }
         IncomingRequest request = incoming.get(event.streamId());
         if (request != null) {
             finishIncoming(
@@ -1397,6 +1447,7 @@ final class ConnectionEngine {
             this.origin = p.nanoClock.getAsLong();
             this.endpoint =
                     p.role == ConnectionParams.Role.CLIENT ? Endpoint.client(p.config) : Endpoint.server(p.config);
+            loopEndpoint = this.endpoint;
             ConnectionParams.Tls security = p.tls;
             if (security == null) {
                 this.tls = null;

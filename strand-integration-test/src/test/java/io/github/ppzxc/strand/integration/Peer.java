@@ -3,7 +3,6 @@ package io.github.ppzxc.strand.integration;
 import io.github.ppzxc.strand.api.CloseNotice;
 import io.github.ppzxc.strand.api.Request;
 import io.github.ppzxc.strand.api.RequestHandle;
-import io.github.ppzxc.strand.api.RequestOptions;
 import io.github.ppzxc.strand.api.RequestResult;
 import io.github.ppzxc.strand.nio.internal.ControlledPassage;
 import io.github.ppzxc.strand.nio.internal.TestNio;
@@ -135,7 +134,6 @@ final class Peer implements AutoCloseable {
         Inbox inbox = new Inbox();
         Wire wire = transport.wire();
         Wire.Client client = wire.newClient(inbox.handler(statusForType), idlePingInterval);
-        TcpServer server = TcpServer.byPort(port);
         CompletableFuture<Peer> ready = new CompletableFuture<>();
         client.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port))
                 .whenCompleteAsync(
@@ -145,15 +143,10 @@ final class Peer implements AutoCloseable {
                                 return;
                             }
                             try {
-                                if (server != null) {
-                                    // 서버가 핸들러를 준비하기 전에 온 요청은 거절되므로(규격 4.5절) 서버 쪽 연결이 준비된 뒤에 시험에 돌려준다.
-                                    server.awaitPrepared();
-                                }
                                 ready.complete(new Peer(connection, client, wire.claimPassage(false), inbox));
                             } catch (RuntimeException | AssertionError e) {
                                 ready.completeExceptionally(e);
                             }
-                            // 준비를 기다리는 동안 막으므로 전송의 이벤트 루프가 아니라 앱 실행기에서 돈다.
                         },
                         HANDLERS);
         return ready;
@@ -170,21 +163,6 @@ final class Peer implements AutoCloseable {
 
     Sent request(int type, byte[] payload) {
         return new Sent(connection.request(Request.of(type, payload)));
-    }
-
-    /**
-     * 전송 스레드가 이 호출 전에 접수된 명령을 모두 처리했음을 확인한다. 기한이 0인 요청은 접수하는 즉시 처리 안 됨으로 끝나고 통로에 쓰이지 않으며, 그 결과는 앞서 접수된 명령이 처리된 뒤에야 나온다.
-     */
-    void awaitEngineTurn() {
-        try {
-            Fixtures.await(connection
-                    .request(
-                            Request.of(Fixtures.APPLICATION_TYPE, new byte[0]),
-                            RequestOptions.deadlineAfter(Duration.ZERO))
-                    .result());
-        } catch (Exception e) {
-            throw new AssertionError("전송 스레드가 명령을 처리하지 않았다", e);
-        }
     }
 
     /** 연결 종료(CLOSE) 절차를 시작한다. */

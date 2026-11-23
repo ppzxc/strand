@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.integration;
 
-import io.github.ppzxc.strand.api.Resource;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
@@ -8,7 +7,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntUnaryOperator;
 import org.jspecify.annotations.Nullable;
 
@@ -23,8 +21,6 @@ final class TcpServer implements AutoCloseable {
     private final int port;
     private final List<Peer> peers = new CopyOnWriteArrayList<>();
     private final BlockingQueue<Peer> accepted = new LinkedBlockingQueue<>();
-    private final AtomicInteger connectsCompleted = new AtomicInteger();
-    private final AtomicInteger prepared = new AtomicInteger();
 
     private TcpServer(Transport transport, @Nullable IntUnaryOperator statusForType) throws Exception {
         Wire wire = transport.wire();
@@ -33,7 +29,6 @@ final class TcpServer implements AutoCloseable {
             Peer peer = new Peer(connection, null, wire.claimPassage(true), inbox);
             peers.add(peer);
             accepted.add(peer);
-            prepared.incrementAndGet();
             return inbox.handler(statusForType);
         });
         this.port = server.port();
@@ -57,22 +52,6 @@ final class TcpServer implements AutoCloseable {
 
     int port() throws IOException {
         return port;
-    }
-
-    /**
-     * 맺어진 클라이언트 연결의 서버 쪽 핸들러 준비가 끝나길 기다린다. 서버는 핸들러 준비 전에 온 요청을 거절한다(규격 4.5절). 연결 인증 응답은 팩터리가 끝나기 전에 나가므로 클라이언트가
-     * 연결을 받은 직후에 낸 첫 요청이 거절될 수 있다. 팩터리가 낸 결과를 엔진이 받아들이면 팩터리 작업 슬롯이 돌아오므로(소유 객체의 {@code FACTORY_TASKS} 사용량이 0), 그것을 기다린 뒤 각
-     * 서버 쪽 연결의 전송 스레드가 한 바퀴 돌았는지까지 확인한다.
-     */
-    void awaitPrepared() {
-        int expected = connectsCompleted.incrementAndGet();
-        Peer.awaitUntil(() -> prepared.get() >= expected, "서버가 연결 " + expected + "의 핸들러를 준비하지 못했다");
-        Peer.awaitUntil(
-                () -> server.usage(Resource.FACTORY_TASKS).current() == 0,
-                "서버의 핸들러 팩터리 작업이 " + Fixtures.TIMEOUT_MS + "ms 안에 끝나지 않았다");
-        for (Peer peer : peers) {
-            peer.awaitEngineTurn();
-        }
     }
 
     /** 인증을 통과해 핸들러가 준비된 다음 연결의 서버 쪽을 들어온 순서대로 기다려 돌려준다. */

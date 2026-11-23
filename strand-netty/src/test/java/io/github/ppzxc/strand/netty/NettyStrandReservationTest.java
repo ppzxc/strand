@@ -71,6 +71,59 @@ class NettyStrandReservationTest {
     }
 
     @Test
+    void aFirstRequestSentRightAfterConnectingIsHeldUntilTheHandlerFactoryFinishes() throws Exception {
+        AppFixture server = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        CountDownLatch factoryStarted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        NettyStrandServer app = acceptingServer(server)
+                .handlerFactory(connection -> {
+                    factoryStarted.countDown();
+                    release.await();
+                    return PreparedHandler.of(request -> request.respond(Status.OK, new byte[0]));
+                })
+                .build();
+        Listener listener = listen(app);
+        NettyStrandConnection connection =
+                AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
+        assertThat(factoryStarted.await(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS))
+                .isTrue();
+
+        RequestHandle handle = connection.request(Request.of(TYPE, bytes("a")));
+        Thread.sleep(200);
+        assertThat(handle.result().isDone()).isFalse();
+        release.countDown();
+
+        // 준비 전에 온 요청은 거절되지 않고 활성화된 핸들러가 처리한다(규격 4.5절).
+        assertThat(clientFixture.result(handle.result()).status()).isEqualTo(Status.OK);
+    }
+
+    @Test
+    void aRequestHeldDuringPreparationIsRefusedAsNotProcessedWhenTheFactoryFails() throws Exception {
+        AppFixture server = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        CountDownLatch release = new CountDownLatch(1);
+        NettyStrandServer app = acceptingServer(server)
+                .handlerFactory(connection -> {
+                    release.await();
+                    throw new IllegalStateException("팩터리 실패");
+                })
+                .build();
+        Listener listener = listen(app);
+        NettyStrandConnection connection =
+                AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
+
+        RequestHandle handle = connection.request(Request.of(TYPE, bytes("a")));
+        Thread.sleep(200);
+        release.countDown();
+        RequestResult result = clientFixture.result(handle.result());
+
+        // 앱에 넘기지 않은 요청은 준비가 실패해도 거절되어 처리 안 됨으로 끝난다(규격 4.5절).
+        assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+    }
+
+    @Test
     void receivedRequestsBeyondTheOwnerLimitAreRefusedBeforeAnyHandlerStarts() throws Exception {
         AppFixture server =
                 track(new AppFixture.Spec().ownerIncoming(2, 1 << 20).plain());

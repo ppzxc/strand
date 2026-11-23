@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * 팩터리가 끝나지 않은 준비 중의 입력을 와이어 수준 상대로 확인한다(규격 3.3~3.5절). AUTH 관문을 통과한 뒤의 PING은 확인(ACK)되고, 요청은
- * REFUSED로 거절되며, 두 번째 AUTH는 연결 오류이고, CLOSE는 준비를 실패시킨다(#319).
+ * 활성화까지 보관되며, 두 번째 AUTH는 연결 오류이고, CLOSE는 준비를 실패시킨다(#319).
  */
 class NioPreparationInputTest {
     private static final int HELLO = 0x0001;
@@ -32,7 +32,6 @@ class NioPreparationInputTest {
     private static final int AUTH = 0x0005;
     private static final int ACK = 0x01;
     private static final int PROTOCOL_ERROR = 1;
-    private static final int REFUSED = 3;
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 
@@ -147,6 +146,7 @@ class NioPreparationInputTest {
         final AppFixture fixture;
         final CountDownLatch factoryEntered = new CountDownLatch(1);
         final CountDownLatch releaseFactory = new CountDownLatch(1);
+        final CountDownLatch handled = new CountDownLatch(1);
         final BlockingQueue<PreparationFailure> failures = new LinkedBlockingQueue<>();
         final NioStrandServer server;
         final InetSocketAddress address;
@@ -159,7 +159,7 @@ class NioPreparationInputTest {
                     .handlerFactory(connection -> {
                         factoryEntered.countDown();
                         releaseFactory.await();
-                        return PreparedHandler.of(request -> {});
+                        return PreparedHandler.of(request -> handled.countDown());
                     })
                     .onConnectionFailure(failures::add)
                     .build();
@@ -170,7 +170,7 @@ class NioPreparationInputTest {
     }
 
     @Test
-    void aPingDuringPreparationIsAcknowledgedAndARequestBeforeTheHandlerIsRefused() throws Exception {
+    void aPingDuringPreparationIsAcknowledgedAndARequestBeforeTheHandlerIsHeldUntilItIsActivated() throws Exception {
         BlockedFactoryServer blocked = new BlockedFactoryServer();
         try (RawPeer peer = new RawPeer(blocked.address)) {
             peer.handshakeAndAuthenticate();
@@ -181,24 +181,19 @@ class NioPreparationInputTest {
             peer.write(frame(PING, 0, 0, pingPayload));
             byte[] ack = peer.readUntil(PING, ACK);
             peer.write(frame(0x0100, 0, 1, new byte[0]));
-            byte[] reset = peer.readUntil(RESET, 0);
 
             assertThat(ack).isNotNull();
             assertThat(java.util.Arrays.copyOfRange(ack, 20, 28)).containsExactly(pingPayload);
-            assertThat(reset).isNotNull();
-            long streamId = 0;
-            for (int i = 8; i < 16; i++) {
-                streamId = (streamId << 8) | (reset[i] & 0xFF);
-            }
-            assertThat(streamId).isEqualTo(1);
-            assertThat(reset[23] & 0xFF).isEqualTo(REFUSED);
-            // 거절과 PING은 준비를 끝내지 않는다.
+            // 준비 전에 온 요청은 거절하지 않고 활성화까지 보관한다. PING과 요청은 준비를 끝내지 않는다.
+            assertThat(blocked.handled.await(300, TimeUnit.MILLISECONDS)).isFalse();
             assertThat(blocked.failures.poll(300, TimeUnit.MILLISECONDS)).isNull();
             assertThat(blocked.server
                             .resourceUsage(Resource.PREPARING_CONNECTIONS)
                             .current())
                     .isEqualTo(1);
             blocked.releaseFactory.countDown();
+            assertThat(blocked.handled.await(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS))
+                    .isTrue();
         }
     }
 
