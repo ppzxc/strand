@@ -27,6 +27,9 @@ final class AppExampleSupport {
     static final String PRINCIPAL = "demo-client";
     static final byte[] AUTH_SECRET = "demo-token".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
+    /** 협상할 최대 프레임 크기(바이트). 규격 기본값과 같다. */
+    static final long MAX_FRAME_SIZE = 65_536;
+
     // 연결 수와 요청 수 한도. 연결별 한도는 소유 객체 전체 한도 안이어야 한다.
     static final long CONNECTIONS = 4;
     static final long REQUESTS_PER_CONNECTION = 8;

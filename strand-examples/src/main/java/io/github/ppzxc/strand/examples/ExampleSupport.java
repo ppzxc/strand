@@ -1,19 +1,10 @@
 package io.github.ppzxc.strand.examples;
 
-import io.github.ppzxc.strand.core.internal.AuthDecision;
-import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.nio.internal.ConnectionAuthenticator;
-import io.github.ppzxc.strand.nio.internal.ConnectionClosed;
-import io.github.ppzxc.strand.nio.internal.ConnectionListener;
-import io.github.ppzxc.strand.nio.internal.RequestResult;
+import io.github.ppzxc.strand.api.RequestResult;
+import io.github.ppzxc.strand.nio.Credentials;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.OptionalLong;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-/** 예제가 함께 쓰는 값과 출력 도우미. */
+/** TCP 예제({@link TcpClientExample}, {@link ServerExample})가 함께 쓰는 값과 출력 도우미. */
 final class ExampleSupport {
 
     /** 규격 4.1절: 애플리케이션 type은 256 이상이다. 예제는 256을 쓴다. */
@@ -33,42 +24,9 @@ final class ExampleSupport {
 
     private ExampleSupport() {}
 
-    /** 클라이언트 설정에 AUTH 메커니즘과 자격 증명을 넣는다. 연결 수립 뒤 첫 프레임이 AUTH로 나간다. */
-    static EndpointConfig withAuth(EndpointConfig config) {
-        return config.auth(AUTH_MECHANISM, AUTH_CREDENTIALS);
-    }
-
-    /** 서버의 AUTH 판단. 예제의 토큰만 통과시키고 나머지는 거부한다. */
-    static ConnectionAuthenticator authenticator() {
-        return (mechanism, credentials) -> CompletableFuture.completedFuture(
-                AUTH_MECHANISM.equals(mechanism) && Arrays.equals(AUTH_CREDENTIALS, credentials)
-                        ? AuthDecision.PASS
-                        : AuthDecision.REJECT);
-    }
-
-    /** 핸들러와 알림을 돌리는 실행기. 전송 스레드를 막지 않으려고 연결 드라이버에 따로 준다. */
-    static ExecutorService newHandlerExecutor(String name) {
-        return Executors.newCachedThreadPool(runnable -> {
-            Thread thread = new Thread(runnable, name);
-            thread.setDaemon(true);
-            return thread;
-        });
-    }
-
-    /** 연결 알림을 출력하고, 연결이 끝나면 {@code closed}를 완료한다. */
-    static ConnectionListener printing(String who, CompletableFuture<ConnectionClosed> closed) {
-        return new ConnectionListener() {
-            @Override
-            public void onAuthenticated(OptionalLong credentialLifetime) {
-                System.out.println("[" + who + "] AUTH 통과");
-            }
-
-            @Override
-            public void onClosed(ConnectionClosed event) {
-                System.out.println("[" + who + "] 연결 종료 " + event.reason().kind());
-                closed.complete(event);
-            }
-        };
+    /** 클라이언트가 연결 인증에 보낼 자격 증명. 연결 수립 뒤 첫 프레임이 AUTH로 나간다. */
+    static Credentials credentials() {
+        return Credentials.of(AUTH_MECHANISM, AUTH_CREDENTIALS);
     }
 
     /**
@@ -78,7 +36,7 @@ final class ExampleSupport {
         switch (result.certainty()) {
             case RESPONSE:
                 System.out.println("  -> 응답을 받았다. status=" + result.status() + " body="
-                        + new String(result.body(), StandardCharsets.UTF_8));
+                        + new String(result.payload(), StandardCharsets.UTF_8));
                 break;
             case NOT_PROCESSED:
                 // 상대가 처리를 시작하지 않았음이 확실하므로 다시 보내도 안전하다.

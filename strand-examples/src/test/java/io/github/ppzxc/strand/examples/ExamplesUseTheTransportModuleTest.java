@@ -15,8 +15,8 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * 예제는 전송 모듈 사용법만 보여 준다. 손으로 쓴 드라이브 루프(읽은 것을 넣고, 쌓인 것을 꺼내 쓰고, 시계를 진행)는 연결 드라이버가 하는 일이므로
- * 예제 소스에 {@code Endpoint}를 직접 부르는 호출이 없어야 한다.
+ * 예제는 전송 모듈의 제품 공개 API 사용법만 보여 준다. 손으로 쓴 드라이브 루프(읽은 것을 넣고, 쌓인 것을 꺼내 쓰고, 시계를 진행)는 전송 모듈이 하는 일이므로 예제 소스에 {@code
+ * Endpoint}를 직접 부르는 호출이 없어야 하고, 공개 API가 아닌 {@code ..internal..} 패키지도 쓰지 않는다.
  */
 class ExamplesUseTheTransportModuleTest {
 
@@ -41,11 +41,28 @@ class ExamplesUseTheTransportModuleTest {
     }
 
     @Test
-    void theFourExamplesAndTheirSupportExist() throws IOException {
+    void theTcpExamplesAndTheAppApiExamplesExist() throws IOException {
         assertThat(exampleSources())
                 .extracting(path -> path.getFileName().toString())
-                .contains(
-                        "BlockingTcpExample.java", "NioTcpExample.java", "ServerExample.java", "WebSocketExample.java");
+                .contains("TcpClientExample.java", "ServerExample.java", "NioAppExample.java", "NettyAppExample.java");
+    }
+
+    @Test
+    void noExampleHasAWebSocketDemo() throws IOException {
+        assertThat(exampleSources())
+                .extracting(path -> path.getFileName().toString())
+                .noneMatch(name -> name.contains("WebSocket"));
+    }
+
+    @Test
+    void noExampleImportsAnInternalPackage() throws IOException {
+        Pattern internalImport = Pattern.compile("(?m)^import\\s+(static\\s+)?[\\w.]*\\.internal\\.");
+        for (Path source : exampleSources()) {
+            String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);
+            assertThat(internalImport.matcher(text).find())
+                    .as(source.getFileName() + "가 internal 패키지를 import한다")
+                    .isFalse();
+        }
     }
 
     @Test
