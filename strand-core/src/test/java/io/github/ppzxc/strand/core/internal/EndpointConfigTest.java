@@ -22,9 +22,9 @@ class EndpointConfigTest {
         assertThat(EndpointConfig.isValidIdleIntervalMs(0)).isTrue();
         assertThat(EndpointConfig.isValidIdleIntervalMs(-1)).isFalse();
         assertThat(EndpointConfig.isValidIdleIntervalMs(Long.MAX_VALUE / 2 + 1)).isFalse();
-        assertThat(EndpointConfig.isValidAckTimeoutMs(0)).isFalse();
-        assertThat(EndpointConfig.isValidAckTimeoutMs(1)).isTrue();
-        assertThat(EndpointConfig.isValidAckTimeoutMs(Long.MAX_VALUE / 2)).isTrue();
+        assertThat(EndpointConfig.isPositiveTimeoutMs(0)).isFalse();
+        assertThat(EndpointConfig.isPositiveTimeoutMs(1)).isTrue();
+        assertThat(EndpointConfig.isPositiveTimeoutMs(Long.MAX_VALUE / 2)).isTrue();
         assertThat(EndpointConfig.isUnsigned32(0)).isTrue();
         assertThat(EndpointConfig.isUnsigned32(0xFFFF_FFFFL)).isTrue();
         assertThat(EndpointConfig.isUnsigned32(0x1_0000_0000L)).isFalse();

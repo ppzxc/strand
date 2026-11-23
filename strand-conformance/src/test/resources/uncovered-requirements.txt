@@ -18,7 +18,7 @@ req-security-alpn-server-reject 관측불가 ALPN을 제시하지 않은 연결�
 req-reset-close-only-code-forbidden 형식미지원 CLOSE 전용 error_code를 RESET에 싣고 싶어지는 상황을 만드는 입력이 형식에 없어, 구현이 그 코드를 쓰지 않는다는 것을 단언할 수 없다
 req-backpressure-no-refuse-after-start 형식미지원 처리를 시작한 요청을 로컬 사유(과부하 등)로 거절하고 싶어지는 상황을 만드는 입력이 형식에 없어 거절하지 않는다는 것을 단언할 수 없다
 req-hello-peer-frame-size-limit 형식미지원 상대가 알린 max_frame_size를 넘는 프레임을 호출 API에 요청했을 때 구현은 보내지 않지만, 로컬 예외나 이벤트를 벡터 결과로 표현할 수 없다
-req-close-end-certainty-partial-disconnect-first 형식미지원 쓰기를 시작했지만 넘기지 못한 요청은 NIO 실행 경로에서 부분 쓰기(write_limit_bytes) 뒤 취소로만 끝낼 수 있어, 끊김이 먼저인 벡터를 만들 수 없다. core Endpoint 테스트가 고정한다 (#372)
+req-close-end-certainty-partial-disconnect-first 형식미지원 쓰기를 시작했지만 넘기지 못한 요청은 NIO 실행 경로에서 부분 쓰기(write_limit_bytes) 뒤 취소로만 끝낼 수 있어, 끊김이 먼저인 벡터를 만들 수 없다. core Endpoint 테스트가 고정한다 (#372, #383)
 req-close-end-certainty-partial-own-end-first 형식미지원 쓰기를 시작했지만 넘기지 못한 요청은 NIO 실행 경로에서 부분 쓰기(write_limit_bytes) 뒤 취소로만 끝낼 수 있어, 내 쪽 종료가 먼저인 벡터를 만들 수 없다. core Endpoint 테스트(EndpointOutputProgressTest)가 고정한다 (#372, #383)
 # 관측불가: 1.2절 WebSocket 오류 종료의 상태 코드와 Ping/Pong. WebSocket 계층의 동작이라 바이트·메시지 입출력으로 볼 수 없다.
 req-ws-close-error-not-1000 형식미지원 오류 CLOSE 뒤 WebSocket Close의 상태 코드는 WebSocket 계층의 동작이다. core가 WebSocket 통로를 단위 입력으로 다루게 바뀌는 때(#376)에 벡터로 다룬다

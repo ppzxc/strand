@@ -131,7 +131,7 @@ public final class EndpointConfig {
      */
     public EndpointConfig maxConcurrentStreams(long value) {
         ConfigDraft draft = draft();
-        if (value < 0 || value > MAX_U32) {
+        if (!isUnsigned32(value)) {
             throw new IllegalArgumentException("maxConcurrentStreams는 0 이상 4294967295 이하여야 한다: " + value);
         }
         draft.maxConcurrentStreams = value;
@@ -159,7 +159,7 @@ public final class EndpointConfig {
      */
     public EndpointConfig ackTimeoutMs(long value) {
         ConfigDraft draft = draft();
-        if (!isValidAckTimeoutMs(value)) {
+        if (!isPositiveTimeoutMs(value)) {
             throw new IllegalArgumentException("ackTimeoutMs는 양수이고 Long.MAX_VALUE/2 이하여야 한다: " + value);
         }
         draft.ackTimeoutMs = value;
@@ -193,7 +193,7 @@ public final class EndpointConfig {
      */
     public EndpointConfig authTimeoutMs(long value) {
         ConfigDraft draft = draft();
-        if (!isValidAckTimeoutMs(value)) {
+        if (!isPositiveTimeoutMs(value)) {
             throw new IllegalArgumentException("authTimeoutMs는 양수이고 Long.MAX_VALUE/2 이하여야 한다: " + value);
         }
         draft.authTimeoutMs = value;
@@ -250,7 +250,7 @@ public final class EndpointConfig {
     }
 
     /** 확인 대기 시간(밀리초)이 {@link #ackTimeoutMs(long)}이 받는 범위인지. */
-    public static boolean isValidAckTimeoutMs(long value) {
+    public static boolean isPositiveTimeoutMs(long value) {
         return value > 0 && value <= MAX_TIMEOUT_MS;
     }
 

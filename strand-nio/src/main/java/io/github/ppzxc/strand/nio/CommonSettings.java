@@ -234,7 +234,7 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         // 범위 검사는 core가 한다(16384~1048576).
         EndpointConfig.defaults().maxFrameSize(maxFrameSize);
         long idleIntervalMs = coreMillis("idlePingInterval", idlePingInterval, EndpointConfig::isValidIdleIntervalMs);
-        long ackTimeoutMs = coreMillis("ackTimeout", ackTimeout, EndpointConfig::isValidAckTimeoutMs);
+        long ackTimeoutMs = coreMillis("ackTimeout", ackTimeout, EndpointConfig::isPositiveTimeoutMs);
         NioSecurity channelSecurity = Objects.requireNonNull(security);
         TlsSizes tlsSizes = null;
         if (channelSecurity.tlsContext() != null) {
