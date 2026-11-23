@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.nio.internal;
 
 import io.github.ppzxc.strand.core.internal.CloseReason;
+import io.github.ppzxc.strand.core.internal.CollectionSpace;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.Event;
@@ -664,6 +665,7 @@ public final class ConnectionDriver implements AutoCloseable {
         boolean finished;
         // core가 CLOSED를 냈다. 종료 알림은 이때 한 번만 나간다.
         private boolean closed;
+        private @Nullable CloseReason closeReason;
         // CLOSED 뒤 마무리 기한(주입 시계 값). CLOSED를 낸 시점에 정해진다.
         private long closedFinishDeadline;
         // 읽기나 쓰기가 실패했거나 상대가 끊었다. 더 읽을 것이 없다.
@@ -780,9 +782,12 @@ public final class ConnectionDriver implements AutoCloseable {
                     endpoint.receive(inbound.data());
                     receivedBytes.addAndGet(inbound.data().length);
                     break;
-                case MESSAGE:
-                    endpoint.receiveMessage(inbound.messageKind(), inbound.data());
+                case UNIT:
+                    endpoint.receiveUnit(inbound.data(), 0, inbound.data().length, CollectionSpace.UNLIMITED);
                     receivedBytes.addAndGet(inbound.data().length);
+                    break;
+                case UNSUPPORTED:
+                    endpoint.receiveUnsupportedInput(CollectionSpace.UNLIMITED);
                     break;
                 case END:
                     transportFailed(new EOFException("상대가 연결을 끊었다"));
@@ -871,7 +876,12 @@ public final class ConnectionDriver implements AutoCloseable {
                 }
             } else if (closed && !finished && !outputShutdown && writeQueue.isEmpty()) {
                 outputShutdown = true;
-                passage.shutdownOutput();
+                // core의 전송 종료 지시가 닫으라고 하고(NONE이 아님) 남은 출력을 다 넘겼다. 종료 원인은 통로가 닫는 방식을 고를 때 쓴다.
+                if (endpoint.transportClose() != Endpoint.TransportClose.NONE && closeReason != null) {
+                    passage.shutdownOutput(closeReason);
+                } else {
+                    passage.shutdownOutput();
+                }
             }
         }
 
@@ -999,6 +1009,7 @@ public final class ConnectionDriver implements AutoCloseable {
                                 : closedAtMs + closedFinishLimitMs;
                     }
                     closed = true;
+                    closeReason = event.closeReason().orElse(null);
                     if (transportGone || isDisconnection(event)) {
                         finished = true;
                     }

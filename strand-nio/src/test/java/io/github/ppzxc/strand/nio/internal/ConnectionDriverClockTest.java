@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
-import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -377,7 +376,7 @@ class ConnectionDriverClockTest {
                     if (remaining.decrementAndGet() == 0) {
                         drained.countDown();
                     }
-                    return Inbound.message(WebSocketMessageKind.BINARY, frame);
+                    return Inbound.unit(frame);
                 }
                 Inbound inbound = inner.await(timeoutMs, waitForRead, waitForWrite);
                 // 기다리는 동안 켜졌으면 깨어난 그 읽기에서 바로 쏟아낸다.

@@ -1,7 +1,6 @@
 package io.github.ppzxc.strand.nio.internal;
 
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
-import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -193,7 +192,7 @@ public final class InMemoryPassage implements Passage {
         if (!messages) {
             peer.deliver(Inbound.bytes(slice));
         } else if (whole != null) {
-            peer.deliver(Inbound.message(WebSocketMessageKind.BINARY, whole));
+            peer.deliver(Inbound.unit(whole));
         }
         return accepted;
     }

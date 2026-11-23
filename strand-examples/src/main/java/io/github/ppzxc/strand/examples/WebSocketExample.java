@@ -12,8 +12,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@link WebSocketPassage}(JDK 11 {@code java.net.http} WebSocket) 위에서 요청 하나를 보낸다. WebSocket은 메시지 하나가 프레임 하나이므로
- * {@link EndpointConfig#webSocket()}으로 설정한다. 나머지는 TCP 예제와 같다. 사용법: {@code WebSocketExample ws://host:port/path}
+ * {@link WebSocketPassage}(JDK 11 {@code java.net.http} WebSocket) 위에서 요청 하나를 보낸다. WebSocket은 메시지 하나가 프레임 하나이므로 통로가 메시지 하나를 한 단위로 넘긴다.
+ * 설정과 사용법은 TCP 예제와 같다. 사용법: {@code WebSocketExample ws://host:port/path}
  * (strand를 WebSocket으로 받는 서버가 필요하다)
  */
 public final class WebSocketExample {
@@ -29,7 +29,7 @@ public final class WebSocketExample {
         ExecutorService executor = ExampleSupport.newHandlerExecutor("strand-websocket-example");
         CompletableFuture<ConnectionClosed> closed = new CompletableFuture<>();
         try (ConnectionDriver driver = ConnectionDriver.client(
-                        ExampleSupport.withAuth(EndpointConfig.defaults().webSocket()), WebSocketPassage.connect(uri))
+                        ExampleSupport.withAuth(EndpointConfig.defaults()), WebSocketPassage.connect(uri))
                 .executor(executor)
                 .listener(ExampleSupport.printing("클라이언트", closed))
                 .start()) {

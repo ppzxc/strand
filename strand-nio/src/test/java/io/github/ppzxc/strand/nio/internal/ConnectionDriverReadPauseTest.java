@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
-import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -90,7 +89,7 @@ class ConnectionDriverReadPauseTest {
             while (true) {
                 if (waitForRead && remaining.get() > 0) {
                     remaining.decrementAndGet();
-                    return Inbound.message(WebSocketMessageKind.BINARY, frames.apply(delivered.getAndIncrement()));
+                    return Inbound.unit(frames.apply(delivered.getAndIncrement()));
                 }
                 Inbound inbound = inner.await(timeoutMs, waitForRead, waitForWrite);
                 if (inbound.kind() != Inbound.Kind.NONE || !(waitForRead && remaining.get() > 0)) {
