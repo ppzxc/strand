@@ -131,7 +131,7 @@ public final class EndpointConfig {
      */
     public EndpointConfig maxConcurrentStreams(long value) {
         ConfigDraft draft = draft();
-        if (value < 0 || value > MAX_U32) {
+        if (!isUnsigned32(value)) {
             throw new IllegalArgumentException("maxConcurrentStreams는 0 이상 4294967295 이하여야 한다: " + value);
         }
         draft.maxConcurrentStreams = value;
@@ -159,7 +159,7 @@ public final class EndpointConfig {
      */
     public EndpointConfig ackTimeoutMs(long value) {
         ConfigDraft draft = draft();
-        if (value <= 0 || value > MAX_TIMEOUT_MS) {
+        if (!isPositiveTimeoutMs(value)) {
             throw new IllegalArgumentException("ackTimeoutMs는 양수이고 Long.MAX_VALUE/2 이하여야 한다: " + value);
         }
         draft.ackTimeoutMs = value;
@@ -176,7 +176,7 @@ public final class EndpointConfig {
      */
     public EndpointConfig idleIntervalMs(long value) {
         ConfigDraft draft = draft();
-        if (value < 0 || value > MAX_TIMEOUT_MS) {
+        if (!isValidIdleIntervalMs(value)) {
             throw new IllegalArgumentException("idleIntervalMs는 0 이상 Long.MAX_VALUE/2 이하여야 한다: " + value);
         }
         draft.idleIntervalMs = value;
@@ -193,7 +193,7 @@ public final class EndpointConfig {
      */
     public EndpointConfig authTimeoutMs(long value) {
         ConfigDraft draft = draft();
-        if (value <= 0 || value > MAX_TIMEOUT_MS) {
+        if (!isPositiveTimeoutMs(value)) {
             throw new IllegalArgumentException("authTimeoutMs는 양수이고 Long.MAX_VALUE/2 이하여야 한다: " + value);
         }
         draft.authTimeoutMs = value;
@@ -249,9 +249,24 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
+    /** 확인 대기 시간(밀리초)이 {@link #ackTimeoutMs(long)}이 받는 범위인지. */
+    public static boolean isPositiveTimeoutMs(long value) {
+        return value > 0 && value <= MAX_TIMEOUT_MS;
+    }
+
+    /** 유휴 간격(밀리초)이 {@link #idleIntervalMs(long)}이 받는 범위인지. */
+    public static boolean isValidIdleIntervalMs(long value) {
+        return value >= 0 && value <= MAX_TIMEOUT_MS;
+    }
+
+    /** 값이 부호 없는 32비트 정수 범위(0 이상 4294967295 이하)인지. */
+    public static boolean isUnsigned32(long value) {
+        return value >= 0 && value <= MAX_U32;
+    }
+
     /** 서버 {@code AUTH(ACK)}에 알릴 자격 증명 수명을 정한 복사본. 생략하면 수명 항목을 싣지 않는다. */
     public EndpointConfig credentialLifetimeSeconds(long value) {
-        if (value < 0 || value > 0xFFFF_FFFFL) {
+        if (!isUnsigned32(value)) {
             throw new IllegalArgumentException("credentialLifetimeSeconds는 부호 없는 32비트 정수여야 한다: " + value);
         }
         ConfigDraft draft = draft();

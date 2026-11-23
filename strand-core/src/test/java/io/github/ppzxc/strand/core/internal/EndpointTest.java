@@ -2270,7 +2270,10 @@ class EndpointTest {
         assertThatThrownBy(() -> client.request(257, new byte[MIN_MAX_FRAME_SIZE]))
                 .isInstanceOf(IllegalArgumentException.class);
 
+        // 프레임도 번호도 없다: 아무것도 나가지 않았고, 다음 요청이 첫 번호표와 첫 스트림 번호를 받는다.
+        assertThat(Drive.drainMessages(client)).isEmpty();
         assertThat(client.request(257, new byte[0])).isZero();
+        assertThat(sent(client)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
     }
 
     @Test

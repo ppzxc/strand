@@ -94,6 +94,19 @@ class EndpointOutputProgressTest {
     }
 
     @Test
+    void disconnectAfterOwnEndWasDecidedIsUnknownExactlyOnce() {
+        Endpoint server = openServer();
+        server.request(257, new byte[0]);
+        EndpointOutput request = server.nextOutput();
+        server.outputProgress(request.id(), 1);
+        server.close(ErrorCode.INTERNAL_ERROR);
+        server.disconnect();
+        assertThat(Drive.drainEvents(server).stream().filter(e -> e.certainty().isPresent()))
+                .singleElement()
+                .satisfies(e -> assertThat(e.certainty()).hasValue(Certainty.UNKNOWN));
+    }
+
+    @Test
     void disconnectAfterFullDeliveryIsUnknown() {
         Endpoint server = openServer();
         server.request(257, new byte[0]);

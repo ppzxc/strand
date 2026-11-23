@@ -18,12 +18,12 @@ req-security-alpn-server-reject 관측불가 ALPN을 제시하지 않은 연결�
 req-reset-close-only-code-forbidden 형식미지원 CLOSE 전용 error_code를 RESET에 싣고 싶어지는 상황을 만드는 입력이 형식에 없어, 구현이 그 코드를 쓰지 않는다는 것을 단언할 수 없다
 req-backpressure-no-refuse-after-start 형식미지원 처리를 시작한 요청을 로컬 사유(과부하 등)로 거절하고 싶어지는 상황을 만드는 입력이 형식에 없어 거절하지 않는다는 것을 단언할 수 없다
 req-hello-peer-frame-size-limit 형식미지원 상대가 알린 max_frame_size를 넘는 프레임을 호출 API에 요청했을 때 구현은 보내지 않지만, 로컬 예외나 이벤트를 벡터 결과로 표현할 수 없다
-req-close-end-certainty-partial-disconnect 형식미지원 쓰기를 시작했지만 넘기지 못한 요청은 NIO 실행 경로에서 부분 쓰기(write_limit_bytes) 뒤 취소로만 끝낼 수 있어, 끊김으로 끝나는 벡터를 만들 수 없다. core Endpoint 테스트가 고정한다 (#372)
-req-close-end-certainty-partial-own-end 형식미지원 쓰기를 시작했지만 넘기지 못한 요청은 NIO 실행 경로에서 부분 쓰기(write_limit_bytes) 뒤 취소로만 끝낼 수 있어, 내 쪽 오류 CLOSE로 끝나는 벡터를 만들 수 없다. core Endpoint 테스트가 고정한다 (#372)
+req-close-end-certainty-partial-disconnect-first 형식미지원 쓰기를 시작했지만 넘기지 못한 요청은 NIO 실행 경로에서 부분 쓰기(write_limit_bytes) 뒤 취소로만 끝낼 수 있어, 끊김이 먼저인 벡터를 만들 수 없다. core Endpoint 테스트가 고정한다 (#372, #383)
+req-close-end-certainty-partial-own-end-first 형식미지원 쓰기를 시작했지만 넘기지 못한 요청은 NIO 실행 경로에서 부분 쓰기(write_limit_bytes) 뒤 취소로만 끝낼 수 있어, 내 쪽 종료가 먼저인 벡터를 만들 수 없다. core Endpoint 테스트(EndpointOutputProgressTest)가 고정한다 (#372, #383)
 # 관측불가: 1.2절 WebSocket 오류 종료의 상태 코드와 Ping/Pong. WebSocket 계층의 동작이라 바이트·메시지 입출력으로 볼 수 없다.
 req-ws-close-error-not-1000 형식미지원 오류 CLOSE 뒤 WebSocket Close의 상태 코드는 WebSocket 계층의 동작이다. core가 WebSocket 통로를 단위 입력으로 다루게 바뀌는 때(#376)에 벡터로 다룬다
 req-ws-ping-pong-not-liveness 형식미지원 WebSocket Ping·Pong은 WebSocket 계층의 제어 프레임이다. core가 WebSocket 통로를 단위 입력으로 다루게 바뀌는 때(#376)에 벡터로 다룬다
 # 형식미지원: 크기 초과 프레임과 넘기지 못한 유휴 PING.
-req-hello-oversize-request-local-fail 형식미지원 상대의 max_frame_size를 넘는 요청을 호출 API에 냈을 때의 로컬 실패는 벡터 결과로 표현할 수 없다(req-hello-peer-frame-size-limit과 같은 사유) (확인과 테스트 고정은 #384)
-req-hello-oversize-auth-close-silent 형식미지원 클라이언트 AUTH가 상대 max_frame_size를 넘는 상황을 만드는 입력이 벡터 형식에 없다 (확인과 테스트 고정은 #384)
+req-hello-oversize-request-local-fail 형식미지원 상대의 max_frame_size를 넘는 요청을 호출 API에 냈을 때의 로컬 실패는 벡터 결과로 표현할 수 없다(req-hello-peer-frame-size-limit과 같은 사유) (core 테스트로 고정: #384, EndpointTest.oversizeRequestDoesNotConsumeATicket)
+req-hello-oversize-auth-close-silent 형식미지원 클라이언트 AUTH가 상대 max_frame_size를 넘는 상황을 만드는 입력이 벡터 형식에 없다 (core 테스트로 고정: #384, EndpointTest.clientClosesLocallyWithoutAuthOrCloseWhenItsAuthExceedsThePeerMaxFrameSize)
 req-setup-unsent-idle-ping-close 형식미지원 유휴 PING 간격을 정하는 설정(8.2절)과, 출력을 여러 단계에 걸쳐 계속 막고 바이트 단위 진행만 보고하는 입력(`hold_output`은 다음 단계까지만 보류한다)이 벡터 형식에 없다. core Endpoint 테스트(EndpointUnsentIdlePingTest)와 공개 API 통합 테스트로 확인한다 (#375)

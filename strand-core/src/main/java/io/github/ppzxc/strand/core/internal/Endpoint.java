@@ -1099,8 +1099,7 @@ public final class Endpoint {
     public void completeAuthentication(long id, AuthDecision decision, OptionalLong credentialLifetime) {
         Objects.requireNonNull(decision, "decision");
         Objects.requireNonNull(credentialLifetime, "credentialLifetime");
-        if (credentialLifetime.isPresent()
-                && (credentialLifetime.getAsLong() < 0 || credentialLifetime.getAsLong() > 0xFFFF_FFFFL)) {
+        if (credentialLifetime.isPresent() && !EndpointConfig.isUnsigned32(credentialLifetime.getAsLong())) {
             throw new IllegalArgumentException(
                     "credentialLifetime은 부호 없는 32비트 정수여야 한다: " + credentialLifetime.getAsLong());
         }
