@@ -88,7 +88,7 @@ class ConnectionDriverClockTest {
 
             @Override
             EndpointConfig config() {
-                return EndpointConfig.defaults().webSocket();
+                return EndpointConfig.defaults();
             }
         };
 
@@ -98,7 +98,7 @@ class ConnectionDriverClockTest {
     }
 
     private static EndpointConfig config() {
-        return EndpointConfig.defaults().webSocket().idleIntervalMs(0);
+        return EndpointConfig.defaults().idleIntervalMs(0);
     }
 
     private Side startClient(Side side, EndpointConfig config) {

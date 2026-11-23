@@ -134,7 +134,6 @@ class ConnectionDriverReadPauseTest {
 
     private static EndpointConfig config(long maxConcurrentStreams) {
         return EndpointConfig.defaults()
-                .webSocket()
                 .maxFrameSize(MAX_FRAME_SIZE)
                 .maxConcurrentStreams(maxConcurrentStreams)
                 .ackTimeoutMs(ACK_TIMEOUT_MS)

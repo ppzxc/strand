@@ -56,9 +56,7 @@ final class ControlledPassage implements Passage {
     public int write(OutboundMessage message, int offset) throws IOException {
         synchronized (lock) {
             // 막혀서 같은 메시지로 다시 부르는 호출은 한 번만 적는다.
-            if (message != lastRecorded
-                    && message.kind() == OutboundMessage.Kind.BINARY
-                    && message.length() >= FRAME_HEADER_BYTES) {
+            if (message != lastRecorded && message.length() >= FRAME_HEADER_BYTES) {
                 byte[] bytes = message.bytes();
                 writtenFrameTypes.add(((bytes[4] & 0xff) << 8) | (bytes[5] & 0xff));
                 lastRecorded = message;

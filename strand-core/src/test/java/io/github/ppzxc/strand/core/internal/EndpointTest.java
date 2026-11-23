@@ -75,7 +75,6 @@ class EndpointTest {
     private static byte[] concat(List<OutboundMessage> messages) {
         java.io.ByteArrayOutputStream joined = new java.io.ByteArrayOutputStream();
         for (OutboundMessage message : messages) {
-            assertThat(message.kind()).isEqualTo(OutboundMessage.Kind.BINARY);
             joined.write(message.bytes(), 0, message.bytes().length);
         }
         return joined.toByteArray();
@@ -2743,33 +2742,6 @@ class EndpointTest {
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 
-    private static final String PING_MESSAGE = "00000018000200000000000000000000000000000102030405060708";
-
-    private static Endpoint webSocketServer() {
-        return Endpoint.server(EndpointConfig.defaults().webSocket());
-    }
-
-    private static Endpoint webSocketServerAfterPreface() {
-        Endpoint server = webSocketServer();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
-        Drive.drainMessages(server);
-        return server;
-    }
-
-    private static Endpoint establishedWebSocket() {
-        return establishedWebSocket(EndpointConfig.defaults());
-    }
-
-    private static Endpoint establishedWebSocket(EndpointConfig config) {
-        Endpoint server = Endpoint.server(config.webSocket());
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO));
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO_ACK));
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(AUTH_ANONYMOUS));
-        Drive.drainMessages(server);
-        return server;
-    }
-
     @Test
     void drainMessagesReturnsEachSentMessageOnceInTheOrderSent() {
         Endpoint client = client();
@@ -2783,69 +2755,8 @@ class EndpointTest {
         assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
-    private static List<OutboundMessage.Kind> messageTypes(List<OutboundMessage> messages) {
-        List<OutboundMessage.Kind> types = new ArrayList<>();
-        for (OutboundMessage message : messages) {
-            types.add(message.kind());
-        }
-        return types;
-    }
-
     @Test
-    void webSocketNoErrorCloseIsFollowedByWebSocketCloseNormalClosure() {
-        Endpoint server = establishedWebSocket();
-
-        server.close(ErrorCode.NO_ERROR);
-
-        List<OutboundMessage> messages = Drive.drainMessages(server);
-        assertThat(messageTypes(messages))
-                .containsExactly(OutboundMessage.Kind.BINARY, OutboundMessage.Kind.WEBSOCKET_CLOSE);
-        assertThat(hex(messages.get(0).bytes())).isEqualTo(CLOSE_NO_ERROR);
-        assertThat(messages.get(1).webSocketCloseCode()).isEqualTo(1000);
-        assertThat(messages.get(1).bytes()).isEmpty();
-    }
-
-    @Test
-    void webSocketCloseWaitsForTheLastStreamWhenNoErrorCloseIsDraining() {
-        Endpoint server = establishedWebSocket();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
-        Drive.drainEvents(server);
-        server.close(ErrorCode.NO_ERROR);
-        assertThat(messageTypes(Drive.drainMessages(server))).containsExactly(OutboundMessage.Kind.BINARY);
-
-        server.respond(1, 0, new byte[0]);
-
-        assertThat(messageTypes(Drive.drainMessages(server)))
-                .containsExactly(OutboundMessage.Kind.BINARY, OutboundMessage.Kind.WEBSOCKET_CLOSE);
-    }
-
-    @Test
-    void webSocketReceivedNoErrorCloseIsFollowedByWebSocketCloseNormalClosure() {
-        Endpoint server = establishedWebSocket();
-
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_NO_ERROR));
-
-        List<OutboundMessage> messages = Drive.drainMessages(server);
-        assertThat(messageTypes(messages)).containsExactly(OutboundMessage.Kind.WEBSOCKET_CLOSE);
-        assertThat(messages.get(0).webSocketCloseCode()).isEqualTo(1000);
-    }
-
-    @Test
-    void webSocketCloseWaitsForTheLastStreamWhenReceivedNoErrorCloseIsDraining() {
-        Endpoint server = establishedWebSocket();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
-        Drive.drainEvents(server);
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_NO_ERROR));
-        assertThat(Drive.drainMessages(server)).isEmpty();
-
-        server.respond(1, 0, new byte[0]);
-
-        assertThat(messageTypes(Drive.drainMessages(server)))
-                .containsExactly(OutboundMessage.Kind.BINARY, OutboundMessage.Kind.WEBSOCKET_CLOSE);
-    }
-
-    @Test
-    void byteStreamReceivedNoErrorCloseHasNoWebSocketClose() {
+    void receivedNoErrorCloseSendsNothing() {
         Endpoint server = established();
 
         Drive.receive(server, bytes(CLOSE_NO_ERROR));
@@ -2854,220 +2765,14 @@ class EndpointTest {
     }
 
     @Test
-    void webSocketReceivedErrorCloseHasNoWebSocketCloseItem() {
-        Endpoint server = establishedWebSocket();
-
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_PROTOCOL_ERROR));
-
-        assertThat(Drive.drainMessages(server)).isEmpty();
-    }
-
-    @Test
-    void webSocketErrorCloseReceivedWhileDrainingHasNoWebSocketCloseItem() {
-        Endpoint server = establishedWebSocket();
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
-        Drive.drainEvents(server);
-        server.close(ErrorCode.NO_ERROR);
-        Drive.drainMessages(server);
-
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_PROTOCOL_ERROR));
-
-        assertThat(Drive.drainMessages(server)).isEmpty();
-    }
-
-    @Test
-    void byteStreamNoErrorCloseHasNoWebSocketClose() {
+    void sentNoErrorCloseSendsOnlyTheCloseFrame() {
         Endpoint server = established();
 
         server.close(ErrorCode.NO_ERROR);
 
-        assertThat(messageTypes(Drive.drainMessages(server))).containsExactly(OutboundMessage.Kind.BINARY);
-    }
-
-    @Test
-    void webSocketErrorCloseHasNoWebSocketCloseItem() {
-        Endpoint server = establishedWebSocket();
-
-        server.close(ErrorCode.PROTOCOL_ERROR);
-
-        assertThat(messageTypes(Drive.drainMessages(server))).containsExactly(OutboundMessage.Kind.BINARY);
-    }
-
-    @Test
-    void webSocketMessageIsOneFrame() {
-        Endpoint server = establishedWebSocket();
-
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PING_MESSAGE));
-
-        assertThat(sent(server)).isEqualTo("00000018000201000000000000000000000000000102030405060708");
-    }
-
-    @Test
-    void webSocketPrefaceMessageGetsTheServerHello() {
-        Endpoint server = webSocketServer();
-
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
-
-        assertThat(sent(server)).startsWith("00000");
-        assertThat(Drive.drainEvents(server)).isEmpty();
-    }
-
-    @Test
-    void webSocketPrefaceOfTheWrongSizeOrOpcodeClosesSilently() {
-        for (String hex : new String[] {"c0de5354523000", "c0de53545230000000"}) {
-            Endpoint server = webSocketServer();
-            server.receiveMessage(WebSocketMessageKind.BINARY, bytes(hex));
-            assertClosedSilently(server);
-        }
-        Endpoint text = webSocketServer();
-        text.receiveMessage(WebSocketMessageKind.TEXT, bytes(PREFACE));
-        assertClosedSilently(text);
-    }
-
-    @Test
-    void webSocketFirstFrameThatIsTextOrShortClosesSilently() {
-        Endpoint text = webSocketServerAfterPreface();
-        text.receiveMessage(WebSocketMessageKind.TEXT, bytes(HELLO));
-        assertClosedSilently(text);
-
-        Endpoint shortFrame = webSocketServerAfterPreface();
-        shortFrame.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000000c000100000000"));
-        assertClosedSilently(shortFrame);
-    }
-
-    @Test
-    void webSocketFirstFrameThatIsNotHelloClosesSilently() {
-        Endpoint server = webSocketServerAfterPreface();
-
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PING_MESSAGE));
-
-        assertClosedSilently(server);
-    }
-
-    @Test
-    void webSocketFirstFrameSizeMismatchIsAProtocolError() {
-        Endpoint server = webSocketServerAfterPreface();
-
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO + "00"));
-
-        assertClosedWithProtocolError(server);
-    }
-
-    @Test
-    void webSocketTextMessageAfterTheFirstFrameIsAProtocolError() {
-        Endpoint server = establishedWebSocket();
-
-        server.receiveMessage(WebSocketMessageKind.TEXT, bytes(PING_MESSAGE));
-
-        assertClosedWithProtocolError(server);
-    }
-
-    @Test
-    void webSocketCloseCarriedInATextMessageIsAProtocolError() {
-        Endpoint noError = establishedWebSocket();
-        noError.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
-        assertClosedWithProtocolError(noError);
-
-        Endpoint protocolError = establishedWebSocket();
-        protocolError.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_PROTOCOL_ERROR));
-        assertClosedWithProtocolError(protocolError);
-    }
-
-    @Test
-    void webSocketTextCloseSendsNoSecondCloseAfterOneWasSentOrReceived() {
-        Endpoint sentClose = establishedWebSocket();
-        sentClose.request(257, new byte[0]);
-        Drive.drainMessages(sentClose);
-        sentClose.close(ErrorCode.NO_ERROR);
-        Drive.drainMessages(sentClose);
-        Drive.drainEvents(sentClose);
-        sentClose.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
-        assertThat(Drive.drainMessages(sentClose)).isEmpty();
-        assertThat(kinds(sentClose)).contains(Event.Kind.CLOSED);
-
-        Endpoint receivedClose = establishedWebSocket();
-        receivedClose.request(257, new byte[0]);
-        Drive.drainMessages(receivedClose);
-        receivedClose.receiveMessage(WebSocketMessageKind.BINARY, bytes(closeNoErrorLast(2)));
-        Drive.drainMessages(receivedClose);
-        Drive.drainEvents(receivedClose);
-        receivedClose.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
-        assertThat(Drive.drainMessages(receivedClose)).isEmpty();
-        assertThat(kinds(receivedClose)).contains(Event.Kind.CLOSED);
-
-        Endpoint closed = establishedWebSocket();
-        closed.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
-        Drive.drainMessages(closed);
-        Drive.drainEvents(closed);
-        closed.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
-        assertOpenAndSilent(closed);
-    }
-
-    @Test
-    void webSocketMessageOfTheWrongSizeIsAProtocolError() {
-        Endpoint longer = establishedWebSocket();
-        longer.receiveMessage(WebSocketMessageKind.BINARY, bytes(PING_MESSAGE + "00"));
-        assertClosedWithProtocolError(longer);
-
-        Endpoint shorter = establishedWebSocket();
-        shorter.receiveMessage(
-                WebSocketMessageKind.BINARY, bytes(PING_MESSAGE.substring(0, PING_MESSAGE.length() - 2)));
-        assertClosedWithProtocolError(shorter);
-
-        Endpoint tiny = establishedWebSocket();
-        tiny.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000"));
-        assertClosedWithProtocolError(tiny);
-    }
-
-    @Test
-    void webSocketMessageAboveTheMaxFrameSizeIsAProtocolError() {
-        Endpoint server = establishedWebSocket(EndpointConfig.defaults().maxFrameSize(16384));
-        String payload = new String(new char[16384 - 16 - 4 + 1]).replace("\0", "00");
-
-        server.receiveMessage(
-                WebSocketMessageKind.BINARY,
-                bytes(String.format("%08x", 16 + payload.length() / 2) + "00020000" + "0000000000000000" + "00000000"
-                        + payload));
-
-        assertClosedWithProtocolError(server);
-    }
-
-    @Test
-    void webSocketCloseMessageWithTheWrongSizeClosesSilently() {
-        Endpoint server = establishedWebSocket();
-
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes("000000100003000000000000000000000000000000"));
-
-        assertClosedSilently(server);
-    }
-
-    @Test
-    void webSocketClientFirstFrameThatIsTextClosesSilently() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().webSocket());
-        Drive.drainMessages(client);
-
-        client.receiveMessage(WebSocketMessageKind.TEXT, bytes(HELLO));
-
-        assertClosedSilently(client);
-    }
-
-    @Test
-    void messagesAfterClosedAreIgnored() {
-        Endpoint server = webSocketServer();
-        server.receiveMessage(WebSocketMessageKind.TEXT, bytes(PREFACE));
-        Drive.drainEvents(server);
-
-        server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
-
-        assertOpenAndSilent(server);
-    }
-
-    @Test
-    void webSocketEndpointRejectsByteInputAndStreamEndpointRejectsMessages() {
-        assertThatThrownBy(() -> webSocketServer().receiveBounded(bytes(PREFACE), 0, 8, 1, CollectionSpace.UNLIMITED))
-                .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> server().receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE)))
-                .isInstanceOf(IllegalStateException.class);
+        List<OutboundMessage> messages = Drive.drainMessages(server);
+        assertThat(messages).hasSize(1);
+        assertThat(hex(messages.get(0).bytes())).isEqualTo(CLOSE_NO_ERROR);
     }
 
     // ---- CLOSE: 대기열 요청 즉시 종료, 끊기 전 REFUSED (규격 3.5절, 3.5.1절) ----

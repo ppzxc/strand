@@ -48,11 +48,7 @@ class EndpointTicketOrderTest {
                     .append('\n');
         }
         for (OutboundMessage message : Drive.drainMessages(endpoint)) {
-            trace.append("message ")
-                    .append(message.kind())
-                    .append(' ')
-                    .append(Arrays.toString(message.bytes()))
-                    .append('\n');
+            trace.append("message ").append(Arrays.toString(message.bytes())).append('\n');
             byte[] bytes = message.bytes();
             if (bytes.length >= 16 && Frames.readUnsignedShort(bytes, 4) == REQUEST_TYPE) {
                 sentStreams.add(java.nio.ByteBuffer.wrap(bytes, 8, 8).getLong());

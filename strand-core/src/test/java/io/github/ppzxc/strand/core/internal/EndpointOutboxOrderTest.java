@@ -28,25 +28,24 @@ class EndpointOutboxOrderTest {
         STREAM,
         /** 바이트 스트림, 짧은 확인 대기와 유휴 간격. drain이 시작한 확인 대기가 실제로 만료된다. */
         SHORT_TIMERS,
-        /** WebSocket. 닫을 때 WebSocket Close가 맨 끝에 붙는다. */
-        WEBSOCKET;
+        /** 바이트 스트림, 받은 바이트를 단위 입력으로 넣는다. */
+        UNIT;
 
         EndpointConfig config() {
             switch (this) {
                 case SHORT_TIMERS:
                     return EndpointConfig.defaults().ackTimeoutMs(100).idleIntervalMs(40);
-                case WEBSOCKET:
-                    return EndpointConfig.defaults().webSocket();
                 default:
                     return EndpointConfig.defaults();
             }
         }
     }
 
-    /** 상대가 보낸 바이트(WebSocket이면 메시지 하나)를 넣는다. */
+    /** 상대가 보낸 바이트를 넣는다. 단위 입력이면 한 번에 한 단위로 넣는다. */
     private static void feed(Variant variant, Endpoint endpoint, byte[] bytes) {
-        if (variant == Variant.WEBSOCKET) {
-            endpoint.receiveMessage(WebSocketMessageKind.BINARY, bytes);
+        if (variant == Variant.UNIT) {
+            endpoint.receiveUnit(bytes, 0, bytes.length, CollectionSpace.UNLIMITED);
+            Drive.settle(endpoint);
         } else {
             Drive.receive(endpoint, bytes);
         }
@@ -54,8 +53,7 @@ class EndpointOutboxOrderTest {
 
     /** 서버 쪽에서 서문, HELLO 교환, AUTH 통과까지 마친 엔드포인트. 상대가 알린 동시 스트림 수는 규격 기본값이다. */
     private static Endpoint established(Variant variant) {
-        Endpoint server =
-                variant == Variant.WEBSOCKET ? Endpoint.server(variant.config()) : Drive.server(variant.config());
+        Endpoint server = Drive.server(variant.config());
         feed(variant, server, Frames.preface());
         feed(variant, server, Frames.hello(EndpointConfig.defaults()));
         feed(variant, server, Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
@@ -78,11 +76,7 @@ class EndpointOutboxOrderTest {
                     .append('\n');
         }
         for (OutboundMessage message : Drive.drainMessages(endpoint)) {
-            trace.append("message ")
-                    .append(message.kind())
-                    .append(' ')
-                    .append(Arrays.toString(message.bytes()))
-                    .append('\n');
+            trace.append("message ").append(Arrays.toString(message.bytes())).append('\n');
         }
     }
 
@@ -192,8 +186,7 @@ class EndpointOutboxOrderTest {
                 .contains("event REQUEST_RECEIVED")
                 .contains("event RESULT")
                 .contains("event CLOSED")
-                .contains("message WEBSOCKET_CLOSE")
-                .contains("message BINARY");
+                .contains("message [");
     }
 
     @Test

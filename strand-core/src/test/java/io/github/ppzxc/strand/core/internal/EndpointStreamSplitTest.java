@@ -160,11 +160,7 @@ class EndpointStreamSplitTest {
                     .append('\n');
         }
         for (OutboundMessage message : Drive.drainMessages(endpoint)) {
-            out.append("message ")
-                    .append(message.kind())
-                    .append(' ')
-                    .append(Arrays.toString(message.bytes()))
-                    .append('\n');
+            out.append("message ").append(Arrays.toString(message.bytes())).append('\n');
         }
         return out.toString();
     }

@@ -211,7 +211,7 @@ final class ConnectionPhase {
         return !closed && ending.due();
     }
 
-    /** 닫는 일이 {@code NO_ERROR}로 끝나는가. 이미 오류로 끝나기로 했으면 이후 NO_ERROR CLOSE가 겹쳐도 아니다. 참이면 WebSocket Close(1000)를 덧붙인다(규격 1.2절). */
+    /** 닫는 일이 {@code NO_ERROR}로 끝나는가. 이미 오류로 끝나기로 했으면 이후 NO_ERROR CLOSE가 겹쳐도 아니다. */
     boolean endsNormally() {
         return ending.normal();
     }
@@ -358,7 +358,7 @@ final class ConnectionPhase {
         ending = ending.afterError();
     }
 
-    /** 상대가 CLOSE 없이 전송 계층을 끊었다(TCP EOF·RST, WebSocket close). 곧 닫을 때가 되고 연결 종료(CLOSE)로 끝난 것이 아니다. */
+    /** 상대가 CLOSE 없이 전송 계층을 끊었다(TCP EOF·RST 등 통로가 닫힘). 곧 닫을 때가 되고 연결 종료(CLOSE)로 끝난 것이 아니다. */
     void transportDisconnected() {
         if (closed) {
             return;

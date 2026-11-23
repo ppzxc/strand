@@ -27,7 +27,7 @@ import org.jspecify.annotations.Nullable;
  * #request}, {@link RequestHandle#cancel() cancel}, {@link #respond}, {@link #ping}, {@link #closeConnection}, {@link #abortClosing},
  * {@link #close})은 명령으로 큐에 넣고 전송 스레드를 깨운다. {@code Endpoint}를 잠금으로 감싸지 않는다.
  *
- * <p>전송 스레드가 한 번 도는 순서는 읽기와 기다림, {@code receive}/{@code receiveMessage}, 시계 진행({@code advance}), 명령 처리, 이벤트
+ * <p>전송 스레드가 한 번 도는 순서는 읽기와 기다림, {@code receive}/{@code receiveUnit}, 시계 진행({@code advance}), 명령 처리, 이벤트
  * 배출, core 쓰기 대기열에서 메시지 꺼내기, 쓰기다. 같은 읽기에 들어온 ACK가 확인 대기 초과로 오판되지 않고, 기한 있는 요청이 맞춘 시계 위에서 기한을
  * 잡는다. 기다림은 core의 {@code nextDeadline}, (CLOSED 뒤라면) 마무리 기한, 읽을 것, (쓰기 대기열이 남았으면) 통로의 쓰기 가능, 깨움 가운데 먼저
  * 오는 것까지이고, 기한이 없으면 입출력이나 명령이 올 때까지 기다린다. 클라이언트의 서문과 HELLO는 첫 쓰기로 나간다.
@@ -312,7 +312,7 @@ public final class ConnectionDriver implements AutoCloseable {
     /**
      * 클라이언트 연결 드라이버를 만든다.
      *
-     * @param config 엔드포인트 설정. 메시지 통로면 {@code webSocket()}을 켠 설정이어야 한다
+     * @param config 엔드포인트 설정. 통로의 종류와 무관하다(core는 통로의 종류를 모른다)
      * @param passage 서버에 이어진 통로
      * @return 빌더
      */
@@ -323,7 +323,7 @@ public final class ConnectionDriver implements AutoCloseable {
     /**
      * 서버 연결 드라이버를 만든다.
      *
-     * @param config 엔드포인트 설정. 메시지 통로면 {@code webSocket()}을 켠 설정이어야 한다
+     * @param config 엔드포인트 설정. 통로의 종류와 무관하다(core는 통로의 종류를 모른다)
      * @param passage 맺어진 클라이언트에 이어진 통로
      * @return 빌더
      */
@@ -944,12 +944,10 @@ public final class ConnectionDriver implements AutoCloseable {
         private void completeHead(OutboundMessage head) {
             writeQueue.poll();
             writeOffset = 0;
-            if (head.kind() == OutboundMessage.Kind.BINARY) {
-                int length = head.length();
-                writtenBytes.addAndGet(length);
-                if (length >= FRAME_HEADER_BYTES) {
-                    writtenFrames.incrementAndGet();
-                }
+            int length = head.length();
+            writtenBytes.addAndGet(length);
+            if (length >= FRAME_HEADER_BYTES) {
+                writtenFrames.incrementAndGet();
             }
         }
 

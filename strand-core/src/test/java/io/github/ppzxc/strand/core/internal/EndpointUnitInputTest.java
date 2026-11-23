@@ -15,9 +15,8 @@ class EndpointUnitInputTest {
     private static final int REQUEST_TYPE = 257;
     private static final CollectionSpace SPACE = CollectionSpace.UNLIMITED;
 
-    private static Endpoint server(boolean webSocket) {
-        EndpointConfig config = webSocket ? EndpointConfig.defaults().webSocket() : EndpointConfig.defaults();
-        return Drive.server(config);
+    private static Endpoint server() {
+        return Drive.server(EndpointConfig.defaults());
     }
 
     private static ReceiveProgress unit(Endpoint endpoint, byte[] bytes) {
@@ -26,8 +25,8 @@ class EndpointUnitInputTest {
         return progress;
     }
 
-    private static Endpoint established(boolean webSocket) {
-        Endpoint server = server(webSocket);
+    private static Endpoint established() {
+        Endpoint server = server();
         unit(server, Frames.preface());
         unit(server, Frames.hello(EndpointConfig.defaults()));
         unit(server, Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
@@ -63,22 +62,20 @@ class EndpointUnitInputTest {
 
     @Test
     void aWholePrefaceUnitIsAnsweredWithHello() {
-        for (boolean webSocket : new boolean[] {false, true}) {
-            Endpoint server = server(webSocket);
+        Endpoint server = server();
 
-            ReceiveProgress progress = unit(server, Frames.preface());
+        ReceiveProgress progress = unit(server, Frames.preface());
 
-            assertThat(progress.consumed()).isEqualTo(Frames.preface().length);
-            assertThat(progress.collectionRequired()).isFalse();
-            assertThat(Drive.drainMessages(server)).hasSize(1);
-        }
+        assertThat(progress.consumed()).isEqualTo(Frames.preface().length);
+        assertThat(progress.collectionRequired()).isFalse();
+        assertThat(Drive.drainMessages(server)).hasSize(1);
     }
 
     @Test
     void rightSizedUnitsHaveTheSameEventsAndOutputAsTheSameBytesAsAStream() {
         byte[] request = Frames.request(REQUEST_TYPE, 1, new byte[] {1, 2, 3});
-        Endpoint byUnit = established(false);
-        Endpoint byStream = established(false);
+        Endpoint byUnit = established();
+        Endpoint byStream = established();
 
         unit(byUnit, request);
         Drive.receive(byStream, request);
@@ -93,7 +90,7 @@ class EndpointUnitInputTest {
 
     @Test
     void aUnitReadsOnlyItsRangeOfTheArray() {
-        Endpoint server = established(false);
+        Endpoint server = established();
         byte[] request = Frames.request(REQUEST_TYPE, 1, new byte[] {7});
         byte[] padded = new byte[request.length + 6];
         System.arraycopy(request, 0, padded, 3, request.length);
@@ -110,7 +107,7 @@ class EndpointUnitInputTest {
     void aPrefaceUnitOfTheWrongSizeClosesSilently() {
         byte[] preface = Frames.preface();
         for (byte[] bad : new byte[][] {Arrays.copyOf(preface, 7), Arrays.copyOf(preface, 9), new byte[0]}) {
-            Endpoint server = server(false);
+            Endpoint server = server();
 
             unit(server, bad);
 
@@ -124,7 +121,7 @@ class EndpointUnitInputTest {
     @Test
     void aFirstFrameUnitTooShortToReadItsHeaderClosesSilently() {
         byte[] hello = Frames.hello(EndpointConfig.defaults());
-        Endpoint server = server(false);
+        Endpoint server = server();
         unit(server, Frames.preface());
         Drive.drainMessages(server);
 
@@ -138,7 +135,7 @@ class EndpointUnitInputTest {
     void aHelloUnitOfTheWrongSizeIsAProtocolErrorOnceTheFirstFrameCheckPassed() {
         byte[] hello = Frames.hello(EndpointConfig.defaults());
         for (byte[] bad : new byte[][] {withLength(hello, 1), Arrays.copyOf(hello, hello.length - 1)}) {
-            Endpoint server = server(false);
+            Endpoint server = server();
             unit(server, Frames.preface());
             Drive.drainMessages(server);
 
@@ -151,7 +148,7 @@ class EndpointUnitInputTest {
 
     @Test
     void aFirstFrameThatIsNotHelloClosesSilently() {
-        Endpoint server = server(false);
+        Endpoint server = server();
         unit(server, Frames.preface());
         Drive.drainMessages(server);
 
@@ -169,7 +166,7 @@ class EndpointUnitInputTest {
         for (byte[] bad : new byte[][] {
             withLength(request, 1), Arrays.copyOf(request, request.length - 1), Arrays.copyOf(request, 2)
         }) {
-            Endpoint server = established(false);
+            Endpoint server = established();
 
             unit(server, bad);
 
@@ -181,7 +178,7 @@ class EndpointUnitInputTest {
     @Test
     void aWrongSizedCloseUnitClosesWithoutSendingClose() {
         byte[] close = Frames.control(FrameType.CLOSE, 0, new byte[12]);
-        Endpoint server = established(false);
+        Endpoint server = established();
 
         unit(server, withLength(close, 3));
 
@@ -193,12 +190,12 @@ class EndpointUnitInputTest {
 
     @Test
     void unsupportedInputInThePrefaceAndFirstFramePhasesClosesSilently() {
-        Endpoint atPreface = server(false);
+        Endpoint atPreface = server();
         atPreface.receiveUnsupportedInput(SPACE);
         assertThat(kinds(atPreface)).containsExactly(Event.Kind.CLOSED);
         assertThat(Drive.drainMessages(atPreface)).isEmpty();
 
-        Endpoint atFirstFrame = server(false);
+        Endpoint atFirstFrame = server();
         unit(atFirstFrame, Frames.preface());
         Drive.drainMessages(atFirstFrame);
         atFirstFrame.receiveUnsupportedInput(SPACE);
@@ -208,14 +205,12 @@ class EndpointUnitInputTest {
 
     @Test
     void unsupportedInputAfterTheFirstFrameIsAProtocolError() {
-        for (boolean webSocket : new boolean[] {false, true}) {
-            Endpoint server = established(webSocket);
+        Endpoint server = established();
 
-            server.receiveUnsupportedInput(SPACE);
+        server.receiveUnsupportedInput(SPACE);
 
-            assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
-            assertThat(sentClose(server)).isTrue();
-        }
+        assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
+        assertThat(sentClose(server)).isTrue();
     }
 
     @Test
@@ -236,7 +231,7 @@ class EndpointUnitInputTest {
 
     @Test
     void unsupportedInputAsAnAlreadySentOrReceivedCloseSendsNoSecondClose() {
-        Endpoint closing = established(false);
+        Endpoint closing = established();
         closing.close(ErrorCode.NO_ERROR);
         Drive.drainMessages(closing);
         Drive.drainEvents(closing);
@@ -248,7 +243,7 @@ class EndpointUnitInputTest {
 
     @Test
     void aClientAlsoClosesSilentlyOnUnsupportedFirstInput() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().webSocket());
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
         Drive.drainMessages(client);
 
         client.receiveUnsupportedInput(SPACE);
@@ -261,7 +256,7 @@ class EndpointUnitInputTest {
 
     @Test
     void stopsWithoutConsumingWhenCollectionIsNeededAndResumesWithTheSameUnit() {
-        Endpoint server = established(false);
+        Endpoint server = established();
         CollectionSpace space = CollectionSpace.of(2, 8);
         byte[] first = Frames.request(REQUEST_TYPE, 1, new byte[] {1});
         byte[] second = Frames.request(REQUEST_TYPE, 3, new byte[] {2});
@@ -279,7 +274,7 @@ class EndpointUnitInputTest {
 
     @Test
     void unsupportedInputAlsoStopsWhenCollectionIsNeeded() {
-        Endpoint server = established(false);
+        Endpoint server = established();
         CollectionSpace space = CollectionSpace.of(2, 8);
         byte[] request = Frames.request(REQUEST_TYPE, 1, new byte[0]);
         server.receiveUnit(request, 0, request.length, space);
@@ -296,7 +291,7 @@ class EndpointUnitInputTest {
 
     @Test
     void anEndedConnectionConsumesNothing() {
-        Endpoint server = established(false);
+        Endpoint server = established();
         server.disconnect();
         Drive.drainEvents(server);
 
@@ -310,7 +305,7 @@ class EndpointUnitInputTest {
 
     @Test
     void invalidRangesAreRejected() {
-        Endpoint server = established(false);
+        Endpoint server = established();
 
         assertThatIllegalArgumentException().isThrownBy(() -> server.receiveUnit(new byte[2], 1, 2, SPACE));
         assertThatIllegalArgumentException().isThrownBy(() -> server.receiveUnit(new byte[2], -1, 1, SPACE));
@@ -318,7 +313,7 @@ class EndpointUnitInputTest {
 
     @Test
     void aUnitCannotFollowBytesLeftOverFromAStreamInput() {
-        Endpoint server = established(false);
+        Endpoint server = established();
         byte[] request = Frames.request(REQUEST_TYPE, 1, new byte[0]);
         Drive.receive(server, Arrays.copyOf(request, 5));
 

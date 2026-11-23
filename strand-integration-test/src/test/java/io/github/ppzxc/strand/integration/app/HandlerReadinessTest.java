@@ -57,8 +57,8 @@ class HandlerReadinessTest {
         App.Conn conn = Rig.get(client.connect(listener.address()));
         assertThat(factoryEntered.await(Rig.WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
 
-        RequestResult early = rig.result(conn.request(request("early"), RequestOptions.noDeadline())
-                .result());
+        RequestResult early = rig.result(
+                conn.request(request("early"), RequestOptions.noDeadline()).result());
         assertThat(early.status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(early.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
         assertThat(delivered).hasValue(0);
@@ -68,8 +68,8 @@ class HandlerReadinessTest {
         long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(Rig.WAIT_SECONDS);
         RequestResult late;
         do {
-            late = rig.result(conn.request(request("late"), RequestOptions.noDeadline())
-                    .result());
+            late = rig.result(
+                    conn.request(request("late"), RequestOptions.noDeadline()).result());
             if (late.status() != Status.OK) {
                 assertThat(late.status()).isEqualTo(Status.UNAVAILABLE);
                 assertThat(late.certainty()).isEqualTo(Certainty.NOT_PROCESSED);

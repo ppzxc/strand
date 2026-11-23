@@ -75,17 +75,6 @@ final class Outbox {
         return node;
     }
 
-    /** 메시지를 맨 뒤에 붙인다. 앞쪽 비애플리케이션 구간이 끝까지 이어져 있었다면 새 노드까지 그 구간이다. */
-    Node addLast(OutboundMessage message) {
-        Node node = new Node(message);
-        boolean extendsControl = !node.application && tail == lastControl;
-        linkAfter(tail, node);
-        if (extendsControl) {
-            lastControl = node;
-        }
-        return node;
-    }
-
     /**
      * 애플리케이션 노드를 대기열에서 거둔다. 첫 애플리케이션 노드였다면 그 뒤에 이어진 비애플리케이션 노드(앞서 보내지 못해 남은 CLOSE 등)가
      * 제어 구간에 들어온다. 확인 대기가 붙은 노드(HELLO·AUTH·PING)는 거두지 않는다. 대기는 {@link #drain}이 시작시키므로, 거두면 시작하지 못한 채 남는다.

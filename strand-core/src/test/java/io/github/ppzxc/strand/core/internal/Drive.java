@@ -104,15 +104,7 @@ final class Drive {
         EndpointOutput output;
         while ((output = endpoint.nextOutput()) != null) {
             drained.add(output.message());
-            if (output.length() == 0) {
-                endpoint.outputAccepted(output.id());
-                continue;
-            }
-            try {
-                endpoint.outputProgress(output.id(), output.length());
-            } catch (IllegalStateException webSocketOutput) {
-                endpoint.outputAccepted(output.id());
-            }
+            endpoint.outputProgress(output.id(), output.length());
         }
         return drained;
     }

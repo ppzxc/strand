@@ -88,7 +88,7 @@ class ConnectionDriverClosedFinishTest {
     }
 
     private static EndpointConfig config() {
-        return EndpointConfig.defaults().webSocket().ackTimeoutMs(ACK_TIMEOUT_MS);
+        return EndpointConfig.defaults().ackTimeoutMs(ACK_TIMEOUT_MS);
     }
 
     private ConnectionDriver start(boolean isClient, Passage passage, long limitMs) {

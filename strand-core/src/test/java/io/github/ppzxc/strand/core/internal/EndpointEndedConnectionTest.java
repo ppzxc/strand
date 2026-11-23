@@ -53,11 +53,15 @@ class EndpointEndedConnectionTest {
         return openServer(EndpointConfig.defaults());
     }
 
-    private static Endpoint openWebSocketClient() {
-        Endpoint client = Endpoint.client(EndpointConfig.defaults().webSocket());
-        client.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO));
-        client.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO_ACK));
-        client.receiveMessage(WebSocketMessageKind.BINARY, bytes(AUTH_ACK));
+    private static void receiveUnit(Endpoint endpoint, byte[] unit) {
+        endpoint.receiveUnit(unit, 0, unit.length, CollectionSpace.UNLIMITED);
+    }
+
+    private static Endpoint openUnitInputClient() {
+        Endpoint client = Endpoint.client(EndpointConfig.defaults());
+        receiveUnit(client, bytes(HELLO));
+        receiveUnit(client, bytes(HELLO_ACK));
+        receiveUnit(client, bytes(AUTH_ACK));
         return client;
     }
 
@@ -154,14 +158,14 @@ class EndpointEndedConnectionTest {
     }
 
     @Test
-    void receivedWebSocketMessagesAreIgnored() {
-        Endpoint ended = settle(openWebSocketClient());
+    void receivedUnitInputsAreIgnored() {
+        Endpoint ended = settle(openUnitInputClient());
         ended.disconnect();
         settle(ended);
 
-        ended.receiveMessage(WebSocketMessageKind.TEXT, bytes(HELLO));
-        ended.receiveMessage(WebSocketMessageKind.BINARY, new byte[] {1});
-        ended.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
+        ended.receiveUnsupportedInput(CollectionSpace.UNLIMITED);
+        receiveUnit(ended, new byte[] {1});
+        receiveUnit(ended, bytes(PREFACE));
 
         assertSilent(ended);
     }

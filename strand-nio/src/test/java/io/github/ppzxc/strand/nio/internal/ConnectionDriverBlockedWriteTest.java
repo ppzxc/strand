@@ -44,10 +44,7 @@ class ConnectionDriverBlockedWriteTest {
     }
 
     private static EndpointConfig config() {
-        return EndpointConfig.defaults()
-                .webSocket()
-                .ackTimeoutMs(ACK_TIMEOUT_MS)
-                .idleIntervalMs(IDLE_INTERVAL_MS);
+        return EndpointConfig.defaults().ackTimeoutMs(ACK_TIMEOUT_MS).idleIntervalMs(IDLE_INTERVAL_MS);
     }
 
     /** 핸드셰이크를 마친 연결 한 쌍. */

@@ -56,7 +56,7 @@ class ConnectionDriverTest {
 
             @Override
             EndpointConfig config() {
-                return EndpointConfig.defaults().webSocket();
+                return EndpointConfig.defaults();
             }
         };
 
@@ -706,22 +706,5 @@ class ConnectionDriverTest {
         assertThat(await(serverOwn).status()).isEqualTo(STATUS_UNAVAILABLE);
         assertThat(await(serverOwn).certainty()).isNotEqualTo(Certainty.RESPONSE);
         assertThat(await(clientOwn).status()).isEqualTo(STATUS_UNAVAILABLE);
-    }
-
-    @Test
-    void anInputTheEndpointRejectsEndsTheConnectionAndPendingRequestsGetTheCoreResult() throws Exception {
-        // 서버는 메시지 통로 설정인데 통로는 바이트 스트림이라 receive가 IllegalStateException을 던진다.
-        InMemoryPassage.Pair link = InMemoryPassage.streams();
-        ConnectionDriver server =
-                start(ConnectionDriver.server(EndpointConfig.defaults().webSocket(), link.second()));
-        CompletableFuture<RequestResult> pending =
-                server.request(APPLICATION_TYPE, bytes("never-sent")).result();
-        // 요청 명령이 아직 큐에 있는 채 서버가 오류로 멈춰도, 멈추기 전에 큐를 소진해 core 결과로 끝나므로 순서를 맞출 필요가 없다.
-        client(Wire.STREAM, link.first(), ConnectionDriverTest::ignore);
-
-        RequestResult result = await(pending);
-
-        assertThat(result.status()).isEqualTo(STATUS_UNAVAILABLE);
-        assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
     }
 }
