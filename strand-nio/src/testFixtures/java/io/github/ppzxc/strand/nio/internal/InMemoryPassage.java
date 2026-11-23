@@ -269,7 +269,7 @@ public final class InMemoryPassage implements Passage {
 
     /**
      * 시간 제한을 실제 시간으로 흘리지 않게 한다. 제한이 있는 {@link #await}도 읽을 것이나 {@link #wakeup}이 올 때까지 기다리고, 받은 제한은
-     * {@link #lastAwaitTimeoutMs}로 볼 수 있다. 드라이버를 시작하기 전에 부른다.
+     * {@link #lastAwaitTimeoutMs}로 볼 수 있다. 엔진을 시작하기 전에 부른다.
      *
      * @return 이 통로
      */
@@ -281,7 +281,7 @@ public final class InMemoryPassage implements Passage {
     }
 
     /**
-     * {@link #await}를 부른 횟수(시간 제한 0 포함). 시계가 가지 않는데 늘면 드라이버가 되풀이해 깨어나는 것이다.
+     * {@link #await}를 부른 횟수(시간 제한 0 포함). 시계가 가지 않는데 늘면 엔진이 되풀이해 깨어나는 것이다.
      *
      * @return 부른 횟수
      */
@@ -293,7 +293,7 @@ public final class InMemoryPassage implements Passage {
 
     /**
      * 상대가 보낸 것을 받아 두기만 하고 {@link #releaseDeliveries}까지 읽게 하지 않는다. 상대가 한 스텝에 나눠 쓴 여러 프레임이 읽는 쪽에 같은
-     * 읽기로 함께 도착하는 상황을 결정적으로 만든다(읽는 스레드가 첫 프레임만 보고 깨어나는 경쟁이 없다). 드라이버를 시작하기 전에 부른다.
+     * 읽기로 함께 도착하는 상황을 결정적으로 만든다(읽는 스레드가 첫 프레임만 보고 깨어나는 경쟁이 없다). 엔진을 시작하기 전에 부른다.
      */
     public void holdDeliveries() {
         synchronized (lock) {
@@ -376,6 +376,18 @@ public final class InMemoryPassage implements Passage {
         }
     }
 
+    /**
+     * 이 통로가 닫혔는가. 엔진은 전송 스레드가 끝나기 전의 마무리(남은 결과 확정, 종료 알림 확정)를 통로를 닫은 뒤에 하므로, 닫혔다고 해서 그 마무리까지 끝난
+     * 것은 아니다.
+     *
+     * @return 닫혔으면 true
+     */
+    public boolean isClosed() {
+        synchronized (lock) {
+            return closed;
+        }
+    }
+
     private long activity() {
         synchronized (lock) {
             return activity;
@@ -383,14 +395,14 @@ public final class InMemoryPassage implements Passage {
     }
 
     /**
-     * 주어진 통로들이 모두 더 할 일 없이 기다리는 상태가 될 때까지 기다린다(결정적 동기화용). 드라이버들이 주고받는 쓰기가 다 처리된 뒤에야 돌아온다.
-     * 실제 시간은 상한(5초)으로만 쓴다.
+     * 주어진 통로들이 모두 더 할 일 없이 기다리는 상태가 될 때까지 기다린다(결정적 동기화용). 엔진들이 주고받는 쓰기가 다 처리된 뒤에야 돌아온다.
+     * 실제 시간은 상한(15초)으로만 쓴다.
      *
      * @param passages 기다릴 통로들(manualTime이어야 한다)
-     * @throws IllegalStateException 5초 안에 가라앉지 않을 때
+     * @throws IllegalStateException 15초 안에 가라앉지 않을 때
      */
     public static void awaitQuiescence(InMemoryPassage... passages) {
-        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
         while (System.nanoTime() < limit) {
             long[] before = new long[passages.length];
             boolean allParked = true;

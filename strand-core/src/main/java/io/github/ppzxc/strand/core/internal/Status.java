@@ -16,9 +16,25 @@ public final class Status {
     /** 요청 기한이 지났다(규격 4.4.1절). */
     public static final int DEADLINE_EXCEEDED = 4;
 
+    public static final int NOT_FOUND = 5;
+
+    public static final int ALREADY_EXISTS = 6;
+
+    public static final int PERMISSION_DENIED = 7;
+
+    public static final int RESOURCE_EXHAUSTED = 8;
+
+    public static final int FAILED_PRECONDITION = 9;
+
+    public static final int ABORTED = 10;
+
+    public static final int OUT_OF_RANGE = 11;
+
     public static final int UNIMPLEMENTED = 12;
     public static final int INTERNAL = 13;
     public static final int UNAVAILABLE = 14;
+
+    public static final int DATA_LOSS = 15;
     /** 규격 2.5.1절에 정의된 마지막 status. */
     public static final int UNAUTHENTICATED = 16;
 

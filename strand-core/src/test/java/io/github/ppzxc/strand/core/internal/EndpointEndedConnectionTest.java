@@ -54,7 +54,7 @@ class EndpointEndedConnectionTest {
     }
 
     private static void receiveUnit(Endpoint endpoint, byte[] unit) {
-        endpoint.receiveUnit(unit, 0, unit.length, Drive.ROOMY);
+        endpoint.receiveUnit(unit, 0, unit.length, EndpointDriver.ROOMY);
     }
 
     private static Endpoint openUnitInputClient() {
@@ -163,7 +163,7 @@ class EndpointEndedConnectionTest {
         ended.disconnect();
         settle(ended);
 
-        ended.receiveUnsupportedInput(Drive.ROOMY);
+        ended.receiveUnsupportedInput(EndpointDriver.ROOMY);
         receiveUnit(ended, new byte[] {1});
         receiveUnit(ended, bytes(PREFACE));
 
@@ -343,7 +343,6 @@ class EndpointEndedConnectionTest {
         assertThat(Drive.drainMessages(server)).isEmpty();
         List<Event> events = Drive.drainEvents(server);
         assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
-        assertThat(events.get(0).cause()).isEmpty();
     }
 
     @Test

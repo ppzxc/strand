@@ -6,12 +6,10 @@ import static io.github.ppzxc.strand.integration.Fixtures.CLOSE_TYPE;
 import static io.github.ppzxc.strand.integration.Fixtures.STATUS_OK;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.ppzxc.strand.core.internal.Certainty;
-import io.github.ppzxc.strand.core.internal.CloseReason;
-import io.github.ppzxc.strand.nio.internal.ConnectionClosed;
-import io.github.ppzxc.strand.nio.internal.IncomingRequest;
-import io.github.ppzxc.strand.nio.internal.RequestResult;
-import io.github.ppzxc.strand.nio.internal.TcpPassage;
+import io.github.ppzxc.strand.api.Certainty;
+import io.github.ppzxc.strand.api.CloseNotice;
+import io.github.ppzxc.strand.api.RequestResult;
+import io.github.ppzxc.strand.nio.internal.ControlledPassage;
 import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -21,8 +19,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /** 종료가 다른 동작과 겹치는 경우를 실제 TCP 위에서 확인한다(규격 3.5절). */
+@ExtendWith(PassageObservation.class)
 class CloseRaceIntegrationTest {
 
     /** CLOSE가 엇갈리는 것은 타이밍에 달려 있어서, 같은 시나리오를 여러 번 되풀이해 엇갈릴 기회를 늘린다. */
@@ -35,33 +35,34 @@ class CloseRaceIntegrationTest {
     /**
      * {@code NO_ERROR} CLOSE는 대기 중인 스트림이 끝날 때까지 연결을 닫지 않는다. 서버가 응답을 보류한 채 클라이언트가 CLOSE를 보내고, 그 뒤에 서버가
      * 응답한다. 대기 중인 요청을 버리고 바로 닫는 구현은 클라이언트가 {@code OK}가 아니라 로컬 {@code UNAVAILABLE}을 받아 실패한다. 종료 알림이 마지막
-     * 스트림의 결과보다 먼저 와도 실패하므로 알림을 받았을 때 결과 Future가 이미 끝나 있는지도 함께 본다. 서버가 CLOSE를 처리했는지는 받은 바이트 수라는
+     * 스트림의 결과보다 먼저 와도 실패하므로 알림을 받았을 때 제품이 보존한 결과가 이미 확정되어 있는지도 함께 본다(규격 3.5절은 보존된 결과 다음에 알림을 낸다고 정한다. 앱 실행기를 한 번 더 거쳐 완료되는 Future는 알림과의 순서가 정해져 있지 않아 보지 않는다). 서버가 CLOSE를 처리했는지는 받은 바이트 수라는
      * 관찰 지점으로 본다. 서버가 처리한 바이트 수가 CLOSE 프레임 크기만큼 늘어난 것을 확인한 뒤에 응답한다. 응답이 CLOSE보다 먼저 닿는 경로로 통과하지
      * 않게 하려는 것이다.
      */
     @Test
-    @DisplayName("대기 요청이 있는 채 NO_ERROR CLOSE를 보내도 응답을 받은 뒤에 닫힌다 (규격 3.5)")
+    @DisplayName("[nio 전용] 대기 요청이 있는 채 NO_ERROR CLOSE를 보내도 응답을 받은 뒤에 닫힌다 (규격 3.5)")
     void noErrorCloseWaitsForPendingResponse() throws Exception {
-        try (TcpServer server = TcpServer.start();
-                Peer client = Peer.connect(server.port(), null)) {
+        Transport transport = Transport.NIO;
+        try (TcpServer server = TcpServer.start(transport);
+                Peer client = Peer.connect(transport, server.port(), null)) {
             Peer serverSide = server.awaitPeer();
-            CompletableFuture<RequestResult> result =
-                    client.request(APPLICATION_TYPE, Fixtures.payload("hello")).result();
-            IncomingRequest received = serverSide.awaitRequest();
-            long receivedBeforeClose = serverSide.driver().receivedBytes();
+            Peer.Sent sent = client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
+            CompletableFuture<RequestResult> result = sent.result();
+            Wire.Incoming received = serverSide.awaitRequest();
+            long receivedBeforeClose = serverSide.passage().readBytes();
 
-            client.driver().closeConnection();
+            client.closeConnection();
             serverSide.awaitReceivedBytes(receivedBeforeClose + CLOSE_FRAME_BYTES);
             assertThat(result).isNotDone();
-            received.respond(STATUS_OK, Fixtures.payload("late")).get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            ConnectionClosed atClient = client.awaitClosed();
-            ConnectionClosed atServer = serverSide.awaitClosed();
+            Fixtures.await(received.respond(STATUS_OK, Fixtures.payload("late")));
+            CloseNotice atClient = client.awaitClosed();
+            CloseNotice atServer = serverSide.awaitClosed();
 
-            assertThat(result).isDone();
+            assertThat(sent.isResultRetained()).isTrue();
             assertThat(await(result).status()).isEqualTo(STATUS_OK);
             assertThat(await(result).certainty()).isEqualTo(Certainty.RESPONSE);
-            assertThat(atClient.reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
-            assertThat(atServer.reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
+            assertThat(atClient.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
+            assertThat(atServer.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
         }
     }
 
@@ -74,13 +75,13 @@ class CloseRaceIntegrationTest {
      * 경로를 시험할 수 없다.
      */
     @Test
-    @DisplayName("대기 스트림이 있는 양쪽이 서로의 CLOSE를 보기 전에 CLOSE를 보내도 CLOSE는 각자 하나뿐이다 (규격 3.5)")
+    @DisplayName("[nio 전용] 대기 스트림이 있는 양쪽이 서로의 CLOSE를 보기 전에 CLOSE를 보내도 CLOSE는 각자 하나뿐이다 (규격 3.5)")
     void crossedCloseWhileClosingSendsOneCloseEach() throws Exception {
-        try (TcpServer server = TcpServer.start(
-                null, channel -> new ControlledPassage(Peer.tcp(channel, TcpPassage.DEFAULT_READ_BUFFER_BYTES)))) {
-            ControlledPassage clientPassage = new ControlledPassage(TcpPassage.of(Peer.open(server.port())));
-            try (Peer client = Peer.client(clientPassage, null)) {
+        Transport transport = Transport.NIO;
+        try (TcpServer server = TcpServer.start(transport)) {
+            try (Peer client = Peer.connect(transport, server.port(), null)) {
                 Peer serverSide = server.awaitPeer();
+                ControlledPassage clientPassage = client.passage();
                 ControlledPassage serverPassage = serverSide.passage();
                 CompletableFuture<RequestResult> fromClient = client.request(
                                 APPLICATION_TYPE, Fixtures.payload("from-client"))
@@ -88,32 +89,28 @@ class CloseRaceIntegrationTest {
                 CompletableFuture<RequestResult> fromServer = serverSide
                         .request(APPLICATION_TYPE, Fixtures.payload("from-server"))
                         .result();
-                IncomingRequest requestAtServer = serverSide.awaitRequest();
-                IncomingRequest requestAtClient = client.awaitRequest();
-                long clientFramesBefore = client.driver().writtenFrames();
-                long serverFramesBefore = serverSide.driver().writtenFrames();
-                long clientReceivedBefore = client.driver().receivedBytes();
-                long serverReceivedBefore = serverSide.driver().receivedBytes();
+                Wire.Incoming requestAtServer = serverSide.awaitRequest();
+                Wire.Incoming requestAtClient = client.awaitRequest();
+                long clientFramesBefore = clientPassage.writtenFrames().size();
+                long serverFramesBefore = serverPassage.writtenFrames().size();
+                long clientReceivedBefore = clientPassage.readBytes();
+                long serverReceivedBefore = serverPassage.readBytes();
 
                 clientPassage.deferWrites();
                 serverPassage.deferWrites();
-                client.driver().closeConnection();
-                serverSide.driver().closeConnection();
+                client.closeConnection();
+                serverSide.closeConnection();
                 Peer.awaitUntil(
-                        () -> client.driver().writtenFrames() > clientFramesBefore
-                                && serverSide.driver().writtenFrames() > serverFramesBefore,
+                        () -> clientPassage.writtenFrames().size() > clientFramesBefore
+                                && serverPassage.writtenFrames().size() > serverFramesBefore,
                         "양쪽이 CLOSE를 쓰지 않았다");
                 clientPassage.releaseWrites();
                 serverPassage.releaseWrites();
                 client.awaitReceivedBytes(clientReceivedBefore + CLOSE_FRAME_BYTES);
                 serverSide.awaitReceivedBytes(serverReceivedBefore + CLOSE_FRAME_BYTES);
 
-                requestAtServer
-                        .respond(STATUS_OK, Fixtures.payload("ok"))
-                        .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
-                requestAtClient
-                        .respond(STATUS_OK, Fixtures.payload("ok"))
-                        .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                Fixtures.await(requestAtServer.respond(STATUS_OK, Fixtures.payload("ok")));
+                Fixtures.await(requestAtClient.respond(STATUS_OK, Fixtures.payload("ok")));
                 client.awaitClosed();
                 serverSide.awaitClosed();
                 client.stop();
@@ -137,13 +134,13 @@ class CloseRaceIntegrationTest {
      * 타이밍에서 양쪽이 엇갈리는지는 보장되지 않으므로 시작 신호로 동시에 출발시켜 {@value #REPEATS}번 되풀이한다. 엇갈림을 확정해서 보는 시험은 {@link
      * #crossedCloseWhileClosingSendsOneCloseEach()}가 맡는다.
      */
-    @Test
+    @TransportTest
     @DisplayName("양쪽이 동시에 CLOSE를 보내도 종료 알림은 양쪽에서 한 번씩만 온다 (규격 3.5)")
-    void simultaneousCloseNotifiesOncePerSide() throws Exception {
+    void simultaneousCloseNotifiesOncePerSide(Transport transport) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(2);
-        try (TcpServer server = TcpServer.start(type -> STATUS_OK)) {
+        try (TcpServer server = TcpServer.start(transport, type -> STATUS_OK)) {
             for (int round = 0; round < REPEATS; round++) {
-                try (Peer client = Peer.connect(server.port(), null)) {
+                try (Peer client = Peer.connect(transport, server.port(), null)) {
                     Peer serverSide = server.awaitPeer();
                     await(client.request(APPLICATION_TYPE, Fixtures.payload("hello"))
                             .result());
@@ -151,12 +148,12 @@ class CloseRaceIntegrationTest {
                     CountDownLatch start = new CountDownLatch(1);
                     Future<?> clientClose = pool.submit(() -> {
                         start.await();
-                        client.driver().closeConnection();
+                        client.closeConnection();
                         return null;
                     });
                     Future<?> serverClose = pool.submit(() -> {
                         start.await();
-                        serverSide.driver().closeConnection();
+                        serverSide.closeConnection();
                         return null;
                     });
                     start.countDown();

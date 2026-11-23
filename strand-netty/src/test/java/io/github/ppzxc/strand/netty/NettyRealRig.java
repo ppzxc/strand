@@ -138,6 +138,20 @@ final class NettyRealRig implements AutoCloseable {
             }
         }
 
+        /** 연결을 RST로 끊는다(정상 종료의 FIN이 아니다). 클라이언트는 입출력 오류로 끊김을 본다. */
+        void resetConnections() {
+            synchronized (sockets) {
+                for (Socket socket : sockets) {
+                    try {
+                        socket.setSoLinger(true, 0);
+                    } catch (IOException ignored) {
+                        // 이미 닫힌 소켓이다.
+                    }
+                    closeQuietly(socket);
+                }
+            }
+        }
+
         private static void closeQuietly(Socket socket) {
             try {
                 socket.close();

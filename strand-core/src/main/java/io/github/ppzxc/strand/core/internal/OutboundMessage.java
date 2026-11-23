@@ -10,7 +10,7 @@ public final class OutboundMessage {
     }
 
     /** 프레임 하나를 실은 메시지. 애플리케이션 프레임인지는 프레임의 type으로 정한다(8바이트 연결 서문은 프레임이 아니다). */
-    static OutboundMessage binary(byte[] bytes) {
+    static OutboundMessage of(byte[] bytes) {
         return new OutboundMessage(bytes);
     }
 

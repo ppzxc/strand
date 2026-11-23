@@ -15,6 +15,9 @@ final class OutputProgress {
     private final LivenessTimers timers;
     private final OwnRequestLedger ledger;
 
+    // selected(쓰기 대기열 노드)와 current(전송 모듈에 내주는 출력)는 늘 짝으로 움직이지만 하나로 줄이지 않는다. 노드는 대기열이 소유한
+    // 내부 연결 리스트 원소라서(removeForWriting, 확인 대기 waitId, 내 요청 장부 통지에 쓴다) 전송 모듈 쪽 타입인 EndpointOutput에 얹으면
+    // 대기열 내부가 새고, 반대로 노드만 두면 next()를 부를 때마다 EndpointOutput을 새로 만들어 쓰기 경로에서 할당이 생긴다.
     private Outbox.@Nullable Node selected;
     private @Nullable EndpointOutput current;
     private long nextOutputId;

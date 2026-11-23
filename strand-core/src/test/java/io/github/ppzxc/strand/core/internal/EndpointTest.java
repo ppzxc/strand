@@ -88,7 +88,7 @@ class EndpointTest {
         return serverAfterPreface(config, null);
     }
 
-    private static Endpoint serverAfterPreface(EndpointConfig config, Drive.Authentication authentication) {
+    private static Endpoint serverAfterPreface(EndpointConfig config, EndpointDriver.Authentication authentication) {
         Endpoint server = authentication == null ? Drive.server(config) : Drive.server(config, authentication);
         Drive.receive(server, bytes(PREFACE));
         Drive.drainMessages(server);
@@ -1279,7 +1279,7 @@ class EndpointTest {
         return closeWithLast(errorCode, 0);
     }
 
-    private static Endpoint serverAwaitingAuth(Drive.Authentication authentication) {
+    private static Endpoint serverAwaitingAuth(EndpointDriver.Authentication authentication) {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults(), authentication);
         Drive.receive(server, bytes(HELLO));
         Drive.receive(server, bytes(HELLO_ACK));

@@ -357,7 +357,7 @@ class VectorRunnerTest {
     @Test
     void runnerSourcesDoNotUseTheBatchDrivingMode() throws java.io.IOException {
         java.nio.file.Path dir = java.nio.file.Paths.get("src/test/java/io/github/ppzxc/strand/conformance");
-        for (String file : new String[] {"VectorRunner.java", "StepKind.java", "ProgressDriver.java"}) {
+        for (String file : new String[] {"VectorRunner.java", "StepKind.java"}) {
             String source = new String(
                     java.nio.file.Files.readAllBytes(dir.resolve(file)), java.nio.charset.StandardCharsets.UTF_8);
             assertThat(source)
@@ -521,10 +521,10 @@ class VectorRunnerTest {
         assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }
 
-    private static OutboundMessage binaryMessage(byte[] bytes) throws ReflectiveOperationException {
-        Method binary = OutboundMessage.class.getDeclaredMethod("binary", byte[].class);
-        binary.setAccessible(true);
-        return (OutboundMessage) binary.invoke(null, (Object) bytes);
+    private static OutboundMessage messageOf(byte[] bytes) throws ReflectiveOperationException {
+        Method factory = OutboundMessage.class.getDeclaredMethod("of", byte[].class);
+        factory.setAccessible(true);
+        return (OutboundMessage) factory.invoke(null, (Object) bytes);
     }
 
     private static final String PING_FRAME = "00000018000200000000000000000000" + "00000000" + "0102030405060708";
@@ -533,7 +533,7 @@ class VectorRunnerTest {
     void aWebSocketMessageCarryingTwoFramesFails() throws ReflectiveOperationException {
         VectorRunner runner =
                 new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
-        List<OutboundMessage> messages = Arrays.asList(binaryMessage(Bytes.fromHex(PING_FRAME + PING_FRAME)));
+        List<OutboundMessage> messages = Arrays.asList(messageOf(Bytes.fromHex(PING_FRAME + PING_FRAME)));
 
         assertThatThrownBy(() -> runner.describeMessages(messages, false)).isInstanceOf(AssertionError.class);
     }
@@ -543,8 +543,8 @@ class VectorRunnerTest {
         VectorRunner runner =
                 new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
         List<OutboundMessage> messages = Arrays.asList(
-                binaryMessage(Bytes.fromHex(PING_FRAME.substring(0, 20))),
-                binaryMessage(Bytes.fromHex(PING_FRAME.substring(20))));
+                messageOf(Bytes.fromHex(PING_FRAME.substring(0, 20))),
+                messageOf(Bytes.fromHex(PING_FRAME.substring(20))));
 
         assertThatThrownBy(() -> runner.describeMessages(messages, false)).isInstanceOf(AssertionError.class);
     }
@@ -553,10 +553,10 @@ class VectorRunnerTest {
     void aByteStreamMayCarryTwoFramesInOneMessageOrSplitAcrossMessages() throws ReflectiveOperationException {
         VectorRunner runner =
                 new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
-        List<OutboundMessage> twoInOne = Arrays.asList(binaryMessage(Bytes.fromHex(PING_FRAME + PING_FRAME)));
+        List<OutboundMessage> twoInOne = Arrays.asList(messageOf(Bytes.fromHex(PING_FRAME + PING_FRAME)));
         List<OutboundMessage> split = Arrays.asList(
-                binaryMessage(Bytes.fromHex(PING_FRAME.substring(0, 20))),
-                binaryMessage(Bytes.fromHex(PING_FRAME.substring(20) + PING_FRAME)));
+                messageOf(Bytes.fromHex(PING_FRAME.substring(0, 20))),
+                messageOf(Bytes.fromHex(PING_FRAME.substring(20) + PING_FRAME)));
 
         assertThat(runner.describeMessages(twoInOne, false)).hasSize(2);
         assertThat(runner.describeMessages(split, false)).hasSize(2);
@@ -575,7 +575,7 @@ class VectorRunnerTest {
     private static List<String> sentOnce(boolean client, String hex) throws ReflectiveOperationException {
         VectorRunner runner =
                 new VectorRunner(client, false, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
-        return runner.describeMessages(Arrays.asList(binaryMessage(Bytes.fromHex(hex))), false);
+        return runner.describeMessages(Arrays.asList(messageOf(Bytes.fromHex(hex))), false);
     }
 
     private static String expectedOf(String frameJson) {
@@ -642,7 +642,7 @@ class VectorRunnerTest {
         VectorRunner runner =
                 new VectorRunner(true, false, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
         return FrameKind.comparable(
-                runner.describeMessages(Arrays.asList(binaryMessage(Bytes.fromHex(hex))), false),
+                runner.describeMessages(Arrays.asList(messageOf(Bytes.fromHex(hex))), false),
                 JsonParser.parseString(expectedSend).getAsJsonArray());
     }
 
@@ -687,8 +687,7 @@ class VectorRunnerTest {
                 frameHex("0000001f", "0003", "00", "0000000000000000", "0000", CLOSE_PAYLOAD_NO_ERROR + "616263");
         VectorRunner runner =
                 new VectorRunner(true, true, Endpoint.client(EndpointConfig.defaults()), OptionalLong.empty());
-        List<OutboundMessage> messages =
-                Arrays.asList(binaryMessage(Bytes.fromHex(ping)), binaryMessage(Bytes.fromHex(close)));
+        List<OutboundMessage> messages = Arrays.asList(messageOf(Bytes.fromHex(ping)), messageOf(Bytes.fromHex(close)));
         String expected = "[" + PING_EXPECTED + ","
                 + "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\",\"reason\":\"abc\"}]";
 

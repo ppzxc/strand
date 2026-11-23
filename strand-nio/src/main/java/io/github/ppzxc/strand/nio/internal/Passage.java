@@ -4,10 +4,9 @@ import io.github.ppzxc.strand.core.internal.CloseReason;
 import java.io.IOException;
 
 /**
- * 연결 드라이버가 바이트를 주고받는 통로(TCP, in-memory, WebSocket 등). 바이트 스트림 통로는 {@link Inbound#bytes}를, 메시지 통로는
- * 메시지 하나를 {@link Inbound#unit}으로(바이트로 넘길 수 없는 메시지는 {@link Inbound#unsupported()}로) 내며, 드라이버는 그 종류에 따라
- * {@code Endpoint}의 {@code receive}와 {@code receiveUnit}·{@code receiveUnsupportedInput} 가운데 하나를 부른다. 통로의 종류는 core가
- * 모른다.
+ * 연결 엔진이 바이트를 주고받는 통로(TCP, TLS, in-memory 등). 바이트 스트림 통로는 {@link Inbound#bytes}를 내고, 연결 엔진은 그것을 {@code
+ * Endpoint}의 스트림 입력으로 넣는다. 메시지 하나를 {@link Inbound#unit}으로(바이트로 넘길 수 없는 메시지는 {@link Inbound#unsupported()}로)
+ * 내는 메시지 통로도 {@code Inbound}가 표현할 수 있으나, 현재 연결 엔진은 바이트 스트림 통로만 다룬다. 통로의 종류는 core가 모른다.
  *
  * <p>{@code await}와 {@link #writeBytes}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
@@ -18,7 +17,7 @@ public interface Passage {
      *
      * @param timeoutMs 기다리는 상한(밀리초). 0은 기다리지 않고 폴, 음수는 상한 없음, 양수는 그 밀리초까지
      * @return 읽은 것. 읽을 것이 없이 깨어났으면 {@link Inbound#none()}
-     * @throws IOException 입출력 오류. 드라이버는 연결이 끊긴 것으로 본다
+     * @throws IOException 입출력 오류. 연결 엔진은 연결이 끊긴 것으로 본다
      */
     default Inbound await(long timeoutMs) throws IOException {
         return await(timeoutMs, true, false);
@@ -30,7 +29,7 @@ public interface Passage {
      * 기다릴 때 이미 받아 줄 수 있으면 바로 끝난다.
      *
      * <p>시간 제한의 계약이다. {@code timeoutMs}가 0이면 기다리지 않고 지금 읽을 수 있는 것만 돌려준다(논블로킹 폴, 읽을 것이 없으면 바로
-     * {@link Inbound#none()}). 음수면 기다리는 대상이 오거나 {@code wakeup}이 올 때까지 상한 없이 기다린다. 양수면 그 밀리초까지만 기다린다. 드라이버는 양수 값을 {@code Integer.MAX_VALUE} 이하로 잘라 부른다.
+     * {@link Inbound#none()}). 음수면 기다리는 대상이 오거나 {@code wakeup}이 올 때까지 상한 없이 기다린다. 양수면 그 밀리초까지만 기다린다. 연결 엔진은 양수 값을 {@code Integer.MAX_VALUE} 이하로 잘라 부른다.
      * 구현은 {@code PassageContract}(test fixtures)를 상속한 테스트로 이를 확인한다.
      *
      * <p>{@code waitForRead}가 false면 이 호출은 읽지 않는다. 읽을 것이 있어도 깨어나지 않고 입력을 가져가지도 않으며, 늘 {@link Inbound#none()}을
@@ -41,7 +40,7 @@ public interface Passage {
      * @param waitForRead 읽을 것이 생기기를 기다리고 읽은 것을 돌려줄지
      * @param waitForWrite 쓰기가 받아 줄 수 있게 되기를 기다릴지
      * @return 읽은 것. 읽을 것이 없이 깨어났으면 {@link Inbound#none()}
-     * @throws IOException 입출력 오류. 드라이버는 연결이 끊긴 것으로 본다
+     * @throws IOException 입출력 오류. 연결 엔진은 연결이 끊긴 것으로 본다
      */
     Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException;
 
@@ -56,7 +55,7 @@ public interface Passage {
      * @param offset 보낼 바이트가 시작하는 위치
      * @param length 보낼 바이트 수(0 이상)
      * @return 이번에 소비한 바이트 수(0 이상, {@code length} 이하)
-     * @throws IOException 입출력 오류. 드라이버는 연결이 끊긴 것으로 본다
+     * @throws IOException 입출력 오류. 연결 엔진은 연결이 끊긴 것으로 본다
      */
     int writeBytes(byte[] bytes, int offset, int length) throws IOException;
 
@@ -71,7 +70,7 @@ public interface Passage {
     }
 
     /**
-     * {@link #shutdownOutput()}과 같되 연결이 어떻게 끝났는지를 안다. 드라이버는 core의 전송 종료 지시가 닫으라고 하고 남은 출력을 다 넘긴 뒤 이
+     * {@link #shutdownOutput()}과 같되 연결이 어떻게 끝났는지를 안다. 연결 엔진은 core의 전송 종료 지시가 닫으라고 하고 남은 출력을 다 넘긴 뒤 이
      * 메서드를 부른다. 종료 원인에 따라 닫는 방식이 갈리는 통로(WebSocket은 연결 종료에만 Close 1000을 쓴다)가 재정의한다. 기본 구현은 원인을 보지
      * 않는다.
      *
@@ -86,7 +85,7 @@ public interface Passage {
 
     /**
      * 보내는 쪽만 닫는다. 상대는 끊김(EOF)을 보지만 이쪽은 상대가 끊을 때까지 {@link #await}로 계속 읽을 수 있다(TCP의 {@code
-     * shutdownOutput}과 같다). 드라이버는 연결이 끝난 뒤(CLOSED), 쓸 것을 다 쓰고 나서 한 번 부른다. 기본 구현은 통로를 통째로 닫는다.
+     * shutdownOutput}과 같다). 연결 엔진은 연결이 끝난 뒤(CLOSED), 쓸 것을 다 쓰고 나서 한 번 부른다. 기본 구현은 통로를 통째로 닫는다.
      */
     default void shutdownOutput() {
         close();

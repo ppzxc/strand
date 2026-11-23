@@ -44,7 +44,7 @@ class EndpointOutboxOrderTest {
     /** 상대가 보낸 바이트를 넣는다. 단위 입력이면 한 번에 한 단위로 넣는다. */
     private static void feed(Variant variant, Endpoint endpoint, byte[] bytes) {
         if (variant == Variant.UNIT) {
-            endpoint.receiveUnit(bytes, 0, bytes.length, Drive.ROOMY);
+            endpoint.receiveUnit(bytes, 0, bytes.length, EndpointDriver.ROOMY);
             Drive.settle(endpoint);
         } else {
             Drive.receive(endpoint, bytes);

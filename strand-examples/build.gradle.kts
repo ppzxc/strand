@@ -11,11 +11,6 @@ dependencies {
   // 앱 공개 API 예제(NettyAppExample)는 Netty 전송 모듈과 앱이 제공하는 Netty를 쓴다.
   implementation(project(":strand-netty"))
   implementation("io.netty:netty-transport:${nettyVersion.get()}")
-  // WebSocket 통로 테스트가 Passage 계약(PassageContract)을 상속한다.
+  // 앱 공개 API 예제 테스트가 TLS 시험용 컨텍스트(TestTls)를 쓴다.
   testImplementation(testFixtures(project(":strand-nio")))
-}
-
-// JDK 11 java.net.http를 쓰므로 core와 달리 release 11. 배포하지 않고 컴파일만 확인한다.
-tasks.withType<JavaCompile>().configureEach {
-  options.release = 11
 }
