@@ -6,3 +6,6 @@ req-hello-peer-concurrent-limit
 req-close-malformed-last-id-above-sent-error
 # 결과 확정성을 요청의 세 단계로 나눴다. 쓰기를 시작했지만 넘기지 못한 요청은 끊김이면 처리 안 됨, 내 쪽 종료면 결과 모름이다 (#372)
 req-close-end-certainty-by-handoff
+# 쓰기를 시작했지만 넘기지 못한 요청의 결과 확정성을 어느 쪽 끝냄이 먼저 정해졌는지로 가른다. 내 쪽 종료 뒤의 끊김도 결과 모름이다 (#383)
+req-close-end-certainty-partial-disconnect
+req-close-end-certainty-partial-own-end
