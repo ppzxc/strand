@@ -120,7 +120,6 @@ public final class Endpoint {
 
     private boolean deferredAuthentication;
     private boolean authenticationPending;
-    private boolean handlerReady;
     private Outbox.@Nullable Node selectedOutput;
     private @Nullable EndpointOutput currentOutput;
     private long nextOutputId;
@@ -690,6 +689,101 @@ public final class Endpoint {
         dropMessage();
     }
 
+    /**
+     * 정확히 한 단위(서문 또는 프레임 하나)라고 주장하는 바이트를 넣는다. 크기가 한 단위와 같으면 같은 바이트를 스트림으로 넣었을 때와 같은 사건과
+     * 출력을 낸다. 다르면 연결 단계에 맞게 반응한다: 서문 단계와 첫 프레임 단계는 아무것도 보내지 않고 닫고, 그 뒤는 연결 오류이며, {@code
+     * type}이 CLOSE이면 CLOSE 없이 닫는다(규격 3.5절, 5.1절). 설정의 WebSocket 여부와 무관하다.
+     *
+     * <p>수거 공간 계약은 {@link #receiveBounded(byte[], int, int, int, CollectionSpace)}와 같다. 공간이 모자라면 아무것도 소비하지 않고
+     * 수거가 필요하다고 알리며, 호출자는 수거한 뒤 같은 단위를 다시 넣는다. 연결이 이미 끝났으면 아무것도 소비하지 않는다. 이 호출 안에서 읽고
+     * 끝내며 {@code bytes}를 붙잡지 않는다.
+     *
+     * @param bytes 단위를 담은 배열
+     * @param offset 단위의 시작 위치
+     * @param length 단위의 길이
+     * @param space 수거 전에 쌓아 둘 수 있는 사건·출력의 한도
+     * @return 소비한 바이트 수와 수거 필요 여부
+     * @throws IllegalArgumentException 범위가 유효하지 않을 때
+     * @throws IllegalStateException 스트림 입력으로 받아 두고 처리하지 못한 바이트가 남아 있을 때, 입력을 처리하는 중에 다시 불렀을 때, 수거할
+     *     것이 하나도 없는데도 공간이 모자랄 때
+     */
+    public ReceiveProgress receiveUnit(byte[] bytes, int offset, int length, CollectionSpace space) {
+        Objects.requireNonNull(bytes, "bytes");
+        Objects.requireNonNull(space, "space");
+        if (offset < 0 || length < 0 || offset > bytes.length - length) {
+            throw new IllegalArgumentException("유효하지 않은 입력 범위");
+        }
+        return receiveWholeUnit(bytes, offset, length, true, space);
+    }
+
+    /**
+     * 바이트로 넘길 수 없는 입력(예: 텍스트 메시지)을 받았다고 알린다. 반응은 크기가 어긋난 단위 입력과 같다. 수거 공간 계약도 같다: {@code
+     * collectionRequired}가 참이면 아무것도 하지 않은 것이므로, 수거한 뒤 다시 부른다. 연결이 이미 끝났으면 아무것도 하지 않는다. 소비한 바이트는
+     * 늘 0이다.
+     *
+     * @param space 수거 전에 쌓아 둘 수 있는 사건·출력의 한도
+     * @return 수거 필요 여부
+     */
+    public ReceiveProgress receiveUnsupportedInput(CollectionSpace space) {
+        Objects.requireNonNull(space, "space");
+        return receiveWholeUnit(NO_BYTES, 0, 0, false, space);
+    }
+
+    private ReceiveProgress receiveWholeUnit(
+            byte[] bytes, int offset, int length, boolean supported, CollectionSpace space) {
+        if (pendingLength > 0) {
+            throw new IllegalStateException("스트림 입력으로 받아 둔 바이트가 남아 있어 단위로 입력할 수 없다");
+        }
+        if (!enterReceive()) {
+            return new ReceiveProgress(0, false);
+        }
+        try {
+            if (!hasSpace(space)) {
+                return new ReceiveProgress(0, true);
+            }
+            consumeWholeUnit(bytes, offset, length, supported);
+            return new ReceiveProgress(supported ? length : 0, false);
+        } finally {
+            receiving = false;
+        }
+    }
+
+    /** 한 단위가 정확히 {@code length}바이트라고 보고 처리한다. 크기가 어긋나면 연결 단계에 맞게 닫는다. */
+    private void consumeWholeUnit(byte[] bytes, int off, int length, boolean supported) {
+        if (phase.awaitingPreface()) {
+            if (supported && length == Frames.preface().length && matchesPrefacePrefix(bytes, off, length)) {
+                phase.prefaceVerified();
+                sendHello();
+            } else {
+                closeWithoutClose();
+            }
+            return;
+        }
+        if (phase.awaitingFirstFrame()) {
+            boolean valid = supported
+                    && length >= Frames.HEADER_SIZE
+                    && Frames.readUnsignedInt(bytes, off) >= Frames.MIN_LENGTH
+                    && isFirstFrameHeader(bytes, off);
+            if (!valid) {
+                closeWithoutClose();
+                return;
+            }
+            phase.firstFrameVerified();
+        }
+        if (!supported || length < Frames.TYPE_END) {
+            connectionError();
+            return;
+        }
+        long declared = Frames.readUnsignedInt(bytes, off);
+        if (declared < Frames.MIN_LENGTH
+                || declared > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE
+                || length != Frames.LENGTH_FIELD_SIZE + declared) {
+            rejectBadLength(bytes, off);
+            return;
+        }
+        handle(bytes, off, length);
+    }
+
     /** 전송 모듈이 연결을 어떻게 닫아야 하는지에 대한 core의 지시. Strand CLOSE·WebSocket Close 메시지와는 별개다. */
     public enum TransportClose {
         /** 연결이 끝나지 않았다. 닫지 않는다. */
@@ -940,13 +1034,16 @@ public final class Endpoint {
      * 애플리케이션이 상대의 요청에 응답하게 한다. 스트림이 끝나고 종료 중이었다면 닫는다. 대기 중이 아닌 스트림이면 아무것도 하지 않는다.
      *
      * @param streamId 상대가 연 스트림 번호
-     * @param status 규격 2.5.1절의 status 값
+     * @param status 규격 2.5.1절의 status 값(0~16)
      * @param payload 본문
      * @return 응답을 쌓았으면 true. 대기 중인 스트림이 아니어서(이미 응답했거나, 상대가 RESET했거나, 연결이 끝나서) 아무것도 하지 않았으면 false
-     * @throws IllegalArgumentException 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런 프레임을 보내지 못하게 하고
+     * @throws IllegalArgumentException status가 0~16이 아닐 때(예약 값은 보내지 않는다), 또는 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런 프레임을 보내지 못하게 하고
      *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
     public boolean respond(long streamId, int status, byte[] payload) {
+        if (status < Status.OK || status > Status.UNAUTHENTICATED) {
+            throw new IllegalArgumentException("status는 0~16이어야 한다: " + status);
+        }
         Integer type = peerPendingStreams.get(streamId);
         if (type == null) {
             return false;
@@ -1040,7 +1137,8 @@ public final class Endpoint {
     /**
      * 애플리케이션이 연결을 닫게 한다. 이미 CLOSE를 보냈거나 받았다면 아무것도 하지 않는다(규격 3.5절).
      *
-     * @param errorCode 규격 2.5.2절의 error_code 값
+     * @param errorCode CLOSE에 쓸 수 있는 error_code({@link ErrorCode#isCloseCode})
+     * @throws IllegalArgumentException CLOSE에 쓸 수 없는 error_code일 때. 아무것도 보내지 않고 상태도 바꾸지 않는다
      */
     public void close(int errorCode) {
         close(errorCode, "");
@@ -1049,12 +1147,16 @@ public final class Endpoint {
     /**
      * 애플리케이션이 UTF-8 설명과 함께 연결을 닫게 한다. 프레임 상한에 맞춰 reason을 자른다.
      *
-     * @param errorCode 규격 2.5.2절의 error_code 값
+     * @param errorCode CLOSE에 쓸 수 있는 error_code({@link ErrorCode#isCloseCode})
      * @param reason non-null UTF-8 close reason; 빈 문자열은 허용한다
      * @throws NullPointerException reason이 {@code null}일 때
+     * @throws IllegalArgumentException CLOSE에 쓸 수 없는 error_code일 때. 아무것도 보내지 않고 상태도 바꾸지 않는다
      */
     public void close(int errorCode, String reason) {
         Objects.requireNonNull(reason, "reason");
+        if (!ErrorCode.isCloseCode(errorCode)) {
+            throw new IllegalArgumentException("CLOSE에 쓸 수 없는 error_code: " + errorCode);
+        }
         if (!phase.isActive()) {
             return;
         }
@@ -1491,8 +1593,7 @@ public final class Endpoint {
             // CLOSE를 보냈거나 받은 뒤의 새 요청은 끝까지 읽고 조용히 버린다. 어떤 프레임도 보내지 않는다(규격 3.5절).
             return;
         }
-        if ((deferredAuthentication && !handlerReady)
-                || peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
+        if (peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
             send(Frames.reset(streamId, ErrorCode.REFUSED));
         } else if (!config.knows(type)) {
             send(Frames.response(type, streamId, Status.UNIMPLEMENTED));
@@ -1700,13 +1801,6 @@ public final class Endpoint {
         finishAuthentication(decision, credentialLifetime);
     }
 
-    /** 인증을 마친 연결에서 핸들러 준비가 완료되었음을 알린다. */
-    public void handlerReady() {
-        if (deferredAuthentication && phase.isActive() && phase.hasPassedAuthGate()) {
-            handlerReady = true;
-        }
-    }
-
     private void finishAuthentication(AuthDecision decision, OptionalLong credentialLifetime) {
         if (!phase.isActive()) {
             // 콜백 안에서 CLOSE를 보냈거나 연결 오류로 CLOSE 교환으로 쳤거나 연결이 끝났다(isActive는 이 셋을 모두 거짓으로 답한다). 판정과 무관하게
@@ -1835,7 +1929,7 @@ public final class Endpoint {
             phase.connectionFailed();
             return;
         }
-        if (phase.closeReceived(Frames.readUnsignedInt(bytes, off + Frames.HEADER_SIZE))) {
+        if (phase.closeReceived(ErrorCode.normalizeReceived(Frames.readUnsignedInt(bytes, off + Frames.HEADER_SIZE)))) {
             for (OwnRequestLedger.Outcome outcome : ledger.endAfter(lastStreamId)) {
                 applyOutcome(outcome);
             }

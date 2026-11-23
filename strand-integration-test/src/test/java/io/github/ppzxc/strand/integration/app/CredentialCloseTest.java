@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ppzxc.strand.api.CloseNotice;
 import io.github.ppzxc.strand.api.Request;
+import io.github.ppzxc.strand.api.RequestHandle;
 import io.github.ppzxc.strand.api.RequestOptions;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -66,8 +67,13 @@ class CredentialCloseTest {
         }
 
         void sendPending() throws Exception {
-            client.request(Request.of(TYPE, "p".getBytes(StandardCharsets.UTF_8)), RequestOptions.noDeadline());
-            awaitTrue(() -> served.size() == 1);
+            // 팩터리가 끝나기 전의 요청은 핸들러에 닿기 전에 거절되므로(규격 4.5절) 핸들러에 전달될 때까지 다시 보낸다.
+            while (served.isEmpty()) {
+                RequestHandle handle = client.request(
+                        Request.of(TYPE, "p".getBytes(StandardCharsets.UTF_8)), RequestOptions.noDeadline());
+                awaitTrue(() -> !served.isEmpty() || handle.result().isDone());
+            }
+            assertThat(served).hasSize(1);
         }
     }
 

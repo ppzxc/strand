@@ -43,7 +43,6 @@ final class BenchSupport {
         for (Event event : drainEvents(server)) {
             if (event.kind() == Event.Kind.AUTHENTICATION_REQUIRED) {
                 server.completeAuthentication(event.authenticationId(), AuthDecision.PASS);
-                server.handlerReady();
             }
         }
     }

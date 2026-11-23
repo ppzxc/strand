@@ -71,6 +71,14 @@ final class Drive {
         }
     }
 
+    /** 단위 입력처럼 {@link #receive}를 거치지 않은 입력 뒤에 위임된 인증 판단이 나왔으면 입력한다. */
+    static void settle(Endpoint endpoint) {
+        Session session = session(endpoint);
+        if (session.authentication != null && !session.answered) {
+            answerAuthentication(endpoint, session);
+        }
+    }
+
     private static void answerAuthentication(Endpoint endpoint, Session session) {
         for (Event event : endpoint.drainEvents(Integer.MAX_VALUE)) {
             if (event.kind() != Event.Kind.AUTHENTICATION_REQUIRED) {
@@ -86,7 +94,6 @@ final class Drive {
             }
             endpoint.completeAuthentication(
                     event.authenticationId(), decision, session.config.credentialLifetimeSeconds());
-            endpoint.handlerReady();
             session.answered = true;
         }
     }

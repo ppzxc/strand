@@ -21,6 +21,7 @@ import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.CollectionSpace;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointOutput;
+import io.github.ppzxc.strand.core.internal.ErrorCode;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.core.internal.ReceiveProgress;
@@ -60,17 +61,6 @@ import org.jspecify.annotations.Nullable;
  * 결과 보존은 그 실행을 기다리지 않는다.
  */
 final class ConnectionEngine {
-    /** 규격 2.5.2절의 error_code. */
-    private static final int NO_ERROR = 0;
-
-    /** 규격 2.5.2절 EXCESSIVE_USE. */
-    private static final int EXCESSIVE_USE = 5;
-
-    private static final int INTERNAL_ERROR = 2;
-    /** 규격 2.5.2절 UNAUTHENTICATED. 준비 중 CLOSE가 이 코드면 실패 단계는 연결 인증이다. */
-    private static final long UNAUTHENTICATED = 7;
-
-    private static final int UNIMPLEMENTED = 12;
     /** 한 번에 처리하는 입력 단위의 상한. 넘으면 시계와 명령 처리를 먼저 한다. */
     static final int MAX_UNITS_PER_STEP = 64;
 
@@ -114,6 +104,9 @@ final class ConnectionEngine {
     private volatile boolean stopped;
     private volatile Passage openedPassage = NOT_OPENED;
     private volatile @Nullable RequestHandler activeHandler;
+
+    /** 핸들러 준비(팩터리 완료 또는 핸들러 등록)가 끝났는가. 끝나기 전에 온 요청은 애플리케이션에 넘기기 전에 거절한다(규격 4.5절). */
+    private volatile boolean handlerPrepared;
 
     // 전송 스레드에서만 읽고 쓰는 상태. 처음 쓰는 곳 외에는 {@link #thread}에서만 접근한다.
     private PreparationStage stage;
@@ -294,7 +287,7 @@ final class ConnectionEngine {
 
     void close() {
         if (closeSubmitted.compareAndSet(false, true)) {
-            submit(new EndpointCall(endpoint -> endpoint.close(NO_ERROR)));
+            submit(new EndpointCall(endpoint -> endpoint.close(ErrorCode.NO_ERROR)));
         }
     }
 
@@ -309,7 +302,7 @@ final class ConnectionEngine {
     }
 
     void closeExcessiveUse() {
-        submit(new EndpointCall(endpoint -> endpoint.close(EXCESSIVE_USE)));
+        submit(new EndpointCall(endpoint -> endpoint.close(ErrorCode.EXCESSIVE_USE)));
     }
 
     private void requireServer(String operation) {
@@ -663,7 +656,7 @@ final class ConnectionEngine {
                 p.budgets.owner().release(Resource.FACTORY_TASKS, 1);
                 Throwable cause = failure == null ? new IllegalStateException("팩터리가 핸들러를 돌려주지 않았다") : failure;
                 failPreparation(PreparationStage.HANDLER_FACTORY, cause);
-                loop.endpoint.close(INTERNAL_ERROR);
+                loop.endpoint.close(ErrorCode.INTERNAL_ERROR);
                 return;
             }
             if (!preparing || loop.closedSeen) {
@@ -800,7 +793,7 @@ final class ConnectionEngine {
 
     private void activate(Loop loop, @Nullable RequestHandler handler) {
         activeHandler = handler;
-        loop.endpoint.handlerReady();
+        handlerPrepared = true;
         becomeReady(loop);
     }
 
@@ -817,7 +810,7 @@ final class ConnectionEngine {
         stage = PreparationStage.HANDLER_FACTORY;
         if (!p.budgets.owner().tryReserve(Resource.FACTORY_TASKS, 1)) {
             failPreparation(PreparationStage.HANDLER_FACTORY, new ResourceExhaustedException(Resource.FACTORY_TASKS));
-            loop.endpoint.close(INTERNAL_ERROR);
+            loop.endpoint.close(ErrorCode.INTERNAL_ERROR);
             return;
         }
         try {
@@ -825,7 +818,7 @@ final class ConnectionEngine {
         } catch (RuntimeException | Error e) {
             p.budgets.owner().release(Resource.FACTORY_TASKS, 1);
             failPreparation(PreparationStage.HANDLER_FACTORY, e);
-            loop.endpoint.close(INTERNAL_ERROR);
+            loop.endpoint.close(ErrorCode.INTERNAL_ERROR);
         }
     }
 
@@ -860,10 +853,15 @@ final class ConnectionEngine {
         long streamId = event.streamId();
         byte[] body = event.body();
         byte[] wireExtensions = event.extensions();
+        if (!handlerPrepared) {
+            // 준비 전 요청은 애플리케이션에 넘기지 않고 거절한다. 전송 모듈의 정책이다(규격 4.5절).
+            loop.endpoint.refuseRequest(streamId);
+            return;
+        }
         RequestHandler handler = activeHandler;
         if (handler == null) {
             // 핸들러를 등록하지 않은 쪽이 받은 요청은 구현하지 않은 것으로 답한다.
-            loop.endpoint.respond(streamId, UNIMPLEMENTED, EMPTY);
+            loop.endpoint.respond(streamId, Status.UNIMPLEMENTED, EMPTY);
             return;
         }
         long bytes = (long) body.length + wireExtensions.length;
@@ -1351,10 +1349,12 @@ final class ConnectionEngine {
          * 3.3.1절). 클라이언트는 AUTH(ACK)를 받기 전에 상대가 보낸 INTERNAL_ERROR를 인증 단계의 실패로 본다.
          */
         private boolean isAuthenticationEnd(CloseReason reason) {
-            if (reason.errorCode() == UNAUTHENTICATED) {
+            if (reason.errorCode() == ErrorCode.UNAUTHENTICATED) {
                 return true;
             }
-            return p.role == ConnectionParams.Role.CLIENT && reason.errorCode() == INTERNAL_ERROR && peerSent(reason);
+            return p.role == ConnectionParams.Role.CLIENT
+                    && reason.errorCode() == ErrorCode.INTERNAL_ERROR
+                    && peerSent(reason);
         }
 
         private CloseNotice notice(CloseReason reason, @Nullable Throwable cause) {

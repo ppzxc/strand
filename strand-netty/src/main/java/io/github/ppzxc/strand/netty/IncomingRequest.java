@@ -5,6 +5,7 @@ import io.github.ppzxc.strand.api.RequestEnd;
 import io.github.ppzxc.strand.api.ResponseAcceptance;
 import io.github.ppzxc.strand.api.Result;
 import io.github.ppzxc.strand.api.ResultCompletion;
+import io.github.ppzxc.strand.api.Status;
 import java.util.Objects;
 
 /**
@@ -78,14 +79,14 @@ public final class IncomingRequest {
      * 응답한다. 최초 유효 응답만 접수한다. 응답 접수는 상대 수신 보장이 아니다. 자원이 모자라면 본문을 보관하지 않고 응답 권한도 소비하지 않으므로 살아 있는
      * 요청에서 다시 응답할 수 있다.
      *
-     * @param status 규격 2.5.1절의 status(0~255)
+     * @param status 규격 2.5.1절의 status(0~16). 17~255는 예약이라 보내지 않는다
      * @param body 응답 본문. 호출 중 복사한다
      * @return 접수 결과(ACCEPTED, ALREADY_RESPONDED, REQUEST_ENDED, RESOURCE_EXHAUSTED)
-     * @throws IllegalArgumentException status가 범위를 벗어날 때
+     * @throws IllegalArgumentException status가 0~16이 아닐 때
      */
     public Result<ResponseAcceptance> respond(int status, byte[] body) {
-        if (status < 0 || status > 255) {
-            throw new IllegalArgumentException("status는 0~255여야 한다: " + status);
+        if (status < Status.OK || status > Status.UNAUTHENTICATED) {
+            throw new IllegalArgumentException("status는 0~16이어야 한다: " + status);
         }
         return engine.respond(this, status, Objects.requireNonNull(body, "body"));
     }

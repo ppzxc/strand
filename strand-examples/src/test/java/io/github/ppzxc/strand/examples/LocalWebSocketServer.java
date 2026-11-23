@@ -1,7 +1,7 @@
 package io.github.ppzxc.strand.examples;
 
+import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
-import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.Passage;
 import java.io.ByteArrayOutputStream;
@@ -246,7 +246,7 @@ final class LocalWebSocketServer implements AutoCloseable {
                 while (true) {
                     Frame frame = session.readFrame();
                     if (frame.opcode == 2) {
-                        queue.add(Inbound.message(WebSocketMessageKind.BINARY, frame.payload));
+                        queue.add(Inbound.unit(frame.payload));
                     } else if (frame.opcode == 8) {
                         try {
                             session.send(8, true, new byte[] {0x03, (byte) 0xE8});
@@ -289,13 +289,20 @@ final class LocalWebSocketServer implements AutoCloseable {
 
         @Override
         public int write(OutboundMessage message, int offset) throws IOException {
-            if (message.kind() == OutboundMessage.Kind.BINARY) {
-                session.send(2, true, message.bytes());
-                return message.length();
+            session.send(2, true, message.bytes());
+            return message.length();
+        }
+
+        /** 연결 종료로 끝났으면 1000, 아니면 1011로 닫는다. 어느 쪽이든 서버는 1000 아닌 코드를 오류 종료에 쓴다. */
+        @Override
+        public void shutdownOutput(CloseReason reason) {
+            int code = reason.kind() == CloseReason.Kind.CLOSE ? 1000 : 1011;
+            try {
+                session.send(8, true, new byte[] {(byte) (code >> 8), (byte) code});
+            } catch (IOException e) {
+                // 이미 끊겼다.
             }
-            int code = message.webSocketCloseCode();
-            session.send(8, true, new byte[] {(byte) (code >> 8), (byte) code});
-            return 0;
+            session.close();
         }
 
         @Override

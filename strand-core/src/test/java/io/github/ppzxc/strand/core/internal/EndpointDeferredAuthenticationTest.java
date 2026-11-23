@@ -15,7 +15,6 @@ class EndpointDeferredAuthenticationTest {
         Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
         Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
         server.completeAuthentication(Drive.drainEvents(server).get(0).authenticationId(), AuthDecision.PASS);
-        server.handlerReady();
         Drive.drainMessages(server);
         Drive.receive(server, Frames.request(257, 1, new byte[0]));
         Drive.receive(server, Frames.request(257, 3, new byte[0]));
@@ -45,7 +44,7 @@ class EndpointDeferredAuthenticationTest {
     }
 
     @Test
-    void requestBeforeHandlerReadyIsRefused() {
+    void requestAfterAuthenticationIsReportedWithoutAnyAutomaticRefusal() {
         Endpoint server = Endpoint.serverWithDeferredAuthentication(EndpointConfig.defaults());
         Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
         Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
@@ -57,13 +56,12 @@ class EndpointDeferredAuthenticationTest {
 
         Drive.receive(server, Frames.request(257, 1, new byte[0]));
 
-        assertThat(Drive.drainEvents(server)).isEmpty();
+        assertThat(Drive.drainEvents(server)).extracting(Event::kind).containsExactly(Event.Kind.REQUEST_RECEIVED);
+        assertThat(Drive.drainMessages(server)).isEmpty();
+        server.refuseRequest(1);
         assertThat(Drive.drainMessages(server))
                 .singleElement()
                 .satisfies(message -> assertThat(message.bytes()).isEqualTo(Frames.reset(1, ErrorCode.REFUSED)));
-        server.handlerReady();
-        Drive.receive(server, Frames.request(257, 3, new byte[0]));
-        assertThat(Drive.drainEvents(server)).extracting(Event::kind).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
     @Test
@@ -231,7 +229,6 @@ class EndpointDeferredAuthenticationTest {
         Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
         long id = Drive.drainEvents(server).get(0).authenticationId();
         server.completeAuthentication(id, AuthDecision.PASS, OptionalLong.of(1));
-        server.handlerReady();
         Drive.drainMessages(server);
 
         Drive.advance(server, 3_600_000);
