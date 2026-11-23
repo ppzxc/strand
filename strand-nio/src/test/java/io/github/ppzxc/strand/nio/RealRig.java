@@ -163,6 +163,20 @@ final class RealRig implements AutoCloseable {
             }
         }
 
+        /** 연결을 RST로 끊는다. 클라이언트는 입출력 오류(연결 재설정)를 본다. */
+        void resetConnections() {
+            synchronized (sockets) {
+                for (Socket socket : sockets) {
+                    try {
+                        socket.setSoLinger(true, 0);
+                    } catch (IOException ignored) {
+                        // 이미 닫힌 소켓이다.
+                    }
+                }
+            }
+            killConnections();
+        }
+
         private static void closeQuietly(Socket socket) {
             try {
                 socket.close();
