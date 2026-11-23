@@ -9,6 +9,7 @@ import io.github.ppzxc.strand.netty.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.netty.internal.SerialExecutor;
 import io.github.ppzxc.strand.netty.internal.StrandChannel;
 import io.github.ppzxc.strand.netty.internal.StrandServerChannel;
+import io.github.ppzxc.strand.netty.internal.WireFactory;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -151,9 +152,26 @@ public final class NettyStrandServer {
      * @param address 바인딩할 주소
      * @return 리스닝 결과
      */
-    @SuppressWarnings("FutureReturnValueIgnored") // 바인딩 실패 뒤 닫기는 이미 실패한 결과 위에서 하므로 관찰할 것이 없다.
     public Future<Listener> listen(SocketAddress address) {
+        return listen(address, Transport.tcp());
+    }
+
+    /**
+     * 주소에 바인딩해 주어진 전송으로 연결 수락을 시작한다. listener 하나는 전송 하나만 받는다. TCP와 WebSocket을 함께 받으려면 포트를 달리해 두 번 부른다. 나머지는
+     * {@link #listen(SocketAddress)}와 같다.
+     *
+     * @param address 바인딩할 주소
+     * @param transport 전송 방식. WebSocket은 서버가 정확히 일치하는 경로만 업그레이드하고 그 밖은 HTTP 404로, {@code strand} 하위 프로토콜이 없으면 HTTP 400으로 거절한다
+     * @return 리스닝 결과
+     * @throws IllegalStateException WebSocket 전송인데 {@code netty-codec-http}가 클래스패스에 없을 때
+     */
+    @SuppressWarnings("FutureReturnValueIgnored") // 바인딩 실패 뒤 닫기는 이미 실패한 결과 위에서 하므로 관찰할 것이 없다.
+    public Future<Listener> listen(SocketAddress address, Transport transport) {
         Objects.requireNonNull(address, "address");
+        Objects.requireNonNull(transport, "transport");
+        if (transport.isWebSocket()) {
+            WireFactory.requireCodec();
+        }
         EventLoop loop = common.group.next();
         Promise<Listener> promise = loop.newPromise();
         StrandServerChannel server = new StrandServerChannel();
@@ -166,7 +184,7 @@ public final class NettyStrandServer {
         }
         try {
             server.config().setOption(ChannelOption.SO_REUSEADDR, true);
-            server.pipeline().addLast(new Acceptor());
+            server.pipeline().addLast(new Acceptor(transport));
             loop.register(server).addListener((ChannelFutureListener) registered -> {
                 if (!registered.isSuccess()) {
                     // 등록에 실패한 채널이 닫힘을 알리지 않을 수 있다. 정리 완료를 직접 확정한다.
@@ -194,6 +212,16 @@ public final class NettyStrandServer {
     /** 리스닝 채널이 수락한 채널을 받아 연결로 등록한다. 리스닝 채널이 이미 닫혔다면 경합으로 수락된 채널을 정리한다. */
     // 시험이 닫기와 경합한 수락을 결정적으로 재현하려고 패키지 범위로 둔다.
     final class Acceptor extends ChannelInboundHandlerAdapter {
+        private final Transport transport;
+
+        Acceptor() {
+            this(Transport.tcp());
+        }
+
+        Acceptor(Transport transport) {
+            this.transport = transport;
+        }
+
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object message) {
             StrandChannel accepted = (StrandChannel) message;
@@ -202,7 +230,7 @@ public final class NettyStrandServer {
                 return;
             }
             try {
-                admit(accepted);
+                admit(accepted, transport);
             } catch (RuntimeException e) {
                 // 한 연결의 등록 실패가 리스닝을 끝내지 않게 한다. 등록하지 못한 채널은 정리한다.
                 accepted.unsafe().closeForcibly();
@@ -216,7 +244,7 @@ public final class NettyStrandServer {
     }
 
     /** 수락한 채널을 연결로 등록한다. 슬롯과 필수 진행 공간을 수락 직후 예약하고 모자라면 채널을 즉시 닫는다. */
-    private void admit(StrandChannel channel) {
+    private void admit(StrandChannel channel, Transport transport) {
         long now = common.nanoClock.getAsLong();
         SocketAddress remote = Objects.requireNonNull(channel.remoteAddress());
         ConnectionBudgets budgets = common.owner.newConnection(common.limits);
@@ -261,6 +289,7 @@ public final class NettyStrandServer {
                 common.tls(null, 0),
                 common.allocator);
         params.unreleased = unreleased;
+        params.transport = transport;
         NettyStrandConnection connection = new NettyStrandConnection(params, channel);
         // 기록하는 순간부터 전체 종료가 이 연결을 다룰 수 있으므로 종료 훅을 먼저 정한다.
         params.terminated = () -> lifecycle.unregister(connection);

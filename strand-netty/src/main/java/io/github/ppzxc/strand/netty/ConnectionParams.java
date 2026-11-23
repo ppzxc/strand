@@ -92,6 +92,8 @@ final class ConnectionParams {
     UnreleasedHandlers unreleased;
     /** 클라이언트가 호스트 이름을 주소 목록으로 해석하는 방법. */
     HostResolver resolver = HostResolver.SYSTEM;
+    /** 이 연결의 전송 방식. 기본은 TCP다. */
+    Transport transport = Transport.tcp();
 
     ConnectionParams(
             Role role,

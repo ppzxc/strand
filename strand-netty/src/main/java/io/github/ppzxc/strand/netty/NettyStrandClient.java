@@ -9,6 +9,7 @@ import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.netty.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.netty.internal.SerialExecutor;
 import io.github.ppzxc.strand.netty.internal.StrandChannel;
+import io.github.ppzxc.strand.netty.internal.WireFactory;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.Promise;
@@ -136,7 +137,21 @@ public final class NettyStrandClient {
      * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
      */
     public Future<NettyStrandConnection> connect(SocketAddress address) {
-        return connectAttempt(address).result();
+        return connect(address, Transport.tcp());
+    }
+
+    /**
+     * 주어진 전송으로 서버에 연결한다. {@link #connect(SocketAddress)}와 같고 전송만 고른다. WebSocket은 보안 설정이 {@code tls}면 TLS 위에서 업그레이드하며,
+     * 클라이언트는 하위 프로토콜 {@code strand}만 제시하고 서버가 선택하지 않으면 준비 실패({@link PreparationStage#UPGRADE})로 끝난다.
+     *
+     * @param address 서버 주소({@link InetSocketAddress}). WebSocket의 {@code Host} 헤더는 이 주소에서 만든다
+     * @param transport 전송 방식
+     * @return 연결 결과
+     * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
+     * @throws IllegalStateException WebSocket 전송인데 {@code netty-codec-http}가 클래스패스에 없을 때
+     */
+    public Future<NettyStrandConnection> connect(SocketAddress address, Transport transport) {
+        return connectAttempt(address, transport).result();
     }
 
     /**
@@ -148,6 +163,24 @@ public final class NettyStrandClient {
      * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
      */
     public NettyConnectAttempt connectAttempt(SocketAddress address) {
+        return connectAttempt(address, Transport.tcp());
+    }
+
+    /**
+     * 주어진 전송으로 취소할 수 있는 연결 시도를 시작한다. {@link #connectAttempt(SocketAddress)}와 같고 전송만 고른다. WebSocket 업그레이드 도중의 취소도 TCP 연결 도중의 취소와
+     * 같은 의미다.
+     *
+     * @param address 서버 주소({@link InetSocketAddress})
+     * @param transport 전송 방식
+     * @return 연결 시도
+     * @throws IllegalArgumentException 주소가 {@link InetSocketAddress}가 아닐 때
+     * @throws IllegalStateException WebSocket 전송인데 {@code netty-codec-http}가 클래스패스에 없을 때
+     */
+    public NettyConnectAttempt connectAttempt(SocketAddress address, Transport transport) {
+        Objects.requireNonNull(transport, "transport");
+        if (transport.isWebSocket()) {
+            WireFactory.requireCodec();
+        }
         if (!(Objects.requireNonNull(address, "address") instanceof InetSocketAddress)) {
             throw new IllegalArgumentException("TCP 주소(InetSocketAddress)여야 한다");
         }
@@ -216,6 +249,7 @@ public final class NettyStrandClient {
         params.released = released;
         params.preparationBytes = preparationBytes;
         params.resolver = resolver;
+        params.transport = transport;
         StrandChannel channel = new StrandChannel();
         NettyStrandConnection connection = new NettyStrandConnection(params, channel);
         // 기록하는 순간부터 전체 종료가 이 연결을 다룰 수 있으므로 종료 훅을 먼저 정한다.
