@@ -314,9 +314,18 @@ class VectorRunnerTest {
     }
 
     @Test
-    void corePreflightReportsTheTransportWriteControlAsUnsupported() {
+    void corePreflightAcceptsWriteLimitOnAByteStream() {
         ConformanceVector v =
                 vector(ESTABLISHED, step("request", "\"type\":257,\"write_limit_bytes\":10,", "[]", "[]"));
+
+        assertThat(VectorRunner.unsupportedFeatures(v)).isEmpty();
+    }
+
+    @Test
+    void corePreflightReportsWriteLimitOnAMessageTransportAsUnsupported() {
+        ConformanceVector v = vector(
+                "{\"role\":\"client\",\"established\":true,\"transport\":\"websocket\"}",
+                step("request", "\"type\":257,\"write_limit_bytes\":10,", "[]", "[]"));
 
         assertThat(VectorRunner.unsupportedFeatures(v)).containsExactly("request.write_limit_bytes");
     }
@@ -324,7 +333,7 @@ class VectorRunnerTest {
     @Test
     void corePreflightReportsEveryUnsupportedRequestFeature() {
         ConformanceVector v = vector(
-                "{\"role\":\"client\",\"established\":true}",
+                "{\"role\":\"client\",\"established\":true,\"transport\":\"websocket\"}",
                 step(
                         "request",
                         "\"type\":257,\"write_limit_bytes\":10,\"extensions\":[{\"tag\":1,\"value\":\"aa\"}],",
@@ -333,6 +342,34 @@ class VectorRunnerTest {
 
         assertThat(VectorRunner.unsupportedFeatures(v))
                 .containsExactly("request.write_limit_bytes", "request.extensions");
+    }
+
+    /** 부분 쓰기를 관찰하는 벡터는 core 러너가 출력 진행 보고로 같은 상황을 만들어 통과한다. */
+    @Test
+    void partialWriteVectorPassesThroughProgressReports() {
+        ConformanceVector v = VectorLoader.load(java.nio.file.Paths.get(
+                        System.getProperty("strand.conformance.vectors.dir"), "partial-write-cancel.json"))
+                .get(0);
+
+        assertThat(VectorRunner.evaluate(v).status()).isEqualTo(VectorOutcome.Status.PASS);
+    }
+
+    /** 러너는 일괄 수거 방식의 입력·수거와 동기 인증기를 부르지 않는다(스펙 #362). */
+    @Test
+    void runnerSourcesDoNotUseTheBatchDrivingMode() throws java.io.IOException {
+        java.nio.file.Path dir = java.nio.file.Paths.get("src/test/java/io/github/ppzxc/strand/conformance");
+        for (String file : new String[] {"VectorRunner.java", "StepKind.java", "ProgressDriver.java"}) {
+            String source = new String(
+                    java.nio.file.Files.readAllBytes(dir.resolve(file)), java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(source)
+                    .as(file)
+                    .doesNotContain(".drainMessages(")
+                    .doesNotContain(".receive(")
+                    .doesNotContain(".receiveMessage(")
+                    .doesNotContain(".advance(")
+                    .doesNotContain(".authenticator(")
+                    .doesNotContain(".drainEvents()");
+        }
     }
 
     @Test
