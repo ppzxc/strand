@@ -37,7 +37,7 @@ final class VectorRunner {
      */
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(VectorSchema.setupKeys());
 
-    private static final class AuthScenario {
+    private static final class AuthScenario implements ProgressDriver.AuthPolicy {
         private final String mechanism;
         private final String credentialsHex;
         private final OptionalLong lifetimeSeconds;
@@ -49,6 +49,26 @@ final class VectorRunner {
             this.credentialsHex = credentialsHex;
             this.lifetimeSeconds = lifetimeSeconds;
             this.transientFailure = transientFailure;
+        }
+
+        /** 인증 설정이 없는 벡터: 기본 메커니즘 하나만 통과시킨다. */
+        private static AuthScenario anonymous() {
+            return new AuthScenario(Protocol.DEFAULT_AUTH_MECHANISM, "", OptionalLong.empty(), false);
+        }
+
+        @Override
+        public AuthDecision decide(String mechanism, byte[] credentials) {
+            if (transientFailure) {
+                return AuthDecision.TRANSIENT_FAILURE;
+            }
+            return mechanism.equals(this.mechanism) && Arrays.equals(credentials, Bytes.fromHex(credentialsHex))
+                    ? AuthDecision.PASS
+                    : AuthDecision.REJECT;
+        }
+
+        @Override
+        public OptionalLong credentialLifetimeSeconds() {
+            return lifetimeSeconds;
         }
 
         private static AuthScenario from(JsonObject setup) {
@@ -72,12 +92,23 @@ final class VectorRunner {
     private final boolean client;
     private final boolean webSocket;
     private final Endpoint endpoint;
+    private final ProgressDriver driver;
     private final VirtualCredentialLifetime credentialLifetime;
 
     VectorRunner(boolean client, boolean webSocket, Endpoint endpoint, OptionalLong credentialLifetimeSeconds) {
+        this(client, webSocket, endpoint, credentialLifetimeSeconds, AuthScenario.anonymous());
+    }
+
+    private VectorRunner(
+            boolean client,
+            boolean webSocket,
+            Endpoint endpoint,
+            OptionalLong credentialLifetimeSeconds,
+            AuthScenario auth) {
         this.client = client;
         this.webSocket = webSocket;
         this.endpoint = endpoint;
+        this.driver = new ProgressDriver(endpoint, webSocket, auth);
         this.credentialLifetime = new VirtualCredentialLifetime(credentialLifetimeSeconds);
     }
 
@@ -112,10 +143,15 @@ final class VectorRunner {
         AuthScenario auth = AuthScenario.from(setup);
         boolean webSocket = isWebSocket(setup);
         EndpointConfig config = configOf(setup, webSocket, auth);
+        // 인증 판단은 사건으로 위임되고, 러너가 벡터의 인증 설정으로 답한다(ProgressDriver).
         VectorRunner runner = new VectorRunner(
-                client, webSocket, client ? Endpoint.client(config) : Endpoint.server(config), auth.lifetimeSeconds);
+                client,
+                webSocket,
+                client ? Endpoint.client(config) : Endpoint.serverWithDeferredAuthentication(config),
+                auth.lifetimeSeconds,
+                auth);
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
-        List<OutboundMessage> opening = runner.endpoint.drainMessages();
+        List<OutboundMessage> opening = runner.driver.flush();
         if (setup.get("established").getAsBoolean()) {
             runner.establish(opening, setup.getAsJsonObject("peer_hello"), auth);
             runner.credentialLifetime.startAtCurrentTime();
@@ -129,7 +165,8 @@ final class VectorRunner {
             runner.advanceVirtualCredentialClock(step);
             List<OutboundMessage> sent = new ArrayList<>(opening);
             if (!StepKind.of(step).holdsOutput(step)) {
-                sent.addAll(runner.endpoint.drainMessages());
+                // 넘김은 출력 진행 보고다. 부분 쓰기 한도가 있으면 그 바이트까지만 보고하고 나머지는 다음 단계에서 넘긴다.
+                sent.addAll(runner.driver.flush(writeLimit(step)));
             }
             runner.credentialLifetime.observeSentMessages(sent);
             boolean startsWithPreface = !opening.isEmpty();
@@ -138,10 +175,14 @@ final class VectorRunner {
                             runner.describeMessages(sent, startsWithPreface), step.getAsJsonArray("send")))
                     .as("%d번째 단계의 send", number)
                     .isEqualTo(expectedFrames(step));
-            assertThat(describe(runner.endpoint.drainEvents()))
+            assertThat(describe(runner.driver.takeEvents()))
                     .as("%d번째 단계의 events", number)
                     .isEqualTo(expectedEvents(step));
         }
+    }
+
+    private static long writeLimit(JsonObject step) {
+        return step.has("write_limit_bytes") ? step.get("write_limit_bytes").getAsLong() : Long.MAX_VALUE;
     }
 
     /** 실행하지 못하는 부분이 있으면 벡터를 실패시킨다(건너뛰지 않는다). 한 단계도 실행하기 전에 판정한다. */
@@ -160,6 +201,9 @@ final class VectorRunner {
             }
         }
         for (JsonObject step : vector.steps()) {
+            // 부분 쓰기는 바이트 진행을 보고하는 통로에서만 만든다. 메시지 통로는 메시지 전체만 접수한다.
+            addIfUnsupported(
+                    unsupported, !(step.has("write_limit_bytes") && isWebSocket(setup)), "request.write_limit_bytes");
             String kindName = step.get(StepKind.TAG).getAsString();
             StepKind kind = StepKind.named(kindName);
             addIfUnsupported(unsupported, kind != null, "단계 " + kindName);
@@ -213,17 +257,7 @@ final class VectorRunner {
         }
         if (setup.has("auth")) {
             byte[] expectedCredentials = Bytes.fromHex(auth.credentialsHex);
-            config = config.auth(auth.mechanism, expectedCredentials).authenticator((mechanism, credentials) -> {
-                if (auth.transientFailure) {
-                    return AuthDecision.TRANSIENT_FAILURE;
-                }
-                return mechanism.equals(auth.mechanism) && Arrays.equals(credentials, expectedCredentials)
-                        ? AuthDecision.PASS
-                        : AuthDecision.REJECT;
-            });
-            if (auth.lifetimeSeconds.isPresent()) {
-                config = config.credentialLifetimeSeconds(auth.lifetimeSeconds.getAsLong());
-            }
+            config = config.auth(auth.mechanism, expectedCredentials);
         }
         if (setup.has("known_types")) {
             Set<Integer> known = new HashSet<>();
@@ -258,11 +292,11 @@ final class VectorRunner {
         List<OutboundMessage> hello = opening;
         if (!client) {
             deliver(FrameKind.encode(control("PREFACE", false)));
-            hello = endpoint.drainMessages();
+            hello = driver.flush();
         }
         assertThat(describeMessages(hello, client)).as("수립: 연결을 연 뒤의 출력").hasSize(client ? 2 : 1);
         deliver(FrameKind.encode(peerHelloFrame));
-        List<String> afterPeerHello = describeMessages(endpoint.drainMessages(), false);
+        List<String> afterPeerHello = describeMessages(driver.flush(), false);
         if (client) {
             // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 보낸다(규격 3.3절 4번).
             assertThat(afterPeerHello)
@@ -272,25 +306,25 @@ final class VectorRunner {
             assertThat(afterPeerHello).as("수립: 상대 HELLO에 대한 ACK").containsExactly(FrameKind.expected(helloAck));
         }
         deliver(FrameKind.encode(helloAck));
-        assertThat(endpoint.drainMessages()).as("수립: ACK 뒤의 출력").isEmpty();
+        assertThat(driver.flush()).as("수립: ACK 뒤의 출력").isEmpty();
         if (client) {
             deliver(FrameKind.encode(authAck));
         } else {
             deliver(FrameKind.encode(authFrame));
-            assertThat(describeMessages(endpoint.drainMessages(), false))
+            assertThat(describeMessages(driver.flush(), false))
                     .as("수립: AUTH에 대한 AUTH(ACK)")
                     .containsExactly(FrameKind.expected(authAck));
         }
-        assertThat(endpoint.drainMessages()).as("수립: AUTH 관문 통과 뒤의 출력").isEmpty();
-        assertThat(describe(endpoint.drainEvents())).as("수립: 이벤트").isEmpty();
+        assertThat(driver.flush()).as("수립: AUTH 관문 통과 뒤의 출력").isEmpty();
+        assertThat(describe(driver.takeEvents())).as("수립: 이벤트").isEmpty();
     }
 
     /** 수립에 쓰는 입력 하나를 전송 방식에 맞게 넣는다. WebSocket이면 메시지 하나로, 바이트 스트림이면 바이트로 넣는다. */
     private void deliver(byte[] bytes) {
         if (webSocket) {
-            endpoint.receiveMessage(WebSocketMessageKind.BINARY, bytes);
+            driver.receiveWholeMessage(WebSocketMessageKind.BINARY, bytes);
         } else {
-            endpoint.receive(bytes);
+            driver.receiveStream(bytes);
         }
     }
 
@@ -307,7 +341,7 @@ final class VectorRunner {
     }
 
     private void apply(JsonObject step, Map<String, Long> requestTickets) {
-        StepKind.of(step).execute(endpoint, step, requestTickets);
+        StepKind.of(step).execute(driver, step, requestTickets);
     }
 
     private void advanceVirtualCredentialClock(JsonObject step) {
