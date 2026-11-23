@@ -357,6 +357,7 @@ public final class WebSocketPassage implements Passage {
     /**
      * 종료 원인으로 상태 코드를 고른다. {@code NO_ERROR} 연결 종료(CLOSE 교환)로 끝났으면 {@code 1000 Normal Closure}로, 오류 CLOSE나 CLOSE
      * 없는 끊김이면 1000이 아닌 {@code 1011}로 닫는다(규격 1.2.1절: 오류 종료의 상태 코드는 정하지 않되 1000은 쓰지 않는다).
+     * 1011은 이 예제가 고른 값일 뿐 규격이 정한 값이 아니다.
      */
     @Override
     public void shutdownOutput(CloseReason reason) {
