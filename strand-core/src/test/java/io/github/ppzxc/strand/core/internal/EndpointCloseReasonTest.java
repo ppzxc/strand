@@ -226,7 +226,6 @@ class EndpointCloseReasonTest {
         Event closed = closedEvent(server);
 
         assertErrorClose(closed.closeReason().get(), ErrorCode.UNAUTHENTICATED, CloseReason.Sender.LOCAL);
-        assertThat(closed.cause()).isEmpty();
     }
 
     @Test

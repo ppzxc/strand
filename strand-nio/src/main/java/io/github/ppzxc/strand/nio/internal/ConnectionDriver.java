@@ -1170,8 +1170,7 @@ public final class ConnectionDriver implements AutoCloseable {
             if (executor == null || target == null) {
                 return;
             }
-            ConnectionClosed notice = new ConnectionClosed(
-                    event.closeReason().get(), ioFailure, event.cause().orElse(authenticatorFailure));
+            ConnectionClosed notice = new ConnectionClosed(event.closeReason().get(), ioFailure, authenticatorFailure);
             executor.execute(() -> target.onClosed(notice));
         }
 

@@ -340,7 +340,7 @@ final class OwnRequestLedger {
         record.streamId = streamId;
         record.state = RequestState.NUMBERED_UNWRITTEN;
         record.payload = null;
-        record.node = outbox.addApplication(OutboundMessage.binary(frame));
+        record.node = outbox.addApplication(OutboundMessage.of(frame));
         record.node.owner = record;
         record.linked = true;
         register(record);
