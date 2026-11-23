@@ -47,6 +47,7 @@ public final class TlsPipe {
     private @Nullable ByteBuf dataOut;
     private @Nullable ByteBuf controlOut;
     private final ArrayDeque<byte[]> readyPlain = new ArrayDeque<>();
+    private final boolean requireAlpn;
     private boolean handshakeDone;
     private boolean peerEnded;
     private boolean closeNotified;
@@ -59,6 +60,16 @@ public final class TlsPipe {
      * @throws SSLException 핸드셰이크를 시작할 수 없을 때
      */
     public TlsPipe(SSLEngine engine, TlsSizes sizes, ByteBufAllocator allocator, Sink sink) throws SSLException {
+        this(engine, sizes, allocator, sink, true);
+    }
+
+    /**
+     * @param requireAlpn 핸드셰이크가 끝났을 때 ALPN 식별자 협상을 요구하는가. TCP는 true이고 WebSocket은 ALPN을 쓰지 않으므로 false다(규격 3.7절)
+     * @throws SSLException 핸드셰이크를 시작할 수 없을 때
+     */
+    public TlsPipe(SSLEngine engine, TlsSizes sizes, ByteBufAllocator allocator, Sink sink, boolean requireAlpn)
+            throws SSLException {
+        this.requireAlpn = requireAlpn;
         this.engine = engine;
         this.sink = sink;
         this.allocator = allocator;
@@ -253,7 +264,7 @@ public final class TlsPipe {
         if (!handshakeDone && result.getHandshakeStatus() == HandshakeStatus.FINISHED) {
             handshakeDone = true;
             String protocol = TlsEngines.negotiatedProtocol(engine);
-            if (!TlsEngines.ALPN_IDENTIFIER.equals(protocol)) {
+            if (requireAlpn && !TlsEngines.ALPN_IDENTIFIER.equals(protocol)) {
                 throw new SSLException("ALPN 식별자 " + TlsEngines.ALPN_IDENTIFIER + "가 협상되지 않았다");
             }
         }

@@ -29,7 +29,11 @@ final class WsPeer implements AutoCloseable {
     private final List<RawWebSocket.Frame> controlFrames = new CopyOnWriteArrayList<>();
     private final List<RawWebSocket.Frame> textFrames = new CopyOnWriteArrayList<>();
     private final List<byte[]> binaryMessages = new CopyOnWriteArrayList<>();
+    /** 받은 프레임을 도착한 순서대로 적은 기록: {@code BINARY}, {@code TEXT}, {@code CLOSE:<코드>}, {@code PING}, {@code PONG}. */
+    private final List<String> arrivals = new CopyOnWriteArrayList<>();
+
     private volatile boolean ended;
+    private volatile boolean silent;
     private final boolean autoPump;
 
     private WsPeer(Socket socket, InputStream in, EndpointConfig config, boolean autoPump) {
@@ -79,10 +83,11 @@ final class WsPeer implements AutoCloseable {
         try {
             for (; ; ) {
                 RawWebSocket.Frame frame = RawWebSocket.read(in);
+                arrivals.add(describe(frame));
                 switch (frame.opcode) {
                     case RawWebSocket.BINARY:
                         binaryMessages.add(frame.payload);
-                        if (autoPump) {
+                        if (autoPump && !silent) {
                             synchronized (this) {
                                 driver.receiveUnit(frame.payload);
                                 events.addAll(driver.takeEvents());
@@ -102,6 +107,37 @@ final class WsPeer implements AutoCloseable {
             // 어느 쪽이 끊겼다.
         }
         ended = true;
+    }
+
+    private static String describe(RawWebSocket.Frame frame) {
+        switch (frame.opcode) {
+            case RawWebSocket.BINARY:
+                return "BINARY";
+            case RawWebSocket.TEXT:
+                return "TEXT";
+            case RawWebSocket.CLOSE:
+                return "CLOSE:" + frame.closeStatus();
+            case RawWebSocket.PING:
+                return "PING";
+            case RawWebSocket.PONG:
+                return "PONG";
+            default:
+                return "OPCODE:" + frame.opcode;
+        }
+    }
+
+    /** 이후 받은 메시지에 Endpoint가 답하지 않는다(상대가 응답하지 않는 연결을 만든다). */
+    void goSilent() {
+        silent = true;
+    }
+
+    /** 받은 프레임을 도착한 순서대로. */
+    List<String> arrivals() {
+        return new ArrayList<>(arrivals);
+    }
+
+    void sendPing(byte[] payload) throws IOException {
+        sendRaw(RawWebSocket.encode(RawWebSocket.PING, true, payload, true));
     }
 
     /** Endpoint가 내려는 출력을 메시지 하나씩 바이너리 프레임으로 보낸다. */

@@ -1472,11 +1472,19 @@ final class ConnectionEngine {
             if (security == null) {
                 this.tls = null;
             } else {
-                SSLEngine engine = p.role == ConnectionParams.Role.CLIENT
-                        ? TlsEngines.client(
-                                security.context, Objects.requireNonNull(security.clientHost), security.clientPort)
-                        : TlsEngines.server(security.context);
-                this.tls = new TlsPipe(engine, security.sizes, p.allocator, channel::writeAttempt);
+                // WebSocket은 ALPN을 쓰지 않는다(규격 3.7절). TCP는 ALPN 식별자를 협상해야 한다.
+                boolean alpn = !p.transport.isWebSocket();
+                SSLEngine engine;
+                if (p.role == ConnectionParams.Role.CLIENT) {
+                    String host = Objects.requireNonNull(security.clientHost);
+                    engine = alpn
+                            ? TlsEngines.client(security.context, host, security.clientPort)
+                            : TlsEngines.clientWithoutAlpn(security.context, host, security.clientPort);
+                } else {
+                    engine =
+                            alpn ? TlsEngines.server(security.context) : TlsEngines.serverWithoutAlpn(security.context);
+                }
+                this.tls = new TlsPipe(engine, security.sizes, p.allocator, channel::writeAttempt, alpn);
             }
             this.wire = p.transport.isWebSocket() ? createWire() : null;
             if (wire != null && p.role == ConnectionParams.Role.CLIENT) {
