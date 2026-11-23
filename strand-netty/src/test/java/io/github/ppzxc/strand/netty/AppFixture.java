@@ -380,6 +380,10 @@ final class AppFixture implements AutoCloseable {
         return result;
     }
 
+    <T> CompletableFuture<T> resultFuture(Result<T> result) {
+        return result.toCompletionStage(pool).toCompletableFuture();
+    }
+
     <T> T result(Result<T> result) throws Exception {
         return result.toCompletionStage(pool).toCompletableFuture().get(WAIT_SECONDS, TimeUnit.SECONDS);
     }
