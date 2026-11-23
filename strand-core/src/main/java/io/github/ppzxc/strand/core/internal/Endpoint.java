@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -546,7 +547,7 @@ public final class Endpoint {
      *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
      */
     public boolean respond(long streamId, int status, byte[] payload) {
-        if (status < Status.OK || status > Status.UNAUTHENTICATED) {
+        if (!Status.isValid(status)) {
             throw new IllegalArgumentException("status는 0~16이어야 한다: " + status);
         }
         Integer type = peerPendingStreams.get(streamId);
@@ -751,6 +752,9 @@ public final class Endpoint {
         if (maximum < 0) {
             throw new IllegalArgumentException("사건 수거 한도는 음수일 수 없다");
         }
+        if (events.isEmpty()) {
+            return Collections.emptyList();
+        }
         List<Event> drained = new ArrayList<>();
         int consumed = 0;
         while (consumed < events.size() && drained.size() < maximum) {
@@ -764,7 +768,7 @@ public final class Endpoint {
             drained.add(event);
         }
         events.subList(0, consumed).clear();
-        return drained;
+        return Collections.unmodifiableList(drained);
     }
 
     /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */

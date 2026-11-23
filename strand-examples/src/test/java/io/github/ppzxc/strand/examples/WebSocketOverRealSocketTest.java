@@ -155,7 +155,7 @@ class WebSocketOverRealSocketTest {
         WebSocketPassage passage = connect(server);
         OutboundMessage message = TestMessages.firstMessage();
 
-        passage.write(message, 0);
+        TestMessages.write(passage, message, 0);
 
         LocalWebSocketServer.Frame frame = received.get(LIMIT_MS, TimeUnit.MILLISECONDS);
         assertThat(frame.opcode).isEqualTo(2);

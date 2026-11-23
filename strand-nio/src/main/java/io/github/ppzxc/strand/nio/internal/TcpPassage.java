@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 멈추지 않는다. 읽기와 쓰기 관심은 하나의 선택기에서 다룬다. 상대의 EOF는 {@link Inbound#end()}로, 리셋 같은 입출력 오류는
  * {@link IOException}으로 알린다. 서로 쓰기만 하는 두 끝이 멈추지 않는다는 것은 정상 흐름 제어 범위 안에서만 참이다. 드라이버의 쓰기 대기열이 상한을 넘으면 드라이버가 읽기를 멈추고, 그 뒤는 유휴 PING 확인 대기 초과로 끊긴다(유휴 PING을 끈 설정은 제외, {@code ConnectionDriver} 클래스 설명의 "쓰기 대기열 상한과 읽기 멈춤" 참고).
  *
- * <p>{@link #await}와 {@link #write}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
+ * <p>{@link #await}와 {@link #writeBytes}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
 public final class TcpPassage implements Passage {
 

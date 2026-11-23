@@ -1613,7 +1613,7 @@ final class ConnectionEngine {
                 if (writing == null || writing.id() != output.id()) {
                     releaseWriting();
                     writing = output;
-                    writingBytes = output.bytes();
+                    writingBytes = output.readOnlyBytes();
                     writingOffset = 0;
                     if (tls == null) {
                         // 출력마다 직접 버퍼 하나. 전체 전달·철회·채널 정리에서 정확히 한 번 반환한다.

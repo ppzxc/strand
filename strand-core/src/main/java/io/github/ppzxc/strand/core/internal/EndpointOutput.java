@@ -32,6 +32,11 @@ public final class EndpointOutput {
         return message.bytes();
     }
 
+    /** 복사하지 않는 읽기 전용 내용. 호출자는 배열을 바꾸면 안 된다({@link OutboundMessage#readOnlyBytes()}). */
+    public byte[] readOnlyBytes() {
+        return message.readOnlyBytes();
+    }
+
     public int length() {
         return message.length();
     }

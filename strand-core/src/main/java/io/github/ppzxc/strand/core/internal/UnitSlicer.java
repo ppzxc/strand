@@ -14,6 +14,8 @@ final class UnitSlicer {
     private static final int PREFACE_PREFIX_LENGTH = 6;
 
     private static final byte[] NO_BYTES = new byte[0];
+    /** 연결 서문. 비교에만 쓰고 보내거나 바꾸지 않는다(보내는 쪽은 {@link Frames#preface()}가 복사본을 준다). */
+    private static final byte[] PREFACE = Frames.preface();
     /** 경계에 걸친 단위를 모으는 버퍼의 처음 크기. */
     private static final int PENDING_MIN_CAPACITY = 64;
     /** 다 비웠을 때 이 크기를 넘는 버퍼는 놓는다. 큰 프레임 하나 때문에 연결이 그 크기를 계속 붙잡지 않게 한다. */
@@ -140,7 +142,7 @@ final class UnitSlicer {
     void sliceWhole(byte[] bytes, int off, int length, boolean supported, Sink sink) {
         Stage stage = sink.stage();
         if (stage == Stage.PREFACE) {
-            if (supported && length == Frames.preface().length && matchesPrefacePrefix(bytes, off, length)) {
+            if (supported && length == PREFACE.length && matchesPrefacePrefix(bytes, off, length)) {
                 sink.prefaceReceived();
             } else {
                 sink.closeWithoutClose();
@@ -223,7 +225,7 @@ final class UnitSlicer {
 
     /** 서문의 앞 6바이트를 비교한다(규격 3.1절). 판정할 만큼 모였으면 서문 8바이트를 건너뛴다. 서문은 8바이트를 모두 받은 뒤 건너뛴다. */
     private int consumePreface(byte[] bytes, int off, int available, Sink sink) {
-        int prefaceSize = Frames.preface().length;
+        int prefaceSize = PREFACE.length;
         if (!matchesPrefacePrefix(bytes, off, available)) {
             sink.closeWithoutClose();
             return 0;
@@ -257,7 +259,7 @@ final class UnitSlicer {
 
     /** 서문의 앞 6바이트와, 받은 만큼의 앞부분이 일치하는가. */
     private static boolean matchesPrefacePrefix(byte[] bytes, int off, int available) {
-        byte[] preface = Frames.preface();
+        byte[] preface = PREFACE;
         int compared = Math.min(available, PREFACE_PREFIX_LENGTH);
         for (int i = 0; i < compared; i++) {
             if (bytes[off + i] != preface[i]) {

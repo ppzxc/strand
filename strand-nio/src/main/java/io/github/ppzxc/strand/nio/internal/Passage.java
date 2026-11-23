@@ -1,7 +1,6 @@
 package io.github.ppzxc.strand.nio.internal;
 
 import io.github.ppzxc.strand.core.internal.CloseReason;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 
 /**
@@ -10,7 +9,7 @@ import java.io.IOException;
  * {@code Endpoint}의 {@code receive}와 {@code receiveUnit}·{@code receiveUnsupportedInput} 가운데 하나를 부른다. 통로의 종류는 core가
  * 모른다.
  *
- * <p>{@code await}와 {@link #write}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
+ * <p>{@code await}와 {@link #writeBytes}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
 public interface Passage {
 
@@ -59,18 +58,6 @@ public interface Passage {
      * @throws IOException 입출력 오류. 드라이버는 연결이 끊긴 것으로 본다
      */
     int writeBytes(byte[] bytes, int offset, int length) throws IOException;
-
-    /**
-     * 메시지의 {@code offset}부터 남은 바이트를 {@link #writeBytes}로 쓴다.
-     *
-     * @param message 보낼 메시지
-     * @param offset 이미 받아 준 바이트 수(0 이상, 메시지 길이 이하)
-     * @return 이번에 받아 준 바이트 수
-     * @throws IOException 입출력 오류
-     */
-    default int write(OutboundMessage message, int offset) throws IOException {
-        return writeBytes(message.bytes(), offset, message.length() - offset);
-    }
 
     /**
      * 소비한 평문이 아직 상대에게 다 나가지 않고 통로 안에 남아 있는가. TLS에서 평문은 소비했지만 암호문이 덜 나간 상태다. 이 상태에서는 보내는 쪽을 닫기

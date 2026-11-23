@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link Passage#await}와 {@link Passage#wakeup}이 지켜야 하는 계약. 통로 구현의 테스트가 이 클래스를 상속해 {@link #create}와 {@link #peer}를 채운다.
- * 읽을 것은 상대 끝에 {@link Passage#write}로 써서 만든다. 상대가 쓴 것이 이쪽에 닿는 데 걸리는 시간은 통로마다 달라(TCP는 즉시가 아니다), 읽는 시험은
+ * 읽을 것은 상대 끝에 {@link Passage#writeBytes}로 써서 만든다. 상대가 쓴 것이 이쪽에 닿는 데 걸리는 시간은 통로마다 달라(TCP는 즉시가 아니다), 읽는 시험은
  * {@code await}를 상한 시간(5초) 안에서만 되풀이한다.
  */
 public abstract class PassageContract {
@@ -34,7 +34,7 @@ public abstract class PassageContract {
     protected abstract Passage peer();
 
     /**
-     * 쓰기가 막히는 통로 하나. 상대 끝이 읽지 않는 동안 {@link Passage#write}가 일부만 받다가 0을 돌려줘야 한다. 상대 끝은 {@link #peer}로 얻고,
+     * 쓰기가 막히는 통로 하나. 상대 끝이 읽지 않는 동안 {@link Passage#writeBytes}가 일부만 받다가 0을 돌려줘야 한다. 상대 끝은 {@link #peer}로 얻고,
      * 막힘은 {@link #unblockWrites}로 푼다.
      *
      * @return 쓰기가 막히는 새 통로
@@ -61,11 +61,11 @@ public abstract class PassageContract {
     public static void writeFully(Passage passage, OutboundMessage message) throws IOException {
         int offset = 0;
         if (message.length() == 0) {
-            passage.write(message, 0);
+            TestMessages.write(passage, message, 0);
             return;
         }
         while (offset < message.length()) {
-            int accepted = passage.write(message, offset);
+            int accepted = TestMessages.write(passage, message, offset);
             offset += accepted;
             if (accepted == 0) {
                 passage.await(-1, false, true);
@@ -252,7 +252,7 @@ public abstract class PassageContract {
         for (OutboundMessage message : messages) {
             int offset = 0;
             while (offset < message.length()) {
-                int count = passage.write(message, offset);
+                int count = TestMessages.write(passage, message, offset);
                 if (count == 0) {
                     return accepted;
                 }

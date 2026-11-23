@@ -275,27 +275,26 @@ class ConnectionPhaseTest {
     static Stream<Arguments> closeTransitions() {
         Phase closing = Phase.CLOSING;
         Phase closed = Phase.CLOSED;
-        // 사건, 열림 단계에서 시작한 연결의 다음 단계, 닫을 때가 되는가, 연결 종료(CLOSE)로 끝났는가
+        // 사건, 열림 단계에서 시작한 연결의 다음 단계, 닫을 때가 되는가
         return Stream.of(
-                Arguments.of(CloseEvent.CLOSE_SENT_NO_ERROR, closing, false, true),
-                Arguments.of(CloseEvent.CLOSE_SENT_ERROR, closing, true, false),
-                Arguments.of(CloseEvent.CLOSE_RECEIVED_NO_ERROR, closing, false, true),
-                Arguments.of(CloseEvent.CLOSE_RECEIVED_ERROR, closing, true, false),
-                Arguments.of(CloseEvent.CONNECTION_FAILED, closing, true, false),
-                Arguments.of(CloseEvent.DISCONNECTED, Phase.OPEN, true, false),
+                Arguments.of(CloseEvent.CLOSE_SENT_NO_ERROR, closing, false),
+                Arguments.of(CloseEvent.CLOSE_SENT_ERROR, closing, true),
+                Arguments.of(CloseEvent.CLOSE_RECEIVED_NO_ERROR, closing, false),
+                Arguments.of(CloseEvent.CLOSE_RECEIVED_ERROR, closing, true),
+                Arguments.of(CloseEvent.CONNECTION_FAILED, closing, true),
+                Arguments.of(CloseEvent.DISCONNECTED, Phase.OPEN, true),
                 // 종료 중이 아닌 연결에서는 대기 중인 스트림 0개 도달도 닫는 일의 근거가 아니다.
-                Arguments.of(CloseEvent.PENDING_STREAMS_ZERO, Phase.OPEN, false, false),
-                Arguments.of(CloseEvent.TRANSPORT_CLOSED, closed, false, false));
+                Arguments.of(CloseEvent.PENDING_STREAMS_ZERO, Phase.OPEN, false),
+                Arguments.of(CloseEvent.TRANSPORT_CLOSED, closed, false));
     }
 
     @ParameterizedTest
     @MethodSource("closeTransitions")
-    void closeEventFromOpen(CloseEvent event, Phase next, boolean due, boolean normal) {
+    void closeEventFromOpen(CloseEvent event, Phase next, boolean due) {
         ConnectionPhase subject = server(Phase.OPEN);
         event.apply(subject);
         assertThat(subject.phase()).isEqualTo(next);
         assertThat(subject.shouldCloseTransport()).isEqualTo(due);
-        assertThat(subject.endsNormally()).isEqualTo(normal);
     }
 
     /** CLOSE 교환은 수립이 어디까지 진행됐든 일어나고, 닫는 중 단계 값 하나로 보인다. */
@@ -380,7 +379,6 @@ class ConnectionPhaseTest {
         assertThat(subject.shouldCloseTransport()).isFalse();
         subject.closeReceived(ERROR);
         assertThat(subject.shouldCloseTransport()).isTrue();
-        assertThat(subject.endsNormally()).isFalse();
     }
 
     /** 대기 중인 스트림 0개 도달과 중단은 종료 중일 때만 닫을 때로 만들고, 연결 종료(CLOSE)로 남는다. */
@@ -390,7 +388,6 @@ class ConnectionPhaseTest {
         subject.pendingStreamsReachedZero();
         assertThat(subject.phase()).isEqualTo(Phase.CLOSING);
         assertThat(subject.shouldCloseTransport()).isTrue();
-        assertThat(subject.endsNormally()).isTrue();
     }
 
     /** 오류나 끊김이 종료 중인 연결의 끝을 연결 종료(CLOSE)에서 오류 종료로 바꾼다(WebSocket Close를 덧붙이지 않는다). */
@@ -400,10 +397,8 @@ class ConnectionPhaseTest {
             names = {"CONNECTION_FAILED", "DISCONNECTED", "CLOSE_RECEIVED_ERROR"})
     void failureWhileClosingIsNotANormalEnd(CloseEvent event) {
         ConnectionPhase subject = closing(Phase.OPEN);
-        assertThat(subject.endsNormally()).isTrue();
         event.apply(subject);
         assertThat(subject.shouldCloseTransport()).isTrue();
-        assertThat(subject.endsNormally()).isFalse();
     }
 
     /** 오류로 끝나기로 한 연결은 뒤늦은 NO_ERROR CLOSE로 연결 종료(CLOSE)가 되지 않는다. */
@@ -412,7 +407,6 @@ class ConnectionPhaseTest {
         ConnectionPhase subject = server(Phase.OPEN);
         subject.connectionFailed();
         subject.closeReceived(NO_ERROR);
-        assertThat(subject.endsNormally()).isFalse();
     }
 
     @Test
@@ -453,7 +447,6 @@ class ConnectionPhaseTest {
         ConnectionPhase subject = closing(Phase.OPEN);
         subject.pendingStreamsReachedZero();
         subject.transportDisconnected();
-        assertThat(subject.endsNormally()).isFalse();
         assertThat(subject.shouldCloseTransport()).isTrue();
     }
 
@@ -468,7 +461,6 @@ class ConnectionPhaseTest {
         event.apply(subject);
         assertThat(subject.phase()).isEqualTo(Phase.CLOSING);
         assertThat(subject.closeExchanged()).isTrue();
-        assertThat(subject.endsNormally()).isFalse();
         assertThat(subject.shouldCloseTransport()).isTrue();
     }
 
@@ -484,7 +476,6 @@ class ConnectionPhaseTest {
         failed.connectionFailed();
         failed.pendingStreamsReachedZero();
         failed.transportDisconnected();
-        assertThat(failed.endsNormally()).isFalse();
         assertThat(failed.shouldCloseTransport()).isTrue();
         assertThat(failed.phase()).isEqualTo(Phase.CLOSING);
     }
@@ -496,7 +487,6 @@ class ConnectionPhaseTest {
         disconnected.transportDisconnected();
         disconnected.pendingStreamsReachedZero();
         assertThat(disconnected.closeExchanged()).isFalse();
-        assertThat(disconnected.endsNormally()).isFalse();
         assertThat(disconnected.shouldCloseTransport()).isTrue();
     }
 }

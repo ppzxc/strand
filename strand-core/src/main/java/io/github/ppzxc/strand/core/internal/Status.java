@@ -24,6 +24,11 @@ public final class Status {
 
     private Status() {}
 
+    /** status가 규격 2.5.1절의 보낼 수 있는 값(0~16)인가. 예약 값(17~255)은 보내지 않는다. */
+    public static boolean isValid(int status) {
+        return status >= OK && status <= UNAUTHENTICATED;
+    }
+
     /** 내 요청이 받은 RESET으로 끝났을 때 애플리케이션에 넘기는 로컬 status(규격 4.4절). 예약 error_code는 INTERNAL_ERROR로 본다. */
     static int forReset(long errorCode) {
         if (errorCode == ErrorCode.CANCEL) {

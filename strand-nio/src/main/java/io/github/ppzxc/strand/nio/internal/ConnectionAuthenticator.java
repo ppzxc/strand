@@ -1,6 +1,7 @@
 package io.github.ppzxc.strand.nio.internal;
 
 import io.github.ppzxc.strand.core.internal.AuthDecision;
+import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -28,6 +29,8 @@ public interface ConnectionAuthenticator {
      */
     static ConnectionAuthenticator anonymousOnly() {
         return (mechanism, credentials) -> CompletableFuture.completedFuture(
-                "ANONYMOUS".equals(mechanism) && credentials.length == 0 ? AuthDecision.PASS : AuthDecision.REJECT);
+                EndpointConfig.ANONYMOUS.equals(mechanism) && credentials.length == 0
+                        ? AuthDecision.PASS
+                        : AuthDecision.REJECT);
     }
 }

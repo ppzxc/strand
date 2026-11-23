@@ -24,7 +24,7 @@ public final class EndpointConfig {
     /** 유휴 PING 간격의 기본값(30초). 0이면 끈다. */
     public static final long DEFAULT_IDLE_INTERVAL_MS = 30_000L;
     /** 인증이 필요 없는 연결의 메커니즘(규격 3.3.1절). */
-    static final String ANONYMOUS = "ANONYMOUS";
+    public static final String ANONYMOUS = "ANONYMOUS";
 
     private final long maxFrameSize;
     private final long maxConcurrentStreams;

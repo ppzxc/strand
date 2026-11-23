@@ -15,7 +15,7 @@ class TcpPassageBranchTest {
         TcpLoopback pair = TcpLoopback.open();
         TcpPassage passage = TcpPassage.of(pair.client);
         try {
-            assertThat(passage.write(message, message.length())).isZero();
+            assertThat(TestMessages.write(passage, message, message.length())).isZero();
         } finally {
             passage.close();
             pair.accepted.close();
@@ -30,11 +30,11 @@ class TcpPassageBranchTest {
         TcpPassage passage = TcpPassage.of(pair.client);
         try {
             // 상대가 읽지 않으므로 소켓 버퍼만큼만 쓰고 멈춘다. 메시지는 버퍼보다 훨씬 크다.
-            int first = passage.write(message, 0);
+            int first = TestMessages.write(passage, message, 0);
             assertThat(first).isLessThan(message.length());
 
             // 이어 쓰는 위치(first)가 아닌 0에서 다시 쓰면 남은 복사본을 버리고 새로 시작한다.
-            int second = passage.write(message, 0);
+            int second = TestMessages.write(passage, message, 0);
 
             assertThat(second).isBetween(0, message.length() - 1);
         } finally {

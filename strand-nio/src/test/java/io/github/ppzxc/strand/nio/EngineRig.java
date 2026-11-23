@@ -233,7 +233,7 @@ final class EngineRig implements AutoCloseable {
         List<OutboundMessage> messages = TestMessages.takeOutputs(peer);
         for (OutboundMessage message : messages) {
             try {
-                peerEnd.write(message, 0);
+                TestMessages.write(peerEnd, message, 0);
             } catch (IOException e) {
                 peerSawEnd = true;
             }

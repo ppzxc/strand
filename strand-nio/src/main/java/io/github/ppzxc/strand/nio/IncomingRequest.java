@@ -5,7 +5,6 @@ import io.github.ppzxc.strand.api.RequestEnd;
 import io.github.ppzxc.strand.api.ResponseAcceptance;
 import io.github.ppzxc.strand.api.Result;
 import io.github.ppzxc.strand.api.ResultCompletion;
-import io.github.ppzxc.strand.api.Status;
 import java.util.Objects;
 
 /**
@@ -85,7 +84,7 @@ public final class IncomingRequest {
      * @throws IllegalArgumentException status가 0~16이 아닐 때
      */
     public Result<ResponseAcceptance> respond(int status, byte[] body) {
-        if (status < Status.OK || status > Status.UNAUTHENTICATED) {
+        if (!io.github.ppzxc.strand.core.internal.Status.isValid(status)) {
             throw new IllegalArgumentException("status는 0~16이어야 한다: " + status);
         }
         return engine.respond(this, status, Objects.requireNonNull(body, "body"));

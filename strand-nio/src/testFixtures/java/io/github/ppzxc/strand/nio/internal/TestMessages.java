@@ -11,6 +11,7 @@ import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.core.internal.ReceiveProgress;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -19,6 +20,15 @@ import java.util.WeakHashMap;
 
 /** 통로 시험이 쓰는 메시지 재료. 엔드포인트에서 얻어 오므로 실제 프레임이다. */
 public final class TestMessages {
+
+    /**
+     * 메시지의 {@code offset}부터 남은 바이트를 통로에 한 번 쓴다.
+     *
+     * @return 통로가 이번에 받아 준 바이트 수
+     */
+    public static int write(Passage passage, OutboundMessage message, int offset) throws IOException {
+        return passage.writeBytes(message.bytes(), offset, message.length() - offset);
+    }
 
     private static final int APPLICATION_TYPE = 256;
     private static final int LARGE_BODY_BYTES = 60_000;
@@ -73,7 +83,8 @@ public final class TestMessages {
             for (Event event : batch) {
                 if (event.kind() == Event.Kind.AUTHENTICATION_REQUIRED) {
                     boolean anonymous =
-                            event.authenticationMechanism().orElse("").equals("ANONYMOUS") && event.body().length == 0;
+                            event.authenticationMechanism().orElse("").equals(EndpointConfig.ANONYMOUS)
+                                    && event.body().length == 0;
                     endpoint.completeAuthentication(
                             event.authenticationId(), anonymous ? AuthDecision.PASS : AuthDecision.REJECT);
                 } else {

@@ -6,6 +6,7 @@ import io.github.ppzxc.strand.core.internal.CollectionSpace;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.EndpointOutput;
+import io.github.ppzxc.strand.core.internal.ErrorCode;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.ReceiveProgress;
 import io.github.ppzxc.strand.core.internal.WriteQueueLimit;
@@ -84,7 +85,6 @@ import org.jspecify.annotations.Nullable;
  */
 public final class ConnectionDriver implements AutoCloseable {
 
-    private static final int NO_ERROR = 0;
     /** 프레임 헤더 크기(규격 2.1절). 이보다 짧은 바이너리 메시지는 8바이트 연결 서문이라 프레임으로 세지 않는다. */
     private static final int FRAME_HEADER_BYTES = Endpoint.FRAME_HEADER_SIZE;
     /** 한 스텝에서 받는 입력(통로에서 읽어 온 것)의 개수 상한. 이를 넘게 쌓였어도 시계 진행과 명령 처리를 먼저 하고 나머지는 다음 스텝에서 받는다. */
@@ -98,8 +98,6 @@ public final class ConnectionDriver implements AutoCloseable {
 
     private static final long NANOS_PER_MILLI = 1_000_000L;
     private static final byte[] NO_BYTES = new byte[0];
-    /** 쓰기 대기열 상한의 기본 절대 한도. 상대가 HELLO로 알린 큰 값이 상한을 사실상 없애지 못하게 한다. */
-    static final long DEFAULT_MAX_WRITE_QUEUE_BYTES = WriteQueueLimit.DEFAULT_ABSOLUTE_LIMIT;
 
     /** CLOSED 뒤 마무리 시간 상한의 기본값(밀리초). */
     private static final long DEFAULT_CLOSED_FINISH_LIMIT_MS = 5000;
@@ -119,7 +117,7 @@ public final class ConnectionDriver implements AutoCloseable {
         private @Nullable ConnectionListener listener;
         private ConnectionAuthenticator authenticator = ConnectionAuthenticator.anonymousOnly();
         private LongSupplier clock = () -> System.nanoTime() / 1_000_000L;
-        private long maxWriteQueueBytes = DEFAULT_MAX_WRITE_QUEUE_BYTES;
+        private long maxWriteQueueBytes = WriteQueueLimit.DEFAULT_ABSOLUTE_LIMIT;
         private long closedFinishLimitMs = DEFAULT_CLOSED_FINISH_LIMIT_MS;
 
         private Builder(Role role, EndpointConfig config, Passage passage) {
@@ -190,7 +188,7 @@ public final class ConnectionDriver implements AutoCloseable {
 
         /**
          * 쓰기 대기열 상한의 절대 한도(바이트)를 정한다. 상한은 협상 값에서 셈하지만 상대가 알린 큰 값이 상한을 없애지 못하게 이 한도로 막는다. 정상 흐름
-         * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임에 프레임 하나를 더한 값이 기본값 {@value #DEFAULT_MAX_WRITE_QUEUE_BYTES}을
+         * 제어 범위(상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임에 프레임 하나를 더한 값이 기본값 {@value WriteQueueLimit#DEFAULT_ABSOLUTE_LIMIT}을
          * 넘는 설정에서는, 그 범위를 꽉 채워 주고받는 두 끝이 읽기 멈춤에 걸리지 않도록 이 값을 그 값 이상으로 올린다. 정하지 않으면 기본값이다.
          *
          * @param bytes 절대 한도. 규격이 허용하는 가장 작은 {@code max_frame_size}({@value EndpointConfig#MAX_FRAME_SIZE_LOWER_LIMIT}) 이상이어야 한다. 프레임 하나는 대기열에 담겨야 하므로 이 하한을 그대로 쓴다. 상한은 이 값이 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다
@@ -460,7 +458,7 @@ public final class ConnectionDriver implements AutoCloseable {
      * #abortClosing}으로 그만둔다.
      */
     public void closeConnection() {
-        submit(new EndpointCall(endpoint -> endpoint.close(NO_ERROR)));
+        submit(new EndpointCall(endpoint -> endpoint.close(ErrorCode.NO_ERROR)));
     }
 
     /**
@@ -1011,7 +1009,7 @@ public final class ConnectionDriver implements AutoCloseable {
                 }
                 if (writing == null || writing.id() != output.id()) {
                     writing = output;
-                    writingBytes = output.bytes();
+                    writingBytes = output.readOnlyBytes();
                     writingOffset = 0;
                 }
                 int remaining = writingBytes.length - writingOffset;
@@ -1188,18 +1186,22 @@ public final class ConnectionDriver implements AutoCloseable {
                 decision = authenticator.authenticate(
                         event.authenticationMechanism().get(), event.body());
             } catch (RuntimeException e) {
-                authenticatorFailure = e;
-                endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
+                failAuthentication(id, e);
                 return;
             }
             decision.whenComplete((value, failure) -> submit(new EndpointCall(endpoint -> {
                 if (failure != null || value == null) {
-                    authenticatorFailure = failure != null ? failure : new NullPointerException("인증 판단이 비어 있다");
-                    endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
+                    failAuthentication(id, failure != null ? failure : new NullPointerException("인증 판단이 비어 있다"));
                 } else {
                     endpoint.completeAuthentication(id, value);
                 }
             })));
+        }
+
+        /** 인증기 실패를 기록하고 일시 실패로 core에 알린다. */
+        private void failAuthentication(long id, Throwable cause) {
+            authenticatorFailure = cause;
+            endpoint.completeAuthentication(id, AuthDecision.TRANSIENT_FAILURE);
         }
 
         // 최후 수단. core가 낸 결과로 끝나지 않고 남은 Future만 예외로 끝낸다. 연결 종료(CLOSE)와 abort 뒤에는 비어 있다.

@@ -112,11 +112,6 @@ final class ConnectionPhase {
         boolean due() {
             return this == DRAINED || this == FAILED || this == DISCONNECTED;
         }
-
-        /** {@code NO_ERROR}로 끝나는가. */
-        boolean normal() {
-            return this == CLOSING || this == DRAINED;
-        }
     }
 
     private final boolean server;
@@ -207,11 +202,6 @@ final class ConnectionPhase {
     /** 지금 전송 계층을 닫아야 하는가. 닫은 뒤에는 {@link #transportClosed()}를 알린다. */
     boolean shouldCloseTransport() {
         return !closed && ending.due();
-    }
-
-    /** 닫는 일이 {@code NO_ERROR}로 끝나는가. 이미 오류로 끝나기로 했으면 이후 NO_ERROR CLOSE가 겹쳐도 아니다. */
-    boolean endsNormally() {
-        return ending.normal();
     }
 
     /** 연결이 어떻게 끝났는지. 끝나기 전에 부르면 지금까지의 판단이다. */

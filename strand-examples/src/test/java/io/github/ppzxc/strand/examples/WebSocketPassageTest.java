@@ -123,7 +123,7 @@ class WebSocketPassageTest {
         listener.onOpen(socket);
         OutboundMessage message = firstMessage();
 
-        passage.write(message, 0);
+        TestMessages.write(passage, message, 0);
 
         assertThat(socket.sentBinary).hasSize(1);
         assertThat(socket.sentBinary.get(0)).isEqualTo(message.bytes());
@@ -135,12 +135,12 @@ class WebSocketPassageTest {
         listener.onOpen(socket);
         socket.failSends = true;
 
-        assertThatThrownBy(() -> passage.write(firstMessage(), 0)).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> TestMessages.write(passage, firstMessage(), 0)).isInstanceOf(IOException.class);
     }
 
     @Test
     void writingBeforeTheSocketOpenedIsAnIoException() {
-        assertThatThrownBy(() -> passage.write(firstMessage(), 0)).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> TestMessages.write(passage, firstMessage(), 0)).isInstanceOf(IOException.class);
     }
 
     @Test
@@ -291,8 +291,10 @@ class WebSocketPassageTest {
         FakeWebSocket held = new FakeWebSocket();
         limited.listener().onOpen(held);
         held.holdSends = true;
-        limited.write(firstMessage(), 0);
-        assertThat(limited.write(firstMessage(), 0)).as("앞선 보내기가 끝나지 않아 막힌다").isZero();
+        TestMessages.write(limited, firstMessage(), 0);
+        assertThat(TestMessages.write(limited, firstMessage(), 0))
+                .as("앞선 보내기가 끝나지 않아 막힌다")
+                .isZero();
         java.util.concurrent.CompletableFuture<Object> waiting = new java.util.concurrent.CompletableFuture<>();
         Thread waiter = new Thread(() -> {
             try {

@@ -1193,7 +1193,7 @@ final class ConnectionEngine {
                 }
                 if (writing == null || writing.id() != output.id()) {
                     writing = output;
-                    writingBytes = output.bytes();
+                    writingBytes = output.readOnlyBytes();
                     writingOffset = 0;
                 }
                 int remaining = writingBytes.length - writingOffset;

@@ -65,7 +65,7 @@ class TcpPassageTest {
         while ((index < messages.size() || received.size() < expected) && System.nanoTime() < limit) {
             while (index < messages.size()) {
                 OutboundMessage message = messages.get(index);
-                int accepted = passage.write(message, offset);
+                int accepted = TestMessages.write(passage, message, offset);
                 offset += accepted;
                 if (offset == message.length()) {
                     index++;

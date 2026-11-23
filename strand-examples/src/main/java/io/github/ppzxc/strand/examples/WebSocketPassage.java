@@ -1,7 +1,6 @@
 package io.github.ppzxc.strand.examples;
 
 import io.github.ppzxc.strand.core.internal.CloseReason;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.Passage;
 import java.io.ByteArrayOutputStream;
@@ -31,10 +30,10 @@ import org.jspecify.annotations.Nullable;
  * 앞서 넘긴 메시지를 {@code await}가 꺼낸 뒤에야 요청하므로 읽지 않는 쪽으로 메시지가 무한히 쌓이지 않는다. 조각이 이어지는 동안에는 다음 조각을 바로
  * 요청한다.
  *
- * <p>쓰기는 비블로킹이다. JDK는 보내기가 끝나기 전에 다음 보내기를 받지 않으므로, 앞선 보내기가 끝나지 않았으면 {@link #write}는 0을 돌려주고
+ * <p>쓰기는 비블로킹이다. JDK는 보내기가 끝나기 전에 다음 보내기를 받지 않으므로, 앞선 보내기가 끝나지 않았으면 {@link #writeBytes}는 0을 돌려주고
  * 보내기가 끝나면 쓰기를 기다리던 {@link #await}가 깨어난다. 메시지는 JDK가 한 번에 받으므로 받아 주면 메시지 하나를 통째로 받은 것이다.
  *
- * <p>{@link #await}와 {@link #write}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
+ * <p>{@link #await}와 {@link #writeBytes}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
 public final class WebSocketPassage implements Passage {
 
@@ -304,11 +303,6 @@ public final class WebSocketPassage implements Passage {
                 signal();
             }
         });
-    }
-
-    @Override
-    public int write(OutboundMessage message, int offset) throws IOException {
-        return writeBytes(message.bytes(), offset, message.length() - offset);
     }
 
     /**

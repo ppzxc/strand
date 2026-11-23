@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.nio.internal;
 
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -148,44 +147,6 @@ public final class InMemoryPassage implements Passage {
     /** 락을 쥔 채 부른다. */
     private boolean readable() {
         return !held && !inbox.isEmpty();
-    }
-
-    @Override
-    public int write(OutboundMessage message, int offset) throws IOException {
-        synchronized (lock) {
-            if (closed || outputShutdown) {
-                throw new IOException("닫힌 통로");
-            }
-        }
-        int remaining = message.length() - offset;
-        int accepted;
-        byte[] slice;
-        byte[] whole = null;
-        synchronized (lock) {
-            if (muted) {
-                return remaining;
-            }
-            accepted = (int) Math.min(remaining, writeCapacity);
-            if (accepted == 0) {
-                return 0;
-            }
-            if (writeCapacity != UNLIMITED) {
-                writeCapacity -= accepted;
-            }
-            slice = Arrays.copyOfRange(message.bytes(), offset, offset + accepted);
-            partial = concat(partial, slice);
-            if (accepted == remaining) {
-                whole = partial;
-                partial = new byte[0];
-                written.add(whole.clone());
-            }
-        }
-        if (!messages) {
-            peer.deliver(Inbound.bytes(slice));
-        } else if (whole != null) {
-            peer.deliver(Inbound.unit(whole));
-        }
-        return accepted;
     }
 
     /**

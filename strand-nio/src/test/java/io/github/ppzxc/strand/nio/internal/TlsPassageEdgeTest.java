@@ -27,11 +27,6 @@ class TlsPassageEdgeTest {
         }
 
         @Override
-        public int write(io.github.ppzxc.strand.core.internal.OutboundMessage message, int offset) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
         public int writeBytes(byte[] bytes, int offset, int length) {
             int count = Math.min(length, acceptLimit);
             written += count;
@@ -128,7 +123,8 @@ class TlsPassageEdgeTest {
         TlsPassage passage = client(transport);
 
         // 핸드셰이크 전에는 평문을 소비하지 않으므로 0이다.
-        assertThat(passage.write(TestMessages.largeRequests().get(0), 0)).isZero();
+        assertThat(TestMessages.write(passage, TestMessages.largeRequests().get(0), 0))
+                .isZero();
         assertThat(passage.peerPrincipalOr("fallback")).isEqualTo("fallback");
     }
 }
