@@ -396,13 +396,13 @@ public final class InMemoryPassage implements Passage {
 
     /**
      * 주어진 통로들이 모두 더 할 일 없이 기다리는 상태가 될 때까지 기다린다(결정적 동기화용). 엔진들이 주고받는 쓰기가 다 처리된 뒤에야 돌아온다.
-     * 실제 시간은 상한(5초)으로만 쓴다.
+     * 실제 시간은 상한(15초)으로만 쓴다.
      *
      * @param passages 기다릴 통로들(manualTime이어야 한다)
-     * @throws IllegalStateException 5초 안에 가라앉지 않을 때
+     * @throws IllegalStateException 15초 안에 가라앉지 않을 때
      */
     public static void awaitQuiescence(InMemoryPassage... passages) {
-        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
         while (System.nanoTime() < limit) {
             long[] before = new long[passages.length];
             boolean allParked = true;

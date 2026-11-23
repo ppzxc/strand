@@ -252,6 +252,9 @@ final class EngineRig implements AutoCloseable {
         connection.start();
         settle();
         ready.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+        // 준비 알림은 엔진이 상대에게 마지막 응답(인증 성공 등)을 쓰기 전에 앱 쪽으로 나간다. 그 쓰기와 상대의 처리가 끝나기 전에 시험이 통로를 막거나 상대에게 요청을
+        // 시키면 상대는 아직 준비되지 않은 채라 요청이 영영 엔진에 닿지 않는다.
+        settle();
     }
 
     /** 수동 시계를 올리고 전송 스레드를 깨운다. */

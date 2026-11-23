@@ -9,8 +9,8 @@ import io.github.ppzxc.strand.api.RequestHandle;
 import io.github.ppzxc.strand.api.RequestOptions;
 import io.github.ppzxc.strand.api.Status;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -144,7 +144,7 @@ class EngineBlockedWriteTest {
 
     @Test
     void thePeersMessagesAreStillReadWhileTheWriteIsBlocked() throws Exception {
-        List<IncomingRequest> received = new ArrayList<>();
+        List<IncomingRequest> received = new CopyOnWriteArrayList<>();
         rig = EngineRig.server(received::add, tuning());
         rig.client.writeCapacity(0);
 
