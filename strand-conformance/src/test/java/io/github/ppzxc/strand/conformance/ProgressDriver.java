@@ -7,7 +7,6 @@ import io.github.ppzxc.strand.core.internal.EndpointOutput;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.core.internal.ReceiveProgress;
-import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
@@ -65,11 +64,22 @@ final class ProgressDriver {
         collectEvents();
     }
 
-    /** 메시지 하나가 온 입력. 조각 하나로 메시지 전체를 넘긴다. */
-    void receiveWholeMessage(WebSocketMessageKind kind, byte[] message) {
+    /** 정확히 한 단위(서문 또는 프레임 하나)가 온 입력. 메시지 통로는 메시지 하나를 이렇게 넣는다. */
+    void receiveUnit(byte[] unit) {
         while (true) {
-            ReceiveProgress progress =
-                    endpoint.receiveMessageFragment(kind, true, true, message, 0, message.length, SPACE);
+            ReceiveProgress progress = endpoint.receiveUnit(unit, 0, unit.length, SPACE);
+            if (!progress.collectionRequired()) {
+                break;
+            }
+            requireCollection(progress.consumed());
+        }
+        collectEvents();
+    }
+
+    /** 바이트로 넘길 수 없는 입력(예: 텍스트 메시지)이 온 알림. */
+    void receiveUnsupportedInput() {
+        while (true) {
+            ReceiveProgress progress = endpoint.receiveUnsupportedInput(SPACE);
             if (!progress.collectionRequired()) {
                 break;
             }
@@ -118,7 +128,8 @@ final class ProgressDriver {
                 break;
             }
             if (webSocket) {
-                endpoint.outputAccepted(output.id());
+                // 메시지 통로는 메시지 전체를 넘겼을 때 전체 길이를 보고한다. 부분 쓰기는 없다.
+                endpoint.outputProgress(output.id(), output.length());
                 sent.add(output.message());
                 continue;
             }

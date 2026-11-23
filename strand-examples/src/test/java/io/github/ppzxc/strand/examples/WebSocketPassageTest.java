@@ -6,16 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
-import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import java.io.IOException;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
-/** {@link WebSocketPassage}가 JDK WebSocket 콜백을 메시지 통로({@link Inbound#message})로 바꾸는 방식. */
+/** {@link WebSocketPassage}가 JDK WebSocket 콜백을 단위 입력({@link Inbound#unit})과 잘못된 입력({@link Inbound#unsupported()})으로 바꾸는 방식. */
 class WebSocketPassageTest {
 
     private final WebSocketPassage passage = new WebSocketPassage();
@@ -31,9 +29,7 @@ class WebSocketPassageTest {
     }
 
     private static OutboundMessage firstMessage() {
-        return Endpoint.client(EndpointConfig.defaults().webSocket())
-                .drainMessages()
-                .get(0);
+        return Endpoint.client(EndpointConfig.defaults()).drainMessages().get(0);
     }
 
     @Test
@@ -44,23 +40,20 @@ class WebSocketPassageTest {
         listener.onBinary(socket, buffer(3), true);
 
         Inbound inbound = passage.await(0);
-        assertThat(inbound.kind()).isEqualTo(Inbound.Kind.MESSAGE);
-        assertThat(inbound.messageKind()).isEqualTo(WebSocketMessageKind.BINARY);
+        assertThat(inbound.kind()).isEqualTo(Inbound.Kind.UNIT);
         assertThat(inbound.data()).containsExactly(1, 2, 3);
         assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.NONE);
     }
 
     @Test
-    void aTextMessageIsDeliveredAsATextMessageWithItsUtf8Bytes() throws Exception {
+    void aTextMessageIsDeliveredAsAnUnsupportedInput() throws Exception {
         listener.onOpen(socket);
 
         listener.onText(socket, "한", false);
         listener.onText(socket, "글", true);
 
         Inbound inbound = passage.await(0);
-        assertThat(inbound.kind()).isEqualTo(Inbound.Kind.MESSAGE);
-        assertThat(inbound.messageKind()).isEqualTo(WebSocketMessageKind.TEXT);
-        assertThat(inbound.data()).isEqualTo("한글".getBytes(StandardCharsets.UTF_8));
+        assertThat(inbound.kind()).isEqualTo(Inbound.Kind.UNSUPPORTED);
     }
 
     @Test
@@ -111,7 +104,7 @@ class WebSocketPassageTest {
         listener.onBinary(socket, buffer(5), true);
         listener.onClose(socket, 1000, "");
 
-        assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.MESSAGE);
+        assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.UNIT);
         assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.END);
     }
 
@@ -251,7 +244,7 @@ class WebSocketPassageTest {
         }
         listener.onText(socket, "a", true);
 
-        assertThat(passage.await(0).data()).hasSize(1000);
+        assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.UNSUPPORTED);
         assertThat(passage.encodedCharCount())
                 .as("조각마다 전체를 다시 인코딩하면 이 값이 제곱으로 는다")
                 .isEqualTo(1000);
@@ -265,7 +258,7 @@ class WebSocketPassageTest {
         limited.listener().onText(socket, "한", false);
         limited.listener().onText(socket, "글", true);
 
-        assertThat(limited.await(0).data()).hasSize(6);
+        assertThat(limited.await(0).kind()).isEqualTo(Inbound.Kind.UNSUPPORTED);
         assertThat(socket.aborted).isFalse();
     }
 
@@ -290,7 +283,7 @@ class WebSocketPassageTest {
         limited.listener().onText(socket, "\uD83D", false);
         limited.listener().onText(socket, "\uDE00", true);
 
-        assertThat(limited.await(0).data()).isEqualTo("\uD83D\uDE00".getBytes(StandardCharsets.UTF_8));
+        assertThat(limited.await(0).kind()).isEqualTo(Inbound.Kind.UNSUPPORTED);
     }
 
     @Test
@@ -325,7 +318,7 @@ class WebSocketPassageTest {
         assertThat(passage.await(-1, false, false).kind()).isEqualTo(Inbound.Kind.NONE);
         listener.onBinary(socket, buffer(1), true);
 
-        assertThat(passage.await(0).kind()).as("읽기를 다시 켜면 쌓인 메시지가 먼저다").isEqualTo(Inbound.Kind.MESSAGE);
+        assertThat(passage.await(0).kind()).as("읽기를 다시 켜면 쌓인 메시지가 먼저다").isEqualTo(Inbound.Kind.UNIT);
         assertThat(passage.await(0).kind()).isEqualTo(Inbound.Kind.NONE);
     }
 

@@ -1,12 +1,14 @@
 package io.github.ppzxc.strand.nio.internal;
 
+import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 
 /**
  * 연결 드라이버가 바이트를 주고받는 통로(TCP, in-memory, WebSocket 등). 바이트 스트림 통로는 {@link Inbound#bytes}를, 메시지 통로는
- * {@link Inbound#message}를 내며, 드라이버는 그 종류에 따라 {@code Endpoint}의 {@code receive}와 {@code receiveMessage} 가운데 하나를
- * 부른다.
+ * 메시지 하나를 {@link Inbound#unit}으로(바이트로 넘길 수 없는 메시지는 {@link Inbound#unsupported()}로) 내며, 드라이버는 그 종류에 따라
+ * {@code Endpoint}의 {@code receive}와 {@code receiveUnit}·{@code receiveUnsupportedInput} 가운데 하나를 부른다. 통로의 종류는 core가
+ * 모른다.
  *
  * <p>{@code await}와 {@link #write}는 전송 스레드 하나만 부른다. {@link #wakeup}과 {@link #close}는 어느 스레드에서든 부른다.
  */
@@ -49,8 +51,7 @@ public interface Passage {
      * 받아 줄 수 있게 되기를 {@link #await(long, boolean, boolean)}의 쓰기 대기로 기다린다. 부분 쓰기라서 한 메시지를 여러 번에 나눠 쓸 수
      * 있다. 호출자는 받아 준 만큼 {@code offset}을 올려 이어 쓰고, 메시지 하나를 다 쓰기 전에는 다른 메시지를 쓰지 않는다.
      *
-     * <p>내용이 없는 메시지(TCP에 해당하는 것이 없는 WebSocket 닫기 등)는 {@code offset}이 0인 한 번의 호출로 끝나고 0을 돌려준다. 메시지
-     * 통로는 메시지를 다 받아야 상대에게 메시지 하나로 보인다.
+     * <p>메시지 통로는 메시지를 다 받아야 상대에게 메시지 하나로 보인다.
      *
      * @param message 보낼 메시지
      * @param offset 이미 받아 준 바이트 수(0 이상, 메시지 길이 이하)
@@ -83,6 +84,17 @@ public interface Passage {
      */
     default boolean pendingOutput() {
         return false;
+    }
+
+    /**
+     * {@link #shutdownOutput()}과 같되 연결이 어떻게 끝났는지를 안다. 드라이버는 core의 전송 종료 지시가 닫으라고 하고 남은 출력을 다 넘긴 뒤 이
+     * 메서드를 부른다. 종료 원인에 따라 닫는 방식이 갈리는 통로(WebSocket은 연결 종료에만 Close 1000을 쓴다)가 재정의한다. 기본 구현은 원인을 보지
+     * 않는다.
+     *
+     * @param reason 연결의 종료 원인
+     */
+    default void shutdownOutput(CloseReason reason) {
+        shutdownOutput();
     }
 
     /** 기다리고 있거나 곧 기다릴 {@link #await}를 깨운다. 어느 스레드에서든 부를 수 있다. */

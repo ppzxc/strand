@@ -5,7 +5,6 @@ import static io.github.ppzxc.strand.conformance.Protocol.statusCode;
 import static io.github.ppzxc.strand.conformance.Protocol.streamId;
 
 import com.google.gson.JsonObject;
-import io.github.ppzxc.strand.core.internal.WebSocketMessageKind;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -58,11 +57,14 @@ final class StepKind {
                     "recv_message",
                     BASE.require("opcode", FieldCheck.oneOf(VectorSchema.OPCODES))
                             .require("hex", Check::hex),
-                    (driver, step) -> driver.receiveWholeMessage(
-                            step.get("opcode").getAsString().equals("binary")
-                                    ? WebSocketMessageKind.BINARY
-                                    : WebSocketMessageKind.TEXT,
-                            Bytes.fromHex(step.get("hex").getAsString())))
+                    (driver, step) -> {
+                        // 메시지 하나는 한 단위다. 텍스트 메시지는 바이트로 넘길 수 없는 입력이다.
+                        if (step.get("opcode").getAsString().equals("binary")) {
+                            driver.receiveUnit(Bytes.fromHex(step.get("hex").getAsString()));
+                        } else {
+                            driver.receiveUnsupportedInput();
+                        }
+                    })
             .inbound(Inbound.MESSAGE)
             .onlyOnTransport(VectorSchema.WEBSOCKET);
 

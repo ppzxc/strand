@@ -59,14 +59,14 @@ class WebSocketConnectionTest {
         FakeWebSocket[] sockets = FakeWebSocket.link(clientPassage, serverPassage);
         CompletableFuture<ConnectionClosed> clientClosed = new CompletableFuture<>();
         CompletableFuture<ConnectionClosed> serverClosed = new CompletableFuture<>();
-        server = ConnectionDriver.server(EndpointConfig.defaults().webSocket(), serverPassage)
+        server = ConnectionDriver.server(EndpointConfig.defaults(), serverPassage)
                 .handler(handlers, request -> {
                     String text = new String(request.body(), StandardCharsets.UTF_8);
                     request.respond(0, ("re:" + text).getBytes(StandardCharsets.UTF_8));
                 })
                 .listener(closedInto(serverClosed))
                 .start();
-        client = ConnectionDriver.client(EndpointConfig.defaults().webSocket(), clientPassage)
+        client = ConnectionDriver.client(EndpointConfig.defaults(), clientPassage)
                 .executor(handlers)
                 .listener(closedInto(clientClosed))
                 .start();
@@ -94,10 +94,10 @@ class WebSocketConnectionTest {
         WebSocketPassage serverPassage = new WebSocketPassage();
         FakeWebSocket[] sockets = FakeWebSocket.link(clientPassage, serverPassage);
         CompletableFuture<ConnectionClosed> clientClosed = new CompletableFuture<>();
-        server = ConnectionDriver.server(EndpointConfig.defaults().webSocket(), serverPassage)
+        server = ConnectionDriver.server(EndpointConfig.defaults(), serverPassage)
                 .handler(handlers, request -> {})
                 .start();
-        client = ConnectionDriver.client(EndpointConfig.defaults().webSocket(), clientPassage)
+        client = ConnectionDriver.client(EndpointConfig.defaults(), clientPassage)
                 .executor(handlers)
                 .listener(closedInto(clientClosed))
                 .start();
@@ -115,6 +115,48 @@ class WebSocketConnectionTest {
         // 실패가 CLOSE 교환보다 먼저 닿으면 입출력 실패로 끊긴 것이고, 교환이 먼저 끝났으면 입출력 실패는 원인으로 남지 않는다. 어느 쪽이든 둘이 섞이지 않는다.
         boolean closeExchange = closed.reason().kind() == CloseReason.Kind.CLOSE;
         assertThat(closed.ioException().isPresent()).isEqualTo(!closeExchange);
+    }
+
+    /** 텍스트 메시지는 바이트로 넘길 수 없는 입력이다. 서문 단계라 core가 아무것도 보내지 않고 닫는다. */
+    @Test
+    void aTextMessageBeforeThePrefaceClosesTheConnectionWithoutAnyStrandBytes() throws Exception {
+        WebSocketPassage serverPassage = new WebSocketPassage();
+        FakeWebSocket socket = new FakeWebSocket();
+        serverPassage.listener().onOpen(socket);
+        CompletableFuture<ConnectionClosed> serverClosed = new CompletableFuture<>();
+        server = ConnectionDriver.server(EndpointConfig.defaults(), serverPassage)
+                .handler(handlers, request -> {})
+                .listener(closedInto(serverClosed))
+                .start();
+
+        serverPassage.listener().onText(socket, "hello", true);
+
+        assertThat(within(serverClosed).reason().kind()).isNotEqualTo(CloseReason.Kind.CLOSE);
+        assertThat(socket.sentBinary).as("서문 단계의 위반에는 아무것도 보내지 않는다").isEmpty();
+    }
+
+    /** 오류로 끝난 연결은 WebSocket Close 1000으로 닫지 않는다(규격 1.2.1절). */
+    @Test
+    void aConnectionThatEndsWithAnErrorCloseIsNotClosedWithNormalClosure() throws Exception {
+        WebSocketPassage clientPassage = new WebSocketPassage();
+        WebSocketPassage serverPassage = new WebSocketPassage();
+        FakeWebSocket[] sockets = FakeWebSocket.link(clientPassage, serverPassage);
+        CompletableFuture<ConnectionClosed> serverClosed = new CompletableFuture<>();
+        server = ConnectionDriver.server(EndpointConfig.defaults(), serverPassage)
+                .handler(handlers, request -> {})
+                .listener(closedInto(serverClosed))
+                .start();
+        client = ConnectionDriver.client(EndpointConfig.defaults(), clientPassage)
+                .executor(handlers)
+                .start();
+        awaitUntil(() -> client.writtenFrames() >= 1);
+
+        // 길이 필드가 최소보다 작은 프레임은 연결 오류다.
+        sockets[0].sendBinary(java.nio.ByteBuffer.wrap(new byte[] {0, 0, 0, 1, 0}), true);
+
+        assertThat(within(serverClosed).reason().kind()).isEqualTo(CloseReason.Kind.ERROR_CLOSE);
+        awaitUntil(() -> !sockets[1].sentCloseCodes.isEmpty());
+        assertThat(sockets[1].sentCloseCodes).doesNotContain(1000);
     }
 
     private static void awaitUntil(java.util.function.BooleanSupplier condition) throws InterruptedException {

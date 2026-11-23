@@ -75,8 +75,7 @@ class WebSocketOverRealSocketTest {
     void theWebSocketExampleExchangesOneRequestWithAStrandServerOverARealSocket() throws Exception {
         LocalWebSocketServer server = serve(true, session -> {
             ConnectionDriver driver = ConnectionDriver.server(
-                            ExampleSupport.withAuthenticator(
-                                    EndpointConfig.defaults().webSocket()),
+                            ExampleSupport.withAuthenticator(EndpointConfig.defaults()),
                             new LocalWebSocketServer.SessionPassage(session))
                     .handler(handlers, request -> {
                         String body = new String(request.body(), StandardCharsets.UTF_8);
@@ -123,7 +122,7 @@ class WebSocketOverRealSocketTest {
 
         Inbound inbound = awaitSomething(passage);
 
-        assertThat(inbound.kind()).isEqualTo(Inbound.Kind.MESSAGE);
+        assertThat(inbound.kind()).isEqualTo(Inbound.Kind.UNIT);
         assertThat(inbound.data()).containsExactly(1, 2, 3, 4, 5);
     }
 
@@ -154,9 +153,8 @@ class WebSocketOverRealSocketTest {
         CompletableFuture<LocalWebSocketServer.Frame> received = new CompletableFuture<>();
         LocalWebSocketServer server = serve(true, session -> received.complete(session.readFrame()));
         WebSocketPassage passage = connect(server);
-        OutboundMessage message = Endpoint.client(EndpointConfig.defaults().webSocket())
-                .drainMessages()
-                .get(0);
+        OutboundMessage message =
+                Endpoint.client(EndpointConfig.defaults()).drainMessages().get(0);
 
         passage.write(message, 0);
 
