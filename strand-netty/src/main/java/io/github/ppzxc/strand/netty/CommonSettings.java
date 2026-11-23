@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executor;
+import java.util.function.LongPredicate;
 import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 
@@ -243,8 +244,8 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         long closeFinishNanos = positiveNanos("closeFinishDeadline", closeFinishDeadline);
         // 범위 검사는 core가 한다(16384~1048576).
         EndpointConfig.defaults().maxFrameSize(maxFrameSize);
-        long idleIntervalMs = coreMillis("idlePingInterval", idlePingInterval, false);
-        long ackTimeoutMs = coreMillis("ackTimeout", ackTimeout, true);
+        long idleIntervalMs = coreMillis("idlePingInterval", idlePingInterval, EndpointConfig::isValidIdleIntervalMs);
+        long ackTimeoutMs = coreMillis("ackTimeout", ackTimeout, EndpointConfig::isValidAckTimeoutMs);
         NettySecurity channelSecurity = Objects.requireNonNull(security);
         TlsSizes tlsSizes = null;
         if (channelSecurity.tlsContext() != null) {
@@ -280,7 +281,7 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
     }
 
     /** core 설정이 받는 범위(밀리초)로 바꾸고, 벗어나면 거절한다. 범위 검사는 core가 한다. */
-    private static long coreMillis(String name, Duration value, boolean positive) {
+    private static long coreMillis(String name, Duration value, LongPredicate inRange) {
         long millis;
         try {
             if (value.toNanos() % 1_000_000 != 0) {
@@ -290,13 +291,8 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         } catch (ArithmeticException e) {
             throw new IllegalArgumentException(name + "이 너무 크다: " + value, e);
         }
-        try {
-            EndpointConfig config = positive
-                    ? EndpointConfig.defaults().ackTimeoutMs(millis)
-                    : EndpointConfig.defaults().idleIntervalMs(millis);
-            Objects.requireNonNull(config);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException(name + "이 범위를 벗어났다: " + value, e);
+        if (!inRange.test(millis)) {
+            throw new IllegalArgumentException(name + "이 범위를 벗어났다: " + value);
         }
         return millis;
     }

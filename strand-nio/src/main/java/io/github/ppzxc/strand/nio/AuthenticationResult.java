@@ -1,5 +1,6 @@
 package io.github.ppzxc.strand.nio;
 
+import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import java.util.Objects;
 import java.util.OptionalLong;
 import org.jspecify.annotations.Nullable;
@@ -43,7 +44,7 @@ public final class AuthenticationResult {
      * @throws IllegalArgumentException 수명이 범위를 벗어났을 때
      */
     public static AuthenticationResult accepted(Object principal, long lifetimeSeconds) {
-        if (lifetimeSeconds < 0 || lifetimeSeconds > 0xFFFF_FFFFL) {
+        if (!EndpointConfig.isUnsigned32(lifetimeSeconds)) {
             throw new IllegalArgumentException("수명은 부호 없는 32비트 정수여야 한다: " + lifetimeSeconds);
         }
         return new AuthenticationResult(
