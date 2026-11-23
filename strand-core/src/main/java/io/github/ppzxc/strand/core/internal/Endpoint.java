@@ -31,13 +31,7 @@ public final class Endpoint {
     /** 프레임 헤더 크기(규격 2.1절). 전송 모듈이 바이트 수를 셀 때 쓰도록 {@code Frames}의 값을 그대로 노출한다. */
     public static final int FRAME_HEADER_SIZE = Frames.HEADER_SIZE;
 
-    private static final int PREFACE_PREFIX_LENGTH = 6;
     private static final byte[] NO_BYTES = new byte[0];
-    /** 경계에 걸친 단위를 모으는 버퍼의 처음 크기. */
-    private static final int PENDING_MIN_CAPACITY = 64;
-    /** 다 비웠을 때 이 크기를 넘는 버퍼는 놓는다. 큰 프레임 하나 때문에 연결이 그 크기를 계속 붙잡지 않게 한다. */
-    private static final int PENDING_RELEASE_ABOVE = 65_536;
-
     /** 서버는 짝수, 클라이언트는 홀수 번호를 쓰고 첫 번호는 각각 2와 1이다(규격 2.2.5절). */
     private static final int FIRST_SERVER_STREAM_ID = 2;
 
@@ -89,15 +83,10 @@ public final class Endpoint {
      */
     private final Deque<DeferredPing> deferredPings = new ArrayDeque<>();
 
-    /**
-     * 받은 바이트 가운데 아직 한 단위(서문 또는 프레임)가 되지 못한 앞부분. 청크 경계에 걸친 단위 하나만 모으므로 비어 있는 때가 대부분이다.
-     * 한 청크 안에 통째로 든 단위는 들어온 배열에서 바로 처리해 복사하지 않는다.
-     */
-    private byte[] pending = NO_BYTES;
-    /** {@link #pending}에서 쓰인 바이트 수. 0이면 모은 것이 없다. */
-    private int pendingLength;
-    /** {@link #consumeUnit}이 0을 돌려줄 때, 진행하려면 단위의 앞에서부터 있어야 하는 총 바이트 수. */
-    private int wantedLength;
+    /** 받은 바이트를 단위로 자르고 경계에 걸친 단위 하나를 모은다. 이 상태 기계는 프레임 하나와 경계 위반만 받는다. */
+    private final UnitSlicer slicer;
+
+    private final UnitSink unitSink = new UnitSink();
     /** 입력 처리 중이다. 애플리케이션 콜백이 같은 엔드포인트에 다시 입력하는 것을 막는다. */
     private boolean receiving;
 
@@ -134,6 +123,7 @@ public final class Endpoint {
                     "nextStreamId " + firstStreamId + "는 " + (server ? "서버(짝수)" : "클라이언트(홀수)") + "의 번호 공간이 아니다");
         }
         this.ledger = new OwnRequestLedger(outbox, firstStreamId, ownParity);
+        this.slicer = new UnitSlicer(config.maxFrameSize());
         this.output = new OutputProgress(outbox, timers, ledger);
         this.server = server;
         this.phase = server ? ConnectionPhase.server() : ConnectionPhase.client();
@@ -184,48 +174,8 @@ public final class Endpoint {
             return new ReceiveProgress(0, false);
         }
         try {
-            int at = offset;
-            int end = offset + length;
-            int units = 0;
-            boolean collectionRequired = false;
-            while (!phase.isEnded() && units < maximumUnits) {
-                if (pendingLength == 0 && at == end) {
-                    break;
-                }
-                if (!hasSpace(space)) {
-                    collectionRequired = true;
-                    break;
-                }
-                if (pendingLength > 0) {
-                    int consumed = consumeUnit(pending, 0, pendingLength);
-                    if (consumed > 0) {
-                        releasePending();
-                        units++;
-                    } else if (phase.isEnded() || at == end) {
-                        break;
-                    } else {
-                        int take = Math.min(wantedLength - pendingLength, end - at);
-                        if (take <= 0) {
-                            throw new IllegalStateException("더 필요한 바이트 수가 정해지지 않았다");
-                        }
-                        appendPending(bytes, at, take);
-                        at += take;
-                    }
-                } else {
-                    int consumed = consumeUnit(bytes, at, end - at);
-                    if (consumed > 0) {
-                        at += consumed;
-                        units++;
-                    } else {
-                        if (!phase.isEnded()) {
-                            appendPending(bytes, at, end - at);
-                            at = end;
-                        }
-                        break;
-                    }
-                }
-            }
-            return new ReceiveProgress(at - offset, collectionRequired);
+            unitSink.space = space;
+            return slicer.slice(bytes, offset, length, maximumUnits, unitSink);
         } finally {
             receiving = false;
         }
@@ -288,25 +238,6 @@ public final class Endpoint {
         return true;
     }
 
-    private void appendPending(byte[] bytes, int at, int length) {
-        int needed = pendingLength + length;
-        if (needed > pending.length) {
-            // 받은 만큼에 맞춰 두 배씩 키운다. 상한은 처리 중인 단위의 크기(wantedLength, 최대 max_frame_size)다.
-            int doubled = Math.max(PENDING_MIN_CAPACITY, pending.length * 2);
-            pending = Arrays.copyOf(pending, Math.max(needed, Math.min(doubled, wantedLength)));
-        }
-        System.arraycopy(bytes, at, pending, pendingLength, length);
-        pendingLength = needed;
-    }
-
-    /** 모은 바이트를 모두 처리했다. 큰 버퍼는 놓는다. */
-    private void releasePending() {
-        pendingLength = 0;
-        if (pending.length > PENDING_RELEASE_ABOVE) {
-            pending = NO_BYTES;
-        }
-    }
-
     /**
      * 정확히 한 단위(서문 또는 프레임 하나)라고 주장하는 바이트를 넣는다. 크기가 한 단위와 같으면 같은 바이트를 스트림으로 넣었을 때와 같은 사건과
      * 출력을 낸다. 다르면 연결 단계에 맞게 반응한다: 서문 단계와 첫 프레임 단계는 아무것도 보내지 않고 닫고, 그 뒤는 연결 오류이며, {@code
@@ -349,7 +280,7 @@ public final class Endpoint {
 
     private ReceiveProgress receiveWholeUnit(
             byte[] bytes, int offset, int length, boolean supported, CollectionSpace space) {
-        if (pendingLength > 0) {
+        if (slicer.hasBuffered()) {
             throw new IllegalStateException("스트림 입력으로 받아 둔 바이트가 남아 있어 단위로 입력할 수 없다");
         }
         if (!enterReceive()) {
@@ -359,47 +290,11 @@ public final class Endpoint {
             if (!hasSpace(space)) {
                 return new ReceiveProgress(0, true);
             }
-            consumeWholeUnit(bytes, offset, length, supported);
+            slicer.sliceWhole(bytes, offset, length, supported, unitSink);
             return new ReceiveProgress(supported ? length : 0, false);
         } finally {
             receiving = false;
         }
-    }
-
-    /** 한 단위가 정확히 {@code length}바이트라고 보고 처리한다. 크기가 어긋나면 연결 단계에 맞게 닫는다. */
-    private void consumeWholeUnit(byte[] bytes, int off, int length, boolean supported) {
-        if (phase.awaitingPreface()) {
-            if (supported && length == Frames.preface().length && matchesPrefacePrefix(bytes, off, length)) {
-                phase.prefaceVerified();
-                sendHello();
-            } else {
-                closeWithoutClose();
-            }
-            return;
-        }
-        if (phase.awaitingFirstFrame()) {
-            boolean valid = supported
-                    && length >= Frames.HEADER_SIZE
-                    && Frames.readUnsignedInt(bytes, off) >= Frames.MIN_LENGTH
-                    && isFirstFrameHeader(bytes, off);
-            if (!valid) {
-                closeWithoutClose();
-                return;
-            }
-            phase.firstFrameVerified();
-        }
-        if (!supported || length < Frames.TYPE_END) {
-            connectionError();
-            return;
-        }
-        long declared = Frames.readUnsignedInt(bytes, off);
-        if (declared < Frames.MIN_LENGTH
-                || declared > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE
-                || length != Frames.LENGTH_FIELD_SIZE + declared) {
-            rejectBadLength(bytes, off);
-            return;
-        }
-        handle(bytes, off, length);
     }
 
     /** 전송 모듈이 연결을 어떻게 닫아야 하는지에 대한 core의 지시. Strand CLOSE 프레임과는 별개다. */
@@ -870,89 +765,6 @@ public final class Endpoint {
         }
         events.subList(0, consumed).clear();
         return drained;
-    }
-
-    /**
-     * {@code off}에서 시작하는 {@code available}바이트에서 한 단위(서문 또는 프레임)를 처리한다. 처리했으면 소비한 바이트 수를 돌려준다.
-     * 모자라면 0을 돌려주고 {@link #wantedLength}에 진행하려면 있어야 하는 총 바이트 수를 둔다. 판정이 나서 닫았으면 0을 돌려준다. 도착 단위에
-     * 따라 결과가 달라지면 안 되므로, 판정에 필요한 바이트가 모이기 전에는 아무것도 하지 않는다.
-     */
-    private int consumeUnit(byte[] bytes, int off, int available) {
-        if (phase.awaitingPreface()) {
-            return consumePreface(bytes, off, available);
-        }
-        if (available < Frames.LENGTH_FIELD_SIZE) {
-            wantedLength = Frames.LENGTH_FIELD_SIZE;
-            return 0;
-        }
-        long length = Frames.readUnsignedInt(bytes, off);
-        if (phase.awaitingFirstFrame()) {
-            // 첫 프레임 검사(규격 3.2.4절): 헤더를 읽을 수 없거나 HELLO가 아니면 아무것도 보내지 않고 닫는다.
-            if (length < Frames.MIN_LENGTH) {
-                closeWithoutClose();
-                return 0;
-            }
-            if (available < Frames.HEADER_SIZE) {
-                wantedLength = Frames.HEADER_SIZE;
-                return 0;
-            }
-            if (!isFirstFrameHeader(bytes, off)) {
-                closeWithoutClose();
-                return 0;
-            }
-            phase.firstFrameVerified();
-        }
-        if (length < Frames.MIN_LENGTH || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE) {
-            if (available < Frames.TYPE_END) {
-                // type을 읽을 때까지 기다린다. CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫아야 하므로 도착 단위에 따라 결과가 달라지면 안 된다.
-                wantedLength = Frames.TYPE_END;
-                return 0;
-            }
-            rejectBadLength(bytes, off);
-            return 0;
-        }
-        int frameSize = (int) (Frames.LENGTH_FIELD_SIZE + length);
-        if (available < frameSize) {
-            wantedLength = frameSize;
-            return 0;
-        }
-        handle(bytes, off, frameSize);
-        return frameSize;
-    }
-
-    /** 서문의 앞 6바이트를 비교한다(규격 3.1절). 판정할 만큼 모였으면 서문 8바이트를 건너뛴다. 서문은 8바이트를 모두 받은 뒤 건너뛴다. */
-    private int consumePreface(byte[] bytes, int off, int available) {
-        byte[] preface = Frames.preface();
-        if (!matchesPrefacePrefix(bytes, off, available)) {
-            closeWithoutClose();
-            return 0;
-        }
-        if (available < preface.length) {
-            wantedLength = preface.length;
-            return 0;
-        }
-        phase.prefaceVerified();
-        sendHello();
-        return preface.length;
-    }
-
-    /** 서문의 앞 6바이트와, 받은 만큼의 앞부분이 일치하는가. */
-    private static boolean matchesPrefacePrefix(byte[] bytes, int off, int available) {
-        byte[] preface = Frames.preface();
-        int compared = Math.min(available, PREFACE_PREFIX_LENGTH);
-        for (int i = 0; i < compared; i++) {
-            if (bytes[off + i] != preface[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** 첫 프레임의 헤더가 첫 프레임 검사(규격 3.2.4절)를 통과하는가: HELLO이고 stream_id 0, flags 0. */
-    private static boolean isFirstFrameHeader(byte[] bytes, int off) {
-        return Frames.typeOf(bytes, off) == FrameType.HELLO
-                && Frames.streamIdOf(bytes, off) == 0
-                && Frames.flagsOf(bytes, off) == 0;
     }
 
     /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */
@@ -1506,8 +1318,7 @@ public final class Endpoint {
             return;
         }
         phase.transportClosed();
-        pending = NO_BYTES;
-        pendingLength = 0;
+        slicer.discard();
         timers.clear();
         for (OwnRequestLedger.Outcome outcome : ledger.onTransportClosed(phase.endedByDisconnect())) {
             applyOutcome(outcome);
@@ -1578,6 +1389,61 @@ public final class Endpoint {
         Outbox.Node node = send(frame);
         node.waitId = timers.await(kind, payload);
         return node.waitId;
+    }
+
+    /** {@link UnitSlicer}가 자른 결과를 이 상태 기계의 동작으로 옮긴다. */
+    private final class UnitSink implements UnitSlicer.Sink {
+        /** 지금 처리 중인 입력 호출이 준 수거 공간. */
+        private @Nullable CollectionSpace space;
+
+        @Override
+        public boolean isEnded() {
+            return phase.isEnded();
+        }
+
+        @Override
+        public UnitSlicer.Stage stage() {
+            if (phase.awaitingPreface()) {
+                return UnitSlicer.Stage.PREFACE;
+            }
+            return phase.awaitingFirstFrame() ? UnitSlicer.Stage.FIRST_FRAME : UnitSlicer.Stage.FRAME;
+        }
+
+        @Override
+        public boolean hasSpace() {
+            return Endpoint.this.hasSpace(Objects.requireNonNull(space));
+        }
+
+        @Override
+        public void prefaceReceived() {
+            phase.prefaceVerified();
+            sendHello();
+        }
+
+        @Override
+        public void firstFrameVerified() {
+            phase.firstFrameVerified();
+        }
+
+        @Override
+        public void frame(byte[] bytes, int off, int size) {
+            handle(bytes, off, size);
+        }
+
+        @Override
+        public void closeWithoutClose() {
+            Endpoint.this.closeWithoutClose();
+        }
+
+        @Override
+        public void badLength(byte[] bytes, int off) {
+            rejectBadLength(bytes, off);
+        }
+
+        @Override
+        public void connectionError() {
+            Endpoint.this.connectionError();
+        }
     }
 
     /** AUTH 관문을 통과할 때까지 미룬 PING 하나. */
