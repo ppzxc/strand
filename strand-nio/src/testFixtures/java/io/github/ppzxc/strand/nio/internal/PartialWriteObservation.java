@@ -1,23 +1,33 @@
 package io.github.ppzxc.strand.nio.internal;
 
+import io.github.ppzxc.strand.api.Request;
+import io.github.ppzxc.strand.api.RequestHandle;
+import io.github.ppzxc.strand.api.RequestResult;
 import io.github.ppzxc.strand.core.internal.Certainty;
-import io.github.ppzxc.strand.core.internal.EndpointConfig;
+import io.github.ppzxc.strand.nio.Listener;
+import io.github.ppzxc.strand.nio.NioStrandClient;
+import io.github.ppzxc.strand.nio.NioStrandConnection;
+import io.github.ppzxc.strand.nio.NioStrandServer;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** 실행 경로별 적합성 테스트가 전송 계층의 부분 쓰기를 관찰할 수 있게 한다. */
+/**
+ * 실행 경로별 적합성 테스트가 전송 계층의 부분 쓰기를 관찰할 수 있게 한다. 제품 서버와 클라이언트를 실제 TCP로 잇고, 클라이언트 통로를 {@link
+ * PassageWrapping}으로 감싸 쓰기 용량을 제한한다.
+ */
 public final class PartialWriteObservation {
 
-    private static final long ACK_TIMEOUT_MILLISECONDS = 1_000;
-    private static final long IDLE_INTERVAL_MILLISECONDS = 3_000;
     private static final long WRITE_WAIT_SECONDS = 5;
-    private static final int RESUME_WRITE_CAPACITY = 1_000_000;
+    private static final long RESUME_WRITE_CAPACITY = 1_000_000;
 
     /** 실제 NIO 실행에서 관찰한 결과. */
     public static final class Result {
@@ -54,55 +64,88 @@ public final class PartialWriteObservation {
 
     /** 요청 프레임을 제한된 바이트 수만 쓴 뒤 취소하고, 쓰기를 풀어 완성 프레임을 돌려준다. */
     public static Result cancelAfterPartialWrite(int type, byte[] payload, int initialWriteCapacity) throws Exception {
-        ExecutorService handlers = Executors.newSingleThreadExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "partial-write-observer");
-            thread.setDaemon(true);
-            return thread;
-        });
-        EndpointConfig config = EndpointConfig.defaults()
-                .ackTimeoutMs(ACK_TIMEOUT_MILLISECONDS)
-                .idleIntervalMs(IDLE_INTERVAL_MILLISECONDS);
-        InMemoryConnectionPair.Side[] sides = null;
-        try {
-            sides = InMemoryConnectionPair.connected(config, handlers, false);
-            InMemoryConnectionPair.Side clientSide = sides[0];
-            InMemoryConnectionPair.Side serverSide = sides[1];
-            InMemoryPassage clientPassage = clientSide.passage;
+        ExecutorService executor = TestNio.newExecutor("partial-write-observer");
+        BlockingQueue<ControlledPassage> clientPassages = new LinkedBlockingQueue<>();
+        BlockingQueue<ControlledPassage> serverPassages = new LinkedBlockingQueue<>();
+        NioStrandServer server =
+                TestNio.serverBuilder(executor).handler(request -> {}).build();
+        NioStrandClient client = TestNio.clientBuilder(executor).build();
+        try (PassageWrapping.Installation installed = PassageWrapping.install((side, passage) -> {
+            ControlledPassage controlled = new ControlledPassage(passage);
+            (side == PassageWrapping.Side.CLIENT ? clientPassages : serverPassages).add(controlled);
+            return controlled;
+        })) {
+            Listener listener = server.listen(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
+                    .toCompletableFuture()
+                    .get(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
+            NioStrandConnection connection = client.connect(new InetSocketAddress(
+                            InetAddress.getLoopbackAddress(), ((InetSocketAddress) listener.localAddress()).getPort()))
+                    .toCompletableFuture()
+                    .get(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
+            ControlledPassage clientPassage = clientPassages.poll(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
+            if (clientPassage == null) {
+                throw new AssertionError("client passage was not wrapped");
+            }
 
-            int firstWrittenFrame = clientPassage.written().size();
+            int firstWrittenFrame = clientPassage.writtenFrames().size();
             clientPassage.writeCapacity(initialWriteCapacity);
-            RequestHandle handle = clientSide.driver.request(type, payload);
+            RequestHandle handle = connection.request(Request.of(type, payload));
             AtomicInteger resultDeliveries = new AtomicInteger();
-            CompletableFuture<Void> deliveryObserved =
-                    handle.result().thenAccept(ignored -> resultDeliveries.incrementAndGet());
-            if (!clientSide.driver.awaitWriteBlocked(true, WRITE_WAIT_SECONDS, TimeUnit.SECONDS)) {
+            CompletableFuture<Void> deliveryObserved = new CompletableFuture<>();
+            handle.result().observe(ignored -> {
+                resultDeliveries.incrementAndGet();
+                deliveryObserved.complete(null);
+            });
+            if (!clientPassage.awaitBlockedWrites(1)) {
                 throw new AssertionError("NIO writer did not block after the partial request write");
             }
             handle.cancel();
-            RequestResult result = handle.result().get(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
             deliveryObserved.get(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
-            InMemoryConnectionPair.settle(handlers, clientSide, serverSide);
+            RequestResult result = handle.result().resultNow();
             clientPassage.addWriteCapacity(RESUME_WRITE_CAPACITY);
-            InMemoryConnectionPair.settle(handlers, clientSide, serverSide);
+            awaitFrames(clientPassage, firstWrittenFrame + 2);
+            // 서버가 요청 프레임을 끝까지 읽었는지는 서버 통로가 읽은 프레임으로 본다. RESET이 핸들러 시작보다 먼저 처리되면 핸들러는 불리지 않는다.
+            ControlledPassage serverPassage = serverPassages.poll(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
+            if (serverPassage == null || !awaitRead(serverPassage, type)) {
+                throw new AssertionError("peer did not receive the completed request frame");
+            }
             if (resultDeliveries.get() != 1) {
                 throw new AssertionError("request result was delivered " + resultDeliveries.get() + " times");
             }
-            if (serverSide.received.size() != 1) {
-                throw new AssertionError("peer did not receive the completed request frame");
+            List<byte[]> frames = new ArrayList<>();
+            List<ControlledPassage.Frame> written = clientPassage.writtenFrames();
+            for (ControlledPassage.Frame frame : written.subList(firstWrittenFrame, written.size())) {
+                frames.add(frame.bytes());
             }
             return new Result(
-                    result.status(),
-                    result.certainty(),
-                    resultDeliveries.get(),
-                    clientPassage
-                            .written()
-                            .subList(firstWrittenFrame, clientPassage.written().size()));
+                    result.status(), Certainty.valueOf(result.certainty().name()), resultDeliveries.get(), frames);
         } finally {
-            if (sides != null) {
-                sides[0].driver.close();
-                sides[1].driver.close();
+            client.shutdown();
+            server.shutdown();
+            executor.shutdownNow();
+        }
+    }
+
+    private static boolean awaitRead(ControlledPassage passage, int type) throws InterruptedException {
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(WRITE_WAIT_SECONDS);
+        while (System.nanoTime() < limit) {
+            for (ControlledPassage.Frame frame : passage.readFrames()) {
+                if (frame.type() == type) {
+                    return true;
+                }
             }
-            handlers.shutdownNow();
+            Thread.sleep(2);
+        }
+        return false;
+    }
+
+    private static void awaitFrames(ControlledPassage passage, int count) throws InterruptedException {
+        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(WRITE_WAIT_SECONDS);
+        while (passage.writtenFrames().size() < count) {
+            if (System.nanoTime() > limit) {
+                throw new AssertionError("completed request frame and RESET were not both written");
+            }
+            Thread.sleep(2);
         }
     }
 }

@@ -4,19 +4,19 @@ import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 
-import io.github.ppzxc.strand.core.internal.Certainty;
-import io.github.ppzxc.strand.nio.internal.IncomingRequest;
-import io.github.ppzxc.strand.nio.internal.RequestResult;
+import io.github.ppzxc.strand.api.Certainty;
+import io.github.ppzxc.strand.api.RequestResult;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /** 한 연결에서 양쪽이 서로 요청을 내는 경우를 실제 TCP 위에서 확인한다. */
+@ExtendWith(PassageObservation.class)
 class BidirectionalIntegrationTest {
 
     private static final int REQUESTS_PER_SIDE = 3;
@@ -59,14 +59,15 @@ class BidirectionalIntegrationTest {
                 assertThat(clientResult.status()).isEqualTo(i);
                 assertThat(serverResult.status()).isEqualTo(i + CLIENT_STATUS_OFFSET);
             }
-            Map<Long, Integer> typeByStreamAtServer = new HashMap<>();
-            Map<Long, Integer> typeByStreamAtClient = new HashMap<>();
+            // 요청을 받은 쪽 통로가 읽은 프레임의 번호로 본다. 제품 API는 받은 요청의 스트림 번호를 드러내지 않는다.
             for (int i = 0; i < REQUESTS_PER_SIDE; i++) {
-                IncomingRequest atServer = serverSide.awaitRequest();
-                typeByStreamAtServer.put(atServer.streamId(), atServer.type());
-                IncomingRequest atClient = client.awaitRequest();
-                typeByStreamAtClient.put(atClient.streamId(), atClient.type());
+                serverSide.awaitRequest();
+                client.awaitRequest();
             }
+            Map<Long, Integer> typeByStreamAtServer =
+                    Fixtures.requestTypeByStream(serverSide.passage().readFrames(), true);
+            Map<Long, Integer> typeByStreamAtClient =
+                    Fixtures.requestTypeByStream(client.passage().readFrames(), false);
 
             // 클라이언트 개시: 번호 1, 3, 5. 서버 개시: 번호 2, 4, 6. 번호 i번째 요청의 type이 APPLICATION_TYPE + i다.
             assertThat(typeByStreamAtServer)

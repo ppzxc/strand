@@ -4,8 +4,7 @@ import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static io.github.ppzxc.strand.integration.Fixtures.STATUS_OK;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.ppzxc.strand.core.internal.CloseReason;
-import io.github.ppzxc.strand.nio.internal.ConnectionClosed;
+import io.github.ppzxc.strand.api.CloseNotice;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,18 +27,18 @@ class CloseIntegrationTest {
                     .result()
                     .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
-            client.driver().closeConnection();
-            ConnectionClosed atClient = client.awaitClosed();
-            ConnectionClosed atServer = serverSide.awaitClosed();
+            client.closeConnection();
+            CloseNotice atClient = client.awaitClosed();
+            CloseNotice atServer = serverSide.awaitClosed();
             client.stop();
             serverSide.stop();
 
             assertThat(client.closedNotices()).hasSize(1);
             assertThat(serverSide.closedNotices()).hasSize(1);
-            assertThat(atClient.reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
-            assertThat(atClient.reason().sender()).contains(CloseReason.Sender.LOCAL);
-            assertThat(atServer.reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
-            assertThat(atServer.reason().sender()).contains(CloseReason.Sender.PEER);
+            assertThat(atClient.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
+            assertThat(atClient.sender()).contains(CloseNotice.Sender.LOCAL);
+            assertThat(atServer.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
+            assertThat(atServer.sender()).contains(CloseNotice.Sender.PEER);
         }
     }
 }

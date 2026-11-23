@@ -29,6 +29,7 @@ import io.github.ppzxc.strand.nio.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.OwnerBudgets;
 import io.github.ppzxc.strand.nio.internal.Passage;
+import io.github.ppzxc.strand.nio.internal.PassageWrapping;
 import io.github.ppzxc.strand.nio.internal.ProgressSpace;
 import io.github.ppzxc.strand.nio.internal.TlsPassage;
 import java.io.EOFException;
@@ -997,7 +998,10 @@ final class ConnectionEngine {
         long remaining = p.preparationDeadlineAtNanos - p.nanoClock.getAsLong();
         Passage passage = p.opener.open(remaining);
         stage = passage instanceof TlsPassage ? PreparationStage.SECURITY : PreparationStage.HELLO;
-        return passage;
+        // 테스트 전용 감싸기 지점. 설치된 것이 없으면 통로 그대로다.
+        return PassageWrapping.wrap(
+                p.role == ConnectionParams.Role.CLIENT ? PassageWrapping.Side.CLIENT : PassageWrapping.Side.SERVER,
+                passage);
     }
 
     private void failedToOpen(Throwable original) {

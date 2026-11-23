@@ -320,8 +320,8 @@ final class VectorRunner {
 
     /**
      * WebSocket 전송 모듈이 WebSocket Close 1000을 보낼지. core의 전송 종료 지시가 닫으라고 하고(남은 출력을 다 넘겼으므로 이 단계에서 끝난
-     * 연결이다) 종료 원인이 {@code NO_ERROR} 연결 종료일 때다. core는 WebSocket을 모르므로 이 판단은 전송 모듈의 일이고, 예제의 WebSocket
-     * 통로가 같은 판단을 한다. 벡터의 {@code WEBSOCKET_CLOSE} 기대 항목은 이 판단으로 확인한다.
+     * 연결이다) 종료 원인이 {@code NO_ERROR} 연결 종료일 때다. core는 WebSocket을 모르므로 이 판단은 전송 모듈의 일이고, #390의 공식
+     * WebSocket 지원이 같은 판단을 해야 한다(그 전까지는 실제 통로로 확인하는 곳이 없다). 벡터의 {@code WEBSOCKET_CLOSE} 기대 항목은 이 판단으로 확인한다.
      */
     private boolean webSocketCloses(List<Event> events) {
         if (!webSocket || endpoint.transportClose() == Endpoint.TransportClose.NONE) {

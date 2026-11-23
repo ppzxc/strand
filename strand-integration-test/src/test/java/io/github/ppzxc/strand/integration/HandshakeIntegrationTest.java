@@ -3,7 +3,7 @@ package io.github.ppzxc.strand.integration;
 import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.ppzxc.strand.nio.internal.IncomingRequest;
+import io.github.ppzxc.strand.nio.IncomingRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -28,7 +28,7 @@ class HandshakeIntegrationTest {
             IncomingRequest received = serverSide.awaitRequest();
 
             assertThat(received.type()).isEqualTo(APPLICATION_TYPE);
-            assertThat(received.body()).isEqualTo(Fixtures.payload("hello"));
+            assertThat(received.payload()).isEqualTo(Fixtures.payload("hello"));
         }
     }
 }

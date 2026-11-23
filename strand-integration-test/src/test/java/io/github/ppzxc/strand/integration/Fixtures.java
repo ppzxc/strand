@@ -1,6 +1,12 @@
 package io.github.ppzxc.strand.integration;
 
+import io.github.ppzxc.strand.api.Result;
+import io.github.ppzxc.strand.nio.internal.ControlledPassage;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /** 통합 테스트가 함께 쓰는 값. */
 final class Fixtures {
@@ -30,5 +36,27 @@ final class Fixtures {
 
     static byte[] payload(String text) {
         return text.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** 보존된 결과가 확정되길 상한 안에서 기다려 꺼낸다. */
+    static <T> T await(Result<T> result) throws Exception {
+        return result.toCompletionStage(Peer.HANDLERS).toCompletableFuture().get(TIMEOUT_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * 통로가 읽은 프레임 가운데 상대가 낸 애플리케이션 요청의 {@code stream_id}별 type. 제품 API는 받은 요청의 스트림 번호를 드러내지 않아 통로로 본다. 응답 프레임도 type이 256
+     * 이상이고 {@code stream_id}가 상대 엔드포인트의 번호 공간이므로(규격 4.2절), 읽는 쪽이 아니라 보낸 쪽의 번호 공간(클라이언트는 홀수, 서버는 짝수)인 프레임만 요청으로 센다.
+     *
+     * @param sentByClient 프레임을 보낸 쪽이 클라이언트인가(서버 통로가 읽은 프레임이면 true)
+     */
+    static Map<Long, Integer> requestTypeByStream(List<ControlledPassage.Frame> frames, boolean sentByClient) {
+        Map<Long, Integer> typeByStream = new HashMap<>();
+        for (ControlledPassage.Frame frame : frames) {
+            boolean oddStream = (frame.streamId() & 1) == 1;
+            if (frame.type() >= APPLICATION_TYPE && oddStream == sentByClient) {
+                typeByStream.put(frame.streamId(), frame.type());
+            }
+        }
+        return typeByStream;
     }
 }

@@ -8,7 +8,6 @@ import io.github.ppzxc.strand.api.RequestOptions;
 import io.github.ppzxc.strand.api.RequestResult;
 import io.github.ppzxc.strand.api.ResourceLimits;
 import io.github.ppzxc.strand.api.Status;
-import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.netty.AuthenticationResult;
 import io.github.ppzxc.strand.netty.Credentials;
 import io.github.ppzxc.strand.netty.Listener;
@@ -63,7 +62,7 @@ public final class NettyAppExample {
             // 1) 필수 설정: 한도와 시간. 진행 공간은 전송 모듈이 알려 주는 최소 필요량이다.
             MinimumProgressSpace space = NettyMinimumProgress.of(
                     clientSecurity,
-                    EndpointConfig.DEFAULT_MAX_FRAME_SIZE,
+                    AppExampleSupport.MAX_FRAME_SIZE,
                     AppExampleSupport.REQUESTS_PER_CONNECTION,
                     AppExampleSupport.REQUESTS_PER_CONNECTION);
             ResourceLimits limits = AppExampleSupport.limits(space);
@@ -81,6 +80,7 @@ public final class NettyAppExample {
                     .shutdownDeadline(AppExampleSupport.SHUTDOWN_DEADLINE)
                     .writeQueueBytes(AppExampleSupport.WRITE_QUEUE_BYTES)
                     .closeFinishDeadline(AppExampleSupport.CLOSE_FINISH_DEADLINE)
+                    .maxFrameSize(AppExampleSupport.MAX_FRAME_SIZE)
                     .security(serverSecurity)
                     .authenticate(credentials -> AppExampleSupport.AUTH_MECHANISM.equals(credentials.mechanism())
                                     && Arrays.equals(AppExampleSupport.AUTH_SECRET, credentials.secret())
@@ -140,6 +140,7 @@ public final class NettyAppExample {
                     .shutdownDeadline(AppExampleSupport.SHUTDOWN_DEADLINE)
                     .writeQueueBytes(AppExampleSupport.WRITE_QUEUE_BYTES)
                     .closeFinishDeadline(AppExampleSupport.CLOSE_FINISH_DEADLINE)
+                    .maxFrameSize(AppExampleSupport.MAX_FRAME_SIZE)
                     .security(clientSecurity)
                     .credentials(Credentials.of(AppExampleSupport.AUTH_MECHANISM, AppExampleSupport.AUTH_SECRET))
                     .handler(request -> request.respond(Status.OK, bytes("ack")))
