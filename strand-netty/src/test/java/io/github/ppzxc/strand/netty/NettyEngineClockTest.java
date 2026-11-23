@@ -181,12 +181,12 @@ class NettyEngineClockTest {
 
         assertThat(rig.fixture.result(handle.result()).status()).isEqualTo(Status.DEADLINE_EXCEEDED);
         // 기한이 처리된 뒤에도 상대의 입력은 소켓에 남아 있다(받기만 하다 굶지 않았다).
-        NettyEngineRig.awaitTrue(() -> !rig.channel.config().isAutoRead());
+        NettyRig.awaitTrue(() -> !rig.channel.config().isAutoRead());
         assertThat(flood.isDone()).isFalse();
 
         // 남은 것도 다음 걸음들에서 이어 받는다: 쓰기가 풀리면 모두 읽고 ACK가 나간다.
         rig.channel.addCapacity(100_000_000);
         flood.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
-        NettyEngineRig.awaitTrue(() -> rig.channel.written() >= (long) FLOOD_SIZE * PING_FRAME);
+        NettyRig.awaitTrue(() -> rig.channel.written() >= (long) FLOOD_SIZE * PING_FRAME);
     }
 }

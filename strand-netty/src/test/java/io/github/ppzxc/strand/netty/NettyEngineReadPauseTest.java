@@ -99,7 +99,7 @@ class NettyEngineReadPauseTest {
 
     /** 엔진이 읽기를 멈출 때까지 기다린 뒤, 멈춘 채 가라앉았음을 짧게 두 번 본다. */
     private void awaitReadPaused() throws Exception {
-        NettyEngineRig.awaitTrue(() -> !rig.channel.config().isAutoRead());
+        NettyRig.awaitTrue(() -> !rig.channel.config().isAutoRead());
         rig.settleLoop();
         assertThat(rig.channel.config().isAutoRead()).isFalse();
     }
@@ -177,8 +177,8 @@ class NettyEngineReadPauseTest {
 
         flood.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
         // 상대가 보낸 PING 전부에 ACK가 나갔다: 모두 읽었다.
-        NettyEngineRig.awaitTrue(() -> rig.channel.written() >= (long) FLOOD_SIZE * PING_FRAME);
-        NettyEngineRig.awaitTrue(() -> rig.channel.config().isAutoRead());
+        NettyRig.awaitTrue(() -> rig.channel.written() >= (long) FLOOD_SIZE * PING_FRAME);
+        NettyRig.awaitTrue(() -> rig.channel.config().isAutoRead());
         assertThat(rig.closed()).isFalse();
     }
 
@@ -200,7 +200,7 @@ class NettyEngineReadPauseTest {
             mine.add(rig.connection.request(Request.of(NettyEngineRig.TYPE, body)));
             rig.peer.run(endpoint -> endpoint.request(NettyEngineRig.TYPE, body));
         }
-        NettyEngineRig.awaitTrue(() -> received.size() == concurrent);
+        NettyRig.awaitTrue(() -> received.size() == concurrent);
         rig.settleLoop();
 
         // 대기열이 정상 범위를 꽉 채운 채여도 읽기는 계속된다.

@@ -40,7 +40,7 @@ class NettyEngineClosedFinishTest {
     /** 엔진이 CLOSE를 보내고 상대의 CLOSE로 CLOSED를 낸 뒤 보내는 쪽을 닫았음을 기다린다. */
     private void closeAndAwaitClosed() throws Exception {
         rig.connection.close();
-        NettyEngineRig.awaitTrue(rig.peer::ended);
+        NettyRig.awaitTrue(rig.peer::ended);
     }
 
     @Test

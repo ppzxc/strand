@@ -1,5 +1,6 @@
 package io.github.ppzxc.strand.core.internal;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
@@ -10,7 +11,7 @@ import java.util.WeakHashMap;
  * 한 단위씩 넣고, 인증은 위임된 인증 판단({@code AUTHENTICATION_REQUIRED} 사건)으로 처리하며, 시계는 밀리초로 옮긴다.
  */
 final class Drive {
-    private static final Map<Endpoint, EndpointDriver> DRIVERS = new WeakHashMap<>();
+    private static final Map<Endpoint, EndpointDriver> DRIVERS = Collections.synchronizedMap(new WeakHashMap<>());
 
     private Drive() {}
 

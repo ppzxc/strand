@@ -160,11 +160,6 @@ final class Peer implements AutoCloseable {
         return wrapped;
     }
 
-    /** 이 전송이 통로를 관찰하게 해 주는가. 관찰하지 못하면 {@link #passage()}는 실패한다. */
-    boolean observesPassage() {
-        return passage != null;
-    }
-
     Sent request(int type, byte[] payload) {
         return new Sent(connection.request(Request.of(type, payload)));
     }

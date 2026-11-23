@@ -24,15 +24,13 @@ public final class PassageObservation implements BeforeEachCallback, AfterEachCa
 
     @Override
     public void beforeEach(ExtensionContext context) {
-        CLIENT.clear();
-        SERVER.clear();
-        readChunkBytes = Integer.MAX_VALUE;
+        reset();
         installation = PassageWrapping.install((side, passage) -> {
             ControlledPassage controlled = new ControlledPassage(passage);
             if (readChunkBytes != Integer.MAX_VALUE) {
                 controlled.readChunkBytes(readChunkBytes);
             }
-            (side == PassageWrapping.Side.CLIENT ? CLIENT : SERVER).add(controlled);
+            queue(side).add(controlled);
             return controlled;
         });
     }
@@ -44,9 +42,18 @@ public final class PassageObservation implements BeforeEachCallback, AfterEachCa
             current.close();
             installation = null;
         }
+        reset();
+    }
+
+    /** 쌓인 통로와 읽기 조각 설정을 처음 상태로 되돌린다. */
+    private static void reset() {
         CLIENT.clear();
         SERVER.clear();
         readChunkBytes = Integer.MAX_VALUE;
+    }
+
+    private static ConcurrentLinkedQueue<ControlledPassage> queue(PassageWrapping.Side side) {
+        return side == PassageWrapping.Side.CLIENT ? CLIENT : SERVER;
     }
 
     /** 이 뒤에 열리는 모든 통로가 한 번에 이 바이트씩만 읽게 한다. 프레임이 쪼개져 오는 경우를 만든다. */
@@ -56,6 +63,6 @@ public final class PassageObservation implements BeforeEachCallback, AfterEachCa
 
     /** 아직 어느 연결도 가져가지 않은 가장 먼저 열린 통로. 없으면 null이다. */
     static @Nullable ControlledPassage claim(PassageWrapping.Side side) {
-        return (side == PassageWrapping.Side.CLIENT ? CLIENT : SERVER).poll();
+        return queue(side).poll();
     }
 }

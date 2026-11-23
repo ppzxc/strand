@@ -68,7 +68,7 @@ class NettyEngineConnectionEndTest {
         rig.peerRespond(rig.peerRequestStreams().get(0), 0, new byte[] {7});
         assertOutcome(pending, 0, Certainty.RESPONSE);
 
-        NettyEngineRig.awaitTrue(rig.peer::ended);
+        NettyRig.awaitTrue(rig.peer::ended);
         rig.peerHangsUp();
         CloseNotice notice = notice();
         assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
@@ -161,7 +161,7 @@ class NettyEngineConnectionEndTest {
         rig.connection.close();
 
         // 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다: 상대는 끝을 읽었지만 연결은 아직 끝나지 않았다.
-        NettyEngineRig.awaitTrue(rig.peer::ended);
+        NettyRig.awaitTrue(rig.peer::ended);
         assertThat(rig.closed()).isFalse();
 
         rig.peerHangsUp();
@@ -175,7 +175,7 @@ class NettyEngineConnectionEndTest {
     void aReadFailureAfterClosedIsNotANewNotice() throws Exception {
         client();
         rig.connection.close();
-        NettyEngineRig.awaitTrue(rig.peer::ended);
+        NettyRig.awaitTrue(rig.peer::ended);
 
         rig.onLoop(() -> rig.channel.pipeline().fireExceptionCaught(new IOException("읽기 실패")));
 

@@ -36,8 +36,7 @@ class NettyEngineFailureTest {
         assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
         assertThat(notice.cause()).containsSame(boom);
         assertThat(rig.fixture.result(pending.result()).status()).isEqualTo(Status.UNAVAILABLE);
-        NettyEngineRig.awaitTrue(
-                () -> rig.owner.usage(Resource.TOTAL_CONNECTIONS).current() == 0);
+        NettyRig.awaitTrue(() -> rig.owner.usage(Resource.TOTAL_CONNECTIONS).current() == 0);
         assertThat(rig.owner.usage(Resource.PREPARING_CONNECTIONS).current()).isZero();
     }
 }

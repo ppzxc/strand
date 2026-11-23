@@ -30,6 +30,11 @@ public final class TestNio {
     private static final long BODY_BYTES = 1 << 20;
     private static final long OWNER_BODY_BYTES = 1 << 24;
 
+    /**
+     * 종료 마무리 기한. 양쪽이 동시에 CLOSE를 보내면 제품 엔진에서 한쪽이 상대의 끊김을 보지 못하고 마무리 기한까지 기다릴 수 있어, 기본 5초 대신 짧게 둔다.
+     */
+    public static final Duration CLOSE_FINISH_DEADLINE = Duration.ofSeconds(1);
+
     private TestNio() {}
 
     /**
@@ -52,9 +57,20 @@ public final class TestNio {
      * @return 자원 한도
      */
     public static ResourceLimits limits() {
-        NioSecurity security = NioSecurity.externallySecured();
-        MinimumProgressSpace space = NioMinimumProgress.of(
-                security, EndpointConfig.DEFAULT_MAX_FRAME_SIZE, REQUESTS_PER_CONNECTION, REQUESTS_PER_CONNECTION);
+        return limits(NioMinimumProgress.of(
+                NioSecurity.externallySecured(),
+                EndpointConfig.DEFAULT_MAX_FRAME_SIZE,
+                REQUESTS_PER_CONNECTION,
+                REQUESTS_PER_CONNECTION));
+    }
+
+    /**
+     * 넉넉한 한도. 진행 공간은 부른 쪽이 정한 최소 필요량이다.
+     *
+     * @param space 엔진이 계산한 최소 진행 공간
+     * @return 자원 한도
+     */
+    public static ResourceLimits limits(MinimumProgressSpace space) {
         long[] min = {
             space.get(Resource.FRAME_ASSEMBLY_BYTES),
             space.get(Resource.CONTROL_OUTPUT_BYTES),
@@ -107,8 +123,7 @@ public final class TestNio {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
-                // 양쪽이 동시에 CLOSE를 보내면 한쪽이 상대의 끊김을 보지 못하고 마무리 기한까지 기다리는 경우가 있어, 기본 5초 대신 짧게 둔다.
-                .closeFinishDeadline(Duration.ofSeconds(1))
+                .closeFinishDeadline(CLOSE_FINISH_DEADLINE)
                 .security(NioSecurity.externallySecured())
                 .authenticate(credentials -> AuthenticationResult.accepted("peer"));
     }
@@ -126,8 +141,7 @@ public final class TestNio {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
-                // 양쪽이 동시에 CLOSE를 보내면 한쪽이 상대의 끊김을 보지 못하고 마무리 기한까지 기다리는 경우가 있어, 기본 5초 대신 짧게 둔다.
-                .closeFinishDeadline(Duration.ofSeconds(1))
+                .closeFinishDeadline(CLOSE_FINISH_DEADLINE)
                 .security(NioSecurity.externallySecured());
     }
 }

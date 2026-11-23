@@ -1,9 +1,6 @@
 package io.github.ppzxc.strand.integration;
 
 import io.github.ppzxc.strand.api.CloseNotice;
-import io.github.ppzxc.strand.api.ConnectionLimits;
-import io.github.ppzxc.strand.api.MinimumProgressSpace;
-import io.github.ppzxc.strand.api.OwnerLimits;
 import io.github.ppzxc.strand.api.Request;
 import io.github.ppzxc.strand.api.RequestHandle;
 import io.github.ppzxc.strand.api.RequestOptions;
@@ -48,56 +45,17 @@ final class NettyWire implements Wire {
     private static final EventLoopGroup GROUP =
             new NioEventLoopGroup(4, new DefaultThreadFactory("integration-netty", true));
 
-    private static final long BODY_BYTES = 1 << 20;
-    private static final long OWNER_BODY_BYTES = 1 << 24;
-
     @Override
     public @Nullable ControlledPassage claimPassage(boolean server) {
         return null;
     }
 
     private static ResourceLimits limits() {
-        long requests = TestNio.REQUESTS_PER_CONNECTION;
-        long connections = TestNio.CONNECTIONS;
-        MinimumProgressSpace space = NettyMinimumProgress.of(
-                NettySecurity.externallySecured(), EndpointConfig.DEFAULT_MAX_FRAME_SIZE, requests, requests);
-        long[] min = {
-            space.get(Resource.FRAME_ASSEMBLY_BYTES),
-            space.get(Resource.CONTROL_OUTPUT_BYTES),
-            space.get(Resource.RESULT_EVENT_BYTES),
-            space.get(Resource.TLS_PLAINTEXT_BYTES),
-            space.get(Resource.TLS_CIPHERTEXT_BYTES),
-            space.get(Resource.TLS_CONTROL_BYTES)
-        };
-        return ResourceLimits.builder()
-                .perConnection(ConnectionLimits.builder()
-                        .outgoingRequests(requests, BODY_BYTES)
-                        .incomingRequests(requests, BODY_BYTES)
-                        .responseBytes(BODY_BYTES)
-                        .handlerTasks(requests)
-                        .observations(64)
-                        .preparationBytes(1 << 16)
-                        .progressBytes(min[0], min[1], min[2], min[3], min[4], min[5])
-                        .build())
-                .perOwner(OwnerLimits.builder()
-                        .preparingConnections(connections)
-                        .totalConnections(connections)
-                        .preparationTasks(connections, connections, connections)
-                        .outgoingRequests(requests * connections, OWNER_BODY_BYTES)
-                        .incomingRequests(requests * connections, OWNER_BODY_BYTES)
-                        .responseBytes(OWNER_BODY_BYTES)
-                        .handlerTasks(requests * connections)
-                        .observations(64 * connections)
-                        .preparationBytes(1 << 20)
-                        .progressBytes(
-                                min[0] * connections,
-                                min[1] * connections,
-                                min[2] * connections,
-                                min[3] * connections,
-                                min[4] * connections,
-                                min[5] * connections)
-                        .build())
-                .build();
+        return TestNio.limits(NettyMinimumProgress.of(
+                NettySecurity.externallySecured(),
+                EndpointConfig.DEFAULT_MAX_FRAME_SIZE,
+                TestNio.REQUESTS_PER_CONNECTION,
+                TestNio.REQUESTS_PER_CONNECTION));
     }
 
     private static <T> CompletableFuture<T> cf(Future<T> future) {
@@ -186,7 +144,7 @@ final class NettyWire implements Wire {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
-                .closeFinishDeadline(Duration.ofSeconds(1))
+                .closeFinishDeadline(TestNio.CLOSE_FINISH_DEADLINE)
                 .security(NettySecurity.externallySecured())
                 .authenticate(credentials -> AuthenticationResult.accepted("peer"))
                 .handlerFactory(connection -> PreparedHandler.of(handler(handlers.apply(new Conn(connection)))))
@@ -226,7 +184,7 @@ final class NettyWire implements Wire {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
-                .closeFinishDeadline(Duration.ofSeconds(1))
+                .closeFinishDeadline(TestNio.CLOSE_FINISH_DEADLINE)
                 .security(NettySecurity.externallySecured())
                 .handler(handler(handler));
         if (idlePingInterval != null) {

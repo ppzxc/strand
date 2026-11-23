@@ -31,7 +31,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.BooleanSupplier;
 import java.util.function.IntFunction;
 import java.util.function.UnaryOperator;
 
@@ -273,7 +272,7 @@ final class NettyEngineRig implements AutoCloseable {
             peerSocket = serverSideSocket;
             peer = new PeerLink(Endpoint.client(peerConfig), serverSideSocket);
             peer.run(endpoint -> {});
-            awaitTrue(() -> peer.events().stream().anyMatch(e -> e.kind() == Event.Kind.AUTHENTICATED));
+            NettyRig.awaitTrue(() -> peer.events().stream().anyMatch(e -> e.kind() == Event.Kind.AUTHENTICATED));
         }
     }
 
@@ -351,7 +350,7 @@ final class NettyEngineRig implements AutoCloseable {
 
     /** 엔진이 쓰기를 {@code count}번째 막힐 때까지 기다린다. */
     void awaitStalls(long count) throws Exception {
-        awaitTrue(() -> channel.stalls() >= count);
+        NettyRig.awaitTrue(() -> channel.stalls() >= count);
     }
 
     /** 상대 소켓을 닫아 엔진이 끊김(끝)을 읽게 한다. */
@@ -410,7 +409,7 @@ final class NettyEngineRig implements AutoCloseable {
 
     /** 상대가 요청을 {@code count}개 받을 때까지 기다리고 그 스트림 번호들을 돌려준다. */
     List<Long> awaitPeerRequests(int count) throws Exception {
-        awaitTrue(() -> peerRequestStreams().size() >= count);
+        NettyRig.awaitTrue(() -> peerRequestStreams().size() >= count);
         return peerRequestStreams();
     }
 
@@ -421,16 +420,6 @@ final class NettyEngineRig implements AutoCloseable {
 
     long used(Resource resource) {
         return connection.resourceUsage(resource).current();
-    }
-
-    static void awaitTrue(BooleanSupplier condition) throws Exception {
-        long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(AppFixture.WAIT_SECONDS);
-        while (!condition.getAsBoolean()) {
-            if (System.nanoTime() > limit) {
-                throw new AssertionError("기다린 조건이 되지 않았다");
-            }
-            Thread.sleep(2);
-        }
     }
 
     @Override
