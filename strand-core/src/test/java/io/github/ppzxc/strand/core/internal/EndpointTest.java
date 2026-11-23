@@ -68,7 +68,7 @@ class EndpointTest {
     }
 
     private static String sent(Endpoint endpoint) {
-        return hex(concat(endpoint.drainMessages()));
+        return hex(concat(Drive.drainMessages(endpoint)));
     }
 
     /** 보낸 메시지를 이어 붙인 바이트. 바이트 스트림 전송이 보내는 바이트와 같다. */
@@ -82,13 +82,17 @@ class EndpointTest {
     }
 
     private static Endpoint server() {
-        return Endpoint.server(EndpointConfig.defaults().idleIntervalMs(0));
+        return Drive.server(EndpointConfig.defaults().idleIntervalMs(0));
     }
 
     private static Endpoint serverAfterPreface(EndpointConfig config) {
-        Endpoint server = Endpoint.server(config);
-        server.receive(bytes(PREFACE));
-        server.drainMessages();
+        return serverAfterPreface(config, null);
+    }
+
+    private static Endpoint serverAfterPreface(EndpointConfig config, Drive.Authentication authentication) {
+        Endpoint server = authentication == null ? Drive.server(config) : Drive.server(config, authentication);
+        Drive.receive(server, bytes(PREFACE));
+        Drive.drainMessages(server);
         return server;
     }
 
@@ -99,32 +103,32 @@ class EndpointTest {
     /** 서버: 상대 HELLO에 ACK를 보냈고 상대 ACK도 받은 상태. */
     private static Endpoint established() {
         Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.receive(bytes(AUTH_ANONYMOUS));
-        server.drainMessages();
-        assertThat(server.drainEvents()).isEmpty();
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
+        Drive.drainMessages(server);
+        assertThat(Drive.drainEvents(server)).isEmpty();
         return server;
     }
 
     private static Endpoint establishedWith(EndpointConfig config) {
         Endpoint server = serverAfterPreface(config);
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.receive(bytes(AUTH_ANONYMOUS));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
+        Drive.drainMessages(server);
         return server;
     }
 
     @Test
     void serverCanAnnounceCredentialLifetimeInAuthAck() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().credentialLifetimeSeconds(60));
-        server.receive(bytes(HELLO));
-        server.drainMessages();
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.drainMessages(server);
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
 
-        server.receive(bytes(AUTH_ANONYMOUS));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
 
         assertThat(sent(server)).isEqualTo("000000160005010000000000000000000000000000010000003c");
     }
@@ -141,7 +145,7 @@ class EndpointTest {
 
     @Test
     void credentialNotificationsRequireServerAuthGate() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
+        Endpoint server = Drive.server(EndpointConfig.defaults());
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
 
         assertThatThrownBy(server::credentialExpired).isInstanceOf(IllegalStateException.class);
@@ -165,40 +169,40 @@ class EndpointTest {
 
     /** 클라이언트가 서버의 {@code AUTH(ACK)}를 받아 AUTH 관문을 통과한다. 알림 이벤트는 비운다. */
     private static void clientPassesAuthGate(Endpoint client) {
-        client.receive(bytes(AUTH_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
         assertThat(kinds(client)).containsExactly(Event.Kind.AUTHENTICATED);
     }
 
     /** 서버가 클라이언트의 {@code ANONYMOUS AUTH}를 통과시킨다. 보낸 {@code AUTH(ACK)}는 비운다. */
     private static void serverPassesAuthGate(Endpoint server) {
-        server.receive(bytes(AUTH_ANONYMOUS));
-        server.drainMessages();
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
+        Drive.drainMessages(server);
     }
 
     /** 클라이언트: 서버 HELLO에 ACK를 보냈고 서버 ACK도 받은 상태. */
     private static Endpoint establishedClient() {
         Endpoint client = client();
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        client.receive(bytes(AUTH_ACK));
-        client.drainMessages();
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
+        Drive.drainMessages(client);
         assertThat(kinds(client)).containsExactly(Event.Kind.AUTHENTICATED);
         return client;
     }
 
     private static Endpoint establishedClientWithPeerFrameSize(int maxFrameSize) {
         Endpoint client = client();
-        client.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
-        client.receive(bytes(HELLO_ACK));
-        client.receive(bytes(AUTH_ACK));
-        client.drainMessages();
-        client.drainEvents();
+        Drive.receive(client, bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
+        Drive.drainMessages(client);
+        Drive.drainEvents(client);
         return client;
     }
 
     private static List<Event.Kind> kinds(Endpoint endpoint) {
         List<Event.Kind> kinds = new ArrayList<>();
-        for (Event event : endpoint.drainEvents()) {
+        for (Event event : Drive.drainEvents(endpoint)) {
             kinds.add(event.kind());
         }
         return kinds;
@@ -224,19 +228,19 @@ class EndpointTest {
     }
 
     private static void assertClosedSilently(Endpoint endpoint) {
-        assertThat(endpoint.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(endpoint)).isEmpty();
         assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
     }
 
     private static void assertOpenAndSilent(Endpoint endpoint) {
-        assertThat(endpoint.drainMessages()).isEmpty();
-        assertThat(endpoint.drainEvents()).isEmpty();
+        assertThat(Drive.drainMessages(endpoint)).isEmpty();
+        assertThat(Drive.drainEvents(endpoint)).isEmpty();
     }
 
     /** 로컬에서 실패한 요청: 프레임 없이 stream id 없는 RESULT(UNAVAILABLE)가 정확히 한 번 나온다(규격 2.2.5절, 3.2.1절, 3.5절). */
     private static void assertFailedLocally(Endpoint endpoint) {
-        assertThat(endpoint.drainMessages()).isEmpty();
-        assertLocalUnavailableEvents(endpoint.drainEvents());
+        assertThat(Drive.drainMessages(endpoint)).isEmpty();
+        assertLocalUnavailableEvents(Drive.drainEvents(endpoint));
     }
 
     private static void assertLocalUnavailableEvents(List<Event> events) {
@@ -250,20 +254,20 @@ class EndpointTest {
 
     @Test
     void serverSendsItsHelloRightAfterThePreface() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().maxFrameSize(16384));
+        Endpoint server = Drive.server(EndpointConfig.defaults().maxFrameSize(16384));
 
-        server.receive(bytes(PREFACE));
+        Drive.receive(server, bytes(PREFACE));
 
         assertThat(sent(server))
                 .isEqualTo("0000002200010000000000000000000000000000" + "0001000040000002000000640003" + "00000000");
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
     void prefaceReservedBytesAreIgnored() {
         Endpoint server = server();
 
-        server.receive(bytes("c0de53545230ffff"));
+        Drive.receive(server, bytes("c0de53545230ffff"));
 
         assertThat(sent(server)).isEqualTo("0000002200010000000000000000000000000000" + DEFAULT_HELLO_PARAMS);
     }
@@ -272,7 +276,7 @@ class EndpointTest {
     void wrongPrefaceClosesSilently() {
         Endpoint server = server();
 
-        server.receive(bytes("c0de535452310000"));
+        Drive.receive(server, bytes("c0de535452310000"));
 
         assertClosedSilently(server);
     }
@@ -281,7 +285,7 @@ class EndpointTest {
     void anHttpRequestInPlaceOfThePrefaceClosesSilently() {
         Endpoint server = server();
 
-        server.receive(bytes("474554202f204854"));
+        Drive.receive(server, bytes("474554202f204854"));
 
         assertClosedSilently(server);
     }
@@ -290,7 +294,7 @@ class EndpointTest {
     void aPartialPrefaceWaitsForTheRest() {
         Endpoint server = server();
 
-        server.receive(bytes("c0de5354"));
+        Drive.receive(server, bytes("c0de5354"));
 
         assertOpenAndSilent(server);
     }
@@ -299,7 +303,7 @@ class EndpointTest {
     void helloIsAcknowledgedWithAnEmptyAckHello() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes(HELLO));
+        Drive.receive(server, bytes(HELLO));
 
         assertThat(sent(server)).isEqualTo(HELLO_ACK);
     }
@@ -307,10 +311,10 @@ class EndpointTest {
     @Test
     void ackHelloProducesNoOutput() {
         Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.drainMessages(server);
 
-        server.receive(bytes(HELLO_ACK));
+        Drive.receive(server, bytes(HELLO_ACK));
 
         assertOpenAndSilent(server);
     }
@@ -319,7 +323,7 @@ class EndpointTest {
     void pingIsAnsweredWithTheSameEightBytesAndAckFlag() {
         Endpoint server = established();
 
-        server.receive(bytes(PING));
+        Drive.receive(server, bytes(PING));
 
         assertThat(sent(server)).isEqualTo(PING_ACK);
     }
@@ -328,7 +332,7 @@ class EndpointTest {
     void anAckPingIsNotAnswered() {
         Endpoint server = established();
 
-        server.receive(bytes(PING_ACK));
+        Drive.receive(server, bytes(PING_ACK));
 
         assertOpenAndSilent(server);
     }
@@ -338,8 +342,8 @@ class EndpointTest {
         Endpoint server = serverAfterPreface();
 
         for (byte b : bytes(HELLO)) {
-            assertThat(server.drainMessages()).isEmpty();
-            server.receive(new byte[] {b});
+            assertThat(Drive.drainMessages(server)).isEmpty();
+            Drive.receive(server, new byte[] {b});
         }
 
         assertThat(sent(server)).isEqualTo(HELLO_ACK);
@@ -348,10 +352,10 @@ class EndpointTest {
     @Test
     void drainReturnsEachOutputOnce() {
         Endpoint server = server();
-        server.receive(bytes(PREFACE));
+        Drive.receive(server, bytes(PREFACE));
 
-        assertThat(server.drainMessages()).isNotEmpty();
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isNotEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     // ---- 첫 프레임 검사(3.2.4절) ----
@@ -360,7 +364,7 @@ class EndpointTest {
     void firstFrameThatIsNotHelloClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes(PING));
+        Drive.receive(server, bytes(PING));
 
         assertClosedSilently(server);
     }
@@ -369,7 +373,7 @@ class EndpointTest {
     void firstFrameWithAnApplicationTypeClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000001001010000000000000000000100000000"));
+        Drive.receive(server, bytes("0000001001010000000000000000000100000000"));
 
         assertClosedSilently(server);
     }
@@ -378,7 +382,7 @@ class EndpointTest {
     void firstFrameWithAReservedControlTypeClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000001000050000000000000000000000000000"));
+        Drive.receive(server, bytes("0000001000050000000000000000000000000000"));
 
         assertClosedSilently(server);
     }
@@ -387,7 +391,7 @@ class EndpointTest {
     void firstFrameWithANonzeroStreamIdClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000001000010000000000000000000100000000"));
+        Drive.receive(server, bytes("0000001000010000000000000000000100000000"));
 
         assertClosedSilently(server);
     }
@@ -396,7 +400,7 @@ class EndpointTest {
     void firstFrameWithTheAckFlagClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes(HELLO_ACK));
+        Drive.receive(server, bytes(HELLO_ACK));
 
         assertClosedSilently(server);
     }
@@ -405,7 +409,7 @@ class EndpointTest {
     void firstFrameWithAnUndefinedFlagClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("0000001000018000000000000000000000000000"));
+        Drive.receive(server, bytes("0000001000018000000000000000000000000000"));
 
         assertClosedSilently(server);
     }
@@ -414,7 +418,7 @@ class EndpointTest {
     void firstFrameWithLengthBelowTheMinimumClosesSilently() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("00000004"));
+        Drive.receive(server, bytes("00000004"));
 
         assertClosedSilently(server);
     }
@@ -423,7 +427,7 @@ class EndpointTest {
     void firstFrameStatusAndReservedAreNotChecked() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("00000010000100ff00000000000000000000ffff"));
+        Drive.receive(server, bytes("00000010000100ff00000000000000000000ffff"));
 
         assertThat(sent(server)).isEqualTo(HELLO_ACK);
     }
@@ -433,7 +437,7 @@ class EndpointTest {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
 
         // 헤더 20바이트만으로 판정한다. length = 16381 = 알린 한도 − 4 + 1.
-        server.receive(bytes("00003ffd 0001 00 00 0000000000000000 0000 0000"));
+        Drive.receive(server, bytes("00003ffd 0001 00 00 0000000000000000 0000 0000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -442,7 +446,7 @@ class EndpointTest {
     void firstFrameOfTheWrongTypeAboveTheOwnLimitClosesSilently() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
 
-        server.receive(bytes("00003ffd 0002 00 00 0000000000000000 0000 0000"));
+        Drive.receive(server, bytes("00003ffd 0002 00 00 0000000000000000 0000 0000"));
 
         assertClosedSilently(server);
     }
@@ -451,7 +455,7 @@ class EndpointTest {
     void firstFrameHelloWithExtensionsClosesWithProtocolError() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes("000000140001000000000000000000000004000000090000"));
+        Drive.receive(server, bytes("000000140001000000000000000000000004000000090000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -463,7 +467,7 @@ class EndpointTest {
         for (String size : new String[] {"00004000", "00100000"}) {
             Endpoint server = serverAfterPreface();
 
-            server.receive(bytes(helloWith("0001" + size)));
+            Drive.receive(server, bytes(helloWith("0001" + size)));
 
             assertThat(sent(server)).isEqualTo(HELLO_ACK);
         }
@@ -474,7 +478,7 @@ class EndpointTest {
         for (String size : new String[] {"00003fff", "00100001"}) {
             Endpoint server = serverAfterPreface();
 
-            server.receive(bytes(helloWith("0001" + size)));
+            Drive.receive(server, bytes(helloWith("0001" + size)));
 
             assertClosedWithProtocolError(server);
         }
@@ -484,7 +488,7 @@ class EndpointTest {
     void helloPayloadThatIsNotAMultipleOfSixClosesWithProtocolError() {
         Endpoint server = serverAfterPreface();
 
-        server.receive(bytes(helloWith("0000000000")));
+        Drive.receive(server, bytes(helloWith("0000000000")));
 
         assertClosedWithProtocolError(server);
     }
@@ -494,7 +498,7 @@ class EndpointTest {
         for (String payload : new String[] {"000200000064" + "000200000032", "00ff00000001" + "00ff00000002"}) {
             Endpoint server = serverAfterPreface();
 
-            server.receive(bytes(helloWith(payload)));
+            Drive.receive(server, bytes(helloWith(payload)));
 
             assertClosedWithProtocolError(server);
         }
@@ -508,7 +512,7 @@ class EndpointTest {
             payload.append(String.format("%04x00000000", id));
         }
 
-        server.receive(bytes(helloWith(payload + "000200000002")));
+        Drive.receive(server, bytes(helloWith(payload + "000200000002")));
 
         assertThat(sent(server)).isEqualTo(HELLO_ACK);
     }
@@ -516,10 +520,10 @@ class EndpointTest {
     @Test
     void ackHelloWithAPayloadClosesWithProtocolError() {
         Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.drainMessages(server);
 
-        server.receive(bytes("0000001600010100000000000000000000000000000200000064"));
+        Drive.receive(server, bytes("0000001600010100000000000000000000000000000200000064"));
 
         assertClosedWithProtocolError(server);
     }
@@ -527,10 +531,10 @@ class EndpointTest {
     @Test
     void ackHelloWithANonzeroStreamIdClosesWithProtocolError() {
         Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.drainMessages(server);
 
-        server.receive(bytes("0000001000010100000000000000000100000000"));
+        Drive.receive(server, bytes("0000001000010100000000000000000100000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -538,10 +542,10 @@ class EndpointTest {
     @Test
     void aSecondParameterHelloClosesWithProtocolError() {
         Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.drainMessages(server);
 
-        server.receive(bytes(HELLO));
+        Drive.receive(server, bytes(HELLO));
 
         assertClosedWithProtocolError(server);
     }
@@ -550,7 +554,7 @@ class EndpointTest {
     void aSecondAckClosesWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes(HELLO_ACK));
+        Drive.receive(server, bytes(HELLO_ACK));
 
         assertClosedWithProtocolError(server);
     }
@@ -560,12 +564,12 @@ class EndpointTest {
     @Test
     void frameLengthAboveTheAnnouncedLimitClosesWithProtocolError() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
 
         // 본문이 다 오기 전에 length와 type까지만으로 판정한다.
-        server.receive(bytes("00003ffd0002"));
+        Drive.receive(server, bytes("00003ffd0002"));
 
         assertClosedWithProtocolError(server);
     }
@@ -573,11 +577,11 @@ class EndpointTest {
     @Test
     void frameLengthAtTheAnnouncedLimitIsAccepted() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
 
-        server.receive(bytes("00003ffc"));
+        Drive.receive(server, bytes("00003ffc"));
 
         assertOpenAndSilent(server);
     }
@@ -586,7 +590,7 @@ class EndpointTest {
     void frameLengthBelowTheMinimumClosesWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000f0002"));
+        Drive.receive(server, bytes("0000000f0002"));
 
         assertClosedWithProtocolError(server);
     }
@@ -594,11 +598,11 @@ class EndpointTest {
     @Test
     void nothingIsHandledOnceClosed() {
         Endpoint server = established();
-        server.receive(bytes("0000000f0002"));
-        server.drainMessages();
-        server.drainEvents();
+        Drive.receive(server, bytes("0000000f0002"));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
-        server.receive(bytes(PING));
+        Drive.receive(server, bytes(PING));
 
         assertOpenAndSilent(server);
     }
@@ -607,7 +611,7 @@ class EndpointTest {
     void controlFramesWithExtensionsCloseWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("00000014 0002 00 00 0000000000000000 0004 0000 00000000"));
+        Drive.receive(server, bytes("00000014 0002 00 00 0000000000000000 0004 0000 00000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -616,7 +620,7 @@ class EndpointTest {
     void extensionsLongerThanTheFrameCloseWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000001000050000000000000000000000050000"));
+        Drive.receive(server, bytes("0000001000050000000000000000000000050000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -625,7 +629,7 @@ class EndpointTest {
     void controlFramesWithANonzeroStreamIdCloseWithProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000001800020000000000000000000100000000" + "0102030405060708"));
+        Drive.receive(server, bytes("0000001800020000000000000000000100000000" + "0102030405060708"));
 
         assertClosedWithProtocolError(server);
     }
@@ -639,7 +643,7 @@ class EndpointTest {
         }) {
             Endpoint server = established();
 
-            server.receive(bytes(frame));
+            Drive.receive(server, bytes(frame));
 
             assertClosedWithProtocolError(server);
         }
@@ -653,10 +657,10 @@ class EndpointTest {
             PING, "000000140004000000000000000000010000000000000004", "0000001001010000000000000000000100000000"
         }) {
             Endpoint server = serverAfterPreface();
-            server.receive(bytes(HELLO));
-            server.drainMessages();
+            Drive.receive(server, bytes(HELLO));
+            Drive.drainMessages(server);
 
-            server.receive(bytes(frame));
+            Drive.receive(server, bytes(frame));
 
             assertClosedWithProtocolError(server);
         }
@@ -665,17 +669,17 @@ class EndpointTest {
     @Test
     void reservedControlTypesAreIgnoredBeforeThePeerAck() {
         Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.drainMessages(server);
 
         // 예약 범위는 0x0000과 0x0006~0x00FF다. 0x0005는 AUTH라서 예약이 아니다(규격 2.2.2절).
         for (String type : new String[] {"0000", "0006", "00ff"}) {
-            server.receive(bytes("00000010" + type + "0000" + "0000000000000000" + "00000000"));
+            Drive.receive(server, bytes("00000010" + type + "0000" + "0000000000000000" + "00000000"));
             assertOpenAndSilent(server);
         }
-        server.receive(bytes(HELLO_ACK));
+        Drive.receive(server, bytes(HELLO_ACK));
         serverPassesAuthGate(server);
-        server.receive(bytes(PING));
+        Drive.receive(server, bytes(PING));
 
         assertThat(sent(server)).isEqualTo(PING_ACK);
     }
@@ -683,10 +687,10 @@ class EndpointTest {
     @Test
     void authBeforeThePeerAckClosesWithProtocolErrorBecauseItIsNotReserved() {
         Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.drainMessages(server);
 
-        server.receive(bytes("00000010" + "0005" + "0000" + "0000000000000000" + "00000000"));
+        Drive.receive(server, bytes("00000010" + "0005" + "0000" + "0000000000000000" + "00000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -694,14 +698,14 @@ class EndpointTest {
     @Test
     void closeIsAcceptedBeforeThePeerAck() {
         Endpoint noError = serverAfterPreface();
-        noError.receive(bytes(HELLO));
-        noError.drainMessages();
+        Drive.receive(noError, bytes(HELLO));
+        Drive.drainMessages(noError);
         Endpoint error = serverAfterPreface();
-        error.receive(bytes(HELLO));
-        error.drainMessages();
+        Drive.receive(error, bytes(HELLO));
+        Drive.drainMessages(error);
 
-        noError.receive(bytes(CLOSE_NO_ERROR));
-        error.receive(bytes(CLOSE_PROTOCOL_ERROR));
+        Drive.receive(noError, bytes(CLOSE_NO_ERROR));
+        Drive.receive(error, bytes(CLOSE_PROTOCOL_ERROR));
 
         assertClosedSilently(noError);
         assertClosedSilently(error);
@@ -711,7 +715,7 @@ class EndpointTest {
     void aMalformedCloseIsTreatedAsAReceivedCloseAndClosesWithoutSending() {
         Endpoint server = established();
 
-        server.receive(bytes("00000013 0003 00 00 0000000000000000 0000 0000 000000".replace(" ", "")));
+        Drive.receive(server, bytes("00000013 0003 00 00 0000000000000000 0000 0000 000000".replace(" ", "")));
 
         assertClosedSilently(server);
     }
@@ -720,12 +724,12 @@ class EndpointTest {
     void anErrorCloseClosesImmediatelyEvenWithPendingRequests() {
         Endpoint server = established();
         server.request(257, new byte[0]);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.receive(bytes(CLOSE_PROTOCOL_ERROR));
+        Drive.receive(server, bytes(CLOSE_PROTOCOL_ERROR));
 
-        assertThat(server.drainMessages()).isEmpty();
-        List<Event> events = server.drainEvents();
+        assertThat(Drive.drainMessages(server)).isEmpty();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).streamId()).isEqualTo(2);
@@ -737,14 +741,14 @@ class EndpointTest {
     void connectionErrorAfterCloseWasReceivedSendsNoClose() {
         Endpoint server = established();
         server.request(257, new byte[0]);
-        server.drainMessages();
-        server.receive(bytes(closeNoErrorLast(2)));
+        Drive.drainMessages(server);
+        Drive.receive(server, bytes(closeNoErrorLast(2)));
         assertOpenAndSilent(server);
 
         // payload가 8바이트가 아닌 PING은 연결 오류지만 CLOSE를 이미 받았으므로 CLOSE를 보내지 않는다.
-        server.receive(bytes("00000010 0002 00 00 0000000000000000 0000 0000"));
+        Drive.receive(server, bytes("00000010 0002 00 00 0000000000000000 0000 0000"));
 
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
@@ -752,7 +756,7 @@ class EndpointTest {
     void noErrorCloseWithoutPendingRequestsClosesAtOnce() {
         Endpoint server = established();
 
-        server.receive(bytes(CLOSE_NO_ERROR));
+        Drive.receive(server, bytes(CLOSE_NO_ERROR));
 
         assertClosedSilently(server);
     }
@@ -762,12 +766,12 @@ class EndpointTest {
     @Test
     void serverClosesWhenTheAckDoesNotComeInTime() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000));
-        server.receive(bytes(HELLO));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.drainMessages(server);
 
-        server.advance(999);
+        Drive.advance(server, 999);
         assertOpenAndSilent(server);
-        server.advance(2);
+        Drive.advance(server, 2);
 
         assertClosedUnresponsive(server);
     }
@@ -776,24 +780,24 @@ class EndpointTest {
     void theAckCancelsTheWait() {
         Endpoint server =
                 serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000).authTimeoutMs(Long.MAX_VALUE / 2));
-        server.receive(bytes(HELLO));
-        server.advance(999);
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.advance(server, 999);
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
 
-        server.advance(10000);
+        Drive.advance(server, 10000);
 
         assertOpenAndSilent(server);
     }
 
     @Test
     void theWaitStartsWhenTheHelloIsSent() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().ackTimeoutMs(1000));
-        server.advance(5000);
-        server.receive(bytes(PREFACE));
-        server.drainMessages();
+        Endpoint server = Drive.server(EndpointConfig.defaults().ackTimeoutMs(1000));
+        Drive.advance(server, 5000);
+        Drive.receive(server, bytes(PREFACE));
+        Drive.drainMessages(server);
 
-        server.advance(999);
+        Drive.advance(server, 999);
 
         assertOpenAndSilent(server);
     }
@@ -801,11 +805,11 @@ class EndpointTest {
     @Test
     void noClockEffectOnceClosed() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().ackTimeoutMs(1000));
-        server.receive(bytes(CLOSE_NO_ERROR));
-        server.drainMessages();
-        server.drainEvents();
+        Drive.receive(server, bytes(CLOSE_NO_ERROR));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
-        server.advance(5000);
+        Drive.advance(server, 5000);
 
         assertOpenAndSilent(server);
     }
@@ -815,14 +819,14 @@ class EndpointTest {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
         server.request(257, new byte[0]);
-        server.drainMessages();
-        server.receive(bytes(closeNoErrorLast(2)));
-        server.drainEvents();
+        Drive.drainMessages(server);
+        Drive.receive(server, bytes(closeNoErrorLast(2)));
+        Drive.drainEvents(server);
 
-        server.advance(2000);
+        Drive.advance(server, 2000);
 
         // CLOSE를 이미 받았으므로 확인 대기 초과에도 CLOSE를 보내지 않고 닫는다.
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
@@ -853,16 +857,16 @@ class EndpointTest {
     @Test
     void requestStateTellsTheQueueThroughWritingStarted() {
         Endpoint client = client();
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
 
         long first = client.request(257, new byte[0]);
         assertThat(client.requestState(first)).isEqualTo(OwnRequestLedger.RequestState.QUEUED_WITHOUT_NUMBER);
 
-        client.receive(bytes(AUTH_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
         assertThat(client.requestState(first)).isEqualTo(OwnRequestLedger.RequestState.NUMBERED_UNWRITTEN);
 
-        client.drainMessages();
+        Drive.drainMessages(client);
         long second = client.request(257, new byte[0]);
         assertThat(client.requestState(first)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
         assertThat(client.requestState(second)).isEqualTo(OwnRequestLedger.RequestState.NUMBERED_UNWRITTEN);
@@ -878,10 +882,11 @@ class EndpointTest {
         Endpoint client = establishedClient();
         long kept = client.request(257, new byte[0]);
         long cut = client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         // last_stream_id=1: 번호 1은 상대가 처리했고 3은 처리하지 않았다. 1이 남아 있으니 연결은 종료 중으로 열려 있다.
-        client.receive(
+        Drive.receive(
+                client,
                 bytes(CLOSE_NO_ERROR.substring(0, CLOSE_NO_ERROR.length() - NO_STREAM.length()) + "0000000000000001"));
 
         assertThat(client.requestState(cut)).isNull();
@@ -895,8 +900,8 @@ class EndpointTest {
         Endpoint client = establishedClient();
         for (int i = 0; i < 500; i++) {
             long ticket = client.request(257, new byte[0]);
-            client.drainMessages();
-            client.receive(bytes("0000001001010000" + String.format("%016x", 2L * i + 1) + "00000000"));
+            Drive.drainMessages(client);
+            Drive.receive(client, bytes("0000001001010000" + String.format("%016x", 2L * i + 1) + "00000000"));
 
             assertThat(client.requestState(ticket)).isNull();
         }
@@ -909,11 +914,11 @@ class EndpointTest {
 
         server.request(257, new byte[0]);
         assertOpenAndSilent(server);
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
 
         assertThat(sent(server)).isEqualTo(HELLO_ACK);
-        server.receive(bytes(AUTH_ANONYMOUS));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
 
         assertThat(sent(server)).isEqualTo(AUTH_ACK + "0000001001010000000000000000000200000000");
     }
@@ -922,8 +927,8 @@ class EndpointTest {
     void requestAfterCloseIsFailedLocallyWithoutAFrame() {
         Endpoint server = established();
         server.close(ErrorCode.NO_ERROR);
-        server.drainMessages();
-        server.drainEvents();
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
         server.request(257, new byte[0]);
 
@@ -936,8 +941,8 @@ class EndpointTest {
         Endpoint server = established();
         server.request(257, new byte[0]);
         server.close(ErrorCode.NO_ERROR);
-        server.drainMessages();
-        server.drainEvents();
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
         server.request(257, new byte[0]);
 
@@ -948,9 +953,9 @@ class EndpointTest {
     void requestAfterCloseWasReceivedWhileAStreamIsPendingIsFailedLocally() {
         Endpoint server = established();
         server.request(257, new byte[0]);
-        server.receive(bytes(CLOSE_NO_ERROR));
-        server.drainMessages();
-        server.drainEvents();
+        Drive.receive(server, bytes(CLOSE_NO_ERROR));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
         server.request(257, new byte[0]);
 
@@ -961,8 +966,8 @@ class EndpointTest {
     void requestAfterTheConnectionClosedIsFailedLocally() {
         Endpoint server = established();
         server.close(ErrorCode.PROTOCOL_ERROR);
-        server.drainMessages();
-        server.drainEvents();
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
         server.request(257, new byte[0]);
 
@@ -973,12 +978,12 @@ class EndpointTest {
     void requestDeferredBeforeTheAckIsFailedLocallyWhenCloseArrivesFirst() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults());
         server.request(257, new byte[0]);
-        server.drainMessages();
-        server.drainEvents();
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
-        server.receive(bytes(CLOSE_NO_ERROR));
+        Drive.receive(server, bytes(CLOSE_NO_ERROR));
 
-        List<Event> events = server.drainEvents();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
@@ -988,18 +993,18 @@ class EndpointTest {
     @Test
     void deferredRequestsAfterNumberExhaustionAreFailedLocallyEachOnce() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
-        client.drainMessages();
+        Drive.drainMessages(client);
         client.request(257, new byte[0]);
         client.request(257, new byte[0]);
         client.request(257, new byte[0]);
         client.ping(bytes("0102030405060708"));
 
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        assertThat(client.drainEvents()).isEmpty();
-        client.receive(bytes(AUTH_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        assertThat(Drive.drainEvents(client)).isEmpty();
+        Drive.receive(client, bytes(AUTH_ACK));
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
         events = events.subList(1, events.size());
         assertThat(events).hasSize(2);
@@ -1016,22 +1021,22 @@ class EndpointTest {
     @Test
     void deferredPingKeepsItsPlaceAmongDeferredRequestsWhenTheGateOpens() {
         Endpoint before = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
-        before.drainMessages();
+        Drive.drainMessages(before);
         before.request(257, new byte[0]);
         before.ping(bytes("0102030405060708"));
         before.request(257, new byte[0]);
-        before.receive(bytes(HELLO));
-        before.receive(bytes(HELLO_ACK));
-        before.receive(bytes(AUTH_ACK));
+        Drive.receive(before, bytes(HELLO));
+        Drive.receive(before, bytes(HELLO_ACK));
+        Drive.receive(before, bytes(AUTH_ACK));
 
         Endpoint after = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
-        after.drainMessages();
+        Drive.drainMessages(after);
         after.request(257, new byte[0]);
         after.request(257, new byte[0]);
         after.ping(bytes("0102030405060708"));
-        after.receive(bytes(HELLO));
-        after.receive(bytes(HELLO_ACK));
-        after.receive(bytes(AUTH_ACK));
+        Drive.receive(after, bytes(HELLO));
+        Drive.receive(after, bytes(HELLO_ACK));
+        Drive.receive(after, bytes(AUTH_ACK));
 
         String pingFrame = "0000001800020000000000000000000000000000" + "0102030405060708";
         assertThat(sent(before))
@@ -1059,11 +1064,11 @@ class EndpointTest {
 
         server.ping(bytes("0102030405060708"));
         assertOpenAndSilent(server);
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
 
         assertThat(sent(server)).isEqualTo(HELLO_ACK);
-        server.receive(bytes(AUTH_ANONYMOUS));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
 
         assertThat(sent(server)).isEqualTo(AUTH_ACK + "0000001800020000000000000000000000000000" + "0102030405060708");
     }
@@ -1082,12 +1087,12 @@ class EndpointTest {
     void closeDoesNotCloseWhileRequestsArePending() {
         Endpoint server = established();
         server.request(257, new byte[0]);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
         server.close(ErrorCode.NO_ERROR);
 
         assertThat(sent(server)).isEqualTo(CLOSE_NO_ERROR);
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
@@ -1105,9 +1110,9 @@ class EndpointTest {
     void closeAfterCloseWasReceivedSendsNothing() {
         Endpoint server = established();
         server.request(257, new byte[0]);
-        server.receive(bytes(CLOSE_NO_ERROR));
-        server.drainMessages();
-        server.drainEvents();
+        Drive.receive(server, bytes(CLOSE_NO_ERROR));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
         server.close(ErrorCode.NO_ERROR);
 
@@ -1121,15 +1126,15 @@ class EndpointTest {
         Endpoint client = client();
 
         assertThat(sent(client)).isEqualTo(PREFACE + "0000002200010000000000000000000000000000" + DEFAULT_HELLO_PARAMS);
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(client)).isEmpty();
     }
 
     @Test
     void clientAcknowledgesAValidServerHello() {
         Endpoint client = client();
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(helloWith("000200000064")));
+        Drive.receive(client, bytes(helloWith("000200000064")));
 
         assertThat(sent(client)).isEqualTo(HELLO_ACK + AUTH_ANONYMOUS);
     }
@@ -1137,9 +1142,9 @@ class EndpointTest {
     @Test
     void clientSendsTheConfiguredMechanismAndCredentialsInAuth() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", bytes("0075736572007077")));
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(HELLO));
+        Drive.receive(client, bytes(HELLO));
 
         assertThat(sent(client))
                 .isEqualTo(HELLO_ACK + "0000001e00050000" + "0000000000000000" + "00000000" + "05" + "504c41494e"
@@ -1150,14 +1155,14 @@ class EndpointTest {
     @Test
     void clientClosesLocallyWithoutAuthOrCloseWhenItsAuthExceedsThePeerMaxFrameSize() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", new byte[20000]));
-        client.drainMessages();
+        Drive.drainMessages(client);
         client.request(257, new byte[0]);
 
-        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
+        Drive.receive(client, bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
 
         // 상대 HELLO는 유효하므로 ACK는 보내고(3.2.3절), AUTH와 CLOSE는 보내지 않는다.
         assertThat(sent(client)).isEqualTo(HELLO_ACK);
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
@@ -1169,12 +1174,12 @@ class EndpointTest {
     void clientSendsAuthExactlyAtThePeerMaxFrameSize() {
         int credentials = MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE - 1 - "PLAIN".length();
         Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", new byte[credentials]));
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
+        Drive.receive(client, bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
 
         assertThat(kinds(client)).isEmpty();
-        assertThat(client.drainMessages()).hasSize(2);
+        assertThat(Drive.drainMessages(client)).hasSize(2);
     }
 
     /** 쓰기 전 요청이 많아도 상대 CLOSE와 연결 종료가 요청마다 결과를 정확히 한 번씩 내고 프레임을 거둔다. */
@@ -1183,21 +1188,21 @@ class EndpointTest {
         int count = 5000;
         for (boolean peerClose : new boolean[] {true, false}) {
             Endpoint client = client();
-            client.receive(bytes(helloWith("0002" + String.format("%08x", count))));
-            client.receive(bytes(HELLO_ACK));
-            client.receive(bytes(AUTH_ACK));
-            client.drainMessages();
-            client.drainEvents();
+            Drive.receive(client, bytes(helloWith("0002" + String.format("%08x", count))));
+            Drive.receive(client, bytes(HELLO_ACK));
+            Drive.receive(client, bytes(AUTH_ACK));
+            Drive.drainMessages(client);
+            Drive.drainEvents(client);
             for (int i = 0; i < count; i++) {
                 client.request(257, new byte[0]);
             }
             if (peerClose) {
-                client.receive(bytes(closeNoErrorLast(0)));
+                Drive.receive(client, bytes(closeNoErrorLast(0)));
             } else {
                 client.disconnect();
             }
 
-            List<Event> events = client.drainEvents();
+            List<Event> events = Drive.drainEvents(client);
             assertThat(events).hasSize(count + 1);
             for (int i = 0; i < count; i++) {
                 assertThat(events.get(i).status()).isEqualTo(Status.UNAVAILABLE);
@@ -1210,20 +1215,20 @@ class EndpointTest {
                             .distinct()
                             .count())
                     .isEqualTo(count);
-            assertThat(client.drainMessages()).noneMatch(OutboundMessage::isApplication);
+            assertThat(Drive.drainMessages(client)).noneMatch(OutboundMessage::isApplication);
         }
     }
 
     @Test
     void clientReportsTheCredentialLifetimeAndIgnoresUnknownIdentifiers() {
         Endpoint client = client();
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        client.drainMessages();
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.drainMessages(client);
 
-        client.receive(bytes("0000001c0005010000000000000000000000000000010000012c00ff00000001"));
+        Drive.receive(client, bytes("0000001c0005010000000000000000000000000000010000012c00ff00000001"));
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
         assertThat(events.get(0).credentialLifetime()).hasValue(300);
@@ -1233,26 +1238,27 @@ class EndpointTest {
     @Test
     void authAckWithoutLifetimeReportsNoLifetime() {
         Endpoint client = client();
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
 
-        client.receive(bytes(AUTH_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
 
-        assertThat(client.drainEvents().get(0).credentialLifetime()).isEmpty();
+        assertThat(Drive.drainEvents(client).get(0).credentialLifetime()).isEmpty();
     }
 
     @Test
     void serverHandsTheAuthToTheApplicationAndAnswersAuthAckWhenItPasses() {
         List<String> seen = new ArrayList<>();
-        Endpoint server = serverAfterPreface(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+        Endpoint server = serverAfterPreface(EndpointConfig.defaults(), (mechanism, credentials) -> {
             seen.add(mechanism + ":" + hex(credentials));
             return AuthDecision.PASS;
-        }));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        });
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
 
-        server.receive(
+        Drive.receive(
+                server,
                 bytes("0000001e00050000" + "0000000000000000" + "00000000" + "05" + "504c41494e" + "0075736572007077"));
 
         assertThat(seen).containsExactly("PLAIN:0075736572007077");
@@ -1274,19 +1280,19 @@ class EndpointTest {
         return closeWithLast(errorCode, 0);
     }
 
-    private static Endpoint serverAwaitingAuth(EndpointConfig config) {
-        Endpoint server = serverAfterPreface(config);
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+    private static Endpoint serverAwaitingAuth(Drive.Authentication authentication) {
+        Endpoint server = serverAfterPreface(EndpointConfig.defaults(), authentication);
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
         return server;
     }
 
     @Test
     void serverClosesWithUnauthenticatedAndNoReasonWhenTheApplicationRejects() {
-        Endpoint server = serverAwaitingAuth(EndpointConfig.defaults().authenticator((m, c) -> AuthDecision.REJECT));
+        Endpoint server = serverAwaitingAuth((m, c) -> AuthDecision.REJECT);
 
-        server.receive(bytes(AUTH_ANONYMOUS));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
 
         assertThat(sent(server)).isEqualTo(closeWith(7));
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
@@ -1294,42 +1300,26 @@ class EndpointTest {
 
     @Test
     void serverClosesWithInternalErrorWhenTheAuthenticationFailsTransiently() {
-        Endpoint server =
-                serverAwaitingAuth(EndpointConfig.defaults().authenticator((m, c) -> AuthDecision.TRANSIENT_FAILURE));
+        Endpoint server = serverAwaitingAuth((m, c) -> AuthDecision.TRANSIENT_FAILURE);
 
-        server.receive(bytes(AUTH_ANONYMOUS));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
 
         assertThat(sent(server)).isEqualTo(closeWith(2));
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
 
     @Test
-    void serverClosesWithInternalErrorWhenTheAuthenticatorThrows() {
-        Endpoint server = serverAwaitingAuth(EndpointConfig.defaults().authenticator((m, c) -> {
-            throw new IllegalStateException("auth backend down");
-        }));
-
-        server.receive(bytes(AUTH_ANONYMOUS));
-
-        assertThat(sent(server)).isEqualTo(closeWith(2));
-        List<Event> events = server.drainEvents();
-        assertThat(events).hasSize(1);
-        assertThat(events.get(0).kind()).isEqualTo(Event.Kind.CLOSED);
-        assertThat(events.get(0).cause()).get().isInstanceOf(IllegalStateException.class);
-    }
-
-    @Test
     void credentialExpiryClosesWithNoErrorAndRevocationWithUnauthenticated() {
         Endpoint expiring = established();
-        expiring.drainMessages();
-        expiring.drainEvents();
+        Drive.drainMessages(expiring);
+        Drive.drainEvents(expiring);
         expiring.close(0);
         assertThat(sent(expiring)).isEqualTo(closeWith(0));
         assertThat(kinds(expiring)).containsExactly(Event.Kind.CLOSED);
 
         Endpoint revoked = established();
-        revoked.drainMessages();
-        revoked.drainEvents();
+        Drive.drainMessages(revoked);
+        Drive.drainEvents(revoked);
         revoked.close(7);
         assertThat(sent(revoked)).isEqualTo(closeWith(7));
         assertThat(kinds(revoked)).containsExactly(Event.Kind.CLOSED);
@@ -1338,11 +1328,11 @@ class EndpointTest {
     @Test
     void applicationFrameBeforeTheAuthGateIsAProtocolError() {
         Endpoint server = serverAfterPreface();
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
 
-        server.receive(bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
 
         assertClosedWithProtocolError(server);
     }
@@ -1355,9 +1345,9 @@ class EndpointTest {
             "0000001600010000000000000000000100000000000200000064"
         }) {
             Endpoint client = client();
-            client.drainMessages();
+            Drive.drainMessages(client);
 
-            client.receive(bytes(frame));
+            Drive.receive(client, bytes(frame));
 
             assertClosedSilently(client);
         }
@@ -1366,9 +1356,9 @@ class EndpointTest {
     @Test
     void clientRejectsAServerHelloOutsideTheRangeWithProtocolError() {
         Endpoint client = client();
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(helloWith("000100003fff")));
+        Drive.receive(client, bytes(helloWith("000100003fff")));
 
         assertClosedWithProtocolError(client);
     }
@@ -1376,9 +1366,9 @@ class EndpointTest {
     @Test
     void clientFirstFrameHelloAboveItsOwnLimitClosesWithProtocolError() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().maxFrameSize(16384));
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes("00003ffd 0001 00 00 0000000000000000 0000 0000"));
+        Drive.receive(client, bytes("00003ffd 0001 00 00 0000000000000000 0000 0000"));
 
         assertClosedWithProtocolError(client);
     }
@@ -1386,10 +1376,10 @@ class EndpointTest {
     @Test
     void clientPingBeforeTheServerAckClosesWithProtocolError() {
         Endpoint client = client();
-        client.receive(bytes(HELLO));
-        client.drainMessages();
+        Drive.receive(client, bytes(HELLO));
+        Drive.drainMessages(client);
 
-        client.receive(bytes(PING));
+        Drive.receive(client, bytes(PING));
 
         assertClosedWithProtocolError(client);
     }
@@ -1397,13 +1387,13 @@ class EndpointTest {
     @Test
     void clientWaitIsNotResetByTheServerHello() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().ackTimeoutMs(1000));
-        client.drainMessages();
-        client.advance(999);
-        client.receive(bytes(HELLO));
-        client.drainMessages();
-        assertThat(client.drainEvents()).isEmpty();
+        Drive.drainMessages(client);
+        Drive.advance(client, 999);
+        Drive.receive(client, bytes(HELLO));
+        Drive.drainMessages(client);
+        assertThat(Drive.drainEvents(client)).isEmpty();
 
-        client.advance(2);
+        Drive.advance(client, 2);
 
         assertClosedUnresponsive(client);
     }
@@ -1411,11 +1401,11 @@ class EndpointTest {
     @Test
     void clientClosesWhenTheAckDoesNotComeInTime() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().ackTimeoutMs(1000));
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.advance(999);
+        Drive.advance(client, 999);
         assertOpenAndSilent(client);
-        client.advance(2);
+        Drive.advance(client, 2);
 
         assertClosedUnresponsive(client);
     }
@@ -1423,7 +1413,7 @@ class EndpointTest {
     @Test
     void closeIsSendableBeforeAckingThePeerHello() {
         Endpoint client = client();
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         client.close(ErrorCode.NO_ERROR);
 
@@ -1436,11 +1426,11 @@ class EndpointTest {
     void pingWithoutAnAckClosesWithUnresponsiveAfterTheWait() {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.advance(999);
+        Drive.advance(server, 999);
         assertOpenAndSilent(server);
-        server.advance(2);
+        Drive.advance(server, 2);
 
         assertClosedUnresponsive(server);
     }
@@ -1448,12 +1438,12 @@ class EndpointTest {
     @Test
     void clientPingWithoutAnAckClosesWithUnresponsiveAfterTheWait() {
         Endpoint client = Endpoint.client(ONE_SECOND);
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
         client.ping(bytes(PING_PAYLOAD));
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.advance(1001);
+        Drive.advance(client, 1001);
 
         assertClosedUnresponsive(client);
     }
@@ -1462,11 +1452,11 @@ class EndpointTest {
     void anAckPingWithTheSamePayloadCancelsTheWait() {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
-        server.advance(999);
-        server.receive(bytes(PING_ACK));
-        server.drainMessages();
+        Drive.advance(server, 999);
+        Drive.receive(server, bytes(PING_ACK));
+        Drive.drainMessages(server);
 
-        server.advance(5000);
+        Drive.advance(server, 5000);
 
         assertOpenAndSilent(server);
     }
@@ -1475,11 +1465,11 @@ class EndpointTest {
     void anAckPingWithAnotherPayloadIsIgnoredAndTheWaitContinues() {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes("ffffffffffffffff"));
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.receive(bytes(PING_ACK));
+        Drive.receive(server, bytes(PING_ACK));
         assertOpenAndSilent(server);
-        server.advance(1001);
+        Drive.advance(server, 1001);
 
         assertClosedUnresponsive(server);
     }
@@ -1488,8 +1478,8 @@ class EndpointTest {
     void anUnsolicitedAckPingIsIgnored() {
         Endpoint server = establishedWith(ONE_SECOND);
 
-        server.receive(bytes(PING_ACK));
-        server.advance(5000);
+        Drive.receive(server, bytes(PING_ACK));
+        Drive.advance(server, 5000);
 
         assertOpenAndSilent(server);
     }
@@ -1498,14 +1488,14 @@ class EndpointTest {
     void overlappingPingsAreWaitedOnSeparately() {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
-        server.advance(600);
+        Drive.advance(server, 600);
         server.ping(bytes("ffffffffffffffff"));
-        server.receive(bytes(PING_ACK));
-        server.drainMessages();
+        Drive.receive(server, bytes(PING_ACK));
+        Drive.drainMessages(server);
 
-        server.advance(500);
+        Drive.advance(server, 500);
         assertOpenAndSilent(server);
-        server.advance(600);
+        Drive.advance(server, 600);
 
         assertClosedUnresponsive(server);
     }
@@ -1514,14 +1504,14 @@ class EndpointTest {
     void oneAckEndsOnlyOneOfTwoPingsWithTheSamePayload() {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
-        server.advance(500);
+        Drive.advance(server, 500);
         server.ping(bytes(PING_PAYLOAD));
-        server.receive(bytes(PING_ACK));
-        server.drainMessages();
+        Drive.receive(server, bytes(PING_ACK));
+        Drive.drainMessages(server);
 
-        server.advance(501);
+        Drive.advance(server, 501);
         assertOpenAndSilent(server);
-        server.advance(500);
+        Drive.advance(server, 500);
 
         assertClosedUnresponsive(server);
     }
@@ -1529,18 +1519,18 @@ class EndpointTest {
     @Test
     void pingWaitExpiringWhileClosingClosesWithoutAClosePendingRequestsFail() {
         Endpoint client = Endpoint.client(ONE_SECOND);
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
         clientPassesAuthGate(client);
         client.request(257, new byte[0]);
         client.ping(bytes(PING_PAYLOAD));
-        client.drainMessages();
-        client.receive(bytes(closeNoErrorLast(1)));
-        assertThat(client.drainEvents()).isEmpty();
+        Drive.drainMessages(client);
+        Drive.receive(client, bytes(closeNoErrorLast(1)));
+        assertThat(Drive.drainEvents(client)).isEmpty();
 
-        client.advance(1001);
+        Drive.advance(client, 1001);
 
-        assertThat(client.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(client)).isEmpty();
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
@@ -1550,7 +1540,7 @@ class EndpointTest {
     void withoutAnIdleIntervalNoIdlePingIsSent() {
         Endpoint server = established();
 
-        server.advance(1_000_000);
+        Drive.advance(server, 1_000_000);
 
         assertOpenAndSilent(server);
     }
@@ -1559,9 +1549,9 @@ class EndpointTest {
     void idlePingIsSentWhenNothingWasReceivedForTheIdleInterval() {
         Endpoint server = establishedWith(IDLE_ONE_SECOND);
 
-        server.advance(999);
+        Drive.advance(server, 999);
         assertOpenAndSilent(server);
-        server.advance(1);
+        Drive.advance(server, 1);
 
         assertThat(sent(server)).isEqualTo("0000001800020000000000000000000000000000" + "0000000000000000");
     }
@@ -1569,13 +1559,13 @@ class EndpointTest {
     @Test
     void aReceivedFrameRestartsTheIdleInterval() {
         Endpoint server = establishedWith(IDLE_ONE_SECOND);
-        server.advance(900);
-        server.receive(bytes(PING));
+        Drive.advance(server, 900);
+        Drive.receive(server, bytes(PING));
         assertThat(sent(server)).isEqualTo(PING_ACK);
 
-        server.advance(999);
+        Drive.advance(server, 999);
         assertOpenAndSilent(server);
-        server.advance(1);
+        Drive.advance(server, 1);
 
         assertThat(sent(server)).hasSize(40 + 16);
     }
@@ -1583,10 +1573,10 @@ class EndpointTest {
     @Test
     void noNewIdlePingIsSentWhileOneIsWaitingForItsAck() {
         Endpoint server = establishedWith(IDLE_ONE_SECOND);
-        server.advance(1000);
+        Drive.advance(server, 1000);
         assertThat(sent(server)).hasSize(40 + 16);
 
-        server.advance(3000);
+        Drive.advance(server, 3000);
 
         assertOpenAndSilent(server);
     }
@@ -1595,9 +1585,9 @@ class EndpointTest {
     void noIdlePingIsSentWhileAnApplicationPingIsWaitingForItsAck() {
         Endpoint server = establishedWith(IDLE_ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.advance(2000);
+        Drive.advance(server, 2000);
 
         assertOpenAndSilent(server);
     }
@@ -1605,12 +1595,12 @@ class EndpointTest {
     @Test
     void anUnansweredIdlePingClosesWithUnresponsiveAfterTheAckWait() {
         Endpoint server = establishedWith(IDLE_ONE_SECOND);
-        server.advance(1000);
-        server.drainMessages();
+        Drive.advance(server, 1000);
+        Drive.drainMessages(server);
 
-        server.advance(4999);
+        Drive.advance(server, 4999);
         assertOpenAndSilent(server);
-        server.advance(2);
+        Drive.advance(server, 2);
 
         assertClosedUnresponsive(server);
     }
@@ -1618,14 +1608,14 @@ class EndpointTest {
     @Test
     void anotherIdlePingIsSentAfterTheFirstOneIsAcked() {
         Endpoint server = establishedWith(IDLE_ONE_SECOND);
-        server.advance(1000);
-        server.drainMessages();
-        server.receive(bytes("0000001800020100000000000000000000000000" + "0000000000000000"));
-        server.drainMessages();
+        Drive.advance(server, 1000);
+        Drive.drainMessages(server);
+        Drive.receive(server, bytes("0000001800020100000000000000000000000000" + "0000000000000000"));
+        Drive.drainMessages(server);
 
-        server.advance(999);
+        Drive.advance(server, 999);
         assertOpenAndSilent(server);
-        server.advance(1);
+        Drive.advance(server, 1);
 
         assertThat(sent(server)).isEqualTo("0000001800020000000000000000000000000000" + "0000000000000001");
     }
@@ -1633,11 +1623,11 @@ class EndpointTest {
     @Test
     void idlePingWaitsForTheAuthGate() {
         Endpoint server = serverAfterPreface(IDLE_ONE_SECOND);
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
 
-        server.advance(1000);
+        Drive.advance(server, 1000);
 
         assertOpenAndSilent(server);
     }
@@ -1646,12 +1636,12 @@ class EndpointTest {
     void idlePingContinuesWhileClosing() {
         Endpoint server = establishedWith(IDLE_ONE_SECOND);
         server.request(257, new byte[0]);
-        server.drainMessages();
+        Drive.drainMessages(server);
         // 요청 번호까지 처리한다는 CLOSE라서 요청이 남고 연결은 종료 중으로 머문다(3.5절).
-        server.receive(bytes(closeNoErrorLast(2)));
-        server.drainMessages();
+        Drive.receive(server, bytes(closeNoErrorLast(2)));
+        Drive.drainMessages(server);
 
-        server.advance(1000);
+        Drive.advance(server, 1000);
 
         assertThat(sent(server)).hasSize(40 + 16);
     }
@@ -1660,15 +1650,15 @@ class EndpointTest {
 
     @Test
     void helloWaitStartsWhenTheFrameIsDrainedNotWhenItIsQueued() {
-        Endpoint server = Endpoint.server(ONE_SECOND);
-        server.receive(bytes(PREFACE));
+        Endpoint server = Drive.server(ONE_SECOND);
+        Drive.receive(server, bytes(PREFACE));
 
-        server.advance(5000);
-        assertThat(server.drainEvents()).isEmpty();
-        server.drainMessages();
-        server.advance(999);
+        Drive.advance(server, 5000);
+        assertThat(Drive.drainEvents(server)).isEmpty();
+        Drive.drainMessages(server);
+        Drive.advance(server, 999);
         assertOpenAndSilent(server);
-        server.advance(2);
+        Drive.advance(server, 2);
 
         assertClosedUnresponsive(server);
     }
@@ -1678,12 +1668,12 @@ class EndpointTest {
         Endpoint server = establishedWith(ONE_SECOND);
         server.ping(bytes(PING_PAYLOAD));
 
-        server.advance(5000);
-        assertThat(server.drainEvents()).isEmpty();
-        server.drainMessages();
-        server.advance(999);
+        Drive.advance(server, 5000);
+        assertThat(Drive.drainEvents(server)).isEmpty();
+        Drive.drainMessages(server);
+        Drive.advance(server, 999);
         assertOpenAndSilent(server);
-        server.advance(2);
+        Drive.advance(server, 2);
 
         assertClosedUnresponsive(server);
     }
@@ -1704,15 +1694,15 @@ class EndpointTest {
     void resetWithCloseOnlyOrReservedCodesIsTreatedAsAnyOtherReset() {
         for (String code : new String[] {"00000005", "00000006", "00000007", "00000008", "ffffffff"}) {
             Endpoint client = Endpoint.client(EndpointConfig.defaults());
-            client.receive(bytes(HELLO));
-            client.receive(bytes(HELLO_ACK));
+            Drive.receive(client, bytes(HELLO));
+            Drive.receive(client, bytes(HELLO_ACK));
             clientPassesAuthGate(client);
             client.request(257, new byte[0]);
-            client.drainMessages();
+            Drive.drainMessages(client);
 
-            client.receive(bytes("00000014000400000000000000000001" + "0000" + "0000" + code));
+            Drive.receive(client, bytes("00000014000400000000000000000001" + "0000" + "0000" + code));
 
-            assertThat(client.drainEvents()).singleElement().satisfies(event -> {
+            assertThat(Drive.drainEvents(client)).singleElement().satisfies(event -> {
                 assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
                 assertThat(event.status()).isEqualTo(Status.INTERNAL);
             });
@@ -1723,16 +1713,16 @@ class EndpointTest {
     @Test
     void helloAndPingWaitsAreIndependent() {
         Endpoint server = serverAfterPreface(ONE_SECOND);
-        server.receive(bytes(HELLO));
-        server.advance(500);
+        Drive.receive(server, bytes(HELLO));
+        Drive.advance(server, 500);
         server.ping(bytes(PING_PAYLOAD));
-        server.receive(bytes(HELLO_ACK));
+        Drive.receive(server, bytes(HELLO_ACK));
         serverPassesAuthGate(server);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.advance(999);
+        Drive.advance(server, 999);
         assertOpenAndSilent(server);
-        server.advance(2);
+        Drive.advance(server, 2);
 
         assertClosedUnresponsive(server);
     }
@@ -1741,9 +1731,9 @@ class EndpointTest {
     void firstFrameOfAPeerStreamIsReportedAsAReceivedRequest() {
         Endpoint server = established();
 
-        server.receive(bytes("0000001001010000000000000000000100000000"));
+        Drive.receive(server, bytes("0000001001010000000000000000000100000000"));
 
-        List<Event> events = server.drainEvents();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.REQUEST_RECEIVED);
         assertThat(events.get(0).streamId()).isEqualTo(1);
@@ -1753,12 +1743,12 @@ class EndpointTest {
     @Test
     void resetWithAnyFlagsFreesThePeerStreamSoItCanBeOpenedAgain() {
         Endpoint server = established();
-        server.receive(bytes("0000001001010000000000000000000100000000"));
-        server.drainEvents();
+        Drive.receive(server, bytes("0000001001010000000000000000000100000000"));
+        Drive.drainEvents(server);
 
-        server.receive(bytes("000000140004ff0000000000000000010000000000000004"));
+        Drive.receive(server, bytes("000000140004ff0000000000000000010000000000000004"));
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RESET);
-        server.receive(bytes("0000001001010000000000000000000300000000"));
+        Drive.receive(server, bytes("0000001001010000000000000000000300000000"));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
@@ -1768,7 +1758,7 @@ class EndpointTest {
         for (String streamId : new String[] {"0000000000000000", "8000000000000001"}) {
             Endpoint server = established();
 
-            server.receive(bytes("00000010000400" + "00" + streamId + "0000" + "0000" + "00000004"));
+            Drive.receive(server, bytes("00000010000400" + "00" + streamId + "0000" + "0000" + "00000004"));
 
             assertClosedWithProtocolError(server);
         }
@@ -1793,11 +1783,11 @@ class EndpointTest {
     void clientDeliversTheResponseStatusAsAResult() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(appFrame(1, 14, "")));
+        Drive.receive(client, bytes(appFrame(1, 14, "")));
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).streamId()).isEqualTo(1);
@@ -1808,21 +1798,21 @@ class EndpointTest {
     void reservedResponseStatusIsDeliveredAsUnknown() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(appFrame(1, 200, "")));
+        Drive.receive(client, bytes(appFrame(1, 200, "")));
 
-        assertThat(client.drainEvents().get(0).status()).isEqualTo(2);
+        assertThat(Drive.drainEvents(client).get(0).status()).isEqualTo(2);
     }
 
     @Test
     void responseExtensionsAreOnlyFormatCheckedAndTheirContentIsIgnored() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         // timeout의 길이가 4가 아니어도 응답에서는 값을 해석하지 않는다.
-        client.receive(bytes(appFrame(1, 0, "00010003000001")));
+        Drive.receive(client, bytes(appFrame(1, 0, "00010003000001")));
 
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT);
     }
@@ -1831,9 +1821,9 @@ class EndpointTest {
     void responseWithMalformedExtensionsClosesAndFailsThePendingRequest() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(appFrame(1, 0, "00090001610009000162")));
+        Drive.receive(client, bytes(appFrame(1, 0, "00090001610009000162")));
 
         assertThat(sent(client)).isEqualTo(CLOSE_PROTOCOL_ERROR);
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
@@ -1843,11 +1833,11 @@ class EndpointTest {
     void lastResponseWhileClosingCompletesTheClose() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
-        client.receive(bytes(closeNoErrorLast(1)));
-        assertThat(client.drainEvents()).isEmpty();
+        Drive.drainMessages(client);
+        Drive.receive(client, bytes(closeNoErrorLast(1)));
+        assertThat(Drive.drainEvents(client)).isEmpty();
 
-        client.receive(bytes(appFrame(1, 0, "")));
+        Drive.receive(client, bytes(appFrame(1, 0, "")));
 
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
@@ -1856,7 +1846,7 @@ class EndpointTest {
     void responseToAStreamThatIsNotPendingIsIgnored() {
         Endpoint client = establishedClient();
 
-        client.receive(bytes(appFrame(1, 0, "")));
+        Drive.receive(client, bytes(appFrame(1, 0, "")));
 
         assertOpenAndSilent(client);
     }
@@ -1866,7 +1856,7 @@ class EndpointTest {
         for (int valueLength : new int[] {3, MAX_EXTENSIONS - 4}) {
             Endpoint server = established();
 
-            server.receive(bytes(appFrame(1, 0, unknownTlv(valueLength))));
+            Drive.receive(server, bytes(appFrame(1, 0, unknownTlv(valueLength))));
 
             assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
         }
@@ -1885,7 +1875,7 @@ class EndpointTest {
         for (String extensions : malformed) {
             Endpoint server = established();
 
-            server.receive(bytes(appFrame(1, 0, extensions)));
+            Drive.receive(server, bytes(appFrame(1, 0, extensions)));
 
             assertClosedWithProtocolError(server);
         }
@@ -1922,23 +1912,23 @@ class EndpointTest {
     void requestOfAnUnknownTypeIsAnsweredUnimplementedWithTheSameType() {
         Endpoint server = establishedKnowing(257);
 
-        server.receive(bytes(requestFrame(258, 1, "")));
+        Drive.receive(server, bytes(requestFrame(258, 1, "")));
 
         assertThat(sent(server)).isEqualTo("000000100102000c00000000000000010000" + "0000");
         assertOpenAndSilent(server);
-        server.receive(bytes(requestFrame(257, 3, "")));
+        Drive.receive(server, bytes(requestFrame(257, 3, "")));
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
     @Test
     void clientAlsoAnswersAnUnknownTypeRequestFromTheServer() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().knownTypes(Collections.singleton(257)));
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
         clientPassesAuthGate(client);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(requestFrame(258, 2, "")));
+        Drive.receive(client, bytes(requestFrame(258, 2, "")));
 
         assertThat(sent(client)).isEqualTo("000000100102000c00000000000000020000" + "0000");
     }
@@ -1954,7 +1944,7 @@ class EndpointTest {
         for (String extensions : invalid) {
             Endpoint server = established();
 
-            server.receive(bytes(requestFrame(257, 1, extensions)));
+            Drive.receive(server, bytes(requestFrame(257, 1, extensions)));
 
             assertThat(sent(server)).isEqualTo("00000010010100030000000000000001" + "0000" + "0000");
             assertOpenAndSilent(server);
@@ -1967,7 +1957,7 @@ class EndpointTest {
         int streamId = 1;
         Endpoint server = established();
         for (String extensions : valid) {
-            server.receive(bytes(requestFrame(257, streamId, extensions)));
+            Drive.receive(server, bytes(requestFrame(257, streamId, extensions)));
             streamId += 2;
         }
 
@@ -1978,7 +1968,7 @@ class EndpointTest {
     void unknownTypeIsCheckedBeforeExtensionValues() {
         Endpoint server = establishedKnowing(257);
 
-        server.receive(bytes(requestFrame(258, 1, "00010003000001")));
+        Drive.receive(server, bytes(requestFrame(258, 1, "00010003000001")));
 
         assertThat(sent(server)).isEqualTo("000000100102000c00000000000000010000" + "0000");
     }
@@ -1987,11 +1977,11 @@ class EndpointTest {
     void requestOverTheConcurrentStreamLimitIsRefusedBeforeItsTypeOrExtensionValuesAreSeen() {
         Endpoint server = establishedWith(
                 EndpointConfig.defaults().maxConcurrentStreams(1).knownTypes(Collections.singleton(257)));
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.drainEvents();
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.drainEvents(server);
 
-        server.receive(bytes(requestFrame(258, 3, "")));
-        server.receive(bytes(requestFrame(257, 5, "00010003000001")));
+        Drive.receive(server, bytes(requestFrame(258, 3, "")));
+        Drive.receive(server, bytes(requestFrame(257, 5, "00010003000001")));
 
         assertThat(sent(server)).isEqualTo(RESET_REFUSED_3 + RESET_REFUSED_5);
         assertOpenAndSilent(server);
@@ -2001,7 +1991,7 @@ class EndpointTest {
     void everyRequestIsRefusedWhenTheLimitIsZero() {
         Endpoint server = establishedWith(EndpointConfig.defaults().maxConcurrentStreams(0));
 
-        server.receive(bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
 
         assertThat(sent(server)).isEqualTo(RESET_REFUSED_1);
         assertOpenAndSilent(server);
@@ -2010,11 +2000,11 @@ class EndpointTest {
     @Test
     void requestAfterReceivingCloseIsDroppedSilentlyWhileAPeerStreamKeepsTheConnectionOpen() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.drainEvents();
-        server.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.drainEvents(server);
+        Drive.receive(server, bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
 
-        server.receive(bytes(requestFrame(258, 3, "00010003000001")));
+        Drive.receive(server, bytes(requestFrame(258, 3, "00010003000001")));
 
         assertOpenAndSilent(server);
     }
@@ -2022,12 +2012,12 @@ class EndpointTest {
     @Test
     void requestAfterSendingCloseIsDroppedSilently() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.drainEvents();
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.drainEvents(server);
         server.close(0);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.receive(bytes(requestFrame(257, 3, "")));
+        Drive.receive(server, bytes(requestFrame(257, 3, "")));
 
         assertOpenAndSilent(server);
     }
@@ -2035,12 +2025,12 @@ class EndpointTest {
     @Test
     void connectionClosesWhenTheLastPeerStreamEndsWhileClosing() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.drainEvents();
-        server.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
-        assertThat(server.drainEvents()).isEmpty();
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.drainEvents(server);
+        Drive.receive(server, bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
+        assertThat(Drive.drainEvents(server)).isEmpty();
 
-        server.receive(bytes("000000100004000000000001000000000000" + "0004"));
+        Drive.receive(server, bytes("000000100004000000000001000000000000" + "0004"));
 
         assertThat(sent(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
@@ -2050,42 +2040,42 @@ class EndpointTest {
     void streamNumberAtOrBelowTheHighestPeerNumberClosesWithProtocolError() {
         // 대기 중인 번호, 응답으로 끝난 번호, 건너뛴 번호, 거절한 번호는 모두 쓰인 것으로 센다(규격 4.2.1절).
         Endpoint pending = established();
-        pending.receive(bytes(requestFrame(257, 1, "")));
-        pending.drainEvents();
-        pending.receive(bytes(requestFrame(257, 1, "")));
+        Drive.receive(pending, bytes(requestFrame(257, 1, "")));
+        Drive.drainEvents(pending);
+        Drive.receive(pending, bytes(requestFrame(257, 1, "")));
         assertClosedWithProtocolError(pending, 1);
 
         Endpoint ended = established();
-        ended.receive(bytes(requestFrame(257, 1, "")));
+        Drive.receive(ended, bytes(requestFrame(257, 1, "")));
         ended.respond(1, 0, new byte[0]);
-        ended.drainMessages();
-        ended.drainEvents();
-        ended.receive(bytes(requestFrame(257, 1, "")));
+        Drive.drainMessages(ended);
+        Drive.drainEvents(ended);
+        Drive.receive(ended, bytes(requestFrame(257, 1, "")));
         assertClosedWithProtocolError(ended, 1);
 
         Endpoint skipped = established();
-        skipped.receive(bytes(requestFrame(257, 5, "")));
-        skipped.drainEvents();
-        skipped.receive(bytes(requestFrame(257, 3, "")));
+        Drive.receive(skipped, bytes(requestFrame(257, 5, "")));
+        Drive.drainEvents(skipped);
+        Drive.receive(skipped, bytes(requestFrame(257, 3, "")));
         assertClosedWithProtocolError(skipped, 5);
 
         Endpoint refused = establishedWith(EndpointConfig.defaults().maxConcurrentStreams(0));
-        refused.receive(bytes(requestFrame(257, 5, "")));
-        refused.drainMessages();
-        refused.receive(bytes(requestFrame(257, 3, "")));
+        Drive.receive(refused, bytes(requestFrame(257, 5, "")));
+        Drive.drainMessages(refused);
+        Drive.receive(refused, bytes(requestFrame(257, 3, "")));
         assertClosedWithProtocolError(refused, 5);
     }
 
     @Test
     void repeatedNumberWhileClosingClosesWithoutSendingClose() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.receive(bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
-        server.receive(bytes(requestFrame(257, 3, "")));
-        server.drainMessages();
-        server.drainEvents();
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes("0000001c00030000000000000000000000000000" + "00000000" + NO_STREAM));
+        Drive.receive(server, bytes(requestFrame(257, 3, "")));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
 
-        server.receive(bytes(requestFrame(257, 3, "")));
+        Drive.receive(server, bytes(requestFrame(257, 3, "")));
 
         assertClosedSilently(server);
     }
@@ -2095,7 +2085,7 @@ class EndpointTest {
         for (long streamId : new long[] {0, 0x8000000000000001L}) {
             Endpoint server = established();
 
-            server.receive(bytes(requestFrame(257, streamId, "")));
+            Drive.receive(server, bytes(requestFrame(257, streamId, "")));
 
             assertClosedWithProtocolError(server);
         }
@@ -2106,7 +2096,8 @@ class EndpointTest {
         for (String payload : new String[] {"", "000000", "0000000000"}) {
             Endpoint server = established();
 
-            server.receive(bytes(String.format("%08x00040000%016x00000000", 16 + payload.length() / 2, 1) + payload));
+            Drive.receive(
+                    server, bytes(String.format("%08x00040000%016x00000000", 16 + payload.length() / 2, 1) + payload));
 
             assertClosedWithProtocolError(server);
         }
@@ -2115,24 +2106,24 @@ class EndpointTest {
     @Test
     void respondSendsTheResponseWithTheRequestTypeAndFreesTheSlot() {
         Endpoint server = establishedWith(EndpointConfig.defaults().maxConcurrentStreams(1));
-        server.receive(bytes(requestFrame(258, 1, "")));
-        server.drainEvents();
+        Drive.receive(server, bytes(requestFrame(258, 1, "")));
+        Drive.drainEvents(server);
 
         server.respond(1, 0, new byte[0]);
         server.respond(1, 0, new byte[0]);
 
         assertThat(sent(server)).isEqualTo("00000010010200000000000000000001" + "0000" + "0000");
-        server.receive(bytes(requestFrame(257, 3, "")));
+        Drive.receive(server, bytes(requestFrame(257, 3, "")));
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
     @Test
     void lastRespondWhileClosingClosesTheConnection() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.drainEvents();
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.drainEvents(server);
         server.close(0);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
         server.respond(1, 0, new byte[0]);
 
@@ -2151,8 +2142,8 @@ class EndpointTest {
     @Test
     void respondCarriesThePayloadInTheResponseFrame() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(258, 1, "")));
-        server.drainEvents();
+        Drive.receive(server, bytes(requestFrame(258, 1, "")));
+        Drive.drainEvents(server);
 
         server.respond(1, 0, bytes("cafe01"));
 
@@ -2161,11 +2152,11 @@ class EndpointTest {
 
     private static Endpoint establishedServerWithPeerFrameSize(int maxFrameSize) {
         Endpoint server = serverAfterPreface();
-        server.receive(bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
-        server.receive(bytes(HELLO_ACK));
+        Drive.receive(server, bytes(helloWith("0001" + String.format("%08x", maxFrameSize))));
+        Drive.receive(server, bytes(HELLO_ACK));
         serverPassesAuthGate(server);
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.drainEvents();
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.drainEvents(server);
         return server;
     }
 
@@ -2175,7 +2166,7 @@ class EndpointTest {
 
         server.respond(1, 0, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE]);
 
-        assertThat(concat(server.drainMessages())).hasSize(MIN_MAX_FRAME_SIZE);
+        assertThat(concat(Drive.drainMessages(server))).hasSize(MIN_MAX_FRAME_SIZE);
     }
 
     @Test
@@ -2196,7 +2187,7 @@ class EndpointTest {
 
         client.request(257, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE]);
 
-        assertThat(concat(client.drainMessages())).hasSize(MIN_MAX_FRAME_SIZE);
+        assertThat(concat(Drive.drainMessages(client))).hasSize(MIN_MAX_FRAME_SIZE);
     }
 
     @Test
@@ -2207,7 +2198,7 @@ class EndpointTest {
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(sent(client)).isEmpty();
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(client)).isEmpty();
         client.request(257, new byte[0]);
         assertThat(sent(client)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
     }
@@ -2215,17 +2206,17 @@ class EndpointTest {
     @Test
     void requestDeferredBeforeTheAuthGateFailsLocallyWhenItsFrameIsOverThePeerMaxFrameSize() {
         Endpoint client = client();
-        client.drainMessages();
+        Drive.drainMessages(client);
         client.request(257, new byte[MIN_MAX_FRAME_SIZE - EMPTY_FRAME_SIZE + 1]);
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(client)).isEmpty();
 
-        client.receive(bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
+        Drive.receive(client, bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
 
         assertThat(sent(client)).isEqualTo(HELLO_ACK + AUTH_ANONYMOUS);
-        assertThat(client.drainEvents()).isEmpty();
-        client.receive(bytes(HELLO_ACK));
-        client.receive(bytes(AUTH_ACK));
-        List<Event> events = client.drainEvents();
+        assertThat(Drive.drainEvents(client)).isEmpty();
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
         assertLocalUnavailableEvents(events.subList(1, events.size()));
         client.request(257, new byte[0]);
@@ -2236,8 +2227,8 @@ class EndpointTest {
     void oversizeRequestAfterCloseFailsLocallyInsteadOfThrowing() {
         Endpoint client = establishedClientWithPeerFrameSize(MIN_MAX_FRAME_SIZE);
         client.close(ErrorCode.NO_ERROR);
-        client.drainMessages();
-        client.drainEvents();
+        Drive.drainMessages(client);
+        Drive.drainEvents(client);
 
         client.request(257, new byte[MIN_MAX_FRAME_SIZE]);
 
@@ -2247,7 +2238,7 @@ class EndpointTest {
     @Test
     void deferredRequestAndPingKeepTheBytesGivenAtCallTime() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        client.drainMessages();
+        Drive.drainMessages(client);
         byte[] extensions = bytes("0a0b");
         byte[] pingPayload = bytes("0102030405060708");
         client.request(257, extensions);
@@ -2255,9 +2246,9 @@ class EndpointTest {
         extensions[0] = 0x7f;
         pingPayload[0] = 0x7f;
 
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        client.receive(bytes(AUTH_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
 
         assertThat(sent(client))
                 .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + "0000001800020000000000000000000000000000" + "0102030405060708"
@@ -2267,7 +2258,7 @@ class EndpointTest {
     @Test
     void deferredPingIsNotARequestForRequestState() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        client.drainMessages();
+        Drive.drainMessages(client);
         client.ping(bytes("0102030405060708"));
 
         assertThat(client.requestState(-1)).isNull();
@@ -2287,23 +2278,23 @@ class EndpointTest {
     void cancelSendsResetCancelAndReportsCancelledOnce() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         client.cancel(1);
         client.cancel(1);
 
         assertThat(sent(client)).isEqualTo("00000014000400000000000000000001" + "0000" + "0000" + "00000004");
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).status()).isEqualTo(1);
-        client.receive(bytes(appFrame(1, 0, "")));
+        Drive.receive(client, bytes(appFrame(1, 0, "")));
         assertOpenAndSilent(client);
     }
 
     private static final String RESET_CANCEL_1 = "00000014000400000000000000000001" + "0000" + "0000" + "00000004";
 
     private static void assertSingleResult(Endpoint endpoint, long streamId, int status, Certainty certainty) {
-        List<Event> events = endpoint.drainEvents();
+        List<Event> events = Drive.drainEvents(endpoint);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).streamId()).isEqualTo(streamId);
@@ -2318,7 +2309,7 @@ class EndpointTest {
         long ticket = client.request(257, new byte[0], 100);
         long kept = client.request(257, new byte[0]);
 
-        client.advance(101);
+        Drive.advance(client, 101);
 
         assertSingleResult(client, 1, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED);
         assertThat(client.requestState(ticket)).isNull();
@@ -2331,18 +2322,18 @@ class EndpointTest {
     @Test
     void deadlineOfAQueuedRequestWithoutNumberEndsItWithoutAStreamId() {
         Endpoint client = client();
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        client.drainMessages();
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.drainMessages(client);
         long ticket = client.request(257, new byte[0], 100);
         assertThat(client.requestState(ticket)).isEqualTo(OwnRequestLedger.RequestState.QUEUED_WITHOUT_NUMBER);
 
-        client.advance(101);
+        Drive.advance(client, 101);
 
         assertSingleResult(client, 0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED);
         assertThat(client.requestState(ticket)).isNull();
-        client.receive(bytes(AUTH_ACK));
-        assertThat(client.drainMessages()).isEmpty();
+        Drive.receive(client, bytes(AUTH_ACK));
+        assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
     /** 규격 4.4.1절: 쓰기를 시작한 요청은 기한이 지나면 RESET(CANCEL)을 보내고 DEADLINE_EXCEEDED(결과 모름)로 끝난다. */
@@ -2350,18 +2341,18 @@ class EndpointTest {
     void deadlineAfterWritingStartedSendsResetCancelAndReportsUnknown() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0], 100);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.advance(99);
-        assertThat(client.drainEvents()).isEmpty();
-        assertThat(client.drainMessages()).isEmpty();
-        client.advance(2);
+        Drive.advance(client, 99);
+        assertThat(Drive.drainEvents(client)).isEmpty();
+        assertThat(Drive.drainMessages(client)).isEmpty();
+        Drive.advance(client, 2);
 
         assertThat(sent(client)).isEqualTo(RESET_CANCEL_1);
         assertSingleResult(client, 1, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
         // 이미 끝난 요청의 응답은 조용히 버려지고, 기한은 다시 울리지 않는다.
-        client.receive(bytes(appFrame(1, 0, "")));
-        client.advance(1000);
+        Drive.receive(client, bytes(appFrame(1, 0, "")));
+        Drive.advance(client, 1000);
         assertOpenAndSilent(client);
     }
 
@@ -2371,14 +2362,14 @@ class EndpointTest {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
         client.request(257, new byte[0], 100);
-        client.drainMessages();
-        client.receive(bytes(appFrame(3, 0, "")));
-        client.drainEvents();
+        Drive.drainMessages(client);
+        Drive.receive(client, bytes(appFrame(3, 0, "")));
+        Drive.drainEvents(client);
 
-        client.advance(1_000_000);
+        Drive.advance(client, 1_000_000);
 
-        assertThat(client.drainMessages()).isEmpty();
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(Drive.drainMessages(client)).isEmpty();
+        assertThat(Drive.drainEvents(client)).isEmpty();
     }
 
     /** 규격 4.4절: 한 바이트도 쓰기 전의 취소는 프레임을 거두고 RESET 없이 CANCELLED(처리 안 됨)로 끝난다. */
@@ -2393,7 +2384,7 @@ class EndpointTest {
         assertSingleResult(client, 1, Status.CANCELLED, Certainty.NOT_PROCESSED);
         assertThat(sent(client)).isEqualTo("0000001001010000000000000000000300000000");
         client.cancelRequest(first);
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(client)).isEmpty();
     }
 
     @Test
@@ -2403,7 +2394,7 @@ class EndpointTest {
 
         client.cancel(1);
 
-        assertThat(client.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(client)).isEmpty();
         assertSingleResult(client, 1, Status.CANCELLED, Certainty.NOT_PROCESSED);
     }
 
@@ -2411,16 +2402,16 @@ class EndpointTest {
     @Test
     void cancelOfAQueuedRequestWithoutNumberEndsItWithoutAStreamId() {
         Endpoint client = client();
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        client.drainMessages();
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.drainMessages(client);
         long ticket = client.request(257, new byte[0]);
 
         client.cancelRequest(ticket);
 
         assertSingleResult(client, 0, Status.CANCELLED, Certainty.NOT_PROCESSED);
-        client.receive(bytes(AUTH_ACK));
-        assertThat(client.drainMessages()).isEmpty();
+        Drive.receive(client, bytes(AUTH_ACK));
+        assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
     /** 규격 4.4절: 쓰기를 시작한 뒤의 취소는 RESET(CANCEL)을 보내고 CANCELLED(결과 모름)다. */
@@ -2428,7 +2419,7 @@ class EndpointTest {
     void cancelAfterWritingStartedByTicketSendsResetAndReportsUnknown() {
         Endpoint client = establishedClient();
         long ticket = client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         client.cancelRequest(ticket);
 
@@ -2441,16 +2432,16 @@ class EndpointTest {
         Endpoint client = establishedClient();
 
         assertThatThrownBy(() -> client.request(257, new byte[0], 0)).isInstanceOf(IllegalArgumentException.class);
-        assertThat(client.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
     /** 대기열에서 기다리는 PING과 다른 요청은 기한이나 취소가 건드리지 않는다. */
     @Test
     void expiringOrCancellingAQueuedRequestLeavesOtherQueuedSendsAlone() {
         Endpoint client = client();
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        client.drainMessages();
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.drainMessages(client);
         client.ping(bytes(PING_PAYLOAD));
         long cancelled = client.request(257, new byte[0]);
         client.request(257, new byte[0], 100);
@@ -2458,10 +2449,10 @@ class EndpointTest {
 
         client.cancelRequest(cancelled);
         client.cancelRequest(cancelled);
-        client.advance(101);
-        assertThat(client.drainEvents()).hasSize(2);
+        Drive.advance(client, 101);
+        assertThat(Drive.drainEvents(client)).hasSize(2);
         assertThat(client.requestState(kept)).isEqualTo(OwnRequestLedger.RequestState.QUEUED_WITHOUT_NUMBER);
-        client.receive(bytes(AUTH_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
 
         assertThat(sent(client)).contains(PING_PAYLOAD).contains("0000001001010000000000000000000100000000");
     }
@@ -2471,13 +2462,13 @@ class EndpointTest {
         Endpoint client = establishedClient();
         long ticket = client.request(257, new byte[0], 100);
         client.disconnect();
-        client.drainEvents();
+        Drive.drainEvents(client);
 
         client.cancelRequest(ticket);
         client.cancel(1);
-        client.advance(1000);
+        Drive.advance(client, 1000);
 
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(client)).isEmpty();
     }
 
     /** 규격 4.4.1절: 쓰기 전에 기한이 지난 요청이 마지막 대기 스트림이면 종료 중인 연결이 닫힌다. */
@@ -2486,9 +2477,9 @@ class EndpointTest {
         Endpoint client = establishedClient();
         client.request(257, new byte[0], 100);
         client.close(0);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.advance(101);
+        Drive.advance(client, 101);
 
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
@@ -2498,7 +2489,7 @@ class EndpointTest {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
         client.close(0);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         client.cancel(1);
 
@@ -2511,14 +2502,15 @@ class EndpointTest {
         for (int[] c : cases) {
             Endpoint client = establishedClient();
             client.request(257, new byte[0]);
-            client.drainMessages();
+            Drive.drainMessages(client);
 
-            client.receive(bytes(String.format("00000014000400000000000000000001" + "00000000" + "0000%04x", c[0])));
+            Drive.receive(
+                    client, bytes(String.format("00000014000400000000000000000001" + "00000000" + "0000%04x", c[0])));
 
-            List<Event> events = client.drainEvents();
+            List<Event> events = Drive.drainEvents(client);
             assertThat(events).hasSize(1);
             assertThat(events.get(0).status()).as("error_code %d", c[0]).isEqualTo(c[1]);
-            assertThat(client.drainMessages()).isEmpty();
+            assertThat(Drive.drainMessages(client)).isEmpty();
         }
     }
 
@@ -2526,9 +2518,9 @@ class EndpointTest {
     void resetOnAStreamThatIsNotPendingIsDropped() {
         Endpoint server = established();
 
-        server.receive(bytes("00000014000400000000000000000005" + "0000" + "0000" + "00000004"));
-        server.receive(bytes("00000014000400000000000000000004" + "0000" + "0000" + "00000004"));
-        server.receive(bytes(requestFrame(257, 3, "")));
+        Drive.receive(server, bytes("00000014000400000000000000000005" + "0000" + "0000" + "00000004"));
+        Drive.receive(server, bytes("00000014000400000000000000000004" + "0000" + "0000" + "00000004"));
+        Drive.receive(server, bytes(requestFrame(257, 3, "")));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
@@ -2537,14 +2529,14 @@ class EndpointTest {
     void responseWithADifferentTypeEndsTheRequestWithInternalAndSendsNothing() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(requestFrame(258, 1, "")));
+        Drive.receive(client, bytes(requestFrame(258, 1, "")));
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).status()).isEqualTo(13);
-        assertThat(client.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
     @Test
@@ -2553,15 +2545,15 @@ class EndpointTest {
         for (long[] role : roles) {
             EndpointConfig config = EndpointConfig.defaults().nextStreamId(role[1]);
             Endpoint endpoint = role[0] == 1 ? Endpoint.client(config) : serverAfterPreface(config);
-            endpoint.receive(bytes(HELLO));
-            endpoint.receive(bytes(HELLO_ACK));
-            endpoint.receive(bytes(role[0] == 1 ? AUTH_ACK : AUTH_ANONYMOUS));
-            endpoint.drainMessages();
-            endpoint.drainEvents();
+            Drive.receive(endpoint, bytes(HELLO));
+            Drive.receive(endpoint, bytes(HELLO_ACK));
+            Drive.receive(endpoint, bytes(role[0] == 1 ? AUTH_ACK : AUTH_ANONYMOUS));
+            Drive.drainMessages(endpoint);
+            Drive.drainEvents(endpoint);
             endpoint.request(257, new byte[0]);
-            endpoint.drainMessages();
-            endpoint.receive(bytes(appFrame(role[1], 0, "")));
-            endpoint.drainEvents();
+            Drive.drainMessages(endpoint);
+            Drive.receive(endpoint, bytes(appFrame(role[1], 0, "")));
+            Drive.drainEvents(endpoint);
 
             endpoint.request(257, new byte[0]);
 
@@ -2573,29 +2565,29 @@ class EndpointTest {
     @Test
     void exhaustionWithAPendingRequestWaitsForItAndSendsNoSecondClose() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
         clientPassesAuthGate(client);
         client.request(257, new byte[0]);
         client.close(0);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         client.request(257, new byte[0]);
 
         assertFailedLocally(client);
-        client.receive(bytes(appFrame(Long.MAX_VALUE, 0, "")));
+        Drive.receive(client, bytes(appFrame(Long.MAX_VALUE, 0, "")));
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
     @Test
     void exhaustionTakesPrecedenceOverReachingThePeerConcurrentStreamLimit() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
-        client.receive(bytes(helloWith("0002" + String.format("%08x", 1L))));
-        client.receive(bytes(HELLO_ACK));
+        Drive.receive(client, bytes(helloWith("0002" + String.format("%08x", 1L))));
+        Drive.receive(client, bytes(HELLO_ACK));
         clientPassesAuthGate(client);
         client.request(257, new byte[0]);
-        client.drainMessages();
-        client.drainEvents();
+        Drive.drainMessages(client);
+        Drive.drainEvents(client);
 
         client.request(257, new byte[0]);
 
@@ -2607,17 +2599,17 @@ class EndpointTest {
     void largestStreamNumberIsAccepted() {
         Endpoint server = established();
 
-        server.receive(bytes(requestFrame(257, Long.MAX_VALUE, "")));
+        Drive.receive(server, bytes(requestFrame(257, Long.MAX_VALUE, "")));
 
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
     private static Endpoint establishedClientWithPeerLimit(long maxConcurrentStreams) {
         Endpoint client = client();
-        client.receive(bytes(helloWith("0002" + String.format("%08x", maxConcurrentStreams))));
-        client.receive(bytes(HELLO_ACK));
+        Drive.receive(client, bytes(helloWith("0002" + String.format("%08x", maxConcurrentStreams))));
+        Drive.receive(client, bytes(HELLO_ACK));
         clientPassesAuthGate(client);
-        client.drainMessages();
+        Drive.drainMessages(client);
         return client;
     }
 
@@ -2625,7 +2617,7 @@ class EndpointTest {
     void requestAtThePeerConcurrentStreamLimitIsNotSent() {
         Endpoint client = establishedClientWithPeerLimit(1);
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         client.request(257, new byte[0]);
 
@@ -2636,7 +2628,7 @@ class EndpointTest {
     void requestBelowThePeerConcurrentStreamLimitIsSent() {
         Endpoint client = establishedClientWithPeerLimit(2);
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         client.request(257, new byte[0]);
 
@@ -2648,10 +2640,10 @@ class EndpointTest {
         Endpoint client = establishedClientWithPeerLimit(1);
         client.request(257, new byte[0]);
         client.request(257, new byte[0]);
-        client.drainMessages();
-        assertLocalUnavailableEvents(client.drainEvents());
-        client.receive(bytes(appFrame(1, 0, "")));
-        client.drainEvents();
+        Drive.drainMessages(client);
+        assertLocalUnavailableEvents(Drive.drainEvents(client));
+        Drive.receive(client, bytes(appFrame(1, 0, "")));
+        Drive.drainEvents(client);
 
         client.request(257, new byte[0]);
 
@@ -2671,7 +2663,7 @@ class EndpointTest {
     void closeFrameWithLengthBelowMinimumClosesSilently() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000f0003" + "00000000000000000000000000"));
+        Drive.receive(server, bytes("0000000f0003" + "00000000000000000000000000"));
 
         assertThat(sent(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
@@ -2681,7 +2673,7 @@ class EndpointTest {
     void closeFrameWithLengthAboveMaxFrameSizeClosesSilently() {
         Endpoint server = established();
 
-        server.receive(bytes("00400001" + "0003000000000000" + "00000000"));
+        Drive.receive(server, bytes("00400001" + "0003000000000000" + "00000000"));
 
         assertThat(sent(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
@@ -2691,7 +2683,7 @@ class EndpointTest {
     void nonCloseFrameWithLengthBelowMinimumStillGetsProtocolError() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000f0004" + "00000000000000000000000000"));
+        Drive.receive(server, bytes("0000000f0004" + "00000000000000000000000000"));
 
         assertClosedWithProtocolError(server);
     }
@@ -2700,13 +2692,13 @@ class EndpointTest {
     void disconnectFailsPendingRequestsAndClosesOnce() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         client.disconnect();
         client.disconnect();
 
-        assertThat(client.drainMessages()).isEmpty();
-        List<Event> events = client.drainEvents();
+        assertThat(Drive.drainMessages(client)).isEmpty();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
@@ -2721,8 +2713,8 @@ class EndpointTest {
 
         client.disconnect();
 
-        assertThat(client.drainMessages()).isEmpty();
-        List<Event> events = client.drainEvents();
+        assertThat(Drive.drainMessages(client)).isEmpty();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events.get(0).streamId()).isEqualTo(1);
         assertThat(events.get(0).certainty()).contains(Certainty.NOT_PROCESSED);
     }
@@ -2731,8 +2723,8 @@ class EndpointTest {
     void disconnectAfterClosedEmitsNothing() {
         Endpoint client = establishedClient();
         client.close(1);
-        client.drainMessages();
-        client.drainEvents();
+        Drive.drainMessages(client);
+        Drive.drainEvents(client);
 
         client.disconnect();
 
@@ -2743,9 +2735,9 @@ class EndpointTest {
     void closeFrameWithBadLengthIsSilentEvenWhenTheTypeArrivesLater() {
         Endpoint server = established();
 
-        server.receive(bytes("0000000f"));
+        Drive.receive(server, bytes("0000000f"));
         assertOpenAndSilent(server);
-        server.receive(bytes("0003"));
+        Drive.receive(server, bytes("0003"));
 
         assertThat(sent(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
@@ -2760,7 +2752,7 @@ class EndpointTest {
     private static Endpoint webSocketServerAfterPreface() {
         Endpoint server = webSocketServer();
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
-        server.drainMessages();
+        Drive.drainMessages(server);
         return server;
     }
 
@@ -2774,7 +2766,7 @@ class EndpointTest {
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO));
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(HELLO_ACK));
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(AUTH_ANONYMOUS));
-        server.drainMessages();
+        Drive.drainMessages(server);
         return server;
     }
 
@@ -2782,13 +2774,13 @@ class EndpointTest {
     void drainMessagesReturnsEachSentMessageOnceInTheOrderSent() {
         Endpoint client = client();
 
-        List<OutboundMessage> messages = client.drainMessages();
+        List<OutboundMessage> messages = Drive.drainMessages(client);
 
         assertThat(messages).hasSize(2);
         assertThat(hex(messages.get(0).bytes())).isEqualTo(PREFACE);
         assertThat(hex(messages.get(1).bytes()))
                 .isEqualTo("00000022" + "00010000" + "0000000000000000" + "00000000" + DEFAULT_HELLO_PARAMS);
-        assertThat(client.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
     private static List<OutboundMessage.Kind> messageTypes(List<OutboundMessage> messages) {
@@ -2805,7 +2797,7 @@ class EndpointTest {
 
         server.close(ErrorCode.NO_ERROR);
 
-        List<OutboundMessage> messages = server.drainMessages();
+        List<OutboundMessage> messages = Drive.drainMessages(server);
         assertThat(messageTypes(messages))
                 .containsExactly(OutboundMessage.Kind.BINARY, OutboundMessage.Kind.WEBSOCKET_CLOSE);
         assertThat(hex(messages.get(0).bytes())).isEqualTo(CLOSE_NO_ERROR);
@@ -2817,13 +2809,13 @@ class EndpointTest {
     void webSocketCloseWaitsForTheLastStreamWhenNoErrorCloseIsDraining() {
         Endpoint server = establishedWebSocket();
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
-        server.drainEvents();
+        Drive.drainEvents(server);
         server.close(ErrorCode.NO_ERROR);
-        assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Kind.BINARY);
+        assertThat(messageTypes(Drive.drainMessages(server))).containsExactly(OutboundMessage.Kind.BINARY);
 
         server.respond(1, 0, new byte[0]);
 
-        assertThat(messageTypes(server.drainMessages()))
+        assertThat(messageTypes(Drive.drainMessages(server)))
                 .containsExactly(OutboundMessage.Kind.BINARY, OutboundMessage.Kind.WEBSOCKET_CLOSE);
     }
 
@@ -2833,7 +2825,7 @@ class EndpointTest {
 
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_NO_ERROR));
 
-        List<OutboundMessage> messages = server.drainMessages();
+        List<OutboundMessage> messages = Drive.drainMessages(server);
         assertThat(messageTypes(messages)).containsExactly(OutboundMessage.Kind.WEBSOCKET_CLOSE);
         assertThat(messages.get(0).webSocketCloseCode()).isEqualTo(1000);
     }
@@ -2842,13 +2834,13 @@ class EndpointTest {
     void webSocketCloseWaitsForTheLastStreamWhenReceivedNoErrorCloseIsDraining() {
         Endpoint server = establishedWebSocket();
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
-        server.drainEvents();
+        Drive.drainEvents(server);
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_NO_ERROR));
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
 
         server.respond(1, 0, new byte[0]);
 
-        assertThat(messageTypes(server.drainMessages()))
+        assertThat(messageTypes(Drive.drainMessages(server)))
                 .containsExactly(OutboundMessage.Kind.BINARY, OutboundMessage.Kind.WEBSOCKET_CLOSE);
     }
 
@@ -2856,9 +2848,9 @@ class EndpointTest {
     void byteStreamReceivedNoErrorCloseHasNoWebSocketClose() {
         Endpoint server = established();
 
-        server.receive(bytes(CLOSE_NO_ERROR));
+        Drive.receive(server, bytes(CLOSE_NO_ERROR));
 
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     @Test
@@ -2867,20 +2859,20 @@ class EndpointTest {
 
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_PROTOCOL_ERROR));
 
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     @Test
     void webSocketErrorCloseReceivedWhileDrainingHasNoWebSocketCloseItem() {
         Endpoint server = establishedWebSocket();
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes("0000001001010000000000000000000100000000"));
-        server.drainEvents();
+        Drive.drainEvents(server);
         server.close(ErrorCode.NO_ERROR);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(CLOSE_PROTOCOL_ERROR));
 
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     @Test
@@ -2889,7 +2881,7 @@ class EndpointTest {
 
         server.close(ErrorCode.NO_ERROR);
 
-        assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Kind.BINARY);
+        assertThat(messageTypes(Drive.drainMessages(server))).containsExactly(OutboundMessage.Kind.BINARY);
     }
 
     @Test
@@ -2898,7 +2890,7 @@ class EndpointTest {
 
         server.close(ErrorCode.PROTOCOL_ERROR);
 
-        assertThat(messageTypes(server.drainMessages())).containsExactly(OutboundMessage.Kind.BINARY);
+        assertThat(messageTypes(Drive.drainMessages(server))).containsExactly(OutboundMessage.Kind.BINARY);
     }
 
     @Test
@@ -2917,7 +2909,7 @@ class EndpointTest {
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
 
         assertThat(sent(server)).startsWith("00000");
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
@@ -2985,28 +2977,28 @@ class EndpointTest {
     void webSocketTextCloseSendsNoSecondCloseAfterOneWasSentOrReceived() {
         Endpoint sentClose = establishedWebSocket();
         sentClose.request(257, new byte[0]);
-        sentClose.drainMessages();
+        Drive.drainMessages(sentClose);
         sentClose.close(ErrorCode.NO_ERROR);
-        sentClose.drainMessages();
-        sentClose.drainEvents();
+        Drive.drainMessages(sentClose);
+        Drive.drainEvents(sentClose);
         sentClose.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
-        assertThat(sentClose.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(sentClose)).isEmpty();
         assertThat(kinds(sentClose)).contains(Event.Kind.CLOSED);
 
         Endpoint receivedClose = establishedWebSocket();
         receivedClose.request(257, new byte[0]);
-        receivedClose.drainMessages();
+        Drive.drainMessages(receivedClose);
         receivedClose.receiveMessage(WebSocketMessageKind.BINARY, bytes(closeNoErrorLast(2)));
-        receivedClose.drainMessages();
-        receivedClose.drainEvents();
+        Drive.drainMessages(receivedClose);
+        Drive.drainEvents(receivedClose);
         receivedClose.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
-        assertThat(receivedClose.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(receivedClose)).isEmpty();
         assertThat(kinds(receivedClose)).contains(Event.Kind.CLOSED);
 
         Endpoint closed = establishedWebSocket();
         closed.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
-        closed.drainMessages();
-        closed.drainEvents();
+        Drive.drainMessages(closed);
+        Drive.drainEvents(closed);
         closed.receiveMessage(WebSocketMessageKind.TEXT, bytes(CLOSE_NO_ERROR));
         assertOpenAndSilent(closed);
     }
@@ -3052,7 +3044,7 @@ class EndpointTest {
     @Test
     void webSocketClientFirstFrameThatIsTextClosesSilently() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().webSocket());
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         client.receiveMessage(WebSocketMessageKind.TEXT, bytes(HELLO));
 
@@ -3063,7 +3055,7 @@ class EndpointTest {
     void messagesAfterClosedAreIgnored() {
         Endpoint server = webSocketServer();
         server.receiveMessage(WebSocketMessageKind.TEXT, bytes(PREFACE));
-        server.drainEvents();
+        Drive.drainEvents(server);
 
         server.receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE));
 
@@ -3072,7 +3064,8 @@ class EndpointTest {
 
     @Test
     void webSocketEndpointRejectsByteInputAndStreamEndpointRejectsMessages() {
-        assertThatThrownBy(() -> webSocketServer().receive(bytes(PREFACE))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> webSocketServer().receiveBounded(bytes(PREFACE), 0, 8, 1, CollectionSpace.UNLIMITED))
+                .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> server().receiveMessage(WebSocketMessageKind.BINARY, bytes(PREFACE)))
                 .isInstanceOf(IllegalStateException.class);
     }
@@ -3082,13 +3075,13 @@ class EndpointTest {
     @Test
     void closeSentEndsDeferredRequestsImmediatelyAsNotProcessed() {
         Endpoint client = client();
-        client.drainMessages();
+        Drive.drainMessages(client);
         client.request(257, new byte[0]);
         client.request(257, new byte[0]);
 
         client.close(ErrorCode.NO_ERROR);
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(3);
         for (Event event : events.subList(0, 2)) {
             assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
@@ -3102,12 +3095,12 @@ class EndpointTest {
     @Test
     void closeReceivedEndsDeferredRequestsImmediatelyAsNotProcessedBeforeTheAuthGate() {
         Endpoint client = client();
-        client.drainMessages();
+        Drive.drainMessages(client);
         client.request(257, new byte[0]);
 
-        client.receive(bytes(CLOSE_NO_ERROR));
+        Drive.receive(client, bytes(CLOSE_NO_ERROR));
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).streamId()).isZero();
@@ -3118,8 +3111,8 @@ class EndpointTest {
     @Test
     void connectionErrorReturnsUnhandedRequestsAsRefusedBeforeTheClose() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.receive(bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
 
         assertThat(sent(server))
                 .isEqualTo(RESET_REFUSED_1
@@ -3131,7 +3124,7 @@ class EndpointTest {
     @Test
     void errorCloseFromTheApplicationReturnsUnhandedRequestsAsRefusedBeforeTheClose() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
 
         server.close(ErrorCode.INTERNAL_ERROR);
 
@@ -3144,10 +3137,10 @@ class EndpointTest {
     @Test
     void connectionErrorDoesNotRefuseRequestsTheApplicationAlreadyReceived() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
 
-        server.receive(bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
 
         assertClosedWithProtocolError(server, 1);
     }
@@ -3155,12 +3148,12 @@ class EndpointTest {
     @Test
     void onlyUnhandedRequestsAreRefusedAndTheirRequestReceivedEventsAreWithheld() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.receive(bytes(requestFrame(257, 3, "")));
-        List<Event> handed = server.drainEvents();
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 3, "")));
+        List<Event> handed = Drive.drainEvents(server);
         assertThat(handed).hasSize(2);
-        server.receive(bytes(requestFrame(257, 5, "")));
-        server.receive(bytes(requestFrame(257, 7, "")));
+        Drive.receive(server, bytes(requestFrame(257, 5, "")));
+        Drive.receive(server, bytes(requestFrame(257, 7, "")));
 
         server.close(ErrorCode.INTERNAL_ERROR);
 
@@ -3172,12 +3165,12 @@ class EndpointTest {
     @Test
     void abandoningTheWaitWhileClosingReturnsUnhandedRequestsAsRefusedThenCloses() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
-        server.receive(bytes(requestFrame(257, 3, "")));
-        server.drainEvents();
-        server.receive(bytes(requestFrame(257, 5, "")));
-        server.receive(bytes(CLOSE_NO_ERROR));
-        assertThat(server.drainMessages()).isEmpty();
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 3, "")));
+        Drive.drainEvents(server);
+        Drive.receive(server, bytes(requestFrame(257, 5, "")));
+        Drive.receive(server, bytes(CLOSE_NO_ERROR));
+        assertThat(Drive.drainMessages(server)).isEmpty();
 
         server.abortClosing();
 
@@ -3188,11 +3181,11 @@ class EndpointTest {
     @Test
     void abandoningTheWaitDoesNothingUnlessTheConnectionIsClosing() {
         Endpoint server = established();
-        server.receive(bytes(requestFrame(257, 1, "")));
+        Drive.receive(server, bytes(requestFrame(257, 1, "")));
 
         server.abortClosing();
 
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
@@ -3200,13 +3193,13 @@ class EndpointTest {
     void closeLastStreamIdEndsUndrainedRequestsAndTheirFramesAreNeverSent() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
         client.request(257, new byte[0]);
 
-        client.receive(bytes(closeNoErrorLast(1)));
+        Drive.receive(client, bytes(closeNoErrorLast(1)));
 
-        assertThat(client.drainMessages()).isEmpty();
-        List<Event> events = client.drainEvents();
+        assertThat(Drive.drainMessages(client)).isEmpty();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).streamId()).isEqualTo(3);
         assertThat(events.get(0).certainty()).contains(Certainty.NOT_PROCESSED);
@@ -3216,12 +3209,12 @@ class EndpointTest {
     void closeWithLastStreamIdHighBitSetIsMalformedAndClosesSilently() {
         Endpoint client = establishedClient();
         client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(bytes(closeNoErrorLast(0x8000000000000001L)));
+        Drive.receive(client, bytes(closeNoErrorLast(0x8000000000000001L)));
 
-        assertThat(client.drainMessages()).isEmpty();
-        List<Event> events = client.drainEvents();
+        assertThat(Drive.drainMessages(client)).isEmpty();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events.get(0).certainty()).contains(Certainty.UNKNOWN);
         assertThat(events.get(1).kind()).isEqualTo(Event.Kind.CLOSED);
     }
@@ -3229,8 +3222,8 @@ class EndpointTest {
     @Test
     void abandoningTheWaitAfterTheConnectionClosedDoesNothing() {
         Endpoint server = established();
-        server.receive(bytes(CLOSE_NO_ERROR));
-        server.drainEvents();
+        Drive.receive(server, bytes(CLOSE_NO_ERROR));
+        Drive.drainEvents(server);
 
         server.abortClosing();
 
@@ -3277,7 +3270,7 @@ class EndpointTest {
     void nextStreamIdMustBelongToTheRolesNumberSpace() {
         assertThatThrownBy(() -> Endpoint.client(EndpointConfig.defaults().nextStreamId(2)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> Endpoint.server(EndpointConfig.defaults().nextStreamId(1)))
+        assertThatThrownBy(() -> Drive.server(EndpointConfig.defaults().nextStreamId(1)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

@@ -19,7 +19,7 @@ class EndpointWebSocketCloseTest {
         client.receiveMessage(WebSocketMessageKind.BINARY, Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
         client.receiveMessage(WebSocketMessageKind.BINARY, Frames.authAck(OptionalLong.empty()));
         acceptAll(client);
-        client.drainEvents();
+        Drive.drainEvents(client);
         return client;
     }
 
@@ -51,7 +51,7 @@ class EndpointWebSocketCloseTest {
         client.webSocketClosed(1000);
 
         assertThat(client.nextOutput()).isNull();
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(kinds(events)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
         CloseReason reason = events.get(1).closeReason().get();
         assertThat(reason.kind()).isEqualTo(CloseReason.Kind.DISCONNECTED);
@@ -68,7 +68,7 @@ class EndpointWebSocketCloseTest {
 
         client.webSocketClosed(1000);
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(kinds(events)).containsExactly(Event.Kind.RESULT, Event.Kind.RESULT, Event.Kind.CLOSED);
         assertThat(events.get(0).certainty()).hasValue(Certainty.UNKNOWN);
         assertThat(events.get(1).certainty()).hasValue(Certainty.NOT_PROCESSED);
@@ -83,7 +83,7 @@ class EndpointWebSocketCloseTest {
 
         client.webSocketClosed(1000);
 
-        assertThat(kinds(client.drainEvents())).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+        assertThat(kinds(Drive.drainEvents(client))).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
     @Test
@@ -91,11 +91,11 @@ class EndpointWebSocketCloseTest {
         Endpoint client = establishedClient();
         client.close(ErrorCode.NO_ERROR);
         acceptAll(client);
-        client.drainEvents();
+        Drive.drainEvents(client);
 
         client.webSocketClosed(1000);
 
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(client)).isEmpty();
     }
 
     @Test
@@ -116,7 +116,7 @@ class EndpointWebSocketCloseTest {
         client.disconnect();
 
         assertThat(client.nextOutput()).isNull();
-        assertThat(kinds(client.drainEvents())).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+        assertThat(kinds(Drive.drainEvents(client))).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
         assertThat(client.transportClose()).isEqualTo(Endpoint.TransportClose.IMMEDIATE);
     }
 
@@ -156,7 +156,7 @@ class EndpointWebSocketCloseTest {
         acceptAll(client);
         client.close(ErrorCode.PROTOCOL_ERROR);
 
-        assertThat(kinds(client.drainEvents())).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+        assertThat(kinds(Drive.drainEvents(client))).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
     @Test
@@ -167,7 +167,7 @@ class EndpointWebSocketCloseTest {
 
         List<OutboundMessage> sent = acceptAll(client);
         assertThat(sent).extracting(OutboundMessage::kind).contains(OutboundMessage.Kind.WEBSOCKET_CLOSE);
-        assertThat(client.drainEvents()).extracting(Event::kind).contains(Event.Kind.CLOSED);
+        assertThat(Drive.drainEvents(client)).extracting(Event::kind).contains(Event.Kind.CLOSED);
     }
 
     // ---- 종료 지시 ----

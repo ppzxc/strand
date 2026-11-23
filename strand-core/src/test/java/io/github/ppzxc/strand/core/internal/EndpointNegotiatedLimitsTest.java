@@ -23,12 +23,12 @@ class EndpointNegotiatedLimitsTest {
     void afterThePeerHelloThePeerLimitsAreWhatThePeerAdvertised() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().maxConcurrentStreams(7));
         Endpoint server =
-                Endpoint.server(EndpointConfig.defaults().maxFrameSize(20_000).maxConcurrentStreams(3));
-        for (OutboundMessage message : client.drainMessages()) {
-            server.receive(message.bytes());
+                Drive.server(EndpointConfig.defaults().maxFrameSize(20_000).maxConcurrentStreams(3));
+        for (OutboundMessage message : Drive.drainMessages(client)) {
+            Drive.receive(server, message.bytes());
         }
-        for (OutboundMessage message : server.drainMessages()) {
-            client.receive(message.bytes());
+        for (OutboundMessage message : Drive.drainMessages(server)) {
+            Drive.receive(client, message.bytes());
         }
 
         assertThat(client.peerMaxFrameSize()).isEqualTo(20_000);

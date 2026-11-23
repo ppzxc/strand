@@ -48,24 +48,25 @@ class EndpointOutboxOrderTest {
         if (variant == Variant.WEBSOCKET) {
             endpoint.receiveMessage(WebSocketMessageKind.BINARY, bytes);
         } else {
-            endpoint.receive(bytes);
+            Drive.receive(endpoint, bytes);
         }
     }
 
     /** 서버 쪽에서 서문, HELLO 교환, AUTH 통과까지 마친 엔드포인트. 상대가 알린 동시 스트림 수는 규격 기본값이다. */
     private static Endpoint established(Variant variant) {
-        Endpoint server = Endpoint.server(variant.config());
+        Endpoint server =
+                variant == Variant.WEBSOCKET ? Endpoint.server(variant.config()) : Drive.server(variant.config());
         feed(variant, server, Frames.preface());
         feed(variant, server, Frames.hello(EndpointConfig.defaults()));
         feed(variant, server, Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
         feed(variant, server, Frames.auth("ANONYMOUS", new byte[0]));
-        server.drainMessages();
-        server.drainEvents();
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
         return server;
     }
 
     private static void append(StringBuilder trace, Endpoint endpoint) {
-        for (Event event : endpoint.drainEvents()) {
+        for (Event event : Drive.drainEvents(endpoint)) {
             trace.append("event ")
                     .append(event.kind())
                     .append(' ')
@@ -76,7 +77,7 @@ class EndpointOutboxOrderTest {
                     .append(event.type())
                     .append('\n');
         }
-        for (OutboundMessage message : endpoint.drainMessages()) {
+        for (OutboundMessage message : Drive.drainMessages(endpoint)) {
             trace.append("message ")
                     .append(message.kind())
                     .append(' ')
@@ -131,7 +132,7 @@ class EndpointOutboxOrderTest {
                     feed(variant, endpoint, Frames.reset(2L * (1 + random.nextInt(8)), ErrorCode.REFUSED));
                     break;
                 case 8:
-                    endpoint.advance(random.nextInt(80));
+                    Drive.advance(endpoint, random.nextInt(80));
                     break;
                 case 9:
                     feed(variant, endpoint, Frames.control(FrameType.PING, 0, new byte[8]));

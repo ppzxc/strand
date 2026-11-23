@@ -26,8 +26,8 @@ class EndpointWebSocketMessageInputTest {
         server.receiveMessage(WebSocketMessageKind.BINARY, Frames.hello(EndpointConfig.defaults()));
         server.receiveMessage(WebSocketMessageKind.BINARY, Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
         server.receiveMessage(WebSocketMessageKind.BINARY, Frames.auth("ANONYMOUS", new byte[0]));
-        server.drainMessages();
-        server.drainEvents();
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
         return server;
     }
 
@@ -59,14 +59,14 @@ class EndpointWebSocketMessageInputTest {
 
     private static List<Event.Kind> eventKinds(Endpoint endpoint) {
         List<Event.Kind> kinds = new ArrayList<>();
-        for (Event event : endpoint.drainEvents()) {
+        for (Event event : Drive.drainEvents(endpoint)) {
             kinds.add(event.kind());
         }
         return kinds;
     }
 
     private static boolean sentErrorClose(Endpoint endpoint) {
-        for (OutboundMessage message : endpoint.drainMessages()) {
+        for (OutboundMessage message : Drive.drainMessages(endpoint)) {
             byte[] bytes = message.bytes();
             if (message.kind() == OutboundMessage.Kind.BINARY
                     && bytes.length >= Frames.HEADER_SIZE
@@ -86,10 +86,10 @@ class EndpointWebSocketMessageInputTest {
 
         fragment(server, WebSocketMessageKind.BINARY, true, false, Arrays.copyOfRange(request, 0, 5));
         fragment(server, WebSocketMessageKind.BINARY, false, false, Arrays.copyOfRange(request, 5, 21));
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
         fragment(server, WebSocketMessageKind.BINARY, false, true, Arrays.copyOfRange(request, 21, request.length));
 
-        List<Event> events = server.drainEvents();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.REQUEST_RECEIVED);
         assertThat(events.get(0).body()).containsExactly(1, 2, 3);
@@ -115,7 +115,7 @@ class EndpointWebSocketMessageInputTest {
 
         fragment(server, WebSocketMessageKind.BINARY, true, false, new byte[0]);
         fragment(server, WebSocketMessageKind.BINARY, false, false, request);
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
         fragment(server, WebSocketMessageKind.BINARY, false, true, new byte[0]);
 
         assertThat(eventKinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
@@ -179,7 +179,7 @@ class EndpointWebSocketMessageInputTest {
         ReceiveProgress rest = fragment(server, WebSocketMessageKind.TEXT, false, true, request);
 
         assertThat(rest.consumed()).isZero();
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
@@ -189,7 +189,7 @@ class EndpointWebSocketMessageInputTest {
         fragment(server, WebSocketMessageKind.TEXT, true, false, Arrays.copyOf(Frames.preface(), 4));
 
         assertThat(eventKinds(server)).containsExactly(Event.Kind.CLOSED);
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     // ---- 서문 ----
@@ -201,10 +201,10 @@ class EndpointWebSocketMessageInputTest {
 
         fragment(server, WebSocketMessageKind.BINARY, true, false, Arrays.copyOfRange(preface, 0, 3));
         fragment(server, WebSocketMessageKind.BINARY, false, false, Arrays.copyOfRange(preface, 3, 7));
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
         fragment(server, WebSocketMessageKind.BINARY, false, true, Arrays.copyOfRange(preface, 7, 8));
 
-        assertThat(server.drainMessages()).hasSize(1);
+        assertThat(Drive.drainMessages(server)).hasSize(1);
     }
 
     @Test
@@ -214,7 +214,7 @@ class EndpointWebSocketMessageInputTest {
         fragment(server, WebSocketMessageKind.BINARY, true, false, concat(Frames.preface(), new byte[] {0}));
 
         assertThat(eventKinds(server)).containsExactly(Event.Kind.CLOSED);
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     @Test
@@ -223,11 +223,11 @@ class EndpointWebSocketMessageInputTest {
         byte[] preface = Frames.preface();
 
         fragment(server, WebSocketMessageKind.BINARY, true, false, Arrays.copyOfRange(preface, 0, 4));
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
         fragment(server, WebSocketMessageKind.BINARY, false, true, Arrays.copyOfRange(preface, 4, 7));
 
         assertThat(eventKinds(server)).containsExactly(Event.Kind.CLOSED);
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     // ---- 과대 입력과 유한 조립 공간 ----
@@ -299,14 +299,14 @@ class EndpointWebSocketMessageInputTest {
         assertThat(started.consumed()).isZero();
         assertThat(server.messageAssemblyLength()).isZero();
 
-        assertThat(server.drainEvents()).hasSize(1);
+        assertThat(Drive.drainEvents(server)).hasSize(1);
         started = server.receiveMessageFragment(WebSocketMessageKind.BINARY, true, false, head, 0, head.length, space);
         assertThat(started.consumed()).isEqualTo(head.length);
         ReceiveProgress finished =
                 server.receiveMessageFragment(WebSocketMessageKind.BINARY, false, true, tail, 0, tail.length, space);
         assertThat(finished.consumed()).isEqualTo(tail.length);
 
-        List<Event> events = server.drainEvents();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).streamId()).isEqualTo(3);
     }
@@ -345,7 +345,7 @@ class EndpointWebSocketMessageInputTest {
 
         assertThatIllegalStateException()
                 .isThrownBy(() -> fragment(server, WebSocketMessageKind.BINARY, false, true, new byte[] {1}));
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test
@@ -384,7 +384,6 @@ class EndpointWebSocketMessageInputTest {
 
         assertThatIllegalStateException()
                 .isThrownBy(() -> fragment(stream, WebSocketMessageKind.BINARY, true, true, Frames.preface()));
-        assertThatIllegalStateException().isThrownBy(() -> establishedServer().receive(Frames.preface()));
         assertThatIllegalStateException()
                 .isThrownBy(
                         () -> establishedServer().receiveBounded(Frames.preface(), 0, 8, 1, CollectionSpace.UNLIMITED));
@@ -394,13 +393,13 @@ class EndpointWebSocketMessageInputTest {
     void anEndedConnectionConsumesNothingAndIgnoresFragments() {
         Endpoint server = establishedServer();
         server.disconnect();
-        server.drainEvents();
+        Drive.drainEvents(server);
 
         ReceiveProgress progress = fragment(server, WebSocketMessageKind.BINARY, true, true, Frames.preface());
 
         assertThat(progress.consumed()).isZero();
         assertThat(progress.collectionRequired()).isFalse();
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
     }
 
     @Test

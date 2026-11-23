@@ -29,23 +29,23 @@ class EndpointEndedConnectionTest {
 
     private static Endpoint openClient() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        client.receive(bytes(HELLO));
-        client.receive(bytes(HELLO_ACK));
-        client.receive(bytes(AUTH_ACK));
+        Drive.receive(client, bytes(HELLO));
+        Drive.receive(client, bytes(HELLO_ACK));
+        Drive.receive(client, bytes(AUTH_ACK));
         return client;
     }
 
     private static Endpoint serverAwaitingAuth(EndpointConfig config) {
-        Endpoint server = Endpoint.server(config);
-        server.receive(bytes(PREFACE));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
+        Endpoint server = Drive.server(config);
+        Drive.receive(server, bytes(PREFACE));
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
         return server;
     }
 
     private static Endpoint openServer(EndpointConfig config) {
         Endpoint server = serverAwaitingAuth(config);
-        server.receive(bytes(AUTH_ANONYMOUS));
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
         return server;
     }
 
@@ -62,8 +62,8 @@ class EndpointEndedConnectionTest {
     }
 
     private static Endpoint settle(Endpoint endpoint) {
-        endpoint.drainMessages();
-        endpoint.drainEvents();
+        Drive.drainMessages(endpoint);
+        Drive.drainEvents(endpoint);
         return endpoint;
     }
 
@@ -74,8 +74,8 @@ class EndpointEndedConnectionTest {
         beforeHello.disconnect();
         ended.put("연결 직후 끊김", beforeHello);
         Endpoint beforeAuth = Endpoint.client(EndpointConfig.defaults());
-        beforeAuth.receive(bytes(HELLO));
-        beforeAuth.receive(bytes(HELLO_ACK));
+        Drive.receive(beforeAuth, bytes(HELLO));
+        Drive.receive(beforeAuth, bytes(HELLO_ACK));
         beforeAuth.disconnect();
         ended.put("AUTH 관문 전 끊김", beforeAuth);
         Endpoint disconnected = openClient();
@@ -88,7 +88,7 @@ class EndpointEndedConnectionTest {
         normallyClosed.close(ErrorCode.NO_ERROR);
         ended.put("NO_ERROR CLOSE로 닫음", normallyClosed);
         Endpoint badFrame = openClient();
-        badFrame.receive(bytes("0000000f0004" + "00000000000000000000000000"));
+        Drive.receive(badFrame, bytes("0000000f0004" + "00000000000000000000000000"));
         ended.put("연결 오류로 닫음", badFrame);
         return ended;
     }
@@ -105,15 +105,15 @@ class EndpointEndedConnectionTest {
         ended.put("서버 AUTH 대기 중 오류 CLOSE로 닫음", authExpiryPending);
         EndpointConfig idle = EndpointConfig.defaults().ackTimeoutMs(1000).idleIntervalMs(500);
         Endpoint pingOutstanding = openServer(idle);
-        pingOutstanding.advance(600);
+        Drive.advance(pingOutstanding, 600);
         pingOutstanding.disconnect();
         ended.put("서버 PING 확인 대기 중 끊김", pingOutstanding);
         Endpoint pingOutstandingClosed = openServer(idle);
-        pingOutstandingClosed.advance(600);
+        Drive.advance(pingOutstandingClosed, 600);
         pingOutstandingClosed.close(ErrorCode.NO_ERROR);
         ended.put("서버 PING 확인 대기 중 NO_ERROR CLOSE로 닫음", pingOutstandingClosed);
         Endpoint pendingResponse = openServer();
-        pendingResponse.receive(Frames.request(257, 1, new byte[0]));
+        Drive.receive(pendingResponse, Frames.request(257, 1, new byte[0]));
         pendingResponse.disconnect();
         ended.put("서버 응답 대기 중 끊김", pendingResponse);
         return ended;
@@ -137,17 +137,18 @@ class EndpointEndedConnectionTest {
     }
 
     private static void assertSilent(Endpoint endpoint) {
-        assertThat(endpoint.drainMessages()).isEmpty();
-        assertThat(endpoint.drainEvents()).isEmpty();
+        assertThat(Drive.drainMessages(endpoint)).isEmpty();
+        assertThat(Drive.drainEvents(endpoint)).isEmpty();
     }
 
     @Test
     void receivedBytesAreIgnored() {
         forEachEnded(endpoint -> {
-            endpoint.receive(bytes(PREFACE));
-            endpoint.receive(bytes("0000000f0004"));
-            endpoint.receive(bytes("ffffffff"));
-            endpoint.receive(bytes("0000001c00030000000000000000000000000000" + "00000001" + "0000000000000000"));
+            Drive.receive(endpoint, bytes(PREFACE));
+            Drive.receive(endpoint, bytes("0000000f0004"));
+            Drive.receive(endpoint, bytes("ffffffff"));
+            Drive.receive(
+                    endpoint, bytes("0000001c00030000000000000000000000000000" + "00000001" + "0000000000000000"));
             assertSilent(endpoint);
         });
     }
@@ -168,8 +169,8 @@ class EndpointEndedConnectionTest {
     @Test
     void clockAdvanceIsIgnored() {
         forEachEnded(endpoint -> {
-            endpoint.advance(1_000_000);
-            endpoint.advance(1_000_000);
+            Drive.advance(endpoint, 1_000_000);
+            Drive.advance(endpoint, 1_000_000);
             assertSilent(endpoint);
         });
     }
@@ -181,8 +182,8 @@ class EndpointEndedConnectionTest {
             long second = endpoint.request(257, new byte[0], 100);
 
             assertThat(second).isEqualTo(first + 1);
-            assertThat(endpoint.drainMessages()).isEmpty();
-            List<Event> events = endpoint.drainEvents();
+            assertThat(Drive.drainMessages(endpoint)).isEmpty();
+            List<Event> events = Drive.drainEvents(endpoint);
             assertThat(events).hasSize(2);
             for (Event event : events) {
                 assertThat(event.kind()).isEqualTo(Event.Kind.RESULT);
@@ -203,8 +204,8 @@ class EndpointEndedConnectionTest {
 
         ended.request(257, new byte[20_000]);
 
-        assertThat(ended.drainMessages()).isEmpty();
-        assertThat(ended.drainEvents()).hasSize(1);
+        assertThat(Drive.drainMessages(ended)).isEmpty();
+        assertThat(Drive.drainEvents(ended)).hasSize(1);
     }
 
     @Test
@@ -222,10 +223,10 @@ class EndpointEndedConnectionTest {
     void requestsPendingBeforeTheEndAreNotCancelledAgain() {
         Endpoint client = openClient();
         long numbered = client.request(257, new byte[0]);
-        client.drainMessages();
-        client.drainEvents();
+        Drive.drainMessages(client);
+        Drive.drainEvents(client);
         client.disconnect();
-        client.drainEvents();
+        Drive.drainEvents(client);
 
         client.cancelRequest(numbered);
         client.cancel(1);
@@ -236,7 +237,7 @@ class EndpointEndedConnectionTest {
     @Test
     void respondingToAPeerRequestIsIgnored() {
         Endpoint server = openServer();
-        server.receive(Frames.request(257, 1, new byte[0]));
+        Drive.receive(server, Frames.request(257, 1, new byte[0]));
         settle(server);
         server.disconnect();
         settle(server);
@@ -251,7 +252,7 @@ class EndpointEndedConnectionTest {
     void pingIsIgnored() {
         forEachEnded(endpoint -> {
             endpoint.ping(PING_PAYLOAD);
-            endpoint.advance(1_000_000);
+            Drive.advance(endpoint, 1_000_000);
             assertSilent(endpoint);
         });
     }
@@ -286,7 +287,7 @@ class EndpointEndedConnectionTest {
         List<Endpoint> ended = new ArrayList<>(endedEndpoints().values());
         for (Endpoint endpoint : ended) {
             endpoint.request(257, new byte[0]);
-            endpoint.drainEvents();
+            Drive.drainEvents(endpoint);
             endpoint.close(ErrorCode.NO_ERROR);
             endpoint.abortClosing();
             endpoint.disconnect();
@@ -297,17 +298,17 @@ class EndpointEndedConnectionTest {
     /** 인증 콜백 안에서 {@code onCallback}이 연결을 끝내도록 한 서버로 AUTH를 받게 하고, 그 서버를 돌려준다. */
     private static Endpoint serverEndedInsideAuthCallback(AuthAction onCallback) {
         AtomicReference<Endpoint> self = new AtomicReference<>();
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+        Endpoint server = Drive.server(EndpointConfig.defaults(), (mechanism, credentials) -> {
             self.get().disconnect();
             return onCallback.decide();
-        }));
+        });
         self.set(server);
-        server.receive(bytes(PREFACE));
-        server.receive(bytes(HELLO));
-        server.receive(bytes(HELLO_ACK));
-        server.drainMessages();
-        server.drainEvents();
-        server.receive(bytes(AUTH_ANONYMOUS));
+        Drive.receive(server, bytes(PREFACE));
+        Drive.receive(server, bytes(HELLO));
+        Drive.receive(server, bytes(HELLO_ACK));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
+        Drive.receive(server, bytes(AUTH_ANONYMOUS));
         return server;
     }
 
@@ -321,8 +322,8 @@ class EndpointEndedConnectionTest {
         for (AuthDecision decision : AuthDecision.values()) {
             Endpoint server = serverEndedInsideAuthCallback(() -> decision);
 
-            assertThat(server.drainMessages()).as(decision.name()).isEmpty();
-            assertThat(server.drainEvents())
+            assertThat(Drive.drainMessages(server)).as(decision.name()).isEmpty();
+            assertThat(Drive.drainEvents(server))
                     .as(decision.name())
                     .extracting(Event::kind)
                     .containsExactly(Event.Kind.CLOSED);
@@ -335,8 +336,8 @@ class EndpointEndedConnectionTest {
             throw new IllegalStateException("late");
         });
 
-        assertThat(server.drainMessages()).isEmpty();
-        List<Event> events = server.drainEvents();
+        assertThat(Drive.drainMessages(server)).isEmpty();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
         assertThat(events.get(0).cause()).isEmpty();
     }
@@ -346,21 +347,21 @@ class EndpointEndedConnectionTest {
         // AUTH 단계에는 대기 중인 스트림이 없어, 콜백 안의 CLOSE는 곧바로 연결을 끝낸다. "닫는 중이지만 안 끝난" 상태는 생기지 않는다.
         for (int code : new int[] {ErrorCode.NO_ERROR, ErrorCode.PROTOCOL_ERROR}) {
             AtomicReference<Endpoint> self = new AtomicReference<>();
-            Endpoint server = Endpoint.server(EndpointConfig.defaults().authenticator((mechanism, credentials) -> {
+            Endpoint server = Drive.server(EndpointConfig.defaults(), (mechanism, credentials) -> {
                 self.get().close(code);
                 return AuthDecision.PASS;
-            }));
+            });
             self.set(server);
-            server.receive(bytes(PREFACE));
-            server.receive(bytes(HELLO));
-            server.receive(bytes(HELLO_ACK));
-            server.drainMessages();
-            server.drainEvents();
+            Drive.receive(server, bytes(PREFACE));
+            Drive.receive(server, bytes(HELLO));
+            Drive.receive(server, bytes(HELLO_ACK));
+            Drive.drainMessages(server);
+            Drive.drainEvents(server);
 
-            server.receive(bytes(AUTH_ANONYMOUS));
+            Drive.receive(server, bytes(AUTH_ANONYMOUS));
 
-            assertThat(server.drainMessages()).as("code " + code).hasSize(1); // CLOSE 하나뿐, AUTH ACK 없음
-            assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+            assertThat(Drive.drainMessages(server)).as("code " + code).hasSize(1); // CLOSE 하나뿐, AUTH ACK 없음
+            assertThat(Drive.drainEvents(server)).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
         }
     }
 
@@ -368,7 +369,7 @@ class EndpointEndedConnectionTest {
     void endingClearsAWrittenRequestFromTheLedger() {
         Endpoint client = settle(openClient());
         long written = client.request(257, new byte[0]);
-        client.drainMessages();
+        Drive.drainMessages(client);
         assertThat(client.openStreamCount()).isEqualTo(1);
         assertThat(client.requestState(written)).isNotNull();
         client.disconnect();
@@ -400,17 +401,17 @@ class EndpointEndedConnectionTest {
     @Test
     void endingClearsThePeerPendingStreamsWithoutRefusingThem() {
         Endpoint server = settle(openServer());
-        server.receive(Frames.request(257, 1, new byte[0]));
-        server.receive(Frames.request(257, 3, new byte[0]));
-        server.drainEvents();
-        server.receive(Frames.request(257, 5, new byte[0]));
+        Drive.receive(server, Frames.request(257, 1, new byte[0]));
+        Drive.receive(server, Frames.request(257, 3, new byte[0]));
+        Drive.drainEvents(server);
+        Drive.receive(server, Frames.request(257, 5, new byte[0]));
         // 끝나기 전에는 대기 스트림이 있어 응답이 나간다.
         server.respond(1, 0, new byte[] {1});
-        assertThat(server.drainMessages()).hasSize(1);
+        assertThat(Drive.drainMessages(server)).hasSize(1);
         server.disconnect();
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
         // 끊김은 돌려보내지 않으므로 꺼내지 않은 요청 5의 이벤트가 그대로 남고, 뒤에 CLOSED가 온다.
-        assertThat(server.drainEvents())
+        assertThat(Drive.drainEvents(server))
                 .extracting(Event::kind)
                 .containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.CLOSED);
 

@@ -20,15 +20,15 @@ class EndpointResultTicketBodyTest {
 
     private static Endpoint client(EndpointConfig peerConfig) {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        client.receive(Frames.hello(peerConfig));
-        client.receive(Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
+        Drive.receive(client, Frames.hello(peerConfig));
+        Drive.receive(client, Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
         return client;
     }
 
     private static void passAuthGate(Endpoint client) {
-        client.receive(Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
-        client.drainMessages();
-        client.drainEvents();
+        Drive.receive(client, Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
+        Drive.drainMessages(client);
+        Drive.drainEvents(client);
     }
 
     private static Endpoint establishedClient() {
@@ -38,31 +38,31 @@ class EndpointResultTicketBodyTest {
     }
 
     private static Endpoint establishedServer() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().knownTypes(Collections.singleton(REQUEST_TYPE)));
-        server.receive(Frames.preface());
-        server.receive(Frames.hello(EndpointConfig.defaults()));
-        server.receive(Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
-        server.receive(Frames.auth("ANONYMOUS", NO_BYTES));
-        server.drainMessages();
-        server.drainEvents();
+        Endpoint server = Drive.server(EndpointConfig.defaults().knownTypes(Collections.singleton(REQUEST_TYPE)));
+        Drive.receive(server, Frames.preface());
+        Drive.receive(server, Frames.hello(EndpointConfig.defaults()));
+        Drive.receive(server, Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
+        Drive.receive(server, Frames.auth("ANONYMOUS", NO_BYTES));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
         return server;
     }
 
     private static Event onlyResult(Endpoint endpoint) {
-        List<Event> events = endpoint.drainEvents();
+        List<Event> events = Drive.drainEvents(endpoint);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         return events.get(0);
     }
 
     private static long sentStreamId(Endpoint endpoint) {
-        List<OutboundMessage> messages = endpoint.drainMessages();
+        List<OutboundMessage> messages = Drive.drainMessages(endpoint);
         assertThat(messages).hasSize(1);
         return Frames.streamIdOf(messages.get(0).bytes(), 0);
     }
 
     private static Event resultAfterAuthenticated(Endpoint client) {
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(2);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.AUTHENTICATED);
         assertThat(events.get(1).kind()).isEqualTo(Event.Kind.RESULT);
@@ -76,10 +76,10 @@ class EndpointResultTicketBodyTest {
         Endpoint client = establishedClient();
         client.request(REQUEST_TYPE, NO_BYTES);
         long second = client.request(REQUEST_TYPE, NO_BYTES);
-        List<OutboundMessage> sent = client.drainMessages();
+        List<OutboundMessage> sent = Drive.drainMessages(client);
         long secondStream = Frames.streamIdOf(sent.get(1).bytes(), 0);
 
-        client.receive(Frames.response(REQUEST_TYPE, secondStream, OK, NO_BYTES));
+        Drive.receive(client, Frames.response(REQUEST_TYPE, secondStream, OK, NO_BYTES));
 
         assertThat(onlyResult(client).ticket()).isEqualTo(OptionalLong.of(second));
     }
@@ -89,9 +89,9 @@ class EndpointResultTicketBodyTest {
         Endpoint client = establishedClient();
         client.request(REQUEST_TYPE, NO_BYTES);
         long ticket = client.request(REQUEST_TYPE, NO_BYTES, 100);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.advance(101);
+        Drive.advance(client, 101);
 
         assertThat(onlyResult(client).ticket()).isEqualTo(OptionalLong.of(ticket));
     }
@@ -101,11 +101,11 @@ class EndpointResultTicketBodyTest {
         Endpoint client = establishedClient();
         long byTicket = client.request(REQUEST_TYPE, NO_BYTES);
         long byStream = client.request(REQUEST_TYPE, NO_BYTES);
-        List<OutboundMessage> sent = client.drainMessages();
+        List<OutboundMessage> sent = Drive.drainMessages(client);
 
         client.cancelRequest(byTicket);
         assertThat(onlyResult(client).ticket()).isEqualTo(OptionalLong.of(byTicket));
-        client.drainMessages();
+        Drive.drainMessages(client);
         client.cancel(Frames.streamIdOf(sent.get(1).bytes(), 0));
         assertThat(onlyResult(client).ticket()).isEqualTo(OptionalLong.of(byStream));
     }
@@ -116,7 +116,7 @@ class EndpointResultTicketBodyTest {
         long ticket = client.request(REQUEST_TYPE, NO_BYTES);
         long stream = sentStreamId(client);
 
-        client.receive(Frames.reset(stream, ErrorCode.REFUSED));
+        Drive.receive(client, Frames.reset(stream, ErrorCode.REFUSED));
 
         assertThat(onlyResult(client).ticket()).isEqualTo(OptionalLong.of(ticket));
     }
@@ -125,12 +125,12 @@ class EndpointResultTicketBodyTest {
     void resultsOfRequestsEndedByTheConnectionBreakingCarryTheirTickets() {
         Endpoint client = establishedClient();
         long first = client.request(REQUEST_TYPE, NO_BYTES);
-        client.drainMessages();
+        Drive.drainMessages(client);
         long second = client.request(REQUEST_TYPE, NO_BYTES);
 
         client.disconnect();
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events.get(0).ticket()).isEqualTo(OptionalLong.of(first));
         assertThat(events.get(1).ticket()).isEqualTo(OptionalLong.of(second));
         assertThat(events.get(2).kind()).isEqualTo(Event.Kind.CLOSED);
@@ -140,11 +140,11 @@ class EndpointResultTicketBodyTest {
     void resultOfARequestEndedByCloseAfterLastStreamIdCarriesItsTicket() {
         Endpoint client = establishedClient();
         long ticket = client.request(REQUEST_TYPE, NO_BYTES);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
-        client.receive(Frames.close(ErrorCode.NO_ERROR, 0));
+        Drive.receive(client, Frames.close(ErrorCode.NO_ERROR, 0));
 
-        Event result = client.drainEvents().get(0);
+        Event result = Drive.drainEvents(client).get(0);
         assertThat(result.kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(result.ticket()).isEqualTo(OptionalLong.of(ticket));
     }
@@ -157,7 +157,7 @@ class EndpointResultTicketBodyTest {
 
         client.disconnect();
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events.get(0).ticket()).isEqualTo(OptionalLong.of(first));
         assertThat(events.get(1).ticket()).isEqualTo(OptionalLong.of(second));
     }
@@ -170,7 +170,7 @@ class EndpointResultTicketBodyTest {
 
         client.cancelRequest(cancelled);
         assertThat(onlyResult(client).ticket()).isEqualTo(OptionalLong.of(cancelled));
-        client.advance(101);
+        Drive.advance(client, 101);
         assertThat(onlyResult(client).ticket()).isEqualTo(OptionalLong.of(expiring));
     }
 
@@ -182,7 +182,7 @@ class EndpointResultTicketBodyTest {
 
         client.close(ErrorCode.NO_ERROR);
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events.get(0).ticket()).isEqualTo(OptionalLong.of(first));
         assertThat(events.get(1).ticket()).isEqualTo(OptionalLong.of(second));
     }
@@ -192,7 +192,7 @@ class EndpointResultTicketBodyTest {
         Endpoint client = client(EndpointConfig.defaults().maxFrameSize(16384));
         long ticket = client.request(REQUEST_TYPE, new byte[20000]);
 
-        client.receive(Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
+        Drive.receive(client, Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
 
         Event result = resultAfterAuthenticated(client);
         assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);
@@ -205,7 +205,7 @@ class EndpointResultTicketBodyTest {
         client.request(REQUEST_TYPE, NO_BYTES);
         long second = client.request(REQUEST_TYPE, NO_BYTES);
 
-        client.receive(Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
+        Drive.receive(client, Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
 
         assertThat(resultAfterAuthenticated(client).ticket()).isEqualTo(OptionalLong.of(second));
     }
@@ -214,7 +214,7 @@ class EndpointResultTicketBodyTest {
     void resultOfARequestRefusedLocallyBecauseTheConnectionIsClosingCarriesItsTicket() {
         Endpoint client = establishedClient();
         client.close(ErrorCode.NO_ERROR);
-        client.drainEvents();
+        Drive.drainEvents(client);
 
         long ticket = client.request(REQUEST_TYPE, NO_BYTES);
 
@@ -227,7 +227,7 @@ class EndpointResultTicketBodyTest {
     void resultOfARequestRefusedLocallyBecauseTheConnectionEndedCarriesItsTicket() {
         Endpoint client = establishedClient();
         client.disconnect();
-        client.drainEvents();
+        Drive.drainEvents(client);
 
         long ticket = client.request(REQUEST_TYPE, NO_BYTES);
 
@@ -237,15 +237,15 @@ class EndpointResultTicketBodyTest {
     @Test
     void resultOfARequestRefusedLocallyBecauseStreamNumbersAreExhaustedCarriesItsTicket() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
-        client.receive(Frames.hello(EndpointConfig.defaults()));
-        client.receive(Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
+        Drive.receive(client, Frames.hello(EndpointConfig.defaults()));
+        Drive.receive(client, Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
         passAuthGate(client);
         client.request(REQUEST_TYPE, NO_BYTES);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         long ticket = client.request(REQUEST_TYPE, NO_BYTES);
 
-        Event result = client.drainEvents().get(0);
+        Event result = Drive.drainEvents(client).get(0);
         assertThat(result.kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(result.ticket()).isEqualTo(OptionalLong.of(ticket));
     }
@@ -255,7 +255,7 @@ class EndpointResultTicketBodyTest {
         Endpoint client = client(EndpointConfig.defaults().maxConcurrentStreams(1));
         passAuthGate(client);
         client.request(REQUEST_TYPE, NO_BYTES);
-        client.drainMessages();
+        Drive.drainMessages(client);
 
         long ticket = client.request(REQUEST_TYPE, NO_BYTES);
 
@@ -267,10 +267,10 @@ class EndpointResultTicketBodyTest {
     @Test
     void eventsOtherThanResultHaveNoTicket() {
         Endpoint server = establishedServer();
-        server.receive(Frames.request(REQUEST_TYPE, 1, NO_BYTES));
+        Drive.receive(server, Frames.request(REQUEST_TYPE, 1, NO_BYTES));
         server.disconnect();
 
-        List<Event> events = server.drainEvents();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).hasSize(2);
         for (Event event : events) {
             assertThat(event.ticket()).isEmpty();
@@ -285,7 +285,7 @@ class EndpointResultTicketBodyTest {
         client.request(REQUEST_TYPE, NO_BYTES);
         long stream = sentStreamId(client);
 
-        client.receive(Frames.response(REQUEST_TYPE, stream, OK, new byte[] {1, 2, 3}));
+        Drive.receive(client, Frames.response(REQUEST_TYPE, stream, OK, new byte[] {1, 2, 3}));
 
         assertThat(onlyResult(client).body()).containsExactly(1, 2, 3);
     }
@@ -297,7 +297,8 @@ class EndpointResultTicketBodyTest {
         long stream = sentStreamId(client);
         byte[] unknownExtension = {0x70, 0x00, 0, 4, 0, 0, 0, 9};
 
-        client.receive(withExtensions(Frames.response(REQUEST_TYPE, stream, OK, new byte[] {5, 6}), unknownExtension));
+        Drive.receive(
+                client, withExtensions(Frames.response(REQUEST_TYPE, stream, OK, new byte[] {5, 6}), unknownExtension));
 
         assertThat(onlyResult(client).body()).containsExactly(5, 6);
     }
@@ -327,9 +328,9 @@ class EndpointResultTicketBodyTest {
     void requestBodyIsReadableFromTheReceivedRequestEvent() {
         Endpoint server = establishedServer();
 
-        server.receive(Frames.request(REQUEST_TYPE, 1, new byte[] {9, 8, 7}));
+        Drive.receive(server, Frames.request(REQUEST_TYPE, 1, new byte[] {9, 8, 7}));
 
-        List<Event> events = server.drainEvents();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.REQUEST_RECEIVED);
         assertThat(events.get(0).body()).containsExactly(9, 8, 7);
@@ -338,8 +339,8 @@ class EndpointResultTicketBodyTest {
     @Test
     void changingTheReturnedBodyDoesNotChangeTheEvent() {
         Endpoint server = establishedServer();
-        server.receive(Frames.request(REQUEST_TYPE, 1, new byte[] {9, 8, 7}));
-        Event event = server.drainEvents().get(0);
+        Drive.receive(server, Frames.request(REQUEST_TYPE, 1, new byte[] {9, 8, 7}));
+        Event event = Drive.drainEvents(server).get(0);
 
         event.body()[0] = 0;
 
@@ -350,11 +351,11 @@ class EndpointResultTicketBodyTest {
     void reusingTheInputBufferAfterReceiveDoesNotChangeTheBody() {
         Endpoint server = establishedServer();
         byte[] frame = Frames.request(REQUEST_TYPE, 1, new byte[] {9, 8, 7});
-        server.receive(frame);
+        Drive.receive(server, frame);
 
         Arrays.fill(frame, (byte) 0);
 
-        assertThat(server.drainEvents().get(0).body()).containsExactly(9, 8, 7);
+        assertThat(Drive.drainEvents(server).get(0).body()).containsExactly(9, 8, 7);
     }
 
     @Test
@@ -363,7 +364,7 @@ class EndpointResultTicketBodyTest {
         client.request(REQUEST_TYPE, NO_BYTES);
         long stream = sentStreamId(client);
 
-        client.receive(Frames.response(REQUEST_TYPE + 1, stream, OK, new byte[] {1, 2, 3}));
+        Drive.receive(client, Frames.response(REQUEST_TYPE + 1, stream, OK, new byte[] {1, 2, 3}));
 
         Event result = onlyResult(client);
         assertThat(result.status()).isEqualTo(Status.INTERNAL);
@@ -376,7 +377,7 @@ class EndpointResultTicketBodyTest {
         client.request(REQUEST_TYPE, NO_BYTES);
         long stream = sentStreamId(client);
 
-        client.receive(Frames.response(REQUEST_TYPE, stream, OK, NO_BYTES));
+        Drive.receive(client, Frames.response(REQUEST_TYPE, stream, OK, NO_BYTES));
 
         assertThat(onlyResult(client).body()).isEmpty();
     }
@@ -388,11 +389,11 @@ class EndpointResultTicketBodyTest {
         client.request(REQUEST_TYPE, new byte[] {2}, 100);
         client.request(REQUEST_TYPE, new byte[] {3});
         client.cancelRequest(cancelled);
-        client.advance(101);
+        Drive.advance(client, 101);
         client.disconnect();
         client.request(REQUEST_TYPE, new byte[] {4});
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(5);
         for (Event event : events) {
             assertThat(event.body()).isEmpty();
@@ -402,10 +403,10 @@ class EndpointResultTicketBodyTest {
     @Test
     void closedAndAuthenticatedEventsHaveAnEmptyBody() {
         Endpoint client = client(EndpointConfig.defaults());
-        client.receive(Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
+        Drive.receive(client, Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
         client.disconnect();
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(2);
         for (Event event : events) {
             assertThat(event.body()).isEmpty();

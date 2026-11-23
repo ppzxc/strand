@@ -45,9 +45,13 @@ public class DeadlineExpiryBenchmark {
         public int pending;
 
         Endpoint endpoint;
+        final BenchSupport.Clock clock = new BenchSupport.Clock();
 
         void build(int extraStreams) {
-            EndpointConfig config = EndpointConfig.defaults().maxConcurrentStreams(pending + extraStreams);
+            // 유휴 PING을 끈다. 쓰기를 한 번도 하지 않은 채 시계만 밀면 넘기지 못한 유휴 PING이 확인 대기를 넘겨 연결이 닫힌다.
+            EndpointConfig config = EndpointConfig.defaults()
+                    .maxConcurrentStreams(pending + extraStreams)
+                    .idleIntervalMs(0);
             endpoint = unnumbered ? Endpoint.client(config) : BenchSupport.establish(config)[0];
             for (int i = 0; i < pending; i++) {
                 endpoint.request(BenchSupport.REQUEST_TYPE, EMPTY, FAR_DEADLINE_MS);
@@ -56,7 +60,7 @@ public class DeadlineExpiryBenchmark {
         }
 
         void requireNoEvents() {
-            List<Event> events = endpoint.drainEvents();
+            List<Event> events = BenchSupport.drainEvents(endpoint);
             if (!events.isEmpty()) {
                 throw new IllegalStateException("이벤트가 없어야 하는데 " + events.size() + "건이다: "
                         + events.get(0).kind());
@@ -93,7 +97,7 @@ public class DeadlineExpiryBenchmark {
     @Benchmark
     public void advanceWithoutExpiry(ForAdvance state) {
         for (int i = 0; i < ADVANCES; i++) {
-            state.endpoint.advance(1);
+            state.clock.advance(state.endpoint, 1);
         }
     }
 
@@ -107,8 +111,8 @@ public class DeadlineExpiryBenchmark {
         for (int i = 0; i < state.expiring; i++) {
             endpoint.request(BenchSupport.REQUEST_TYPE, EMPTY, 1);
         }
-        endpoint.advance(2);
-        List<Event> events = endpoint.drainEvents(); // 호출당 O(expiring)이다.
+        state.clock.advance(endpoint, 2);
+        List<Event> events = BenchSupport.drainEvents(endpoint); // 호출당 O(expiring)이다.
         if (events.size() != state.expiring) {
             throw new IllegalStateException("만료 이벤트가 " + state.expiring + "건이어야 하는데 " + events.size() + "건이다");
         }

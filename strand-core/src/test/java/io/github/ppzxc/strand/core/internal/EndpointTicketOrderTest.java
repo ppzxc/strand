@@ -36,7 +36,7 @@ class EndpointTicketOrderTest {
     /** 꺼낸 요청 프레임의 스트림 번호를 {@code sentStreams}에 모은다. 상대가 응답하거나 RESET할 수 있는 번호다. */
     private static void append(StringBuilder trace, Endpoint endpoint, List<Long> tickets, List<Long> sentStreams) {
         states(trace, endpoint, tickets);
-        for (Event event : endpoint.drainEvents()) {
+        for (Event event : Drive.drainEvents(endpoint)) {
             trace.append("event ")
                     .append(event.kind())
                     .append(' ')
@@ -47,7 +47,7 @@ class EndpointTicketOrderTest {
                     .append(event.certainty())
                     .append('\n');
         }
-        for (OutboundMessage message : endpoint.drainMessages()) {
+        for (OutboundMessage message : Drive.drainMessages(endpoint)) {
             trace.append("message ")
                     .append(message.kind())
                     .append(' ')
@@ -68,9 +68,9 @@ class EndpointTicketOrderTest {
     private static String scenario(long seed) {
         Random random = new Random(seed);
         Endpoint endpoint = Endpoint.client(EndpointConfig.defaults());
-        endpoint.receive(Frames.hello(EndpointConfig.defaults()));
-        endpoint.receive(Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
-        endpoint.drainMessages();
+        Drive.receive(endpoint, Frames.hello(EndpointConfig.defaults()));
+        Drive.receive(endpoint, Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
+        Drive.drainMessages(endpoint);
         // 이 걸음에서 AUTH 관문을 통과한다. 그 전의 요청은 번호 없는 대기열에 있다.
         int authAtStep = random.nextInt(OPERATIONS);
         // 이 걸음에서 시계를 크게 밀어 여럿을 만료시키고 곧바로 닫는다(만료 중 닫힘 경로).
@@ -80,10 +80,10 @@ class EndpointTicketOrderTest {
         List<Long> sentStreams = new ArrayList<>();
         for (int step = 0; step < OPERATIONS; step++) {
             if (step == authAtStep) {
-                endpoint.receive(Frames.control(FrameType.AUTH, Flags.ACK, new byte[0]));
+                Drive.receive(endpoint, Frames.control(FrameType.AUTH, Flags.ACK, new byte[0]));
             }
             if (step == expireAndCloseAtStep) {
-                endpoint.advance(70);
+                Drive.advance(endpoint, 70);
                 endpoint.close(random.nextBoolean() ? ErrorCode.NO_ERROR : ErrorCode.PROTOCOL_ERROR);
             }
             switch (random.nextInt(13)) {
@@ -105,11 +105,12 @@ class EndpointTicketOrderTest {
                     break;
                 case 6:
                     if (!sentStreams.isEmpty()) {
-                        endpoint.receive(Frames.response(REQUEST_TYPE, streamOf(random, sentStreams), 0, new byte[0]));
+                        Drive.receive(
+                                endpoint, Frames.response(REQUEST_TYPE, streamOf(random, sentStreams), 0, new byte[0]));
                     }
                     break;
                 case 7:
-                    endpoint.advance(random.nextInt(random.nextBoolean() ? 20 : 150));
+                    Drive.advance(endpoint, random.nextInt(random.nextBoolean() ? 20 : 150));
                     break;
                 case 8:
                 case 11:
@@ -117,7 +118,7 @@ class EndpointTicketOrderTest {
                     break;
                 case 9:
                     // 상대 CLOSE: last_stream_id보다 큰 번호의 내 요청이 로컬 UNAVAILABLE로 끝난다.
-                    endpoint.receive(Frames.close(ErrorCode.NO_ERROR, streamOf(random, sentStreams)));
+                    Drive.receive(endpoint, Frames.close(ErrorCode.NO_ERROR, streamOf(random, sentStreams)));
                     break;
                 case 10:
                     // 상대의 max_frame_size를 넘는 요청. 관문 뒤면 던지고, 관문 전이면 미뤘다가 관문이 열릴 때 로컬로 실패한다.
@@ -129,7 +130,7 @@ class EndpointTicketOrderTest {
                     break;
                 default:
                     if (!sentStreams.isEmpty()) {
-                        endpoint.receive(Frames.reset(streamOf(random, sentStreams), ErrorCode.REFUSED));
+                        Drive.receive(endpoint, Frames.reset(streamOf(random, sentStreams), ErrorCode.REFUSED));
                     }
                     break;
             }
@@ -147,7 +148,7 @@ class EndpointTicketOrderTest {
             default:
                 break;
         }
-        endpoint.advance(1000);
+        Drive.advance(endpoint, 1000);
         append(trace, endpoint, tickets, sentStreams);
         return trace.toString();
     }

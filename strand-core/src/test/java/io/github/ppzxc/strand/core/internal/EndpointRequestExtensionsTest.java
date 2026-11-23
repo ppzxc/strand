@@ -17,22 +17,22 @@ class EndpointRequestExtensionsTest {
 
     private static Endpoint establishedClient() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        client.receive(Frames.hello(EndpointConfig.defaults()));
-        client.receive(Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
-        client.receive(Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
-        client.drainMessages();
-        client.drainEvents();
+        Drive.receive(client, Frames.hello(EndpointConfig.defaults()));
+        Drive.receive(client, Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
+        Drive.receive(client, Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
+        Drive.drainMessages(client);
+        Drive.drainEvents(client);
         return client;
     }
 
     private static Endpoint establishedServer() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults().knownTypes(Collections.singleton(TYPE)));
-        server.receive(Frames.preface());
-        server.receive(Frames.hello(EndpointConfig.defaults()));
-        server.receive(Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
-        server.receive(Frames.auth("ANONYMOUS", NO_BYTES));
-        server.drainMessages();
-        server.drainEvents();
+        Endpoint server = Drive.server(EndpointConfig.defaults().knownTypes(Collections.singleton(TYPE)));
+        Drive.receive(server, Frames.preface());
+        Drive.receive(server, Frames.hello(EndpointConfig.defaults()));
+        Drive.receive(server, Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
+        Drive.receive(server, Frames.auth("ANONYMOUS", NO_BYTES));
+        Drive.drainMessages(server);
+        Drive.drainEvents(server);
         return server;
     }
 
@@ -42,7 +42,7 @@ class EndpointRequestExtensionsTest {
 
         client.request(TYPE, EXTENSIONS, new byte[] {1, 2}, 0);
 
-        List<OutboundMessage> sent = client.drainMessages();
+        List<OutboundMessage> sent = Drive.drainMessages(client);
         assertThat(sent).hasSize(1);
         byte[] frame = sent.get(0).bytes();
         assertThat(Frames.extensionsLengthOf(frame, 0)).isEqualTo(EXTENSIONS.length);
@@ -59,12 +59,12 @@ class EndpointRequestExtensionsTest {
     @Test
     void extensionsOfARequestQueuedBeforeTheAuthGateAreSentWhenTheGateOpens() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults());
-        client.receive(Frames.hello(EndpointConfig.defaults()));
-        client.receive(Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
-        client.drainMessages();
+        Drive.receive(client, Frames.hello(EndpointConfig.defaults()));
+        Drive.receive(client, Frames.control(FrameType.HELLO, Flags.ACK, NO_BYTES));
+        Drive.drainMessages(client);
 
         client.request(TYPE, EXTENSIONS, new byte[] {9}, 0);
-        client.receive(Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
+        Drive.receive(client, Frames.control(FrameType.AUTH, Flags.ACK, NO_BYTES));
 
         byte[] frame = lastMessage(client);
         assertThat(Frames.extensionsLengthOf(frame, 0)).isEqualTo(EXTENSIONS.length);
@@ -75,10 +75,10 @@ class EndpointRequestExtensionsTest {
         Endpoint client = establishedClient();
 
         long ticket = client.request(TYPE, EXTENSIONS, NO_BYTES, 10);
-        client.drainMessages();
-        client.advance(11);
+        Drive.drainMessages(client);
+        Drive.advance(client, 11);
 
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).ticket().getAsLong()).isEqualTo(ticket);
         assertThat(events.get(0).status()).isEqualTo(Status.DEADLINE_EXCEEDED);
@@ -119,9 +119,9 @@ class EndpointRequestExtensionsTest {
         Endpoint server = establishedServer();
         byte[] frame = Frames.request(TYPE, 1, EXTENSIONS, new byte[] {7, 8});
 
-        server.receive(frame);
+        Drive.receive(server, frame);
 
-        List<Event> events = server.drainEvents();
+        List<Event> events = Drive.drainEvents(server);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).extensions()).isEqualTo(EXTENSIONS);
         assertThat(events.get(0).body()).isEqualTo(new byte[] {7, 8});
@@ -131,26 +131,26 @@ class EndpointRequestExtensionsTest {
     void receivedRequestWithoutExtensionsHasEmptyExtensions() {
         Endpoint server = establishedServer();
 
-        server.receive(Frames.request(TYPE, 1, NO_BYTES));
+        Drive.receive(server, Frames.request(TYPE, 1, NO_BYTES));
 
-        assertThat(server.drainEvents().get(0).extensions()).isEmpty();
+        assertThat(Drive.drainEvents(server).get(0).extensions()).isEmpty();
     }
 
     @Test
     void refusingADeliveredRequestSendsResetRefusedAndFreesTheStream() {
         Endpoint server = establishedServer();
-        server.receive(Frames.request(TYPE, 1, NO_BYTES));
-        server.drainEvents();
-        server.drainMessages();
+        Drive.receive(server, Frames.request(TYPE, 1, NO_BYTES));
+        Drive.drainEvents(server);
+        Drive.drainMessages(server);
 
         server.refuseRequest(1);
 
-        List<OutboundMessage> sent = server.drainMessages();
+        List<OutboundMessage> sent = Drive.drainMessages(server);
         assertThat(sent).hasSize(1);
         assertThat(sent.get(0).bytes()).isEqualTo(Frames.reset(1, ErrorCode.REFUSED));
         // 스트림이 끝났으므로 같은 스트림에 응답해도 아무 일이 없다.
         server.respond(1, 0, NO_BYTES);
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     @Test
@@ -159,20 +159,20 @@ class EndpointRequestExtensionsTest {
 
         server.refuseRequest(99);
 
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
     private static byte[] lastMessage(Endpoint endpoint) {
-        List<OutboundMessage> sent = endpoint.drainMessages();
+        List<OutboundMessage> sent = Drive.drainMessages(endpoint);
         return sent.get(sent.size() - 1).bytes();
     }
 
     @Test
     void respondReportsWhetherTheResponseWasAccepted() {
         Endpoint server = establishedServer();
-        server.receive(Frames.request(TYPE, 1, NO_BYTES));
-        server.drainEvents();
-        server.drainMessages();
+        Drive.receive(server, Frames.request(TYPE, 1, NO_BYTES));
+        Drive.drainEvents(server);
+        Drive.drainMessages(server);
 
         assertThat(server.respond(1, 0, NO_BYTES)).isTrue();
         assertThat(server.respond(1, 0, NO_BYTES)).isFalse();
@@ -182,12 +182,12 @@ class EndpointRequestExtensionsTest {
     @Test
     void respondToARequestThePeerResetIsNotAccepted() {
         Endpoint server = establishedServer();
-        server.receive(Frames.request(TYPE, 1, NO_BYTES));
-        server.drainEvents();
-        server.receive(Frames.reset(1, ErrorCode.CANCEL));
-        server.drainMessages();
+        Drive.receive(server, Frames.request(TYPE, 1, NO_BYTES));
+        Drive.drainEvents(server);
+        Drive.receive(server, Frames.reset(1, ErrorCode.CANCEL));
+        Drive.drainMessages(server);
 
         assertThat(server.respond(1, 0, NO_BYTES)).isFalse();
-        assertThat(server.drainMessages()).isEmpty();
+        assertThat(Drive.drainMessages(server)).isEmpty();
     }
 }

@@ -24,12 +24,12 @@ class EndpointWebSocketOutputTest {
             }
             client.outputAccepted(output.id());
         }
-        client.drainEvents();
+        Drive.drainEvents(client);
         return client;
     }
 
     private static Event onlyResult(Endpoint endpoint) {
-        List<Event> events = endpoint.drainEvents();
+        List<Event> events = Drive.drainEvents(endpoint);
         assertThat(events).filteredOn(e -> e.kind() == Event.Kind.RESULT).hasSize(1);
         return events.get(0);
     }
@@ -77,7 +77,7 @@ class EndpointWebSocketOutputTest {
         Event result = onlyResult(client);
         assertThat(result.status()).isEqualTo(Status.CANCELLED);
         client.cancelRequest(ticket);
-        assertThat(client.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(client)).isEmpty();
     }
 
     @Test
@@ -86,7 +86,7 @@ class EndpointWebSocketOutputTest {
         client.request(REQUEST_TYPE, new byte[0], 100);
         client.nextOutput();
 
-        client.advance(101);
+        Drive.advance(client, 101);
 
         assertThat(client.nextOutput()).isNull();
         Event result = onlyResult(client);
@@ -100,13 +100,13 @@ class EndpointWebSocketOutputTest {
         client.request(REQUEST_TYPE, new byte[0], 100);
         client.outputAccepted(client.nextOutput().id());
 
-        client.advance(101);
+        Drive.advance(client, 101);
 
         assertThat(client.nextOutput().bytes()).isEqualTo(Frames.reset(1, ErrorCode.CANCEL));
         Event result = onlyResult(client);
         assertThat(result.status()).isEqualTo(Status.DEADLINE_EXCEEDED);
-        client.advance(1000);
-        assertThat(client.drainEvents()).isEmpty();
+        Drive.advance(client, 1000);
+        assertThat(Drive.drainEvents(client)).isEmpty();
     }
 
     @Test
@@ -139,12 +139,12 @@ class EndpointWebSocketOutputTest {
         client.request(REQUEST_TYPE, new byte[0]);
         client.outputAccepted(client.nextOutput().id());
         client.receiveMessage(WebSocketMessageKind.BINARY, Frames.response(REQUEST_TYPE, 1, 0));
-        List<Event> events = client.drainEvents();
+        List<Event> events = Drive.drainEvents(client);
         assertThat(events).extracting(Event::kind).containsExactly(Event.Kind.RESULT);
 
         client.disconnect();
 
-        assertThat(client.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
+        assertThat(Drive.drainEvents(client)).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
     }
 
     @Test
@@ -203,12 +203,12 @@ class EndpointWebSocketOutputTest {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().webSocket());
         client.outputAccepted(client.nextOutput().id());
         EndpointOutput hello = client.nextOutput();
-        client.advance(6000);
-        assertThat(client.drainEvents()).isEmpty();
+        Drive.advance(client, 6000);
+        assertThat(Drive.drainEvents(client)).isEmpty();
 
         client.outputAccepted(hello.id());
-        client.advance(5001);
+        Drive.advance(client, 5001);
 
-        assertThat(client.drainEvents()).extracting(Event::kind).contains(Event.Kind.CLOSED);
+        assertThat(Drive.drainEvents(client)).extracting(Event::kind).contains(Event.Kind.CLOSED);
     }
 }
