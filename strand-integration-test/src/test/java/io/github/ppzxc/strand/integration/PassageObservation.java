@@ -10,7 +10,7 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 
 /**
  * 시험이 도는 동안 제품 엔진이 연 모든 통로를 {@link ControlledPassage}로 감싼다. 감싼 통로는 쓴 프레임, 받은 바이트, 쓰기 시점을 시험이 관찰하고 조절하게 한다. 엔진이
- * 통로를 안에서 만들어 시험이 직접 끼울 수 없어서 엔진의 테스트 전용 지점({@link PassageWrapping})에 설치한다. 시험 사이에 새지 않게 시험마다 설치하고 되돌린다.
+ * 통로를 안에서 만들어 시험이 직접 끼울 수 없어서 엔진의 테스트 전용 지점({@link PassageWrapping})에 {@link #wrapper()}를 주입한다. 쌓인 통로는 시험마다 비운다.
  *
  * <p>감싼 통로는 연결이 열린 순서대로 쪽(클라이언트·서버)별 대기열에 쌓이고, 연결을 감싸는 {@link Peer}가 자기 것을 순서대로 가져간다. 연결을 한 번에 하나씩 맺는 시험에서
  * 연결과 통로가 정확히 짝지어진다.
@@ -20,29 +20,30 @@ public final class PassageObservation implements BeforeEachCallback, AfterEachCa
     private static final ConcurrentLinkedQueue<ControlledPassage> CLIENT = new ConcurrentLinkedQueue<>();
     private static final ConcurrentLinkedQueue<ControlledPassage> SERVER = new ConcurrentLinkedQueue<>();
     private static volatile int readChunkBytes = Integer.MAX_VALUE;
-    private static volatile PassageWrapping.@Nullable Installation installation;
 
     @Override
     public void beforeEach(ExtensionContext context) {
         reset();
-        installation = PassageWrapping.install((side, passage) -> {
+    }
+
+    @Override
+    public void afterEach(ExtensionContext context) {
+        reset();
+    }
+
+    /**
+     * 통로를 감싸는 감싸개. 시험이 만드는 서버·클라이언트 builder에 주입해 그 연결의 통로만 감싼다({@code NioWire}). 프로세스 전역 설치가 아니라서 이 감싸개를 주입하지 않은
+     * 연결은 영향이 없다.
+     */
+    static PassageWrapping.Wrapper wrapper() {
+        return (side, passage) -> {
             ControlledPassage controlled = new ControlledPassage(passage);
             if (readChunkBytes != Integer.MAX_VALUE) {
                 controlled.readChunkBytes(readChunkBytes);
             }
             queue(side).add(controlled);
             return controlled;
-        });
-    }
-
-    @Override
-    public void afterEach(ExtensionContext context) {
-        PassageWrapping.Installation current = installation;
-        if (current != null) {
-            current.close();
-            installation = null;
-        }
-        reset();
+        };
     }
 
     /** 쌓인 통로와 읽기 조각 설정을 처음 상태로 되돌린다. */

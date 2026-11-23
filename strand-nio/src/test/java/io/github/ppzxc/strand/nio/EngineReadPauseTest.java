@@ -33,6 +33,12 @@ class EngineReadPauseTest {
     private static final int PING_FRAME = HEADER + 8;
     private static final int FLOOD_SIZE = 20_000;
     private static final long PLENTY = 100_000_000;
+    /** 제어 출력 공간(최소치)이 작아 쓰기가 막히면 입력 처리가 그 공간에서 멈추는 연결 한도. */
+    private static final long STALLING_PER_CONNECTION = 8;
+
+    private static final long STALL_SETTLE_MS = 200;
+    private static final long STALL_OBSERVATION_MS = 1000;
+    private static final long MAX_AWAIT_CALLS_WHILE_STALLED = 100;
 
     private final FloodPassage flood = new FloodPassage();
     private EngineRig rig;
@@ -247,6 +253,38 @@ class EngineReadPauseTest {
         // 되풀이해 깨어난다면 통로의 활동이 가라앉지 않아 settle이 실패한다. 고정 시간을 재지 않고 그 훅으로 본다.
         rig.settle();
         assertThat(rig.client.awaitCalls()).isEqualTo(calls);
+    }
+
+    /**
+     * 제어 출력 공간이 다 차서 입력 처리가 멈추고 쓰기도 막힌 동안에는 쓰기 가능·깨움·기한으로만 깨어나야 한다. 처리하지 못한 입력이 남았다고 타임아웃 0으로
+     * 대기를 되풀이하면(바쁜 대기) 같은 시간 동안 대기 호출이 수백만 번 쌓이고 프레임은 거의 나가지 못한다. 실제 시간으로 잠시 기다리며 호출 수를 센다.
+     */
+    @Test
+    void theTransportThreadDoesNotSpinWhileInputIsStalledOnBlockedOutput() throws Exception {
+        rig = EngineRig.client(tuning(2, 2).perConnection(STALLING_PER_CONNECTION));
+        rig.client.writeCapacity(0);
+        flood.flood(FLOOD_SIZE, EngineReadPauseTest::ping);
+        // 바쁜 대기는 통로가 가라앉지 않게 해 settle이 실패하므로 실제 시간으로 기다린다.
+        Thread.sleep(STALL_SETTLE_MS);
+        assertThat(flood.remaining()).isPositive();
+
+        long calls = rig.client.awaitCalls();
+        Thread.sleep(STALL_OBSERVATION_MS);
+
+        assertThat(rig.client.awaitCalls() - calls).isLessThanOrEqualTo(MAX_AWAIT_CALLS_WHILE_STALLED);
+    }
+
+    /** 막힌 쓰기가 풀리면 멈춰 있던 입력 처리가 지연 없이 이어진다. */
+    @Test
+    void inputStalledOnBlockedOutputResumesWhenWritesAreAllowed() throws Exception {
+        rig = EngineRig.client(tuning(2, 2).perConnection(STALLING_PER_CONNECTION));
+        rig.client.writeCapacity(0);
+        flood.flood(FLOOD_SIZE, EngineReadPauseTest::ping);
+        Thread.sleep(STALL_SETTLE_MS);
+        int deliveredBefore = flood.delivered();
+
+        rig.client.writeCapacity(PLENTY);
+        waitFor(() -> flood.delivered() > deliveredBefore);
     }
 
     private static void waitFor(BooleanSupplier condition) throws InterruptedException {

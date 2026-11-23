@@ -13,6 +13,7 @@ import io.github.ppzxc.strand.nio.Listener;
 import io.github.ppzxc.strand.nio.NioStrandClient;
 import io.github.ppzxc.strand.nio.NioStrandConnection;
 import io.github.ppzxc.strand.nio.NioStrandServer;
+import io.github.ppzxc.strand.nio.PassageWrapped;
 import io.github.ppzxc.strand.nio.PreparedHandler;
 import io.github.ppzxc.strand.nio.RequestHandler;
 import io.github.ppzxc.strand.nio.internal.ControlledPassage;
@@ -102,7 +103,8 @@ final class NioWire implements Wire {
 
     @Override
     public Server startServer(Function<Wire.Conn, Handler> handlers) throws Exception {
-        NioStrandServer server = TestNio.serverBuilder(Peer.HANDLERS)
+        NioStrandServer server = PassageWrapped.server(
+                        TestNio.serverBuilder(Peer.HANDLERS), PassageObservation.wrapper())
                 .handlerFactory(connection -> PreparedHandler.of(handler(handlers.apply(new Conn(connection)))))
                 .build();
         Listener listener = server.listen(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
@@ -134,7 +136,9 @@ final class NioWire implements Wire {
 
     @Override
     public Client newClient(Handler handler, @Nullable Duration idlePingInterval) {
-        NioStrandClient.Builder builder = TestNio.clientBuilder(Peer.HANDLERS).handler(handler(handler));
+        NioStrandClient.Builder builder = PassageWrapped.client(
+                        TestNio.clientBuilder(Peer.HANDLERS), PassageObservation.wrapper())
+                .handler(handler(handler));
         if (idlePingInterval != null) {
             builder.idlePingInterval(idlePingInterval);
         }

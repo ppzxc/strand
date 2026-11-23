@@ -242,6 +242,7 @@ public final class NioStrandServer {
                 verifier,
                 common.security.tlsContext() != null);
         params.unreleased = unreleased;
+        params.passageWrapper = common.passageWrapper;
         NioStrandConnection connection = new NioStrandConnection(params);
         if (!lifecycle.register(connection)) {
             // 전체 종료가 시작됐다. 새 접수를 받지 않으므로 예약을 돌려주고 소켓을 닫는다.

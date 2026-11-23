@@ -209,6 +209,7 @@ public final class NioStrandClient {
                 null,
                 common.security.tlsContext() != null);
         params.attempt = state;
+        params.passageWrapper = common.passageWrapper;
         params.preparationBytes = preparationBytes;
         params.released = released;
         params.releasedFallbackNanos = common.shutdownDeadline.toNanos();

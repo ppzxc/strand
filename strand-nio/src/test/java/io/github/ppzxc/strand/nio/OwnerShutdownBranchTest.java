@@ -52,7 +52,8 @@ class OwnerShutdownBranchTest {
                 deadline,
                 clock,
                 EndpointConfig.DEFAULT_IDLE_INTERVAL_MS,
-                EndpointConfig.DEFAULT_ACK_TIMEOUT_MS);
+                EndpointConfig.DEFAULT_ACK_TIMEOUT_MS,
+                null);
     }
 
     private Listener listener(ServerSocketChannel server, CountDownLatch inAccept) {

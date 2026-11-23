@@ -22,6 +22,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -61,12 +62,25 @@ class PassageWrappingTest {
         }
     }
 
-    private static RequestResult echoOnce(AppFixture fixture) throws Exception {
-        NioStrandServer server = fixture.serverBuilder()
+    /** 서버와 클라이언트를 각자의 감싸개(null이면 없음)로 만들어 요청 하나를 주고받는다. */
+    private static RequestResult echoOnce(
+            AppFixture fixture,
+            PassageWrapping.@Nullable Wrapper serverWrapper,
+            PassageWrapping.@Nullable Wrapper clientWrapper)
+            throws Exception {
+        NioStrandServer.Builder serverBuilder = fixture.serverBuilder();
+        if (serverWrapper != null) {
+            PassageWrapped.server(serverBuilder, serverWrapper);
+        }
+        NioStrandClient.Builder clientBuilder = fixture.clientBuilder();
+        if (clientWrapper != null) {
+            PassageWrapped.client(clientBuilder, clientWrapper);
+        }
+        NioStrandServer server = serverBuilder
                 .authenticate(c -> AuthenticationResult.accepted("p"))
                 .handler(request -> request.respond(Status.OK, request.payload()))
                 .build();
-        NioStrandClient client = fixture.clientBuilder().build();
+        NioStrandClient client = clientBuilder.build();
         try {
             Listener listener = AppFixture.get(server.listen(AppFixture.anyLoopback()));
             NioStrandConnection connection = AppFixture.get(client.connect(AppFixture.loopback(listener)));
@@ -83,19 +97,22 @@ class PassageWrappingTest {
         }
     }
 
+    private static PassageWrapping.Wrapper counting(List<PassageWrapping.Side> sides, List<CountingPassage> wrapped) {
+        return (side, passage) -> {
+            sides.add(side);
+            CountingPassage counting = new CountingPassage(passage);
+            wrapped.add(counting);
+            return counting;
+        };
+    }
+
     @Test
-    @SuppressWarnings("try")
     void theEngineRunsEachSideOnThePassageTheWrapperReturns() throws Exception {
         List<PassageWrapping.Side> sides = new CopyOnWriteArrayList<>();
         List<CountingPassage> wrapped = new CopyOnWriteArrayList<>();
-        try (AppFixture fixture = AppFixture.plain();
-                PassageWrapping.Installation installed = PassageWrapping.install((side, passage) -> {
-                    sides.add(side);
-                    CountingPassage counting = new CountingPassage(passage);
-                    wrapped.add(counting);
-                    return counting;
-                })) {
-            RequestResult result = echoOnce(fixture);
+        PassageWrapping.Wrapper wrapper = counting(sides, wrapped);
+        try (AppFixture fixture = AppFixture.plain()) {
+            RequestResult result = echoOnce(fixture, wrapper, wrapper);
 
             assertThat(result.status()).isEqualTo(Status.OK);
             assertThat(sides).containsExactlyInAnyOrder(PassageWrapping.Side.CLIENT, PassageWrapping.Side.SERVER);
@@ -105,32 +122,55 @@ class PassageWrappingTest {
         }
     }
 
+    /** 감싸개는 주입한 builder의 연결에만 적용된다. 같은 프로세스의 다른 서버·클라이언트는 감싸개가 있어도 영향이 없다. */
     @Test
-    void connectionsOpenedAfterTheInstallationIsClosedAreNotWrapped() throws Exception {
+    void aWrapperOnlyAffectsConnectionsOfTheBuildersItWasInjectedInto() throws Exception {
         List<PassageWrapping.Side> sides = new CopyOnWriteArrayList<>();
-        try (AppFixture fixture = AppFixture.plain()) {
-            PassageWrapping.install((side, passage) -> {
-                        sides.add(side);
-                        return passage;
-                    })
-                    .close();
+        List<CountingPassage> wrapped = new CopyOnWriteArrayList<>();
+        PassageWrapping.Wrapper wrapper = counting(sides, wrapped);
+        try (AppFixture observed = AppFixture.plain();
+                AppFixture other = AppFixture.plain()) {
+            // 서버에만 주입한다. 클라이언트와, 감싸개가 없는 다른 서버·클라이언트 한 쌍은 감싸지 않는다.
+            echoOnce(observed, wrapper, null);
+            assertThat(sides).containsExactly(PassageWrapping.Side.SERVER);
 
-            assertThat(echoOnce(fixture).status()).isEqualTo(Status.OK);
-
+            sides.clear();
+            wrapped.clear();
+            assertThat(echoOnce(other, null, null).status()).isEqualTo(Status.OK);
             assertThat(sides).isEmpty();
+            assertThat(wrapped).isEmpty();
         }
     }
 
     @Test
-    @SuppressWarnings("try")
+    void connectionsOfBuildersWithoutAWrapperAreNotWrappedWhileAnotherPairIsWrappedConcurrently() throws Exception {
+        List<PassageWrapping.Side> sides = new CopyOnWriteArrayList<>();
+        List<CountingPassage> wrapped = new CopyOnWriteArrayList<>();
+        PassageWrapping.Wrapper wrapper = counting(sides, wrapped);
+        try (AppFixture observed = AppFixture.plain();
+                AppFixture other = AppFixture.plain()) {
+            NioStrandServer.Builder wrappedServer = PassageWrapped.server(observed.serverBuilder(), wrapper);
+            NioStrandServer holder = wrappedServer
+                    .authenticate(c -> AuthenticationResult.accepted("p"))
+                    .handler(request -> request.respond(Status.OK, request.payload()))
+                    .build();
+            try {
+                // 감싸개를 가진 서버가 떠 있는 동안 다른 쌍을 돌린다.
+                assertThat(echoOnce(other, null, null).status()).isEqualTo(Status.OK);
+                assertThat(sides).isEmpty();
+            } finally {
+                AppFixture.get(holder.shutdown());
+            }
+        }
+    }
+
+    @Test
     void tlsPassagesAreLeftUnwrappedBecauseTheEngineQueriesThemDirectly() throws Exception {
         List<PassageWrapping.Side> sides = new CopyOnWriteArrayList<>();
-        try (AppFixture fixture = AppFixture.tls();
-                PassageWrapping.Installation installed = PassageWrapping.install((side, passage) -> {
-                    sides.add(side);
-                    return passage;
-                })) {
-            assertThat(echoOnce(fixture).status()).isEqualTo(Status.OK);
+        List<CountingPassage> wrapped = new CopyOnWriteArrayList<>();
+        PassageWrapping.Wrapper wrapper = counting(sides, wrapped);
+        try (AppFixture fixture = AppFixture.tls()) {
+            assertThat(echoOnce(fixture, wrapper, wrapper).status()).isEqualTo(Status.OK);
 
             assertThat(sides).isEmpty();
         }

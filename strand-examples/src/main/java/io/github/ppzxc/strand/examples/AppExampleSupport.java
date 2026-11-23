@@ -22,6 +22,8 @@ final class AppExampleSupport {
     static final int HOLD_TYPE = 257;
     /** 서버가 받은 요청 안에서 같은 연결로 클라이언트에 역방향 요청을 내게 하는 type. */
     static final int REVERSE_TYPE = 258;
+    /** 서버가 게이트가 열릴 때까지 응답을 미루는 요청의 type. 결과가 확정되기 전에 변환 Future를 취소하는 순서를 만드는 데 쓴다. */
+    static final int GATED_TYPE = 259;
 
     static final String AUTH_MECHANISM = "BEARER";
     static final String PRINCIPAL = "demo-client";

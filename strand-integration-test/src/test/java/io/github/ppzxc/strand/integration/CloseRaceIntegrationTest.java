@@ -28,6 +28,9 @@ class CloseRaceIntegrationTest {
     /** CLOSE가 엇갈리는 것은 타이밍에 달려 있어서, 같은 시나리오를 여러 번 되풀이해 엇갈릴 기회를 늘린다. */
     private static final int REPEATS = 20;
 
+    /** 마무리 기한(기본 5초)을 기다리지 않고 닫혔다고 볼 수 있는 상한. 기본 기한보다 충분히 짧다. */
+    private static final long WELL_BEFORE_FINISH_DEADLINE_MS = 2_000;
+
     private static RequestResult await(CompletableFuture<RequestResult> future) throws Exception {
         return future.get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
@@ -132,7 +135,8 @@ class CloseRaceIntegrationTest {
      * 대기 스트림이 없는 양쪽이 동시에 {@code NO_ERROR} CLOSE를 보내면 각자 CLOSE를 보내는 즉시 닫히고, 뒤따르는 상대 CLOSE와 TCP 끊김은 무시되어야
      * 한다. 그래도 종료 알림은 양쪽에서 정확히 한 번씩이어야 한다(규격 3.5절 "연결당 정확히 한 번"). 중복되면 연결을 닫은 뒤의 알림 수가 둘이 된다. 실제
      * 타이밍에서 양쪽이 엇갈리는지는 보장되지 않으므로 시작 신호로 동시에 출발시켜 {@value #REPEATS}번 되풀이한다. 엇갈림을 확정해서 보는 시험은 {@link
-     * #crossedCloseWhileClosingSendsOneCloseEach()}가 맡는다.
+     * #crossedCloseWhileClosingSendsOneCloseEach()}가 맡는다. 종료는 기본 마무리 기한(5초)을 기다리지 않고 끝나야 한다. 한쪽이 상대의 TCP 종료를
+     * 보지 못하면 기한까지 기다리므로 라운드마다 걸린 시간을 본다.
      */
     @TransportTest
     @DisplayName("양쪽이 동시에 CLOSE를 보내도 종료 알림은 양쪽에서 한 번씩만 온다 (규격 3.5)")
@@ -146,6 +150,7 @@ class CloseRaceIntegrationTest {
                             .result());
 
                     CountDownLatch start = new CountDownLatch(1);
+                    long startedAt = System.nanoTime();
                     Future<?> clientClose = pool.submit(() -> {
                         start.await();
                         client.closeConnection();
@@ -161,6 +166,9 @@ class CloseRaceIntegrationTest {
                     serverClose.get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
                     client.awaitClosed();
                     serverSide.awaitClosed();
+                    assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt))
+                            .as("%d번째 종료가 마무리 기한을 기다리지 않고 끝난다", round)
+                            .isLessThan(WELL_BEFORE_FINISH_DEADLINE_MS);
                     client.stop();
                     serverSide.stop();
 

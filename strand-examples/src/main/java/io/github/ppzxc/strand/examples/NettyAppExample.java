@@ -71,6 +71,7 @@ public final class NettyAppExample {
             CompletableFuture<Void> stateReleased = new CompletableFuture<>();
             CompletableFuture<Void> reversed = new CompletableFuture<>();
             CompletableFuture<Void> holding = new CompletableFuture<>();
+            CompletableFuture<Void> gate = new CompletableFuture<>();
             NettyStrandServer server = NettyStrandServer.builder()
                     .eventLoopGroup(appEventLoops)
                     .executor(appExecutor)
@@ -95,6 +96,12 @@ public final class NettyAppExample {
                                     if (request.type() == AppExampleSupport.HOLD_TYPE) {
                                         // 응답하지 않는다: 상대가 취소하거나 기한이 지나면 받은 요청의 종료를 알린다.
                                         request.ended().observe(end -> holding.complete(null));
+                                        return;
+                                    }
+                                    if (request.type() == AppExampleSupport.GATED_TYPE) {
+                                        // 게이트가 열릴 때까지 응답을 미룬다: 클라이언트가 변환 Future를 취소한 뒤에 결과가 확정된다.
+                                        gate.thenRunAsync(
+                                                () -> request.respond(Status.OK, bytes("gated")), appExecutor);
                                         return;
                                     }
                                     request.respond(
@@ -174,9 +181,11 @@ public final class NettyAppExample {
             reversed.get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
 
             // 6-1) Netty 변환: 변환 Future를 취소해도 실제 요청은 취소되지 않고 결과는 그대로 확정된다.
-            RequestHandle converted = connection.request(Request.of(AppExampleSupport.ECHO_TYPE, bytes("converted")));
+            // 서버가 게이트를 열기 전에는 결과가 확정되지 않으므로 취소는 항상 확정 전에 일어난다.
+            RequestHandle converted = connection.request(Request.of(AppExampleSupport.GATED_TYPE, bytes("converted")));
             Future<RequestResult> conversion = NettyResults.toFuture(converted.result());
             conversion.cancel(false);
+            gate.complete(null);
             RequestResult kept = converted
                     .result()
                     .toCompletionStage(appExecutor)
