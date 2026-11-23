@@ -308,6 +308,15 @@ public final class WebSocketPassage implements Passage {
 
     @Override
     public int write(OutboundMessage message, int offset) throws IOException {
+        return writeBytes(message.bytes(), offset, message.length() - offset);
+    }
+
+    /**
+     * 출력 하나(프레임 하나)의 남은 바이트를 바이너리 메시지 하나로 보낸다. JDK가 받아 주면 메시지 전체 길이를 보고하고, 앞선 보내기가 끝나지 않았으면
+     * 0을 보고한다. 부분만 받아 주는 일은 없다.
+     */
+    @Override
+    public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
         WebSocket open = socket;
         if (open == null) {
             throw new IOException("아직 열리지 않은 통로");
@@ -317,10 +326,10 @@ public final class WebSocketPassage implements Passage {
             // 보내기가 끝나면 쓰기 대기가 깨운다.
             return 0;
         }
-        CompletableFuture<?> send = open.sendBinary(ByteBuffer.wrap(message.bytes()), true);
+        CompletableFuture<?> send = open.sendBinary(ByteBuffer.wrap(bytes, offset, length), true);
         failIfAlreadyFailed(send);
         watch(send);
-        return message.length();
+        return length;
     }
 
     /** 바로 실패로 끝난 보내기는 이 호출에서 알린다. 나중에 실패하는 것은 {@link #await}가 알린다. */

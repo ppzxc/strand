@@ -3,8 +3,6 @@ package io.github.ppzxc.strand.nio.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.ppzxc.strand.core.internal.Endpoint;
-import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -160,7 +158,7 @@ public abstract class PassageContract {
 
     private static OutboundMessage someMessage() {
         // 엔드포인트가 만든 첫 메시지(서문 또는 첫 프레임). 바이너리 메시지를 직접 만들 수 없어 엔드포인트에서 얻는다.
-        return Endpoint.client(EndpointConfig.defaults()).drainMessages().get(0);
+        return TestMessages.firstMessage();
     }
 
     /** 상한 시간 안에서 {@code await(0)}을 되풀이해 {@code count}바이트가 모일 때까지 읽는다. 바이트 스트림은 쪼개져 올 수 있다. */

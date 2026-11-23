@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ppzxc.strand.core.internal.Certainty;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -88,7 +87,7 @@ class ConnectionDriverClockTest {
 
             @Override
             EndpointConfig config() {
-                return EndpointConfig.defaults().webSocket();
+                return EndpointConfig.defaults();
             }
         };
 
@@ -98,7 +97,7 @@ class ConnectionDriverClockTest {
     }
 
     private static EndpointConfig config() {
-        return EndpointConfig.defaults().webSocket().idleIntervalMs(0);
+        return EndpointConfig.defaults().idleIntervalMs(0);
     }
 
     private Side startClient(Side side, EndpointConfig config) {
@@ -387,8 +386,8 @@ class ConnectionDriverClockTest {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
-            return inner.write(message, offset);
+        public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
+            return inner.writeBytes(bytes, offset, length);
         }
 
         @Override

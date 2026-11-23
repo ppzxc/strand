@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
+import io.github.ppzxc.strand.core.internal.WriteQueueLimit;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -99,8 +99,8 @@ class ConnectionDriverReadPauseTest {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
-            return inner.write(message, offset);
+        public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
+            return inner.writeBytes(bytes, offset, length);
         }
 
         @Override
@@ -134,7 +134,6 @@ class ConnectionDriverReadPauseTest {
 
     private static EndpointConfig config(long maxConcurrentStreams) {
         return EndpointConfig.defaults()
-                .webSocket()
                 .maxFrameSize(MAX_FRAME_SIZE)
                 .maxConcurrentStreams(maxConcurrentStreams)
                 .ackTimeoutMs(ACK_TIMEOUT_MS)
@@ -380,27 +379,25 @@ class ConnectionDriverReadPauseTest {
     @Test
     void theLimitIsTheFlowControlRangePlusOneFrame() {
         // (상대가 알린 동시 스트림 + 내가 알린 동시 스트림) × 상대가 알린 최대 프레임 + 프레임 하나.
-        assertThat(ConnectionDriver.writeQueueLimit(65_536, 100, 100, PLENTY)).isEqualTo(200L * 65_536 + 65_536);
-        assertThat(ConnectionDriver.writeQueueLimit(16_384, 2, 2, PLENTY)).isEqualTo(5L * 16_384);
+        assertThat(WriteQueueLimit.of(65_536, 100, 100, PLENTY)).isEqualTo(200L * 65_536 + 65_536);
+        assertThat(WriteQueueLimit.of(16_384, 2, 2, PLENTY)).isEqualTo(5L * 16_384);
         // 동시 스트림이 0이어도 제어 프레임을 위한 프레임 하나는 남는다.
-        assertThat(ConnectionDriver.writeQueueLimit(16_384, 0, 0, PLENTY)).isEqualTo(16_384);
+        assertThat(WriteQueueLimit.of(16_384, 0, 0, PLENTY)).isEqualTo(16_384);
     }
 
     @Test
     void aPeerCannotRaiseTheLimitWithoutBoundByAdvertisingHugeValues() {
         long hugeStreams = 4_294_967_295L;
         long hugeFrame = 1_048_576L;
-        assertThat(ConnectionDriver.writeQueueLimit(
-                        hugeFrame, hugeStreams, hugeStreams, ConnectionDriver.DEFAULT_MAX_WRITE_QUEUE_BYTES))
-                .isEqualTo(ConnectionDriver.DEFAULT_MAX_WRITE_QUEUE_BYTES);
+        assertThat(WriteQueueLimit.of(hugeFrame, hugeStreams, hugeStreams, WriteQueueLimit.DEFAULT_ABSOLUTE_LIMIT))
+                .isEqualTo(WriteQueueLimit.DEFAULT_ABSOLUTE_LIMIT);
         // 연결 설정으로 절대 한도를 올리면 정상 범위가 그만큼 열린다.
-        assertThat(ConnectionDriver.writeQueueLimit(hugeFrame, 100, 100, 1L << 40))
-                .isEqualTo(201L * hugeFrame);
+        assertThat(WriteQueueLimit.of(hugeFrame, 100, 100, 1L << 40)).isEqualTo(201L * hugeFrame);
     }
 
     @Test
     void theLimitIsNeverBelowOneFrameEvenWithASmallAbsoluteLimit() {
-        assertThat(ConnectionDriver.writeQueueLimit(1_048_576, 100, 100, 1)).isEqualTo(1_048_576);
+        assertThat(WriteQueueLimit.of(1_048_576, 100, 100, 1)).isEqualTo(1_048_576);
     }
 
     @Test

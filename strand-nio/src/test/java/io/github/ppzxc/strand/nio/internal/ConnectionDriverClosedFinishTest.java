@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ppzxc.strand.core.internal.CloseReason;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +26,7 @@ class ConnectionDriverClosedFinishTest {
 
     private static final long UNRESPONSIVE_ERROR_CODE = 6;
     private static final long ACK_TIMEOUT_MS = 1000;
+    private static final long IDLE_INTERVAL_MS = 3000;
     private static final long DEFAULT_LIMIT_MS = 5000;
     /** 빌더에 상한을 주지 않는다(기본값). */
     private static final long DEFAULT = 0;
@@ -48,8 +48,8 @@ class ConnectionDriverClosedFinishTest {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
-            return inner.write(message, offset);
+        public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
+            return inner.writeBytes(bytes, offset, length);
         }
 
         @Override
@@ -88,7 +88,7 @@ class ConnectionDriverClosedFinishTest {
     }
 
     private static EndpointConfig config() {
-        return EndpointConfig.defaults().webSocket().ackTimeoutMs(ACK_TIMEOUT_MS);
+        return EndpointConfig.defaults().ackTimeoutMs(ACK_TIMEOUT_MS);
     }
 
     private ConnectionDriver start(boolean isClient, Passage passage, long limitMs) {
@@ -100,8 +100,9 @@ class ConnectionDriverClosedFinishTest {
                 }
             }
         };
-        ConnectionDriver.Builder builder =
-                isClient ? ConnectionDriver.client(config(), passage) : ConnectionDriver.server(config(), passage);
+        ConnectionDriver.Builder builder = isClient
+                ? ConnectionDriver.client(config().idleIntervalMs(IDLE_INTERVAL_MS), passage)
+                : ConnectionDriver.server(config(), passage);
         if (limitMs != DEFAULT) {
             builder.closedFinishLimitMs(limitMs);
         }
@@ -193,8 +194,8 @@ class ConnectionDriverClosedFinishTest {
     void ifTheWriteStaysBlockedAfterAnErrorCloseTheSameLimitEndsTheTransportThread() {
         connected(false, DEFAULT);
         clientPassage.writeCapacity(0);
-        client.ping(new byte[8]).join();
-        settle();
+        // 막힌 쓰기 뒤라 유휴 PING을 넘기지 못한다. 보내기로 한 때부터 확인 대기 시간이 지나면 확인 대기 초과와 같게 닫는다.
+        tick(IDLE_INTERVAL_MS);
         tick(ACK_TIMEOUT_MS + 1);
         assertThat(closed).hasSize(1);
         CloseReason reason = closed.peek().reason();
@@ -307,8 +308,8 @@ class ConnectionDriverClosedFinishTest {
     void aBlockedWriteThatClearsBeforeTheLimitStillLetsTheTransportThreadEndOnThePeersHangUp() {
         connected(false, DEFAULT);
         clientPassage.writeCapacity(0);
-        client.ping(new byte[8]).join();
-        settle();
+        // 막힌 쓰기 뒤라 유휴 PING을 넘기지 못한다. 보내기로 한 때부터 확인 대기 시간이 지나면 확인 대기 초과와 같게 닫는다.
+        tick(IDLE_INTERVAL_MS);
         tick(ACK_TIMEOUT_MS + 1);
         assertThat(closed).hasSize(1);
 

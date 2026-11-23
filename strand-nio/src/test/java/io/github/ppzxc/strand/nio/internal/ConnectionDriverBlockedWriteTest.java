@@ -44,10 +44,7 @@ class ConnectionDriverBlockedWriteTest {
     }
 
     private static EndpointConfig config() {
-        return EndpointConfig.defaults()
-                .webSocket()
-                .ackTimeoutMs(ACK_TIMEOUT_MS)
-                .idleIntervalMs(IDLE_INTERVAL_MS);
+        return EndpointConfig.defaults().ackTimeoutMs(ACK_TIMEOUT_MS).idleIntervalMs(IDLE_INTERVAL_MS);
     }
 
     /** 핸드셰이크를 마친 연결 한 쌍. */
@@ -72,11 +69,14 @@ class ConnectionDriverBlockedWriteTest {
         Side[] sides = connected();
         Side client = sides[0];
         Side server = sides[1];
-        client.blockWrites();
+        // 요청의 앞 10바이트만 나가고 막힌다. 쓰기를 시작한 요청이다.
+        client.passage.writeCapacity(10);
         RequestHandle handle = client.driver.request(APPLICATION_TYPE, bytes("unread"));
-        client.driver.ping(new byte[8]).join();
         settle(client, server);
 
+        // 유휴 PING을 보내기로 했지만 막힌 쓰기 뒤라 넘기지 못한다. 보내기로 한 때부터 확인 대기 시간이 지나면 확인 대기 초과와 같게 닫는다.
+        client.tick(IDLE_INTERVAL_MS);
+        settle(client, server);
         client.tick(ACK_TIMEOUT_MS);
         settle(client, server);
         assertThat(client.closed).isEmpty();
@@ -88,7 +88,7 @@ class ConnectionDriverBlockedWriteTest {
         assertThat(reason.kind()).isEqualTo(CloseReason.Kind.ERROR_CLOSE);
         assertThat(reason.errorCode()).isEqualTo(UNRESPONSIVE_ERROR_CODE);
         assertThat(handle.result()).isDone();
-        // 꺼낸 시점에 전송 계층에 넘긴 것이라 쓰기를 다 못 했어도 결과 모름이다.
+        // 쓰기를 시작했지만 다 쓰지 못한 요청이라 결과 모름이다.
         assertThat(handle.result().join().status()).isEqualTo(STATUS_UNAVAILABLE);
         assertThat(handle.result().join().certainty()).isEqualTo(Certainty.UNKNOWN);
     }
@@ -98,7 +98,8 @@ class ConnectionDriverBlockedWriteTest {
         Side[] sides = connected();
         Side client = sides[0];
         Side server = sides[1];
-        client.blockWrites();
+        // 요청의 앞 10바이트만 나가고 막힌다. 쓰기를 시작한 요청이다.
+        client.passage.writeCapacity(10);
         RequestHandle handle = client.driver.request(APPLICATION_TYPE, bytes("slow"), 100);
         settle(client, server);
 
@@ -111,6 +112,23 @@ class ConnectionDriverBlockedWriteTest {
         assertThat(handle.result()).isDone();
         assertThat(handle.result().join().status()).isEqualTo(STATUS_DEADLINE_EXCEEDED);
         assertThat(handle.result().join().certainty()).isEqualTo(Certainty.UNKNOWN);
+    }
+
+    @Test
+    void aRequestDeadlineThatPassesBeforeAnyByteWasWrittenIsNotProcessed() {
+        Side[] sides = connected();
+        Side client = sides[0];
+        Side server = sides[1];
+        // 한 바이트도 나가지 못한다. 쓰기를 시작하지 않은 요청이다.
+        client.blockWrites();
+        RequestHandle handle = client.driver.request(APPLICATION_TYPE, bytes("slow"), 100);
+        settle(client, server);
+
+        client.tick(101);
+        settle(client, server);
+
+        assertThat(handle.result().join().status()).isEqualTo(STATUS_DEADLINE_EXCEEDED);
+        assertThat(handle.result().join().certainty()).isEqualTo(Certainty.NOT_PROCESSED);
     }
 
     @Test

@@ -1,7 +1,6 @@
 package io.github.ppzxc.strand.examples;
 
 import io.github.ppzxc.strand.core.internal.CloseReason;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.Passage;
 import java.io.ByteArrayOutputStream;
@@ -288,9 +287,9 @@ final class LocalWebSocketServer implements AutoCloseable {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
-            session.send(2, true, message.bytes());
-            return message.length();
+        public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
+            session.send(2, true, java.util.Arrays.copyOfRange(bytes, offset, offset + length));
+            return length;
         }
 
         /** 연결 종료로 끝났으면 1000, 아니면 1011로 닫는다. 어느 쪽이든 서버는 1000 아닌 코드를 오류 종료에 쓴다. */

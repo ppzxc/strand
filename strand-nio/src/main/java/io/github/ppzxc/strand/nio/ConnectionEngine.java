@@ -23,10 +23,9 @@ import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointOutput;
 import io.github.ppzxc.strand.core.internal.ErrorCode;
 import io.github.ppzxc.strand.core.internal.Event;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.core.internal.ReceiveProgress;
+import io.github.ppzxc.strand.core.internal.WriteQueueLimit;
 import io.github.ppzxc.strand.nio.internal.ConnectionBudgets;
-import io.github.ppzxc.strand.nio.internal.ConnectionDriver;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.OwnerBudgets;
 import io.github.ppzxc.strand.nio.internal.Passage;
@@ -82,7 +81,7 @@ final class ConnectionEngine {
         }
 
         @Override
-        public int write(OutboundMessage message, int offset) {
+        public int writeBytes(byte[] bytes, int offset, int length) {
             return 0;
         }
 
@@ -1129,7 +1128,7 @@ final class ConnectionEngine {
         /** 남은 출력이 상한을 넘으면 읽기를 멈춘다(상대가 읽지 않으면서 계속 보내는 경우 core 출력이 끝없이 늘지 않게 한다). */
         private boolean backlogged() {
             return endpoint.pendingOutputBytes()
-                    > ConnectionDriver.writeQueueLimit(
+                    > WriteQueueLimit.of(
                             endpoint.peerMaxFrameSize(),
                             endpoint.peerMaxConcurrentStreams(),
                             endpoint.ownMaxConcurrentStreams(),

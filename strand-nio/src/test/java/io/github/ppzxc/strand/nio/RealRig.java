@@ -2,7 +2,6 @@ package io.github.ppzxc.strand.nio;
 
 import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
-import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.nio.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.OwnerBudgets;
@@ -47,11 +46,6 @@ final class RealRig implements AutoCloseable {
         @Override
         public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException {
             return delegate.await(timeoutMs, waitForRead, waitForWrite);
-        }
-
-        @Override
-        public int write(OutboundMessage message, int offset) throws IOException {
-            return delegate.write(message, offset);
         }
 
         @Override

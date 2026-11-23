@@ -3,8 +3,6 @@ package io.github.ppzxc.strand.nio.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.ppzxc.strand.core.internal.Endpoint;
-import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -214,8 +212,7 @@ class TcpPassageTest {
             seen = peer.await(100);
         }
         assertThat(seen.kind()).isEqualTo(Inbound.Kind.END);
-        OutboundMessage preface =
-                Endpoint.client(EndpointConfig.defaults()).drainMessages().get(0);
+        OutboundMessage preface = TestMessages.firstMessage();
         PassageContract.writeFully(peer, preface);
         assertThat(readExactly(passage, preface.bytes().length)).isEqualTo(preface.bytes());
         passage.close();

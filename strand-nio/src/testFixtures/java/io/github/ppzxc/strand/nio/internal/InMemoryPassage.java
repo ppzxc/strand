@@ -198,12 +198,14 @@ public final class InMemoryPassage implements Passage {
     }
 
     /**
-     * 진행 보고 방식 쓰기. 받아 주는 만큼({@link #writeCapacity})만 상대에게 보내고 그 바이트 수를 돌려준다. 0은 아무것도 보내지 않은 것이다. 바이트
-     * 스트림 통로에서만 쓴다.
+     * 진행 보고 방식 쓰기. 받아 주는 만큼({@link #writeCapacity})만 상대에게 보내고 그 바이트 수를 돌려준다. 0은 아무것도 보내지 않은 것이다. 호출자는
+     * 출력 하나의 남은 바이트를 모두 넘기므로, 남은 길이를 다 받아 주면 출력 하나를 다 쓴 것이다. 바이트 스트림 통로는 받아 준 만큼을 바로 상대가 읽게
+     * 하고, 메시지 통로는 출력 하나를 다 받았을 때 메시지 하나로 읽게 한다.
      */
     @Override
     public int writeBytes(byte[] bytes, int offset, int length) throws IOException {
         byte[] slice;
+        byte[] whole = null;
         synchronized (lock) {
             if (closed || outputShutdown) {
                 throw new IOException("닫힌 통로");
@@ -223,8 +225,18 @@ public final class InMemoryPassage implements Passage {
             }
             slice = Arrays.copyOfRange(bytes, offset, offset + accepted);
             writtenBytes.write(slice, 0, slice.length);
+            partial = concat(partial, slice);
+            if (accepted == length) {
+                whole = partial;
+                partial = new byte[0];
+                written.add(whole.clone());
+            }
         }
-        peer.deliver(Inbound.bytes(slice));
+        if (!messages) {
+            peer.deliver(Inbound.bytes(slice));
+        } else if (whole != null) {
+            peer.deliver(Inbound.unit(whole));
+        }
         return slice.length;
     }
 

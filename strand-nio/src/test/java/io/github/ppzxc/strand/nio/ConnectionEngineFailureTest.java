@@ -39,7 +39,7 @@ class ConnectionEngineFailureTest {
         }
 
         @Override
-        public int write(io.github.ppzxc.strand.core.internal.OutboundMessage message, int offset) {
+        public int writeBytes(byte[] bytes, int offset, int length) {
             throw new UnsupportedOperationException();
         }
 

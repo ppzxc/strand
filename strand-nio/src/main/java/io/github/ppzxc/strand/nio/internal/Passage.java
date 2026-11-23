@@ -47,33 +47,29 @@ public interface Passage {
     Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) throws IOException;
 
     /**
-     * 메시지의 {@code offset}부터 지금 받을 수 있는 만큼만 상대에게 보낸다. 기다리지 않는다(비블로킹). 통로가 받아 줄 수 없으면 0을 돌려주고,
-     * 받아 줄 수 있게 되기를 {@link #await(long, boolean, boolean)}의 쓰기 대기로 기다린다. 부분 쓰기라서 한 메시지를 여러 번에 나눠 쓸 수
-     * 있다. 호출자는 받아 준 만큼 {@code offset}을 올려 이어 쓰고, 메시지 하나를 다 쓰기 전에는 다른 메시지를 쓰지 않는다.
-     *
-     * <p>메시지 통로는 메시지를 다 받아야 상대에게 메시지 하나로 보인다.
-     *
-     * @param message 보낼 메시지
-     * @param offset 이미 받아 준 바이트 수(0 이상, 메시지 길이 이하)
-     * @return 이번에 받아 준 바이트 수(0 이상, 남은 길이 이하)
-     * @throws IOException 입출력 오류. 드라이버는 연결이 끊긴 것으로 본다
-     */
-    int write(OutboundMessage message, int offset) throws IOException;
-
-    /**
-     * 바이트 배열의 {@code offset}부터 지금 받을 수 있는 만큼만 상대에게 보낸다. 기다리지 않는다(비블로킹). 진행 보고 방식의 쓰기다. 돌려준 값이 보고하는
-     * 소비량이다. TCP는 실제 소켓 쓰기량이고, TLS는 엔진이 실제로 소비한 평문 바이트 수다. 0은 쓰기를 시작한 것이 아니다. 호출자는 0이면 쓰기
-     * 가능을 기다렸다가 다시 부른다.
+     * 바이트 배열의 {@code offset}부터 지금 받을 수 있는 만큼만 상대에게 보낸다. 기다리지 않는다(비블로킹). 돌려준 값이 진행 보고하는 소비량이다. TCP는
+     * 실제 소켓 쓰기량이고, TLS는 엔진이 실제로 소비한 평문 바이트 수이며, 메시지 통로는 메시지 하나를 다 받아 줄 때만 그 전체 길이다. 0은 쓰기를 시작한
+     * 것이 아니다. 호출자는 0이면 쓰기 가능을 기다렸다가 다시 부르고, 받아 준 만큼 {@code offset}을 올려 이어 쓰며, 출력 하나를 다 쓰기 전에는 다른
+     * 출력을 쓰지 않는다. 호출자는 늘 출력 하나의 남은 바이트 전체를 넘기므로 메시지 통로는 남은 길이가 곧 메시지의 남은 길이다.
      *
      * @param bytes 보낼 바이트를 든 배열(통로는 바꾸지 않는다)
      * @param offset 보낼 바이트가 시작하는 위치
      * @param length 보낼 바이트 수(0 이상)
      * @return 이번에 소비한 바이트 수(0 이상, {@code length} 이하)
      * @throws IOException 입출력 오류. 드라이버는 연결이 끊긴 것으로 본다
-     * @throws UnsupportedOperationException 이 통로가 진행 보고 방식 쓰기를 지원하지 않을 때
      */
-    default int writeBytes(byte[] bytes, int offset, int length) throws IOException {
-        throw new UnsupportedOperationException("진행 보고 방식 쓰기를 지원하지 않는 통로");
+    int writeBytes(byte[] bytes, int offset, int length) throws IOException;
+
+    /**
+     * 메시지의 {@code offset}부터 남은 바이트를 {@link #writeBytes}로 쓴다.
+     *
+     * @param message 보낼 메시지
+     * @param offset 이미 받아 준 바이트 수(0 이상, 메시지 길이 이하)
+     * @return 이번에 받아 준 바이트 수
+     * @throws IOException 입출력 오류
+     */
+    default int write(OutboundMessage message, int offset) throws IOException {
+        return writeBytes(message.bytes(), offset, message.length() - offset);
     }
 
     /**

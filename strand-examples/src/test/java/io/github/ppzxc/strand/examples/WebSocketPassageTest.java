@@ -3,10 +3,9 @@ package io.github.ppzxc.strand.examples;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.ppzxc.strand.core.internal.Endpoint;
-import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.nio.internal.Inbound;
+import io.github.ppzxc.strand.nio.internal.TestMessages;
 import java.io.IOException;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
@@ -29,7 +28,7 @@ class WebSocketPassageTest {
     }
 
     private static OutboundMessage firstMessage() {
-        return Endpoint.client(EndpointConfig.defaults()).drainMessages().get(0);
+        return TestMessages.firstMessage();
     }
 
     @Test

@@ -24,6 +24,7 @@ import io.github.ppzxc.strand.core.internal.EndpointOutput;
 import io.github.ppzxc.strand.core.internal.ErrorCode;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.ReceiveProgress;
+import io.github.ppzxc.strand.core.internal.WriteQueueLimit;
 import io.github.ppzxc.strand.netty.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.netty.internal.OwnerBudgets;
 import io.github.ppzxc.strand.netty.internal.ProgressSpace;
@@ -1505,7 +1506,7 @@ final class ConnectionEngine {
         /** 남은 출력이 상한을 넘으면 읽기를 멈춘다(상대가 읽지 않으면서 계속 보내는 경우 core 출력이 끝없이 늘지 않게 한다). */
         private boolean backlogged() {
             return endpoint.pendingOutputBytes()
-                    > writeQueueLimit(
+                    > WriteQueueLimit.of(
                             endpoint.peerMaxFrameSize(),
                             endpoint.peerMaxConcurrentStreams(),
                             endpoint.ownMaxConcurrentStreams(),
@@ -1910,17 +1911,6 @@ final class ConnectionEngine {
             }
             finished = true;
         }
-    }
-
-    /**
-     * 쓰기 대기열 상한(바이트). 규칙을 지키는 상대와의 정상 흐름 제어 범위다. 내 요청(상대가 알린 동시 스트림 × 상대가 알린 최대 프레임)과 상대 요청에 대한
-     * 응답(내가 알린 동시 스트림 × 상대가 알린 최대 프레임), 거기에 제어 프레임 몇 개를 위한 프레임 하나를 더한다. 상대가 알린 값은 상대가 정하므로 절대
-     * 한도({@code absoluteLimit})로 막는다. 절대 한도가 작아도 상대가 알린 최대 프레임 하나보다 작아지지 않는다.
-     */
-    static long writeQueueLimit(
-            long peerMaxFrameSize, long peerMaxConcurrentStreams, long ownMaxConcurrentStreams, long absoluteLimit) {
-        long range = (peerMaxConcurrentStreams + ownMaxConcurrentStreams) * peerMaxFrameSize + peerMaxFrameSize;
-        return Math.max(peerMaxFrameSize, Math.min(range, absoluteLimit));
     }
 
     // ---------------------------------------------------------------- 보조

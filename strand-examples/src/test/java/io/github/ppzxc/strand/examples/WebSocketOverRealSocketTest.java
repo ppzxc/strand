@@ -4,12 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ppzxc.strand.core.internal.Certainty;
-import io.github.ppzxc.strand.core.internal.Endpoint;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
 import io.github.ppzxc.strand.nio.internal.ConnectionDriver;
 import io.github.ppzxc.strand.nio.internal.Inbound;
 import io.github.ppzxc.strand.nio.internal.RequestResult;
+import io.github.ppzxc.strand.nio.internal.TestMessages;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -75,8 +75,8 @@ class WebSocketOverRealSocketTest {
     void theWebSocketExampleExchangesOneRequestWithAStrandServerOverARealSocket() throws Exception {
         LocalWebSocketServer server = serve(true, session -> {
             ConnectionDriver driver = ConnectionDriver.server(
-                            ExampleSupport.withAuthenticator(EndpointConfig.defaults()),
-                            new LocalWebSocketServer.SessionPassage(session))
+                            EndpointConfig.defaults(), new LocalWebSocketServer.SessionPassage(session))
+                    .authenticator(ExampleSupport.authenticator())
                     .handler(handlers, request -> {
                         String body = new String(request.body(), StandardCharsets.UTF_8);
                         request.respond(ExampleSupport.STATUS_OK, ("echo:" + body).getBytes(StandardCharsets.UTF_8));
@@ -153,8 +153,7 @@ class WebSocketOverRealSocketTest {
         CompletableFuture<LocalWebSocketServer.Frame> received = new CompletableFuture<>();
         LocalWebSocketServer server = serve(true, session -> received.complete(session.readFrame()));
         WebSocketPassage passage = connect(server);
-        OutboundMessage message =
-                Endpoint.client(EndpointConfig.defaults()).drainMessages().get(0);
+        OutboundMessage message = TestMessages.firstMessage();
 
         passage.write(message, 0);
 
