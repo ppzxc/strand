@@ -11,7 +11,7 @@ import java.util.jar.Manifest;
 import org.jspecify.annotations.Nullable;
 
 /**
- * 실행 중인 core의 버전. 공개 전까지 바꾸거나 지울 수 있는 임시 API다.
+ * 실행 중인 core의 버전을 조회하는 공개 API. 하위 호환을 약속하는 확정된 API이며, core의 유일한 공개 타입이다.
  */
 public final class StrandVersion {
 

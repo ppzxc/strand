@@ -29,6 +29,10 @@ final class Outbox {
         /** 이 메시지가 시작시킬 확인 대기의 식별자({@link LivenessTimers}). 대기가 없으면 {@link LivenessTimers#NO_WAIT}. */
         long waitId = LivenessTimers.NO_WAIT;
 
+        /** 이 메시지를 낸 쪽의 기록. 쓰기 사건에서 노드로 요청을 바로 찾는 데 쓴다. 없으면 null. */
+        @Nullable
+        Object owner;
+
         @Nullable
         Node prev;
 

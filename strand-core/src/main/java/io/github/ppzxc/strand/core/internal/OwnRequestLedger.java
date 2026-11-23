@@ -195,7 +195,6 @@ final class OwnRequestLedger {
 
     private @Nullable Record firstQueued;
     private @Nullable Record lastQueued;
-    private @Nullable Record firstUnwritten;
     private @Nullable Record lastUnwritten;
     /** 요청 프레임을 전송 계층에 넘긴 내 스트림 가운데 가장 큰 번호. 상대 CLOSE의 {@code last_stream_id} 검사 기준이다(규격 3.5절). */
     private long highestWrittenStreamId;
@@ -342,6 +341,7 @@ final class OwnRequestLedger {
         record.state = RequestState.NUMBERED_UNWRITTEN;
         record.payload = null;
         record.node = outbox.addApplication(OutboundMessage.binary(frame));
+        record.node.owner = record;
         record.linked = true;
         register(record);
         return Admission.ADMITTED;
@@ -352,15 +352,13 @@ final class OwnRequestLedger {
      * 목록에서 빠진다. 마지막 바이트를 넘긴 때는 {@link #onWriteCompleted}가 받는다.
      */
     void onWriteStarted(Outbox.Node node) {
-        for (Record record = firstUnwritten; record != null; record = record.nextUnwritten) {
-            if (record.node == node) {
-                record.node = null;
-                unwrite(record);
-                record.state = RequestState.WRITING_STARTED;
-                record.node = node;
-                writingStreams.put(node, record.streamId);
-                return;
-            }
+        Record record = recordOf(node);
+        if (record != null && record.linked && record.node == node) {
+            record.node = null;
+            unwrite(record);
+            record.state = RequestState.WRITING_STARTED;
+            record.node = node;
+            writingStreams.put(node, record.streamId);
         }
     }
 
@@ -369,13 +367,16 @@ final class OwnRequestLedger {
         if (streamId != null) {
             highestWrittenStreamId = Math.max(highestWrittenStreamId, streamId);
         }
-        for (Record record : byStream.values()) {
-            if (record.node == node) {
-                record.delivered = true;
-                record.node = null;
-                return;
-            }
+        Record record = recordOf(node);
+        if (record != null && record.node == node && byStream.get(record.streamId) == record) {
+            record.delivered = true;
+            record.node = null;
         }
+    }
+
+    /** 쓰기 대기열 노드를 낸 요청. 요청의 프레임이 아니면 null이다. 열린 요청 수와 무관하게 O(1)이다. */
+    private static @Nullable Record recordOf(Outbox.Node node) {
+        return node.owner instanceof Record ? (Record) node.owner : null;
     }
 
     /** 번호 없는 요청 가운데 가장 먼저 낸 것의 번호표. 없으면 -1이다. {@link #openQueued}가 지금 처리할 요청이다. */
@@ -617,9 +618,7 @@ final class OwnRequestLedger {
         byStream.put(record.streamId, record);
         byTicket.put(record.ticket, record);
         record.prevUnwritten = lastUnwritten;
-        if (lastUnwritten == null) {
-            firstUnwritten = record;
-        } else {
+        if (lastUnwritten != null) {
             lastUnwritten.nextUnwritten = record;
         }
         lastUnwritten = record;
@@ -678,9 +677,7 @@ final class OwnRequestLedger {
         record.linked = false;
         Record prev = record.prevUnwritten;
         Record next = record.nextUnwritten;
-        if (prev == null) {
-            firstUnwritten = next;
-        } else {
+        if (prev != null) {
             prev.nextUnwritten = next;
         }
         if (next == null) {
