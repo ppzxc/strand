@@ -698,7 +698,7 @@ public final class Endpoint {
     }
 
     /**
-     * 전송 계층이 CLOSE 없이 끊겼음을 알리는 입력이다(TCP EOF·RST 등 통로가 닫힘). 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다.
+     * 전송 계층이 CLOSE 없이 끊겼음을 알리는 입력이다(통로가 닫힘). 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다.
      * 이미 닫혔다면 아무것도 하지 않는다(규격 3.5절).
      */
     public void disconnect() {

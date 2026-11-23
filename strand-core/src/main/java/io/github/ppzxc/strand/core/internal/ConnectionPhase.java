@@ -340,7 +340,7 @@ final class ConnectionPhase {
         ending = ending.afterError();
     }
 
-    /** 상대가 CLOSE 없이 전송 계층을 끊었다(TCP EOF·RST 등 통로가 닫힘). 곧 닫을 때가 되고 연결 종료(CLOSE)로 끝난 것이 아니다. */
+    /** 상대가 CLOSE 없이 전송 계층을 끊었다(통로가 닫힘). 곧 닫을 때가 되고 연결 종료(CLOSE)로 끝난 것이 아니다. */
     void transportDisconnected() {
         if (closed) {
             return;
@@ -353,7 +353,7 @@ final class ConnectionPhase {
 
     /**
      * 대기 중인 스트림이 0개다. 연결 종료(CLOSE)로 닫는 중이면 닫을 때가 된다(규격 3.5절). 닫는 중이 아니거나 이미 오류로 끝나기로 했으면 아무것도 바꾸지 않는다(오류 종료는 이미 닫을 때이며 연결 종료(CLOSE)로 되돌리지 않는다). 애플리케이션이 종료 중인 연결을 더
-     * 기다리지 않기로 했을 때도 같다. 그러면 {@code NO_ERROR}로 끝난 연결로 남는다(WebSocket Close(1000)를 덧붙인다).
+     * 기다리지 않기로 했을 때도 같다. 그러면 {@code NO_ERROR}로 끝난 연결로 남는다.
      */
     void pendingStreamsReachedZero() {
         if (!closed) {
