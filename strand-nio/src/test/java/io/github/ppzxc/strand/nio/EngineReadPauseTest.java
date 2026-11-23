@@ -216,7 +216,8 @@ class EngineReadPauseTest {
             rig.peerRespond(stream, 0, new byte[] {1});
         }
         assertThat(rig.connection.closed().isDone()).isFalse();
-        assertThat(mine).allSatisfy(handle -> assertThat(handle.result().isDone()).isTrue());
+        assertThat(mine)
+                .allSatisfy(handle -> assertThat(handle.result().isDone()).isTrue());
         assertThat(rig.peerRequestStreams()).hasSize((int) concurrent);
     }
 

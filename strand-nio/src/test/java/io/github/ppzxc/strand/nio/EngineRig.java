@@ -235,8 +235,7 @@ final class EngineRig implements AutoCloseable {
     }
 
     static EngineRig server(RequestHandler handler, Tuning tuning) throws Exception {
-        EngineRig rig =
-                new EngineRig(ConnectionParams.Role.SERVER, handler, InMemoryPassage.streams(), null, tuning);
+        EngineRig rig = new EngineRig(ConnectionParams.Role.SERVER, handler, InMemoryPassage.streams(), null, tuning);
         rig.start();
         return rig;
     }

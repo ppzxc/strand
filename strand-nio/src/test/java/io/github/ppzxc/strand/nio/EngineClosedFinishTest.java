@@ -28,8 +28,8 @@ class EngineClosedFinishTest {
     }
 
     private static EngineRig.Tuning tuning() {
-        return new EngineRig.Tuning().config(config -> config.ackTimeoutMs(ACK_TIMEOUT_MS)
-                .idleIntervalMs(IDLE_INTERVAL_MS));
+        return new EngineRig.Tuning()
+                .config(config -> config.ackTimeoutMs(ACK_TIMEOUT_MS).idleIntervalMs(IDLE_INTERVAL_MS));
     }
 
     private void tick(long ms) {
