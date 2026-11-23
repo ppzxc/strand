@@ -24,6 +24,6 @@ req-close-end-certainty-partial-own-end 형식미지원 쓰기를 시작했지�
 req-ws-close-error-not-1000 형식미지원 오류 CLOSE 뒤 WebSocket Close의 상태 코드는 WebSocket 계층의 동작이다. core가 WebSocket 통로를 단위 입력으로 다루게 바뀌는 때(#376)에 벡터로 다룬다
 req-ws-ping-pong-not-liveness 형식미지원 WebSocket Ping·Pong은 WebSocket 계층의 제어 프레임이다. core가 WebSocket 통로를 단위 입력으로 다루게 바뀌는 때(#376)에 벡터로 다룬다
 # 형식미지원: 크기 초과 프레임과 넘기지 못한 유휴 PING.
-req-hello-oversize-request-local-fail 형식미지원 상대의 max_frame_size를 넘는 요청을 호출 API에 냈을 때의 로컬 실패는 벡터 결과로 표현할 수 없다(req-hello-peer-frame-size-limit과 같은 사유) (확인과 테스트 고정은 #384)
-req-hello-oversize-auth-close-silent 형식미지원 클라이언트 AUTH가 상대 max_frame_size를 넘는 상황을 만드는 입력이 벡터 형식에 없다 (확인과 테스트 고정은 #384)
+req-hello-oversize-request-local-fail 형식미지원 상대의 max_frame_size를 넘는 요청을 호출 API에 냈을 때의 로컬 실패는 벡터 결과로 표현할 수 없다(req-hello-peer-frame-size-limit과 같은 사유) (core 테스트로 고정: #384, EndpointTest.oversizeRequestDoesNotConsumeATicket)
+req-hello-oversize-auth-close-silent 형식미지원 클라이언트 AUTH가 상대 max_frame_size를 넘는 상황을 만드는 입력이 벡터 형식에 없다 (core 테스트로 고정: #384, EndpointTest.clientClosesLocallyWithoutAuthOrCloseWhenItsAuthExceedsThePeerMaxFrameSize)
 req-setup-unsent-idle-ping-close 형식미지원 유휴 PING 간격을 정하는 설정(8.2절)과, 출력을 여러 단계에 걸쳐 계속 막고 바이트 단위 진행만 보고하는 입력(`hold_output`은 다음 단계까지만 보류한다)이 벡터 형식에 없다. core Endpoint 테스트(EndpointUnsentIdlePingTest)와 공개 API 통합 테스트로 확인한다 (#375)
