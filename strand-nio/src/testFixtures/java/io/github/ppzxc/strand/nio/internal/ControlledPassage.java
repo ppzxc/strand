@@ -25,6 +25,9 @@ public final class ControlledPassage implements Passage {
     private static final long UNLIMITED = Long.MAX_VALUE;
     private static final long WAIT_MS = 5000;
 
+    /** 전송 스레드가 기다림에 든 상태가 이만큼 이어지면 붙잡힌 것으로 본다. */
+    private static final long SETTLE_MS = 100;
+
     /** 한쪽 방향으로 오간 프레임 하나. */
     public static final class Frame {
         private final byte[] bytes;
@@ -312,12 +315,25 @@ public final class ControlledPassage implements Passage {
         delegate.wakeup();
         long limit = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WAIT_MS);
         synchronized (lock) {
-            while (!(waitEntries > enteredBefore && waiting)) {
-                long remainingMs = TimeUnit.NANOSECONDS.toMillis(limit - System.nanoTime());
-                if (remainingMs <= 0) {
+            // 방금 깨운 신호가 남아 있으면 기다림에 들어가자마자 곧바로 돌아 나온다. 기다림에 든 것을 본 뒤에도 그 상태가 이어지는지(들어온 횟수가 그대로인지) 확인해야 진짜
+            // 기다림이다. 그렇지 않으면 그 사이 낸 명령이 붙잡히지 않고 처리된다.
+            long stableUntil = 0;
+            long stableEntries = -1;
+            while (true) {
+                long now = System.nanoTime();
+                if (waitEntries > enteredBefore && waiting) {
+                    if (stableEntries != waitEntries) {
+                        stableEntries = waitEntries;
+                        stableUntil = now + TimeUnit.MILLISECONDS.toNanos(SETTLE_MS);
+                    } else if (now >= stableUntil) {
+                        return;
+                    }
+                }
+                if (now > limit) {
                     throw new AssertionError("전송 스레드가 " + WAIT_MS + "ms 안에 기다리는 상태가 되지 않았다");
                 }
-                lock.wait(remainingMs);
+                lock.wait(
+                        Math.max(1, TimeUnit.NANOSECONDS.toMillis(Math.min(limit - now, SETTLE_MS * 1_000_000L / 4))));
             }
         }
     }
