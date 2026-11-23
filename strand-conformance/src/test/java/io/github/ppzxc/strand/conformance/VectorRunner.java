@@ -408,8 +408,7 @@ final class VectorRunner {
 
         private static boolean isAuthAck(OutboundMessage message) {
             byte[] bytes = message.bytes();
-            return message.kind() == OutboundMessage.Kind.BINARY
-                    && bytes.length >= Protocol.HEADER_SIZE
+            return bytes.length >= Protocol.HEADER_SIZE
                     && Protocol.frameType(bytes) == Protocol.TYPE_AUTH
                     && (Protocol.frameFlags(bytes) & Protocol.ACK_FLAG) != 0;
         }

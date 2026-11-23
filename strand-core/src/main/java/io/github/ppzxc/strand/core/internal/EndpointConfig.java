@@ -38,8 +38,6 @@ public final class EndpointConfig {
     private final @Nullable Set<Integer> knownTypes;
     /** 다음에 쓸 스트림 번호. null이면 역할의 첫 번호다(규격 2.2.5절). */
     private final @Nullable Long nextStreamId;
-    /** WebSocket 위에서 쓴다(규격 1.2절). */
-    private final boolean webSocket;
     /** 클라이언트가 {@code AUTH}로 보낼 메커니즘(규격 3.3.1절). */
     private final String authMechanism;
     /** 클라이언트가 {@code AUTH}로 보낼 자격 증명. */
@@ -58,7 +56,6 @@ public final class EndpointConfig {
         this.authTimeoutMs = draft.authTimeoutMs;
         this.knownTypes = draft.knownTypes;
         this.nextStreamId = draft.nextStreamId;
-        this.webSocket = draft.webSocket;
         this.authMechanism = draft.authMechanism;
         this.authCredentials = draft.authCredentials;
         this.authenticator = draft.authenticator;
@@ -80,7 +77,6 @@ public final class EndpointConfig {
         @Nullable
         Long nextStreamId;
 
-        boolean webSocket;
         String authMechanism = ANONYMOUS;
         byte[] authCredentials = new byte[0];
         Authenticator authenticator = EndpointConfig::passesAnonymousOnly;
@@ -98,7 +94,6 @@ public final class EndpointConfig {
         draft.authTimeoutMs = authTimeoutMs;
         draft.knownTypes = knownTypes;
         draft.nextStreamId = nextStreamId;
-        draft.webSocket = webSocket;
         draft.authMechanism = authMechanism;
         draft.authCredentials = authCredentials;
         draft.authenticator = authenticator;
@@ -241,18 +236,6 @@ public final class EndpointConfig {
     }
 
     /**
-     * WebSocket 위에서 쓰는 복사본. 바이트 스트림이 아니라 메시지 하나가 프레임 하나이며, 입력은 {@link Endpoint#receiveMessage}로
-     * 넣는다(규격 1.2절).
-     *
-     * @return 새 설정
-     */
-    public EndpointConfig webSocket() {
-        ConfigDraft draft = draft();
-        draft.webSocket = true;
-        return new EndpointConfig(draft);
-    }
-
-    /**
      * 클라이언트가 {@code AUTH}로 보낼 메커니즘과 자격 증명을 정한 복사본. 정하지 않으면 {@code ANONYMOUS}와 빈 자격 증명이다(규격
      * 3.3.1절).
      *
@@ -323,10 +306,6 @@ public final class EndpointConfig {
 
     OptionalLong credentialLifetimeSeconds() {
         return credentialLifetimeSeconds;
-    }
-
-    boolean isWebSocket() {
-        return webSocket;
     }
 
     boolean knows(int type) {

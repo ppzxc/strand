@@ -33,9 +33,10 @@ public class ReceiveBigFrameBenchmark {
             pieces[i] = Arrays.copyOfRange(big, i * PIECE_SIZE, Math.min(big.length, (i + 1) * PIECE_SIZE));
         }
         for (byte[] piece : pieces) {
-            endpoint.receive(piece);
+            BenchSupport.receive(endpoint, piece);
         }
-        if (!endpoint.drainEvents().isEmpty() || !endpoint.drainMessages().isEmpty()) {
+        if (!BenchSupport.drainEvents(endpoint).isEmpty()
+                || !BenchSupport.drainMessages(endpoint).isEmpty()) {
             throw new IllegalStateException("예약 프레임이 이벤트나 송신을 만들었다");
         }
     }
@@ -43,7 +44,7 @@ public class ReceiveBigFrameBenchmark {
     @Benchmark
     public void receive() {
         for (byte[] piece : pieces) {
-            endpoint.receive(piece);
+            BenchSupport.receive(endpoint, piece);
         }
     }
 }

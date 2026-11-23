@@ -131,9 +131,9 @@ public class TicketLookupBenchmark {
         }
         rotation++;
         // 취소가 쌓은 이벤트와, 쓰기 시작 상태를 유지하려면 새 요청을 내보내야 한다. 둘 다 호출당 O(LOOKUPS)다.
-        endpoint.drainEvents();
+        BenchSupport.drainEvents(endpoint);
         if (kind == Kind.WRITTEN) {
-            List<OutboundMessage> sent = endpoint.drainMessages();
+            List<OutboundMessage> sent = BenchSupport.drainMessages(endpoint);
             if (sent.isEmpty()) {
                 throw new IllegalStateException("내보낼 요청이 없다");
             }

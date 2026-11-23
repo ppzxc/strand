@@ -31,14 +31,15 @@ public class ReceiveManySmallFramesBenchmark {
             System.arraycopy(small, 0, chunk, at, SMALL_FRAME_SIZE);
         }
         // 예약 프레임이 이벤트도 송신도 만들지 않아야 이 벤치마크가 receive만 잰다.
-        endpoint.receive(chunk);
-        if (!endpoint.drainEvents().isEmpty() || !endpoint.drainMessages().isEmpty()) {
+        BenchSupport.receive(endpoint, chunk);
+        if (!BenchSupport.drainEvents(endpoint).isEmpty()
+                || !BenchSupport.drainMessages(endpoint).isEmpty()) {
             throw new IllegalStateException("예약 프레임이 이벤트나 송신을 만들었다");
         }
     }
 
     @Benchmark
     public void receive() {
-        endpoint.receive(chunk);
+        BenchSupport.receive(endpoint, chunk);
     }
 }

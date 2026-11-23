@@ -41,7 +41,7 @@ class EndpointStreamSplitTest {
     }
 
     private static Supplier<Endpoint> server(EndpointConfig config) {
-        return () -> Endpoint.server(config);
+        return () -> Drive.server(config);
     }
 
     /** 서버 쪽 시점에서 서문과 HELLO 교환, AUTH 통과까지의 입력. */
@@ -148,7 +148,7 @@ class EndpointStreamSplitTest {
     /** 이벤트와 송신 메시지를 문자열로 줄인다. */
     private static String observe(Endpoint endpoint) {
         StringBuilder out = new StringBuilder();
-        for (Event event : endpoint.drainEvents()) {
+        for (Event event : Drive.drainEvents(endpoint)) {
             out.append("event ")
                     .append(event.kind())
                     .append(' ')
@@ -159,12 +159,8 @@ class EndpointStreamSplitTest {
                     .append(event.type())
                     .append('\n');
         }
-        for (OutboundMessage message : endpoint.drainMessages()) {
-            out.append("message ")
-                    .append(message.kind())
-                    .append(' ')
-                    .append(Arrays.toString(message.bytes()))
-                    .append('\n');
+        for (OutboundMessage message : Drive.drainMessages(endpoint)) {
+            out.append("message ").append(Arrays.toString(message.bytes())).append('\n');
         }
         return out.toString();
     }
@@ -174,7 +170,7 @@ class EndpointStreamSplitTest {
         int at = 0;
         for (int size : sizes) {
             byte[] chunk = Arrays.copyOfRange(c.stream, at, at + size);
-            endpoint.receive(chunk);
+            Drive.receive(endpoint, chunk);
             if (overwriteAfterEach) {
                 Arrays.fill(chunk, (byte) 0xFF);
             }

@@ -36,7 +36,6 @@ public final class Endpoint {
     /** 다 비웠을 때 이 크기를 넘는 버퍼는 놓는다. 큰 프레임 하나 때문에 연결이 그 크기를 계속 붙잡지 않게 한다. */
     private static final int PENDING_RELEASE_ABOVE = 65_536;
 
-    private static final int MAX_WEBSOCKET_STATUS_CODE = 0xFFFF;
     /** 서버는 짝수, 클라이언트는 홀수 번호를 쓰고 첫 번호는 각각 2와 1이다(규격 2.2.5절). */
     private static final int FIRST_SERVER_STREAM_ID = 2;
 
@@ -130,21 +129,6 @@ public final class Endpoint {
     /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
     private long highestPeerStreamId;
 
-    /** 조각으로 조립 중인 WebSocket 메시지가 열려 있는가. */
-    private boolean messageOpen;
-
-    private @Nullable WebSocketMessageKind messageKind;
-    private byte[] messageBuffer = NO_BYTES;
-    private int messageLength;
-    /** 지금까지 본 메시지의 바이트 수. 모아 두지 않은 것도 센다. */
-    private long messageTotal;
-    /** 판정이 끝나 나머지 조각을 버리는 중인가. */
-    private boolean messageDiscard;
-
-    private boolean messageHeaderChecked;
-    /** 헤더가 알린 프레임의 전체 크기({@code 4 + length}). 헤더를 확인한 뒤에만 의미가 있다. */
-    private long messageExpected;
-
     private Endpoint(boolean server, EndpointConfig config) {
         this.config = config;
         this.timers = new LivenessTimers(config.ackTimeoutMs(), config.authTimeoutMs(), config.idleIntervalMs());
@@ -199,12 +183,9 @@ public final class Endpoint {
      * 않고 던진다. 콜백이 던진 예외는 엔드포인트가 받아 연결을 닫으므로 이 호출 밖으로 나오지 않는다.
      *
      * @param bytes 받은 바이트
-     * @throws IllegalStateException WebSocket 엔드포인트일 때, 또는 입력을 처리하는 중에 다시 불렀을 때
+     * @throws IllegalStateException 입력을 처리하는 중에 다시 불렀을 때
      */
     public void receive(byte[] bytes) {
-        if (config.isWebSocket()) {
-            throw new IllegalStateException("WebSocket 엔드포인트는 receiveMessage로 입력한다");
-        }
         if (!enterReceive()) {
             return;
         }
@@ -234,9 +215,6 @@ public final class Endpoint {
         Objects.requireNonNull(space, "space");
         if (offset < 0 || length < 0 || offset > bytes.length - length || maximumUnits < 0) {
             throw new IllegalArgumentException("유효하지 않은 입력 범위 또는 처리 한도");
-        }
-        if (config.isWebSocket()) {
-            throw new IllegalStateException("WebSocket 엔드포인트는 메시지 단위로 입력한다");
         }
         if (maximumUnits == 0 || !enterReceive()) {
             return new ReceiveProgress(0, false);
@@ -406,293 +384,9 @@ public final class Endpoint {
     }
 
     /**
-     * WebSocket 메시지 하나를 넣는다. 서문은 첫 바이너리 메시지, 그 뒤로는 메시지 하나가 프레임 하나다(규격 1.2절). 바이너리가 아닌
-     * 메시지, 크기가 {@code 4 + length}가 아닌 메시지는 연결 오류다. type이 CLOSE이면 크기가 어긋나도 받은 CLOSE로 본다.
-     *
-     * <p>입력을 처리하는 동안 애플리케이션 콜백에서 같은 엔드포인트에 다시 입력할 수 없다({@link #receive(byte[])}와 같다).
-     *
-     * @param kind 메시지 종류
-     * @param message 메시지 내용
-     * @throws IllegalStateException 바이트 스트림 엔드포인트일 때, 또는 입력을 처리하는 중에 다시 불렀을 때
-     */
-    public void receiveMessage(WebSocketMessageKind kind, byte[] message) {
-        if (!config.isWebSocket()) {
-            throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
-        }
-        if (!enterReceive()) {
-            return;
-        }
-        try {
-            receiveWebSocketMessage(kind, message);
-        } finally {
-            receiving = false;
-        }
-    }
-
-    private void receiveWebSocketMessage(WebSocketMessageKind kind, byte[] message) {
-        if (phase.awaitingPreface()) {
-            if (kind == WebSocketMessageKind.BINARY
-                    && message.length == Frames.preface().length
-                    && matchesPrefacePrefix(message, 0, message.length)) {
-                phase.prefaceVerified();
-                sendHello();
-            } else {
-                closeWithoutClose();
-            }
-            return;
-        }
-        if (phase.awaitingFirstFrame() && !checkFirstMessage(kind, message, message.length)) {
-            closeWithoutClose();
-            return;
-        }
-        if (kind != WebSocketMessageKind.BINARY || message.length < Frames.TYPE_END) {
-            connectionError();
-            return;
-        }
-        long length = Frames.readUnsignedInt(message, 0);
-        if (length < Frames.MIN_LENGTH
-                || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE
-                || message.length != Frames.LENGTH_FIELD_SIZE + length) {
-            rejectBadLength(message, 0);
-            return;
-        }
-        handle(message, 0, message.length);
-    }
-
-    /**
-     * WebSocket 메시지 하나의 조각을 넣는다. 메시지의 종류와 시작·끝을 보존하며, 메시지 전체를 전송 모듈이 미리 모을 필요가 없다. 메시지 끝에서
-     * 정확한 길이를 검증한 뒤에만 프레임의 효과(요청 전달, 결과 확정 등)를 적용한다(규격 1.2절). 조립 공간은 프레임 크기 상한
-     * ({@code max_frame_size})을 넘지 않는다. 프레임 헤더가 상한을 넘는 길이를 알리거나 메시지가 알린 길이를 넘으면 끝을 기다리지 않고 오류로
-     * 처리하며, 그 메시지의 나머지 조각은 모으지 않고 버린다. 텍스트 메시지는 시작에서 오류로 처리한다.
-     *
-     * <p>이 호출 안에서 읽고 끝내며 {@code bytes}를 붙잡지 않는다. 사건·출력 공간이 모자라면 아무것도 소비하지 않고 수거가 필요하다고 알린다.
-     * 호출자는 수거한 뒤 같은 조각(같은 {@code start}·{@code end})을 다시 넣는다. 소비는 조각 단위이며 조각 안에서 일부만 소비하지 않는다.
-     * 연결이 이미 끝났으면 아무것도 소비하지 않는다.
-     *
-     * @param kind 메시지 종류. 한 메시지의 모든 조각에서 같아야 한다
-     * @param start 메시지의 첫 조각이면 참
-     * @param end 메시지의 마지막 조각이면 참
-     * @param bytes 조각을 담은 배열
-     * @param offset 조각의 시작 위치
-     * @param length 조각의 길이
-     * @param space 수거 전에 쌓아 둘 수 있는 사건·출력의 한도
-     * @return 소비한 바이트 수와 수거 필요 여부
-     * @throws IllegalArgumentException 범위가 유효하지 않거나 메시지 안에서 종류가 바뀔 때
-     * @throws IllegalStateException 바이트 스트림 엔드포인트일 때, 시작 없이 이어지거나 열린 메시지 안에서 다시 시작할 때, 입력을 처리하는 중에
-     *     다시 불렀을 때, 수거할 것이 하나도 없는데도 공간이 모자랄 때
-     */
-    public ReceiveProgress receiveMessageFragment(
-            WebSocketMessageKind kind,
-            boolean start,
-            boolean end,
-            byte[] bytes,
-            int offset,
-            int length,
-            CollectionSpace space) {
-        Objects.requireNonNull(kind, "kind");
-        Objects.requireNonNull(bytes, "bytes");
-        Objects.requireNonNull(space, "space");
-        if (offset < 0 || length < 0 || offset > bytes.length - length) {
-            throw new IllegalArgumentException("유효하지 않은 입력 범위");
-        }
-        if (!config.isWebSocket()) {
-            throw new IllegalStateException("바이트 스트림 엔드포인트는 receive로 입력한다");
-        }
-        if (!enterReceive()) {
-            dropMessage();
-            return new ReceiveProgress(0, false);
-        }
-        try {
-            if (start == messageOpen) {
-                throw new IllegalStateException(start ? "열린 메시지 안에서 다시 시작할 수 없다" : "시작 없이 조각이 이어질 수 없다");
-            }
-            if (!start && kind != messageKind) {
-                throw new IllegalArgumentException("한 메시지 안에서 종류가 바뀔 수 없다");
-            }
-            if (!hasSpace(space)) {
-                return new ReceiveProgress(0, true);
-            }
-            if (start) {
-                messageOpen = true;
-                messageKind = kind;
-                messageLength = 0;
-                messageTotal = 0;
-                messageDiscard = false;
-                messageHeaderChecked = false;
-            }
-            if (!messageDiscard) {
-                if (kind == WebSocketMessageKind.TEXT) {
-                    receiveWebSocketMessage(kind, NO_BYTES);
-                    discardMessage();
-                } else {
-                    takeBinaryFragment(bytes, offset, length);
-                }
-            }
-            if (end) {
-                if (!messageDiscard) {
-                    finishMessage();
-                }
-                dropMessage();
-            }
-            return new ReceiveProgress(length, false);
-        } finally {
-            receiving = false;
-        }
-    }
-
-    /** 바이너리 조각을 조립한다. 판정할 수 있게 되면 끝을 기다리지 않고 오류로 처리한다. 모으는 바이트는 판정에 필요한 만큼으로 한정한다. */
-    private void takeBinaryFragment(byte[] bytes, int offset, int length) {
-        int at = offset;
-        int end = offset + length;
-        messageTotal += length;
-        if (phase.awaitingPreface()) {
-            if (messageTotal > Frames.preface().length) {
-                closeWithoutClose();
-                discardMessage();
-                return;
-            }
-            appendMessage(bytes, at, length);
-            return;
-        }
-        if (!messageHeaderChecked) {
-            int take = Math.min(end - at, Frames.HEADER_SIZE - messageLength);
-            appendMessage(bytes, at, take);
-            at += take;
-            if (messageLength < Frames.HEADER_SIZE) {
-                return;
-            }
-            if (!inspectMessageHeader()) {
-                discardMessage();
-                return;
-            }
-        }
-        if (messageTotal > messageExpected) {
-            rejectBadLength(messageBuffer, 0);
-            discardMessage();
-            return;
-        }
-        appendMessage(bytes, at, end - at);
-    }
-
-    /**
-     * 헤더가 모였다. 첫 프레임 검사(규격 3.2.4절)와 {@code length} 범위를 확인한다.
-     *
-     * @return 계속 모아도 되면 참
-     */
-    private boolean inspectMessageHeader() {
-        if (phase.awaitingFirstFrame()
-                && !checkFirstMessage(WebSocketMessageKind.BINARY, messageBuffer, messageLength)) {
-            closeWithoutClose();
-            return false;
-        }
-        long length = Frames.readUnsignedInt(messageBuffer, 0);
-        if (length < Frames.MIN_LENGTH || length > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE) {
-            rejectBadLength(messageBuffer, 0);
-            return false;
-        }
-        messageExpected = Frames.LENGTH_FIELD_SIZE + length;
-        messageHeaderChecked = true;
-        return true;
-    }
-
-    /** 마지막 조각까지 모였다. 정확한 길이를 확인한 뒤에야 프레임의 효과를 적용한다. */
-    private void finishMessage() {
-        if (!messageHeaderChecked) {
-            receiveWebSocketMessage(WebSocketMessageKind.BINARY, Arrays.copyOf(messageBuffer, messageLength));
-        } else if (messageTotal == messageExpected) {
-            handle(messageBuffer, 0, messageLength);
-        } else {
-            rejectBadLength(messageBuffer, 0);
-        }
-    }
-
-    private void appendMessage(byte[] bytes, int at, int length) {
-        if (length == 0) {
-            return;
-        }
-        int needed = messageLength + length;
-        if (needed > messageBuffer.length) {
-            int grown = Math.max(PENDING_MIN_CAPACITY, messageBuffer.length * 2);
-            // 조립 공간은 프레임 크기 상한을 넘기지 않는다.
-            int cap = (int) Math.min(config.maxFrameSize(), Integer.MAX_VALUE);
-            messageBuffer = Arrays.copyOf(messageBuffer, Math.max(needed, Math.min(grown, cap)));
-        }
-        System.arraycopy(bytes, at, messageBuffer, messageLength, length);
-        messageLength = needed;
-    }
-
-    /** 이 메시지의 나머지 조각은 모으지 않고 버린다. */
-    private void discardMessage() {
-        messageDiscard = true;
-        messageLength = 0;
-        messageBuffer = NO_BYTES;
-    }
-
-    /** 조립 중인 메시지를 놓는다. */
-    private void dropMessage() {
-        messageOpen = false;
-        messageDiscard = false;
-        messageHeaderChecked = false;
-        messageLength = 0;
-        messageTotal = 0;
-        if (messageBuffer.length > PENDING_RELEASE_ABOVE) {
-            messageBuffer = NO_BYTES;
-        }
-    }
-
-    /** 조립 중인 메시지에 모아 둔 바이트 수. */
-    int messageAssemblyLength() {
-        return messageLength;
-    }
-
-    /**
-     * WebSocket 출력 하나가 WebSocket 계층에 메시지 전체로 접수됐음을 보고한다. 이 호출이 쓰기 시작과 전체 전달을 함께 뜻한다. 접수 전에는 철회할
-     * 수 있고 접수 뒤에는 메시지를 유지한 채 필요한 RESET을 뒤에 보낸다. 전송 모듈 내부 대기열에 넣은 것, 소켓에 쓴 것, TLS가 평문을 소비한 것은
-     * 접수가 아니다. 상대의 수신·처리를 보장하지 않는다. 전송 모듈은 {@link #nextOutput()}으로 확인한 뒤 이 호출까지 같은 엔드포인트의 다른 명령을
-     * 처리하지 않아야 한다.
-     *
-     * @param id {@link #nextOutput()}이 돌려준 출력의 식별자
-     * @throws IllegalStateException WebSocket 엔드포인트가 아닐 때
-     * @throws IllegalArgumentException 식별자가 현재 출력의 것이 아닐 때(철회·교체·이미 접수한 출력)
-     */
-    public void outputAccepted(long id) {
-        if (!config.isWebSocket()) {
-            throw new IllegalStateException("바이트 스트림 엔드포인트는 outputProgress로 보고한다");
-        }
-        EndpointOutput output = nextOutput();
-        if (output == null || output.id() != id) {
-            throw new IllegalArgumentException("유효하지 않은 출력 접수");
-        }
-        startOutput();
-        timers.outputProgressed(now);
-        completeOutput();
-    }
-
-    /**
-     * WebSocket Close를 받았거나 WebSocket이 닫혔음을 알린다. 전송 종료 입력이다. 상태 코드가 1000이어도 Strand {@code CLOSE}나 {@code
-     * last_stream_id}를 만들지 않으며, 응답·RESET을 받지 못한 요청은 메시지를 접수했는지에 따라 결과 모름 또는 처리 안 됨으로 확정한다(규격 3.5절).
-     * 요청 결과는 종료 사건보다 먼저 남는다. WebSocket 닫기 응답과 실제 통로 정리는 전송 모듈이 맡는다. 조립 중이던 메시지는 효과 없이 버린다. 이미
-     * 끝났다면 아무것도 하지 않는다.
-     *
-     * @param statusCode 받은 WebSocket 상태 코드(0~65535). 결과에 영향을 주지 않는다
-     * @throws IllegalStateException WebSocket 엔드포인트가 아닐 때
-     * @throws IllegalArgumentException 상태 코드가 범위 밖일 때
-     */
-    public void webSocketClosed(int statusCode) {
-        if (!config.isWebSocket()) {
-            throw new IllegalStateException("바이트 스트림 엔드포인트는 disconnect로 알린다");
-        }
-        if (statusCode < 0 || statusCode > MAX_WEBSOCKET_STATUS_CODE) {
-            throw new IllegalArgumentException("WebSocket 상태 코드는 0~65535여야 한다: " + statusCode);
-        }
-        disconnect();
-        dropMessage();
-    }
-
-    /**
      * 정확히 한 단위(서문 또는 프레임 하나)라고 주장하는 바이트를 넣는다. 크기가 한 단위와 같으면 같은 바이트를 스트림으로 넣었을 때와 같은 사건과
      * 출력을 낸다. 다르면 연결 단계에 맞게 반응한다: 서문 단계와 첫 프레임 단계는 아무것도 보내지 않고 닫고, 그 뒤는 연결 오류이며, {@code
-     * type}이 CLOSE이면 CLOSE 없이 닫는다(규격 3.5절, 5.1절). 설정의 WebSocket 여부와 무관하다.
+     * type}이 CLOSE이면 CLOSE 없이 닫는다(규격 3.5절, 5.1절).
      *
      * <p>수거 공간 계약은 {@link #receiveBounded(byte[], int, int, int, CollectionSpace)}와 같다. 공간이 모자라면 아무것도 소비하지 않고
      * 수거가 필요하다고 알리며, 호출자는 수거한 뒤 같은 단위를 다시 넣는다. 연결이 이미 끝났으면 아무것도 소비하지 않는다. 이 호출 안에서 읽고
@@ -784,11 +478,11 @@ public final class Endpoint {
         handle(bytes, off, length);
     }
 
-    /** 전송 모듈이 연결을 어떻게 닫아야 하는지에 대한 core의 지시. Strand CLOSE·WebSocket Close 메시지와는 별개다. */
+    /** 전송 모듈이 연결을 어떻게 닫아야 하는지에 대한 core의 지시. Strand CLOSE 프레임과는 별개다. */
     public enum TransportClose {
         /** 연결이 끝나지 않았다. 닫지 않는다. */
         NONE,
-        /** 연결이 끝났다. 남은 출력(Strand CLOSE, WebSocket Close 포함)을 처리한 뒤 닫는다. */
+        /** 연결이 끝났다. 남은 출력(Strand CLOSE 포함)을 처리한 뒤 닫는다. */
         AFTER_PENDING_OUTPUT,
         /** 연결이 끝났고 보낼 것이 없거나 보낼 수 없다. 기다리지 않고 닫는다(EOF·쓰기 실패·abort 포함). */
         IMMEDIATE
@@ -1192,7 +886,7 @@ public final class Endpoint {
     }
 
     /**
-     * 전송 계층이 CLOSE 없이 끊겼음을 알리는 입력이다(TCP EOF·RST, WebSocket close). 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다.
+     * 전송 계층이 CLOSE 없이 끊겼음을 알리는 입력이다(TCP EOF·RST 등 통로가 닫힘). 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다.
      * 이미 닫혔다면 아무것도 하지 않는다(규격 3.5절).
      */
     public void disconnect() {
@@ -1276,9 +970,6 @@ public final class Endpoint {
         }
         if (count == 0) {
             return;
-        }
-        if (config.isWebSocket()) {
-            throw new IllegalStateException("WebSocket 출력은 메시지 전체 접수만 보고한다(outputAccepted)");
         }
         if (outputWritten == 0) {
             startOutput();
@@ -1435,18 +1126,6 @@ public final class Endpoint {
         return Frames.typeOf(bytes, off) == FrameType.HELLO
                 && Frames.streamIdOf(bytes, off) == 0
                 && Frames.flagsOf(bytes, off) == 0;
-    }
-
-    /** WebSocket의 첫 프레임 메시지 검사(규격 1.2절, 3.2.4절): 바이너리이고 헤더를 읽을 수 있고 HELLO여야 한다. 통과하면 연결 단계에 알린다. */
-    private boolean checkFirstMessage(WebSocketMessageKind kind, byte[] message, int available) {
-        boolean valid = kind == WebSocketMessageKind.BINARY
-                && available >= Frames.HEADER_SIZE
-                && Frames.readUnsignedInt(message, 0) >= Frames.MIN_LENGTH
-                && isFirstFrameHeader(message, 0);
-        if (valid) {
-            phase.firstFrameVerified();
-        }
-        return valid;
     }
 
     /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */
@@ -1997,8 +1676,7 @@ public final class Endpoint {
 
     /**
      * 종료 경로: 전송 계층을 닫는 유일한 곳이다. 대기 중인 스트림이 0개이면 그 사건을 단계에 알리고, 단계가 닫을 때라고 하면 닫아 연결을 끝낸다.
-     * {@code NO_ERROR}로 끝나는 WebSocket 연결이면 마지막 프레임 뒤에 WebSocket Close(1000)를 낸다(규격 1.2절). 오류 종료의 WebSocket
-     * 상태 코드는 규격이 정하지 않아 모델링하지 않는다. 연결이 끝날 때 내 요청 장부와 생존 확인 타이머에 알리고, 결과를 받지 못한 요청마다 로컬
+     * 연결이 끝날 때 내 요청 장부와 생존 확인 타이머에 알리고, 결과를 받지 못한 요청마다 로컬
      * UNAVAILABLE을 한 번씩 넘긴 뒤 상대가 연 스트림을 비우고 닫은 로컬 원인과 함께 closed를 낸다(규격 3.5절). 이후 받은 바이트와 시간은
      * 처리하지 않는다.
      */
@@ -2012,14 +1690,9 @@ public final class Endpoint {
         if (!phase.shouldCloseTransport()) {
             return;
         }
-        if (phase.endsNormally() && config.isWebSocket()) {
-            outbox.addLast(OutboundMessage.normalWebSocketClose());
-        }
         phase.transportClosed();
         pending = NO_BYTES;
         pendingLength = 0;
-        messageBuffer = NO_BYTES;
-        messageLength = 0;
         timers.clear();
         for (OwnRequestLedger.Outcome outcome : ledger.onTransportClosed(phase.endedByDisconnect())) {
             applyOutcome(outcome);

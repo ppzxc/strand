@@ -17,13 +17,13 @@ class EndpointResponseBeforeHandoffTest {
     private static final long STREAM = 2;
 
     private static Endpoint openServer() {
-        Endpoint server = Endpoint.server(EndpointConfig.defaults());
-        server.receive(EndpointTest.bytes("c0de535452300000"));
-        server.receive(EndpointTest.bytes("0000001000010000000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001000010100000000000000000000000000"));
-        server.receive(EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
-        server.drainEvents();
-        server.drainMessages();
+        Endpoint server = Drive.server(EndpointConfig.defaults());
+        Drive.receive(server, EndpointTest.bytes("c0de535452300000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010000000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001000010100000000000000000000000000"));
+        Drive.receive(server, EndpointTest.bytes("0000001a0005000000000000000000000000000009414e4f4e594d4f5553"));
+        Drive.drainEvents(server);
+        Drive.drainMessages(server);
         return server;
     }
 
@@ -37,7 +37,7 @@ class EndpointResponseBeforeHandoffTest {
 
     private static String sent(Endpoint endpoint) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        for (OutboundMessage message : endpoint.drainMessages()) {
+        for (OutboundMessage message : Drive.drainMessages(endpoint)) {
             out.write(message.bytes(), 0, message.bytes().length);
         }
         return EndpointTest.hex(out.toByteArray());
@@ -48,7 +48,7 @@ class EndpointResponseBeforeHandoffTest {
     }
 
     private static void assertResult(Endpoint endpoint, int status, Certainty certainty) {
-        List<Event> events = endpoint.drainEvents();
+        List<Event> events = Drive.drainEvents(endpoint);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).kind()).isEqualTo(Event.Kind.RESULT);
         assertThat(events.get(0).streamId()).isEqualTo(STREAM);
@@ -62,14 +62,14 @@ class EndpointResponseBeforeHandoffTest {
         Endpoint server = openServer();
         long ticket = server.request(REQUEST_TYPE, new byte[0]);
 
-        server.receive(response());
+        Drive.receive(server, response());
 
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
         assertThat(server.requestState(ticket)).isEqualTo(OwnRequestLedger.RequestState.NUMBERED_UNWRITTEN);
         assertThat(server.openStreamCount()).isEqualTo(1);
         assertThat(sent(server)).isEqualTo(requestFrameHex());
 
-        server.receive(response());
+        Drive.receive(server, response());
         assertResult(server, 0, Certainty.RESPONSE);
     }
 
@@ -79,12 +79,12 @@ class EndpointResponseBeforeHandoffTest {
         Endpoint server = openServer();
         server.request(REQUEST_TYPE, new byte[0]);
 
-        server.receive(reset(ErrorCode.REFUSED));
+        Drive.receive(server, reset(ErrorCode.REFUSED));
 
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
         assertThat(sent(server)).isEqualTo(requestFrameHex());
 
-        server.receive(reset(ErrorCode.CANCEL));
+        Drive.receive(server, reset(ErrorCode.CANCEL));
         assertResult(server, Status.CANCELLED, Certainty.UNKNOWN);
     }
 
@@ -97,16 +97,16 @@ class EndpointResponseBeforeHandoffTest {
         server.outputProgress(request.id(), 1);
         assertThat(server.requestState(ticket)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
 
-        server.receive(response());
-        server.receive(reset(ErrorCode.CANCEL));
+        Drive.receive(server, response());
+        Drive.receive(server, reset(ErrorCode.CANCEL));
 
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
         assertThat(server.openStreamCount()).isEqualTo(1);
         EndpointOutput rest = server.nextOutput();
         assertThat(rest.id()).isEqualTo(request.id());
         server.outputProgress(rest.id(), rest.length() - 1);
 
-        server.receive(response());
+        Drive.receive(server, response());
         assertResult(server, 0, Certainty.RESPONSE);
     }
 
@@ -115,9 +115,9 @@ class EndpointResponseBeforeHandoffTest {
     void responseToHandedOffRequestIsResult() {
         Endpoint server = openServer();
         server.request(REQUEST_TYPE, new byte[0]);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.receive(response());
+        Drive.receive(server, response());
 
         assertResult(server, 0, Certainty.RESPONSE);
     }
@@ -127,9 +127,9 @@ class EndpointResponseBeforeHandoffTest {
     void resetToHandedOffRequestIsUnknownResult() {
         Endpoint server = openServer();
         server.request(REQUEST_TYPE, new byte[0]);
-        server.drainMessages();
+        Drive.drainMessages(server);
 
-        server.receive(reset(ErrorCode.CANCEL));
+        Drive.receive(server, reset(ErrorCode.CANCEL));
 
         assertResult(server, Status.CANCELLED, Certainty.UNKNOWN);
     }
@@ -142,9 +142,9 @@ class EndpointResponseBeforeHandoffTest {
         byte[] bad = Arrays.copyOf(reset(ErrorCode.CANCEL), Frames.reset(STREAM, 0).length + 1);
         bad[3] = (byte) (bad[3] + 1);
 
-        server.receive(bad);
+        Drive.receive(server, bad);
 
-        assertThat(server.drainEvents()).extracting(Event::kind).contains(Event.Kind.CLOSED);
+        assertThat(Drive.drainEvents(server)).extracting(Event::kind).contains(Event.Kind.CLOSED);
     }
 
     /** 종료 중인 연결은 내 요청이 남아 있는 동안 닫지 않는다. 버린 응답은 요청 수를 줄이지 않고, 진짜 응답이 오면 닫는다. */
@@ -153,13 +153,15 @@ class EndpointResponseBeforeHandoffTest {
         Endpoint server = openServer();
         server.request(REQUEST_TYPE, new byte[0]);
         server.close(ErrorCode.NO_ERROR);
-        server.receive(response());
+        Drive.receive(server, response());
 
-        assertThat(server.drainEvents()).isEmpty();
+        assertThat(Drive.drainEvents(server)).isEmpty();
         assertThat(server.openStreamCount()).isEqualTo(1);
 
-        server.drainMessages();
-        server.receive(response());
-        assertThat(server.drainEvents()).extracting(Event::kind).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
+        Drive.drainMessages(server);
+        Drive.receive(server, response());
+        assertThat(Drive.drainEvents(server))
+                .extracting(Event::kind)
+                .containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 }

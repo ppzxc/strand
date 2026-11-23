@@ -157,15 +157,6 @@ public final class InMemoryPassage implements Passage {
                 throw new IOException("닫힌 통로");
             }
         }
-        if (message.kind() != OutboundMessage.Kind.BINARY) {
-            synchronized (lock) {
-                if (muted) {
-                    return 0;
-                }
-            }
-            peer.deliver(Inbound.end());
-            return 0;
-        }
         int remaining = message.length() - offset;
         int accepted;
         byte[] slice;
