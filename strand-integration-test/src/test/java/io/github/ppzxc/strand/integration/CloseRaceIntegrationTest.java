@@ -6,12 +6,11 @@ import static io.github.ppzxc.strand.integration.Fixtures.CLOSE_TYPE;
 import static io.github.ppzxc.strand.integration.Fixtures.STATUS_OK;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.ppzxc.strand.core.internal.Certainty;
-import io.github.ppzxc.strand.core.internal.CloseReason;
-import io.github.ppzxc.strand.nio.internal.ConnectionClosed;
-import io.github.ppzxc.strand.nio.internal.IncomingRequest;
-import io.github.ppzxc.strand.nio.internal.RequestResult;
-import io.github.ppzxc.strand.nio.internal.TcpPassage;
+import io.github.ppzxc.strand.api.Certainty;
+import io.github.ppzxc.strand.api.CloseNotice;
+import io.github.ppzxc.strand.api.RequestResult;
+import io.github.ppzxc.strand.nio.IncomingRequest;
+import io.github.ppzxc.strand.nio.internal.ControlledPassage;
 import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -21,8 +20,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /** 종료가 다른 동작과 겹치는 경우를 실제 TCP 위에서 확인한다(규격 3.5절). */
+@ExtendWith(PassageObservation.class)
 class CloseRaceIntegrationTest {
 
     /** CLOSE가 엇갈리는 것은 타이밍에 달려 있어서, 같은 시나리오를 여러 번 되풀이해 엇갈릴 기회를 늘린다. */
@@ -48,20 +49,20 @@ class CloseRaceIntegrationTest {
             CompletableFuture<RequestResult> result =
                     client.request(APPLICATION_TYPE, Fixtures.payload("hello")).result();
             IncomingRequest received = serverSide.awaitRequest();
-            long receivedBeforeClose = serverSide.driver().receivedBytes();
+            long receivedBeforeClose = serverSide.passage().readBytes();
 
-            client.driver().closeConnection();
+            client.closeConnection();
             serverSide.awaitReceivedBytes(receivedBeforeClose + CLOSE_FRAME_BYTES);
             assertThat(result).isNotDone();
-            received.respond(STATUS_OK, Fixtures.payload("late")).get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            ConnectionClosed atClient = client.awaitClosed();
-            ConnectionClosed atServer = serverSide.awaitClosed();
+            Fixtures.await(received.respond(STATUS_OK, Fixtures.payload("late")));
+            CloseNotice atClient = client.awaitClosed();
+            CloseNotice atServer = serverSide.awaitClosed();
 
             assertThat(result).isDone();
             assertThat(await(result).status()).isEqualTo(STATUS_OK);
             assertThat(await(result).certainty()).isEqualTo(Certainty.RESPONSE);
-            assertThat(atClient.reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
-            assertThat(atServer.reason().kind()).isEqualTo(CloseReason.Kind.CLOSE);
+            assertThat(atClient.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
+            assertThat(atServer.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
         }
     }
 
@@ -76,11 +77,10 @@ class CloseRaceIntegrationTest {
     @Test
     @DisplayName("대기 스트림이 있는 양쪽이 서로의 CLOSE를 보기 전에 CLOSE를 보내도 CLOSE는 각자 하나뿐이다 (규격 3.5)")
     void crossedCloseWhileClosingSendsOneCloseEach() throws Exception {
-        try (TcpServer server = TcpServer.start(
-                null, channel -> new ControlledPassage(Peer.tcp(channel, TcpPassage.DEFAULT_READ_BUFFER_BYTES)))) {
-            ControlledPassage clientPassage = new ControlledPassage(TcpPassage.of(Peer.open(server.port())));
-            try (Peer client = Peer.client(clientPassage, null)) {
+        try (TcpServer server = TcpServer.start()) {
+            try (Peer client = Peer.connect(server.port(), null)) {
                 Peer serverSide = server.awaitPeer();
+                ControlledPassage clientPassage = client.passage();
                 ControlledPassage serverPassage = serverSide.passage();
                 CompletableFuture<RequestResult> fromClient = client.request(
                                 APPLICATION_TYPE, Fixtures.payload("from-client"))
@@ -90,30 +90,26 @@ class CloseRaceIntegrationTest {
                         .result();
                 IncomingRequest requestAtServer = serverSide.awaitRequest();
                 IncomingRequest requestAtClient = client.awaitRequest();
-                long clientFramesBefore = client.driver().writtenFrames();
-                long serverFramesBefore = serverSide.driver().writtenFrames();
-                long clientReceivedBefore = client.driver().receivedBytes();
-                long serverReceivedBefore = serverSide.driver().receivedBytes();
+                long clientFramesBefore = clientPassage.writtenFrames().size();
+                long serverFramesBefore = serverPassage.writtenFrames().size();
+                long clientReceivedBefore = clientPassage.readBytes();
+                long serverReceivedBefore = serverPassage.readBytes();
 
                 clientPassage.deferWrites();
                 serverPassage.deferWrites();
-                client.driver().closeConnection();
-                serverSide.driver().closeConnection();
+                client.closeConnection();
+                serverSide.closeConnection();
                 Peer.awaitUntil(
-                        () -> client.driver().writtenFrames() > clientFramesBefore
-                                && serverSide.driver().writtenFrames() > serverFramesBefore,
+                        () -> clientPassage.writtenFrames().size() > clientFramesBefore
+                                && serverPassage.writtenFrames().size() > serverFramesBefore,
                         "양쪽이 CLOSE를 쓰지 않았다");
                 clientPassage.releaseWrites();
                 serverPassage.releaseWrites();
                 client.awaitReceivedBytes(clientReceivedBefore + CLOSE_FRAME_BYTES);
                 serverSide.awaitReceivedBytes(serverReceivedBefore + CLOSE_FRAME_BYTES);
 
-                requestAtServer
-                        .respond(STATUS_OK, Fixtures.payload("ok"))
-                        .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
-                requestAtClient
-                        .respond(STATUS_OK, Fixtures.payload("ok"))
-                        .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                Fixtures.await(requestAtServer.respond(STATUS_OK, Fixtures.payload("ok")));
+                Fixtures.await(requestAtClient.respond(STATUS_OK, Fixtures.payload("ok")));
                 client.awaitClosed();
                 serverSide.awaitClosed();
                 client.stop();
@@ -151,12 +147,12 @@ class CloseRaceIntegrationTest {
                     CountDownLatch start = new CountDownLatch(1);
                     Future<?> clientClose = pool.submit(() -> {
                         start.await();
-                        client.driver().closeConnection();
+                        client.closeConnection();
                         return null;
                     });
                     Future<?> serverClose = pool.submit(() -> {
                         start.await();
-                        serverSide.driver().closeConnection();
+                        serverSide.closeConnection();
                         return null;
                     });
                     start.countDown();

@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
  */
 public final class ControlledPassage implements Passage {
 
-    /** 연결 서문의 길이. 프레임이 아니므로 기록에서 뺀다. */
+    /** 연결 서문의 길이. 클라이언트가 먼저 보내며 프레임이 아니므로 기록에서 뺀다. */
     private static final int PREFACE_BYTES = 8;
 
     private static final int HEADER_BYTES = 20;
@@ -70,27 +70,33 @@ public final class ControlledPassage implements Passage {
         }
     }
 
-    /** 바이트 흐름을 길이 필드로 프레임에 끊어 기록한다. 흐름은 연결 서문 8바이트로 시작한다. */
+    /**
+     * 바이트 흐름을 길이 필드로 프레임에 끊어 기록한다. 클라이언트가 보내는 흐름은 연결 서문 8바이트({@code 0xC0DE}로 시작)로 시작하므로 그것은 프레임으로 세지 않는다. 서버가 보내는 흐름에는
+     * 서문이 없다.
+     */
     private static final class FrameLog {
         private final List<Frame> frames = new ArrayList<>();
         private final ByteArrayOutputStream pending = new ByteArrayOutputStream();
         private long totalBytes;
-        private int prefaceLeft = PREFACE_BYTES;
+        private boolean prefaceChecked;
+        private int prefaceLeft;
 
         void append(byte[] bytes, int offset, int length) {
             totalBytes += length;
-            int start = offset;
-            int left = length;
-            if (prefaceLeft > 0) {
-                int skipped = Math.min(prefaceLeft, left);
-                prefaceLeft -= skipped;
-                start += skipped;
-                left -= skipped;
-            }
-            pending.write(bytes, start, left);
+            pending.write(bytes, offset, length);
             byte[] buffered = pending.toByteArray();
             int position = 0;
-            while (buffered.length - position >= 4) {
+            if (!prefaceChecked && buffered.length >= 2) {
+                prefaceChecked = true;
+                prefaceLeft = (buffered[0] & 0xff) == 0xc0 && (buffered[1] & 0xff) == 0xde ? PREFACE_BYTES : 0;
+            }
+            if (!prefaceChecked) {
+                return;
+            }
+            int skipped = Math.min(prefaceLeft, buffered.length);
+            prefaceLeft -= skipped;
+            position += skipped;
+            while (prefaceLeft == 0 && buffered.length - position >= 4) {
                 int frameBytes = 4 + ByteBuffer.wrap(buffered, position, 4).getInt();
                 if (buffered.length - position < frameBytes) {
                     break;

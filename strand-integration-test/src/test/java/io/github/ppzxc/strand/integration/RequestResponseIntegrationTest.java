@@ -4,17 +4,17 @@ import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 
-import io.github.ppzxc.strand.core.internal.Certainty;
-import io.github.ppzxc.strand.nio.internal.IncomingRequest;
-import io.github.ppzxc.strand.nio.internal.RequestResult;
-import java.util.HashMap;
+import io.github.ppzxc.strand.api.Certainty;
+import io.github.ppzxc.strand.api.RequestResult;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /** 규격 4.2절 스트림 식별을 실제 TCP 위에서 확인한다. */
+@ExtendWith(PassageObservation.class)
 class RequestResponseIntegrationTest {
 
     private static final int FIRST_TYPE = APPLICATION_TYPE;
@@ -47,10 +47,10 @@ class RequestResponseIntegrationTest {
             assertThat(firstResult.status()).isEqualTo(STATUS_FOR_FIRST);
             assertThat(secondResult.certainty()).isEqualTo(Certainty.RESPONSE);
             assertThat(secondResult.status()).isEqualTo(STATUS_FOR_SECOND);
-            Map<Integer, Long> streamByType = new HashMap<>();
-            for (IncomingRequest request : serverSide.drainRequests()) {
-                streamByType.put(request.type(), request.streamId());
-            }
+            // 서버 통로가 읽은 요청 프레임의 번호로 본다. 제품 API는 받은 요청의 스트림 번호를 드러내지 않는다.
+            Map<Integer, Long> streamByType = new java.util.HashMap<>();
+            Fixtures.requestTypeByStream(serverSide.passage().readFrames(), true)
+                    .forEach((streamId, type) -> streamByType.put(type, streamId));
             assertThat(streamByType).containsOnly(entry(FIRST_TYPE, 1L), entry(SECOND_TYPE, 3L));
         }
     }
@@ -66,7 +66,7 @@ class RequestResponseIntegrationTest {
                     .get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
             assertThat(result.certainty()).isEqualTo(Certainty.RESPONSE);
-            assertThat(result.body()).isEqualTo(Fixtures.payload("ok"));
+            assertThat(result.payload()).isEqualTo(Fixtures.payload("ok"));
         }
     }
 }

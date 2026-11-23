@@ -3,11 +3,10 @@ package io.github.ppzxc.strand.integration;
 import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.ppzxc.strand.core.internal.Certainty;
-import io.github.ppzxc.strand.core.internal.CloseReason;
-import io.github.ppzxc.strand.nio.internal.ConnectionClosed;
-import io.github.ppzxc.strand.nio.internal.IncomingRequest;
-import io.github.ppzxc.strand.nio.internal.RequestResult;
+import io.github.ppzxc.strand.api.Certainty;
+import io.github.ppzxc.strand.api.CloseNotice;
+import io.github.ppzxc.strand.api.RequestResult;
+import io.github.ppzxc.strand.nio.internal.ControlledPassage;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -20,6 +19,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * 서버 하나에 클라이언트 여러 개가 붙는 1:N 연결을 실제 TCP 위에서 확인한다. 연결마다 {@code Endpoint}가 독립이라는 점이 대상이다.
@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
  * <p>서버는 요청 {@code type}에서 {@code APPLICATION_TYPE}를 뺀 값을 {@code status}로 응답한다. 클라이언트 {@code i}는 {@code type}
  * {@code APPLICATION_TYPE + i}로 요청하고 {@code status} {@code i}를 기대한다. 응답이 자기 연결로 왔는지는 이 {@code status}로 가른다.
  */
+@ExtendWith(PassageObservation.class)
 class MultiClientIntegrationTest {
 
     private static final int CLIENT_COUNT = 16;
@@ -38,11 +39,9 @@ class MultiClientIntegrationTest {
     }
 
     private static CompletableFuture<RequestResult> requestFor(Peer client, int index) {
-        CompletableFuture<RequestResult> result = client.request(
-                        APPLICATION_TYPE + index, Fixtures.payload("client-" + index))
-                .result();
-        client.logResult(result);
-        return result;
+        Peer.Sent sent = client.request(APPLICATION_TYPE + index, Fixtures.payload("client-" + index));
+        client.logResult(sent);
+        return sent.result();
     }
 
     private static RequestResult await(CompletableFuture<RequestResult> future) throws Exception {
@@ -72,10 +71,17 @@ class MultiClientIntegrationTest {
                 assertThat(result.certainty()).as("클라이언트 %d의 결과 확정성", i).isEqualTo(Certainty.RESPONSE);
                 assertThat(result.status()).as("클라이언트 %d의 status", i).isEqualTo(i);
             }
+            // 서버 통로들이 읽은 요청 프레임의 번호로 본다. 제품 API는 받은 요청의 스트림 번호를 드러내지 않는다.
+            // 연결과 통로를 동시에 짝짓기 어려우므로 type이 서로 다른 요청을 모든 서버 쪽 통로에서 모은다.
             Map<Integer, Long> streamByType = new HashMap<>();
             for (int i = 0; i < CLIENT_COUNT; i++) {
-                IncomingRequest request = server.awaitPeer().awaitRequest();
-                streamByType.put(request.type(), request.streamId());
+                Peer serverSide = server.awaitPeer();
+                serverSide.awaitRequest();
+                for (ControlledPassage.Frame frame : serverSide.passage().readFrames()) {
+                    if (frame.type() >= APPLICATION_TYPE) {
+                        streamByType.put(frame.type(), frame.streamId());
+                    }
+                }
             }
             assertThat(streamByType)
                     .hasSize(CLIENT_COUNT)
@@ -128,7 +134,7 @@ class MultiClientIntegrationTest {
                 }
             }
             clients.get(aborted).stop();
-            ConnectionClosed abortedNotice = serverSides.get(aborted).awaitClosed();
+            CloseNotice abortedNotice = serverSides.get(aborted).awaitClosed();
             for (int i = 0; i < second.size(); i++) {
                 int client = i < aborted ? i : i + 1;
                 assertThat(await(second.get(i)).status()).isEqualTo(client);
@@ -136,7 +142,7 @@ class MultiClientIntegrationTest {
 
             for (int i = 0; i < CLIENT_COUNT; i++) {
                 if (i != aborted) {
-                    clients.get(i).driver().closeConnection();
+                    clients.get(i).closeConnection();
                     clients.get(i).awaitClosed();
                 }
                 serverSides.get(i).awaitClosed();
@@ -149,7 +155,7 @@ class MultiClientIntegrationTest {
                 peer.stop();
             }
 
-            assertThat(abortedNotice.reason().kind()).isEqualTo(CloseReason.Kind.DISCONNECTED);
+            assertThat(abortedNotice.kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
             assertThat(serverSides.get(aborted).closedNotices()).hasSize(1);
             assertThat(serverSides.get(aborted).drainRequests()).hasSize(1);
             assertThat(serverSides.get(aborted).log()).containsExactly(Peer.REQUEST_RECEIVED, Peer.CLOSED);
@@ -158,18 +164,11 @@ class MultiClientIntegrationTest {
                     assertThat(clients.get(i).closedNotices())
                             .as("클라이언트 %d의 종료 알림", i)
                             .hasSize(1);
-                    assertThat(clients.get(i).closedNotices().get(0).reason().kind())
-                            .isEqualTo(CloseReason.Kind.CLOSE);
+                    assertThat(clients.get(i).closedNotices().get(0).kind()).isEqualTo(CloseNotice.Kind.CLOSE);
                     assertThat(serverSides.get(i).closedNotices())
                             .as("서버 쪽 연결 %d의 종료 알림", i)
                             .hasSize(1);
-                    assertThat(serverSides
-                                    .get(i)
-                                    .closedNotices()
-                                    .get(0)
-                                    .reason()
-                                    .kind())
-                            .isEqualTo(CloseReason.Kind.CLOSE);
+                    assertThat(serverSides.get(i).closedNotices().get(0).kind()).isEqualTo(CloseNotice.Kind.CLOSE);
                     assertThat(serverSides.get(i).drainRequests())
                             .as("서버 쪽 연결 %d의 받은 요청", i)
                             .hasSize(2);

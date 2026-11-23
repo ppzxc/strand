@@ -3,9 +3,9 @@ package io.github.ppzxc.strand.integration;
 import static io.github.ppzxc.strand.integration.Fixtures.APPLICATION_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.ppzxc.strand.core.internal.Certainty;
-import io.github.ppzxc.strand.nio.internal.IncomingRequest;
-import io.github.ppzxc.strand.nio.internal.RequestResult;
+import io.github.ppzxc.strand.api.Certainty;
+import io.github.ppzxc.strand.api.RequestResult;
+import io.github.ppzxc.strand.nio.internal.ControlledPassage;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,8 +15,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /** 한 연결에서 요청이 많이 오가는 경우를 실제 TCP 위에서 확인한다. */
+@ExtendWith(PassageObservation.class)
 class RequestVolumeIntegrationTest {
 
     private static final int TOTAL_REQUESTS = 1000;
@@ -52,8 +54,11 @@ class RequestVolumeIntegrationTest {
             }
 
             Map<String, Long> streamByBody = new HashMap<>();
-            for (IncomingRequest request : serverSide.drainRequests()) {
-                streamByBody.put(new String(request.body(), StandardCharsets.UTF_8), request.streamId());
+            // 서버 통로가 읽은 요청 프레임의 번호로 본다. 제품 API는 받은 요청의 스트림 번호를 드러내지 않는다.
+            for (ControlledPassage.Frame frame : serverSide.passage().readFrames()) {
+                if (frame.type() >= APPLICATION_TYPE) {
+                    streamByBody.put(new String(frame.payload(), StandardCharsets.UTF_8), frame.streamId());
+                }
             }
             assertThat(streamByBody).hasSize(TOTAL_REQUESTS);
             for (int i = 0; i < TOTAL_REQUESTS; i++) {

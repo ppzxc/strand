@@ -107,6 +107,8 @@ public final class TestNio {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
+                // 양쪽이 동시에 CLOSE를 보내면 한쪽이 상대의 끊김을 보지 못하고 마무리 기한까지 기다리는 경우가 있어, 기본 5초 대신 짧게 둔다.
+                .closeFinishDeadline(Duration.ofSeconds(1))
                 .security(NioSecurity.externallySecured())
                 .authenticate(credentials -> AuthenticationResult.accepted("peer"));
     }
@@ -124,6 +126,8 @@ public final class TestNio {
                 .preparationDeadline(Duration.ofSeconds(10))
                 .shutdownGrace(Duration.ofSeconds(1))
                 .shutdownDeadline(Duration.ofSeconds(5))
+                // 양쪽이 동시에 CLOSE를 보내면 한쪽이 상대의 끊김을 보지 못하고 마무리 기한까지 기다리는 경우가 있어, 기본 5초 대신 짧게 둔다.
+                .closeFinishDeadline(Duration.ofSeconds(1))
                 .security(NioSecurity.externallySecured());
     }
 }
