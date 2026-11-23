@@ -12,6 +12,7 @@ final class ConformanceReport {
 
     static final String CORE_PATH = "core";
     static final String NIO_PATH = "nio";
+    static final String NETTY_PATH = "netty";
     static final String INTEGRATED_PATH = "integrated";
 
     private final Map<String, List<VectorOutcome>> byPath;
@@ -52,6 +53,15 @@ final class ConformanceReport {
         Map<String, Map<String, VectorOutcome>> byPath = new LinkedHashMap<>();
         byPath.put(CORE_PATH, Collections.singletonMap(vectorId, core));
         byPath.put(NIO_PATH, Collections.singletonMap(vectorId, nio));
+        return integrate(vectorId, byPath);
+    }
+
+    static VectorOutcome integratedOutcome(
+            String vectorId, VectorOutcome core, VectorOutcome nio, VectorOutcome netty) {
+        Map<String, Map<String, VectorOutcome>> byPath = new LinkedHashMap<>();
+        byPath.put(CORE_PATH, Collections.singletonMap(vectorId, core));
+        byPath.put(NIO_PATH, Collections.singletonMap(vectorId, nio));
+        byPath.put(NETTY_PATH, Collections.singletonMap(vectorId, netty));
         return integrate(vectorId, byPath);
     }
 
