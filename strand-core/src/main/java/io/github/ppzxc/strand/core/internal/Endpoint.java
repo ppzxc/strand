@@ -690,6 +690,101 @@ public final class Endpoint {
         dropMessage();
     }
 
+    /**
+     * 정확히 한 단위(서문 또는 프레임 하나)라고 주장하는 바이트를 넣는다. 크기가 한 단위와 같으면 같은 바이트를 스트림으로 넣었을 때와 같은 사건과
+     * 출력을 낸다. 다르면 연결 단계에 맞게 반응한다: 서문 단계와 첫 프레임 단계는 아무것도 보내지 않고 닫고, 그 뒤는 연결 오류이며, {@code
+     * type}이 CLOSE이면 CLOSE 없이 닫는다(규격 3.5절, 5.1절). 설정의 WebSocket 여부와 무관하다.
+     *
+     * <p>수거 공간 계약은 {@link #receiveBounded(byte[], int, int, int, CollectionSpace)}와 같다. 공간이 모자라면 아무것도 소비하지 않고
+     * 수거가 필요하다고 알리며, 호출자는 수거한 뒤 같은 단위를 다시 넣는다. 연결이 이미 끝났으면 아무것도 소비하지 않는다. 이 호출 안에서 읽고
+     * 끝내며 {@code bytes}를 붙잡지 않는다.
+     *
+     * @param bytes 단위를 담은 배열
+     * @param offset 단위의 시작 위치
+     * @param length 단위의 길이
+     * @param space 수거 전에 쌓아 둘 수 있는 사건·출력의 한도
+     * @return 소비한 바이트 수와 수거 필요 여부
+     * @throws IllegalArgumentException 범위가 유효하지 않을 때
+     * @throws IllegalStateException 스트림 입력으로 받아 두고 처리하지 못한 바이트가 남아 있을 때, 입력을 처리하는 중에 다시 불렀을 때, 수거할
+     *     것이 하나도 없는데도 공간이 모자랄 때
+     */
+    public ReceiveProgress receiveUnit(byte[] bytes, int offset, int length, CollectionSpace space) {
+        Objects.requireNonNull(bytes, "bytes");
+        Objects.requireNonNull(space, "space");
+        if (offset < 0 || length < 0 || offset > bytes.length - length) {
+            throw new IllegalArgumentException("유효하지 않은 입력 범위");
+        }
+        return receiveWholeUnit(bytes, offset, length, true, space);
+    }
+
+    /**
+     * 바이트로 넘길 수 없는 입력(예: 텍스트 메시지)을 받았다고 알린다. 반응은 크기가 어긋난 단위 입력과 같다. 수거 공간 계약도 같다: {@code
+     * collectionRequired}가 참이면 아무것도 하지 않은 것이므로, 수거한 뒤 다시 부른다. 연결이 이미 끝났으면 아무것도 하지 않는다. 소비한 바이트는
+     * 늘 0이다.
+     *
+     * @param space 수거 전에 쌓아 둘 수 있는 사건·출력의 한도
+     * @return 수거 필요 여부
+     */
+    public ReceiveProgress receiveUnsupportedInput(CollectionSpace space) {
+        Objects.requireNonNull(space, "space");
+        return receiveWholeUnit(NO_BYTES, 0, 0, false, space);
+    }
+
+    private ReceiveProgress receiveWholeUnit(
+            byte[] bytes, int offset, int length, boolean supported, CollectionSpace space) {
+        if (pendingLength > 0) {
+            throw new IllegalStateException("스트림 입력으로 받아 둔 바이트가 남아 있어 단위로 입력할 수 없다");
+        }
+        if (!enterReceive()) {
+            return new ReceiveProgress(0, false);
+        }
+        try {
+            if (!hasSpace(space)) {
+                return new ReceiveProgress(0, true);
+            }
+            consumeWholeUnit(bytes, offset, length, supported);
+            return new ReceiveProgress(supported ? length : 0, false);
+        } finally {
+            receiving = false;
+        }
+    }
+
+    /** 한 단위가 정확히 {@code length}바이트라고 보고 처리한다. 크기가 어긋나면 연결 단계에 맞게 닫는다. */
+    private void consumeWholeUnit(byte[] bytes, int off, int length, boolean supported) {
+        if (phase.awaitingPreface()) {
+            if (supported && length == Frames.preface().length && matchesPrefacePrefix(bytes, off, length)) {
+                phase.prefaceVerified();
+                sendHello();
+            } else {
+                closeWithoutClose();
+            }
+            return;
+        }
+        if (phase.awaitingFirstFrame()) {
+            boolean valid = supported
+                    && length >= Frames.HEADER_SIZE
+                    && Frames.readUnsignedInt(bytes, off) >= Frames.MIN_LENGTH
+                    && isFirstFrameHeader(bytes, off);
+            if (!valid) {
+                closeWithoutClose();
+                return;
+            }
+            phase.firstFrameVerified();
+        }
+        if (!supported || length < Frames.TYPE_END) {
+            connectionError();
+            return;
+        }
+        long declared = Frames.readUnsignedInt(bytes, off);
+        if (declared < Frames.MIN_LENGTH
+                || declared > config.maxFrameSize() - Frames.LENGTH_FIELD_SIZE
+                || length != Frames.LENGTH_FIELD_SIZE + declared) {
+            rejectBadLength(bytes, off);
+            return;
+        }
+        handle(bytes, off, length);
+    }
+
     /** 전송 모듈이 연결을 어떻게 닫아야 하는지에 대한 core의 지시. Strand CLOSE·WebSocket Close 메시지와는 별개다. */
     public enum TransportClose {
         /** 연결이 끝나지 않았다. 닫지 않는다. */
