@@ -8,7 +8,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.ppzxc.strand.api.Certainty;
 import io.github.ppzxc.strand.api.CloseNotice;
 import io.github.ppzxc.strand.api.RequestResult;
-import io.github.ppzxc.strand.nio.IncomingRequest;
 import io.github.ppzxc.strand.nio.internal.ControlledPassage;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
@@ -27,11 +26,11 @@ class TransportFailureIntegrationTest {
      * 응답을 기다리는 중에 상대가 CLOSE 없이 TCP를 끊으면, 대기 중이던 요청은 로컬 {@code UNAVAILABLE}과 결과 모름으로 끝나고 그 뒤에 종료 알림이 CLOSE
      * 없이 끊김으로 한 번 와야 한다(규격 3.5절). 이 처리가 빠지면 애플리케이션이 응답을 영영 기다리고, 알림이 중복되면 같은 연결의 종료를 두 번 처리한다.
      */
-    @Test
+    @TransportTest
     @DisplayName("CLOSE 없이 TCP가 끊기면 대기 요청이 UNAVAILABLE로 끝나고 종료 알림이 한 번 온다 (규격 3.5)")
-    void abruptDisconnectFailsPendingRequestOnce() throws Exception {
-        try (TcpServer server = TcpServer.start();
-                Peer client = Peer.connect(server.port(), null)) {
+    void abruptDisconnectFailsPendingRequestOnce(Transport transport) throws Exception {
+        try (TcpServer server = TcpServer.start(transport);
+                Peer client = Peer.connect(transport, server.port(), null)) {
             Peer serverSide = server.awaitPeer();
             Peer.Sent handle = client.request(APPLICATION_TYPE, Fixtures.payload("hello"));
             client.logResult(handle);
@@ -58,10 +57,11 @@ class TransportFailureIntegrationTest {
      * 통로가 쓰기를 받지 않게 막아(용량 0) 요청 프레임이 쓰이지 못하게 하고, 서버가 TCP를 끊으면 로컬 {@code UNAVAILABLE}과 처리 안 됨으로 끝난다.
      */
     @Test
-    @DisplayName("프레임을 보내지 못한 요청은 연결이 끝날 때 처리 안 됨으로 끝난다 (규격 3.5)")
+    @DisplayName("[nio 전용] 프레임을 보내지 못한 요청은 연결이 끝날 때 처리 안 됨으로 끝난다 (규격 3.5)")
     void requestNeverWrittenEndsAsNotProcessed() throws Exception {
-        try (TcpServer server = TcpServer.start();
-                Peer client = Peer.connect(server.port(), null)) {
+        Transport transport = Transport.NIO;
+        try (TcpServer server = TcpServer.start(transport);
+                Peer client = Peer.connect(transport, server.port(), null)) {
             Peer serverSide = server.awaitPeer();
             ControlledPassage passage = client.passage();
             // 수립에 쓴 프레임이 모두 나간 뒤에 막아서, 이 뒤에 요청 프레임이 쓰이지 않았음을 쓴 프레임 수로 본다.
@@ -93,15 +93,16 @@ class TransportFailureIntegrationTest {
      * 실패한다. 읽은 바이트 수도 관찰 지점으로 확인해, 1바이트씩 읽었어도 보낸 만큼 모두 처리됐는지 본다.
      */
     @Test
-    @DisplayName("1바이트씩 읽어도 프레임이 조립되어 요청과 응답이 오간다 (규격 2.1)")
+    @DisplayName("[nio 전용] 1바이트씩 읽어도 프레임이 조립되어 요청과 응답이 오간다 (규격 2.1)")
     void framesAreReassembledFromOneByteReads() throws Exception {
+        Transport transport = Transport.NIO;
         PassageObservation.splitReads(1);
-        try (TcpServer server = TcpServer.start(type -> STATUS_OK);
-                Peer client = Peer.connect(server.port(), null)) {
+        try (TcpServer server = TcpServer.start(transport, type -> STATUS_OK);
+                Peer client = Peer.connect(transport, server.port(), null)) {
             Peer serverSide = server.awaitPeer();
 
             RequestResult result = await(client.request(APPLICATION_TYPE, Fixtures.payload("hello")));
-            IncomingRequest received = serverSide.awaitRequest();
+            Wire.Incoming received = serverSide.awaitRequest();
 
             assertThat(received.type()).isEqualTo(APPLICATION_TYPE);
             assertThat(received.payload()).isEqualTo(Fixtures.payload("hello"));
