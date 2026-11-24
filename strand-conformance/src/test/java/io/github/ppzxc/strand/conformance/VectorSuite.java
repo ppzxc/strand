@@ -40,9 +40,9 @@ final class VectorSuite {
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 String id = name + "/" + vector.id();
                 tests.add(DynamicTest.dynamicTest(id, () -> {
-                    VectorOutcome core = VectorRunner.evaluate(vector, id);
-                    VectorOutcome nio = NioVectorRunner.evaluate(vector, id);
-                    VectorOutcome netty = NettyVectorRunner.evaluate(vector, id);
+                    VectorOutcome core = ExecutionPaths.CORE.evaluate(vector, id);
+                    VectorOutcome nio = ExecutionPaths.NIO.evaluate(vector, id);
+                    VectorOutcome netty = ExecutionPaths.NETTY.evaluate(vector, id);
                     VectorOutcome outcome = ConformanceReport.integratedOutcome(id, core, nio, netty);
                     assertThat(outcome.status())
                             .as("벡터 %s (%s): %s", id, outcome.status(), outcome.details())

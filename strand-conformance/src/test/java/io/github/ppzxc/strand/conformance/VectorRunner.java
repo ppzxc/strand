@@ -90,17 +90,84 @@ final class VectorRunner {
         }
     }
 
+    /** 실행 경로마다 다른 부분: 경로가 실행하지 못하는 벡터와, 입력·출력이 지나는 길을 만드는 방법. */
+    interface Medium {
+        /** 이 경로가 실행하지 못하는 setup 쪽 항목. 다른 미지원 항목보다 앞에 보고한다. */
+        List<String> unsupportedSetup(JsonObject setup);
+
+        /** 이 경로가 `send`의 프레임 항목을 실행할 수 있는가. */
+        boolean carriesFrame(JsonObject frame);
+
+        /** 한 번의 실행에 쓸 길을 만든다. */
+        Transmission open(boolean client, boolean webSocket, int maxFrameSize);
+    }
+
+    /** core 경로: 엔드포인트의 입력과 출력을 그대로 주고받는다. WebSocket Close는 전송 모듈의 몫이라 싣지 않는다(ADR 0006). */
+    static final Medium DIRECT = new Medium() {
+        @Override
+        public List<String> unsupportedSetup(JsonObject setup) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public boolean carriesFrame(JsonObject frame) {
+            return !"WEBSOCKET_CLOSE".equals(VectorSchema.frameType(frame));
+        }
+
+        @Override
+        public Transmission open(boolean client, boolean webSocket, int maxFrameSize) {
+            return new DirectTransmission(webSocket);
+        }
+    };
+
+    private static final class DirectTransmission implements Transmission {
+        private final boolean webSocket;
+
+        private DirectTransmission(boolean webSocket) {
+            this.webSocket = webSocket;
+        }
+
+        @Override
+        public void deliver(EndpointDriver driver, byte[] bytes) {
+            if (webSocket) {
+                driver.receiveUnit(bytes);
+            } else {
+                driver.receiveStream(bytes);
+            }
+        }
+
+        @Override
+        public void apply(EndpointDriver driver, JsonObject step, Map<String, Long> requestTickets) {
+            StepKind.of(step).execute(driver, step, requestTickets);
+        }
+
+        @Override
+        public List<byte[]> transmit(List<OutboundMessage> sent) {
+            return bytesOf(sent);
+        }
+
+        @Override
+        public List<String> observeAfter(List<Event> events) {
+            return Collections.emptyList();
+        }
+    }
+
     private final boolean client;
     private final boolean webSocket;
-    /** netty 실행 경로의 제품 통로. core 경로에서는 null이다. */
-    private final NettyPipeline pipeline;
+    private final Transmission transmission;
 
     private final Endpoint endpoint;
     private final EndpointDriver driver;
     private final VirtualCredentialLifetime credentialLifetime;
 
     VectorRunner(boolean client, boolean webSocket, Endpoint endpoint, OptionalLong credentialLifetimeSeconds) {
-        this(client, webSocket, endpoint, credentialLifetimeSeconds, AuthScenario.anonymous(), null);
+        this(
+                client,
+                webSocket,
+                endpoint,
+                credentialLifetimeSeconds,
+                AuthScenario.anonymous(),
+                new DirectTransmission(webSocket));
     }
 
     private VectorRunner(
@@ -109,10 +176,10 @@ final class VectorRunner {
             Endpoint endpoint,
             OptionalLong credentialLifetimeSeconds,
             AuthScenario auth,
-            NettyPipeline pipeline) {
+            Transmission transmission) {
         this.client = client;
         this.webSocket = webSocket;
-        this.pipeline = pipeline;
+        this.transmission = transmission;
         this.endpoint = endpoint;
         this.driver = EndpointDriver.of(endpoint)
                 .authentication(auth)
@@ -135,28 +202,24 @@ final class VectorRunner {
     }
 
     static VectorOutcome evaluate(ConformanceVector vector, String vectorId) {
-        return evaluate(vector, vectorId, false);
+        return evaluate(vector, vectorId, DIRECT);
     }
 
-    /** netty 실행 경로: 제품 WebSocket 통로를 거쳐 실행한다. {@code transport: websocket} 벡터만 지원하고 나머지는 미지원이다. */
-    static VectorOutcome evaluateOnNetty(ConformanceVector vector, String vectorId) {
-        return evaluate(vector, vectorId, true);
-    }
-
-    private static VectorOutcome evaluate(ConformanceVector vector, String vectorId, boolean netty) {
-        List<String> unsupported = unsupportedFeatures(vector, vector.setup(), netty);
+    /** 주어진 실행 경로의 길로 벡터를 실행한다. */
+    static VectorOutcome evaluate(ConformanceVector vector, String vectorId, Medium medium) {
+        List<String> unsupported = unsupportedFeatures(vector, medium);
         if (!unsupported.isEmpty()) {
             return VectorOutcome.unsupported(vectorId, unsupported);
         }
         try {
-            runSupported(vector, netty);
+            runSupported(vector, medium);
             return VectorOutcome.pass(vectorId);
         } catch (AssertionError | RuntimeException failure) {
             return VectorOutcome.fail(vectorId, failure.getMessage());
         }
     }
 
-    private static void runSupported(ConformanceVector vector, boolean netty) {
+    private static void runSupported(ConformanceVector vector, Medium medium) {
         JsonObject setup = vector.setup();
 
         boolean client = setup.get("role").getAsString().equals("client");
@@ -164,20 +227,19 @@ final class VectorRunner {
         boolean webSocket = isWebSocket(setup);
         EndpointConfig config = configOf(setup, webSocket, auth);
         // 인증 판단은 사건으로 위임되고, 러너가 벡터의 인증 설정으로 답한다(EndpointDriver).
-        NettyPipeline pipeline = netty
-                ? new NettyPipeline(
-                        client,
-                        Protocol.helloParams(setup.getAsJsonObject("local_hello"))
-                                .get("max_frame_size")
-                                .intValue())
-                : null;
+        Transmission transmission = medium.open(
+                client,
+                webSocket,
+                Protocol.helloParams(setup.getAsJsonObject("local_hello"))
+                        .get("max_frame_size")
+                        .intValue());
         VectorRunner runner = new VectorRunner(
                 client,
                 webSocket,
                 client ? Endpoint.client(config) : Endpoint.server(config),
                 auth.lifetimeSeconds,
                 auth,
-                pipeline);
+                transmission);
         // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
         List<OutboundMessage> opening = runner.driver.flush();
         if (setup.get("established").getAsBoolean()) {
@@ -200,10 +262,8 @@ final class VectorRunner {
             boolean startsWithPreface = !opening.isEmpty();
             opening = new ArrayList<>();
             List<Event> events = runner.driver.takeEvents();
-            List<String> observed = runner.describeThroughTheTransport(sent, startsWithPreface);
-            if (pipeline != null && pipeline.closesNormally(events)) {
-                observed.add(FrameKind.webSocketClose(Protocol.NORMAL_CLOSURE));
-            }
+            List<String> observed = runner.describeBytes(transmission.transmit(sent), startsWithPreface);
+            observed.addAll(transmission.observeAfter(events));
             assertThat(FrameKind.comparable(observed, step.getAsJsonArray("send")))
                     .as("%d번째 단계의 send", number)
                     .isEqualTo(expectedFrames(step));
@@ -217,19 +277,14 @@ final class VectorRunner {
 
     /** 실행하지 못하는 부분이 있으면 벡터를 실패시킨다(건너뛰지 않는다). 한 단계도 실행하기 전에 판정한다. */
     static List<String> unsupportedFeatures(ConformanceVector vector) {
-        return unsupportedFeatures(vector, vector.setup(), false);
+        return unsupportedFeatures(vector, DIRECT);
     }
 
-    /** netty 경로가 실행하지 못하는 부분. core 경로의 미지원에 더해 WebSocket이 아닌 벡터는 실행하지 않는다. */
-    static List<String> unsupportedFeaturesOnNetty(ConformanceVector vector) {
-        return unsupportedFeatures(vector, vector.setup(), true);
-    }
-
-    private static List<String> unsupportedFeatures(ConformanceVector vector, JsonObject setup, boolean netty) {
+    /** 주어진 실행 경로가 실행하지 못하는 부분. */
+    static List<String> unsupportedFeatures(ConformanceVector vector, Medium medium) {
+        JsonObject setup = vector.setup();
         List<String> unsupported = new ArrayList<>();
-        if (netty) {
-            addIfUnsupported(unsupported, isWebSocket(setup), "setup.transport");
-        }
+        unsupported.addAll(medium.unsupportedSetup(setup));
         for (String key : setup.keySet()) {
             addIfUnsupported(unsupported, SUPPORTED_SETUP.contains(key), "setup." + key);
         }
@@ -253,11 +308,7 @@ final class VectorRunner {
             for (JsonElement element : step.getAsJsonArray("send")) {
                 JsonObject frame = element.getAsJsonObject();
                 addIfUnsupported(unsupported, FrameKind.isSupported(frame), "프레임 " + frame.get("type"));
-                // WebSocket Close는 전송 모듈이 내는 메시지다. core는 WebSocket을 모르므로 이 항목은 제품 통로(netty 경로)에서만 확인한다(ADR 0006).
-                addIfUnsupported(
-                        unsupported,
-                        netty || !"WEBSOCKET_CLOSE".equals(VectorSchema.frameType(frame)),
-                        "프레임 " + frame.get("type"));
+                addIfUnsupported(unsupported, medium.carriesFrame(frame), "프레임 " + frame.get("type"));
                 addIfUnsupported(unsupported, FrameKind.hasSupportedFlags(frame), "프레임 flags");
             }
             for (JsonElement event : step.getAsJsonArray("events")) {
@@ -361,13 +412,7 @@ final class VectorRunner {
 
     /** 수립에 쓰는 입력 하나를 전송 방식에 맞게 넣는다. WebSocket이면 메시지 하나로, 바이트 스트림이면 바이트로 넣는다. */
     private void deliver(byte[] bytes) {
-        if (pipeline != null) {
-            pipeline.inbound(driver, true, bytes);
-        } else if (webSocket) {
-            driver.receiveUnit(bytes);
-        } else {
-            driver.receiveStream(bytes);
-        }
+        transmission.deliver(driver, bytes);
     }
 
     /** 수립 스크립트에 쓰는 기대 프레임 항목. 프레임 인코딩과 렌더링은 {@link FrameKind}가 한다. */
@@ -383,15 +428,7 @@ final class VectorRunner {
     }
 
     private void apply(JsonObject step, Map<String, Long> requestTickets) {
-        if (pipeline != null && StepKind.of(step).inbound() == StepKind.Inbound.MESSAGE) {
-            // 메시지 하나를 제품 통로에 프레임으로 넣는다. 통로가 core에 단위 입력 또는 "받았다" 신호로 넘긴다.
-            pipeline.inbound(
-                    driver,
-                    step.get("opcode").getAsString().equals("binary"),
-                    Bytes.fromHex(step.get("hex").getAsString()));
-            return;
-        }
-        StepKind.of(step).execute(driver, step, requestTickets);
+        transmission.apply(driver, step, requestTickets);
     }
 
     private void advanceVirtualCredentialClock(JsonObject step) {
@@ -485,19 +522,15 @@ final class VectorRunner {
      * (벡터 형식 6.1절). WebSocket Close는 core의 출력이 아니라 {@link #webSocketCloses}가 판단한다. 바이트 스트림에서는 메시지를 이어 붙여 프레임으로 푼다.
      */
     List<String> describeMessages(List<OutboundMessage> messages, boolean startsWithPreface) {
+        return describeBytes(bytesOf(messages), startsWithPreface);
+    }
+
+    private static List<byte[]> bytesOf(List<OutboundMessage> messages) {
         List<byte[]> bytes = new ArrayList<>();
         for (OutboundMessage message : messages) {
             bytes.add(message.bytes());
         }
-        return describeBytes(bytes, startsWithPreface);
-    }
-
-    /** netty 경로는 엔드포인트의 메시지를 제품 통로로 보내 프레임으로 풀어 낸 결과를 비교한다. core 경로는 메시지를 그대로 비교한다. */
-    private List<String> describeThroughTheTransport(List<OutboundMessage> sent, boolean startsWithPreface) {
-        if (pipeline == null) {
-            return describeMessages(sent, startsWithPreface);
-        }
-        return describeBytes(pipeline.transmit(sent), startsWithPreface);
+        return bytes;
     }
 
     private List<String> describeBytes(List<byte[]> messages, boolean startsWithPreface) {

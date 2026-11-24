@@ -69,9 +69,9 @@ class VectorConformanceTest {
             String fileKey = VectorSuite.fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 String vectorId = fileKey + "/" + vector.id();
-                coreOutcomes.add(VectorRunner.evaluate(vector, vectorId));
-                nioOutcomes.add(NioVectorRunner.evaluate(vector, vectorId));
-                nettyOutcomes.add(NettyVectorRunner.evaluate(vector, vectorId));
+                coreOutcomes.add(ExecutionPaths.CORE.evaluate(vector, vectorId));
+                nioOutcomes.add(ExecutionPaths.NIO.evaluate(vector, vectorId));
+                nettyOutcomes.add(ExecutionPaths.NETTY.evaluate(vector, vectorId));
             }
         }
         Map<String, List<VectorOutcome>> outcomesByPath = new LinkedHashMap<>();
@@ -117,7 +117,7 @@ class VectorConformanceTest {
         for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 VectorOutcome outcome =
-                        NettyVectorRunner.evaluate(vector, VectorSuite.fileKey(file) + "/" + vector.id());
+                        ExecutionPaths.NETTY.evaluate(vector, VectorSuite.fileKey(file) + "/" + vector.id());
                 boolean webSocket = vector.setup().has("transport")
                         && VectorSchema.WEBSOCKET.equals(
                                 vector.setup().get("transport").getAsString());
@@ -145,8 +145,9 @@ class VectorConformanceTest {
                 }
                 closeVectors++;
                 String id = VectorSuite.fileKey(file) + "/" + vector.id();
-                assertThat(VectorRunner.evaluate(vector, id).status()).isEqualTo(VectorOutcome.Status.UNSUPPORTED);
-                assertThat(NettyVectorRunner.evaluate(vector, id).status()).isEqualTo(VectorOutcome.Status.PASS);
+                assertThat(ExecutionPaths.CORE.evaluate(vector, id).status())
+                        .isEqualTo(VectorOutcome.Status.UNSUPPORTED);
+                assertThat(ExecutionPaths.NETTY.evaluate(vector, id).status()).isEqualTo(VectorOutcome.Status.PASS);
             }
         }
         assertThat(closeVectors).isPositive();
@@ -156,15 +157,14 @@ class VectorConformanceTest {
     @Test
     void selectedExecutionPathReportHasNoFailuresOrUnsupportedVectors(TestReporter reporter) {
         String path = executionPath();
-        Assumptions.assumeTrue(ConformanceReport.CORE_PATH.equals(path)
-                || ConformanceReport.NIO_PATH.equals(path)
-                || ConformanceReport.NETTY_PATH.equals(path));
+        Assumptions.assumeTrue(!ConformanceReport.INTEGRATED_PATH.equals(path));
+        ExecutionPath executionPath = ExecutionPaths.named(path);
         List<VectorOutcome> outcomes = new ArrayList<>();
         for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
             String fileKey = VectorSuite.fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 String vectorId = fileKey + "/" + vector.id();
-                outcomes.add(evaluateOn(path, vector, vectorId));
+                outcomes.add(executionPath.evaluate(vector, vectorId));
             }
         }
         ConformanceReport report = ConformanceReport.forPath(path, outcomes);
@@ -173,17 +173,6 @@ class VectorConformanceTest {
         assertThat(report.passes())
                 .as("%s 실행 경로 적합성 결과: %s", path, report.summary())
                 .isTrue();
-    }
-
-    private static VectorOutcome evaluateOn(String path, ConformanceVector vector, String vectorId) {
-        switch (path) {
-            case ConformanceReport.CORE_PATH:
-                return VectorRunner.evaluate(vector, vectorId);
-            case ConformanceReport.NIO_PATH:
-                return NioVectorRunner.evaluate(vector, vectorId);
-            default:
-                return NettyVectorRunner.evaluate(vector, vectorId);
-        }
     }
 
     private static String executionPath() {

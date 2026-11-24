@@ -1425,12 +1425,70 @@ final class ConnectionEngine {
 
     // ---------------------------------------------------------------- 연결 루프 (이벤트 루프)
 
+    /** 전송 방식마다 다른 쓰기. core 출력을 소켓(또는 TLS)에 쓰고 진행을 core에 보고한다. */
+    private interface Outbound {
+        /**
+         * 출력을 소켓(또는 TLS)이 받아 주는 만큼 쓰고 진행을 보고한다. 0은 보고하지 않는다.
+         *
+         * @return 한 바이트라도 소비했거나 쓸 출력이 없으면 true, 소켓(또는 TLS)이 받아 주지 않아 막혔으면 false
+         */
+        boolean write() throws IOException;
+
+        /** 소켓(또는 TLS)에 아직 쓰지 못했거나 곧 쓸 것이 남아 있는가. */
+        boolean pending();
+
+        /** 쓰던 출력이 아직 끝나지 않았는가. */
+        boolean writingNow();
+
+        /** 지금 쓰는 출력이 이 스트림의 애플리케이션 프레임인가. */
+        boolean isWriting(long streamId);
+
+        /**
+         * CLOSE로 끝난 연결에서 남은 출력을 모두 보낸 뒤에 할 일(전송 방식이 요구하는 종료 메시지)을 한다.
+         *
+         * @param reason 연결이 끝난 원인
+         * @return 모두 내보냈으면 true, 소켓이 받아 주지 않아 남았으면 false
+         */
+        boolean finishClose(CloseReason reason) throws IOException;
+
+        /** 쓰던 출력의 참조를 놓는다. 여러 번 불러도 된다. */
+        void release();
+    }
+
+    /** 전송 방식마다 다른 읽기. 읽은 평문 바이트를 core 입력으로 바꿔 넣는다. */
+    private interface Inbound {
+        /** 읽은 평문 바이트(TCP 소켓에서 읽은 것 또는 TLS가 푼 것)를 받아 둔다. */
+        void offer(byte[] plain);
+
+        /**
+         * 받아 둔 입력을 유한 단위로 core에 넣는다. 수거 공간이 모자라 멈추면 사건을 수거하고 쓰기를 진행한 뒤 같은 위치부터 다시 넣는다.
+         */
+        void process() throws IOException;
+
+        /** 아직 처리하지 않은 바이트가 쌓여 있는가. */
+        boolean hasBufferedBytes();
+
+        /** 처리하지 못한 입력(바이트, 또는 core가 받지 못한 메시지)이 남아 읽기를 멈춰야 하는가. */
+        boolean hasPendingInput();
+
+        /** 보안 협상을 마친 직후의 준비 단계. 전송 방식이 업그레이드를 요구하면 {@link PreparationStage#UPGRADE}다. */
+        PreparationStage stageAfterSecurity();
+
+        /** 전송 방식의 업그레이드를 마쳤는가. 업그레이드가 없는 전송 방식은 늘 true다. */
+        boolean upgraded();
+
+        /** 입력 쪽이 쥔 내부 버퍼를 놓는다. 여러 번 불러도 된다. */
+        void release();
+    }
+
     /** 이벤트 루프 안에서만 쓰는 상태와 구동 순서. */
     private final class Loop {
         final Endpoint endpoint;
         final @Nullable TlsPipe tls;
-        /** WebSocket 전송이면 메시지 통로, 바이트 스트림(TCP)이면 null. */
-        final @Nullable MessageWire wire;
+        /** 읽기 쪽: 전송 방식에 맞는 구현 하나를 만들 때 고른다. */
+        final Inbound inbound;
+        /** 쓰기 쪽: 전송 방식에 맞는 구현 하나를 만들 때 고른다. */
+        final Outbound outbound;
 
         final long origin;
         long lastElapsed;
@@ -1445,23 +1503,10 @@ final class ConnectionEngine {
         private long finishDeadline;
         private @Nullable Throwable ioFailure;
         private @Nullable Throwable endCause;
-        private final ArrayDeque<byte[]> inputQueue = new ArrayDeque<>();
-        private byte[] input = EMPTY;
-        private int inputPos;
-        private @Nullable EndpointOutput writing;
-        private byte[] writingBytes = EMPTY;
-        private int writingOffset;
-        private @Nullable ByteBuf writingBuffer;
         private @Nullable ScheduledFuture<?> timer;
         private long timerAtNanos;
-        /** 메시지 통로가 넘긴 입력 가운데 core가 아직 받지 못한 하나(수거 공간이 모자라 같은 입력을 다시 넣어야 한다). */
-        private @Nullable WireMessage wireCurrent;
-        /** 통로가 내보내려고 내준 바이트 가운데 소켓(또는 TLS)이 아직 다 받지 않은 것. */
-        private byte @Nullable [] wireBytes;
-
-        private int wireOffset;
-        /** 연결이 끝났을 때 보낼 WebSocket Close 상태 코드. 끝나기 전에는 {@link WebSocketStatus#NONE}. */
-        private int wireCloseStatus = WebSocketStatus.NONE;
+        /** 연결이 끝난 원인. 끝나기 전에는 null. */
+        private @Nullable CloseReason closeReason;
 
         Loop() throws IOException {
             this.origin = p.nanoClock.getAsLong();
@@ -1486,9 +1531,16 @@ final class ConnectionEngine {
                 }
                 this.tls = new TlsPipe(engine, security.sizes, p.allocator, channel::writeAttempt, alpn);
             }
-            this.wire = p.transport.isWebSocket() ? createWire() : null;
-            if (wire != null && p.role == ConnectionParams.Role.CLIENT) {
-                wire.start();
+            if (p.transport.isWebSocket()) {
+                MessageWire wire = createWire();
+                if (p.role == ConnectionParams.Role.CLIENT) {
+                    wire.start();
+                }
+                this.inbound = new MessageInbound(wire);
+                this.outbound = new MessageOutbound(wire);
+            } else {
+                this.inbound = new StreamInbound();
+                this.outbound = new StreamOutbound();
             }
         }
 
@@ -1516,7 +1568,7 @@ final class ConnectionEngine {
                     tls.feed(bytes);
                     moveDecrypted();
                 } else {
-                    inputQueue.add(bytes);
+                    inbound.offer(bytes);
                 }
             } catch (IOException e) {
                 transportFailed(e);
@@ -1527,7 +1579,7 @@ final class ConnectionEngine {
         private void moveDecrypted() {
             byte[] plain = Objects.requireNonNull(tls).pollPlain();
             while (plain != null) {
-                inputQueue.add(plain);
+                inbound.offer(plain);
                 plain = tls.pollPlain();
             }
         }
@@ -1558,11 +1610,11 @@ final class ConnectionEngine {
             if (tls != null) {
                 tls.pump();
                 moveDecrypted();
-                if (tls.peerEnded() && inputQueue.isEmpty() && inputPos >= input.length) {
+                if (tls.peerEnded() && !inbound.hasBufferedBytes()) {
                     transportFailed(new EOFException("상대가 TLS를 끝냈다"));
                 }
             }
-            processInput();
+            inbound.process();
             advanceClock();
             runCommands();
             if (abortRequested) {
@@ -1573,11 +1625,7 @@ final class ConnectionEngine {
             collectEvents();
             writeOutputs();
             collectEvents();
-            blocked = writing != null
-                    || wireBytes != null
-                    || ((wire == null || wire.established()) && endpoint.nextOutput() != null)
-                    || (wire != null && wire.wirePending())
-                    || (tls != null && tls.pendingOutput());
+            blocked = outbound.pending() || (tls != null && tls.pendingOutput());
             finishClosing();
         }
 
@@ -1598,10 +1646,7 @@ final class ConnectionEngine {
         /** 읽기를 켜고 끈다: 처리하지 못한 입력이 남았거나 core 출력이 상한을 넘으면 멈춘다. */
         private void updateRead() {
             boolean want = !transportGone
-                    && inputQueue.isEmpty()
-                    && inputPos >= input.length
-                    && wireCurrent == null
-                    && (wire == null || !wire.hasMessages())
+                    && !inbound.hasPendingInput()
                     && (tls == null || tls.canAcceptRead())
                     && !backlogged();
             if (want != reading) {
@@ -1618,98 +1663,6 @@ final class ConnectionEngine {
                             endpoint.peerMaxConcurrentStreams(),
                             endpoint.ownMaxConcurrentStreams(),
                             p.writeQueueBytes);
-        }
-
-        /** 받은 입력을 유한 단위로 처리한다. 수거 공간이 모자라 멈추면 사건을 수거하고 쓰기를 진행한 뒤 소비 위치부터 다시 입력한다. */
-        private void processInput() throws IOException {
-            if (wire != null) {
-                processWireInput(wire);
-                return;
-            }
-            while (!transportGone && !abandoned) {
-                if (inputPos >= input.length) {
-                    byte[] next = inputQueue.poll();
-                    if (next == null) {
-                        return;
-                    }
-                    input = next;
-                    inputPos = 0;
-                }
-                ReceiveProgress progress = endpoint.receiveBounded(
-                        input, inputPos, input.length - inputPos, MAX_UNITS_PER_STEP, collectionSpace);
-                inputPos += progress.consumed();
-                collectEvents();
-                if (closedSeen) {
-                    // 연결이 끝난 뒤의 입력은 core가 받지 않는다. 남겨 두면 읽기가 꺼진 채 상대의 TCP 종료를 보지 못한다.
-                    inputPos = input.length;
-                    inputQueue.clear();
-                    return;
-                }
-                if (progress.collectionRequired()) {
-                    boolean progressed = writeOutputs();
-                    collectEvents();
-                    if (!progressed) {
-                        // 출력이 막혀 수거할 수 없다. 쓰기가 풀리면 같은 위치에서 재개한다.
-                        return;
-                    }
-                } else if (progress.consumed() == 0) {
-                    return;
-                }
-            }
-        }
-
-        /**
-         * 메시지 통로를 거친 입력을 처리한다. 읽은 평문을 통로에 넣어 업그레이드와 프레임 변환을 맡기고, 바이너리 메시지는 core에 단위 입력으로, 바이트로 넘길 수 없는 입력은
-         * "받았다" 신호로 넣는다. 수거 공간이 모자라면 사건을 수거하고 쓰기를 진행한 뒤 같은 입력을 다시 넣는다.
-         */
-        private void processWireInput(MessageWire messages) throws IOException {
-            while (!transportGone && !abandoned) {
-                WireMessage message = wireCurrent;
-                if (message == null) {
-                    message = messages.pollMessage();
-                }
-                if (message == null) {
-                    byte[] chunk = inputQueue.poll();
-                    if (chunk == null) {
-                        return;
-                    }
-                    try {
-                        messages.feed(chunk);
-                        if (stage == PreparationStage.UPGRADE && messages.established()) {
-                            // 같은 읽기에서 이어진 입력이 준비 결과를 정하기 전에 단계를 옮긴다.
-                            stage = PreparationStage.HELLO;
-                        }
-                    } catch (WireUpgradeException e) {
-                        transportFailed(
-                                new WebSocketUpgradeException(String.valueOf(e.getMessage()), e.httpStatus(), e));
-                        return;
-                    }
-                    continue;
-                }
-                wireCurrent = null;
-                if (message.kind() == WireMessage.Kind.PEER_CLOSED) {
-                    // 상대가 통로를 닫았다. 바이트 스트림이 끊긴 것과 같다.
-                    transportFailed(new EOFException("상대가 WebSocket Close를 보냈다"));
-                    return;
-                }
-                if (closedSeen) {
-                    // 연결이 끝난 뒤의 입력은 core가 받지 않는다. 통로는 상대의 Close를 볼 때까지 계속 읽는다.
-                    continue;
-                }
-                ReceiveProgress progress = message.kind() == WireMessage.Kind.BINARY
-                        ? endpoint.receiveUnit(message.bytes(), 0, message.bytes().length, collectionSpace)
-                        : endpoint.receiveUnsupportedInput(collectionSpace);
-                collectEvents();
-                if (progress.collectionRequired()) {
-                    wireCurrent = message;
-                    boolean progressed = writeOutputs();
-                    collectEvents();
-                    if (!progressed) {
-                        // 출력이 막혀 수거할 수 없다. 쓰기가 풀리면 같은 입력부터 재개한다.
-                        return;
-                    }
-                }
-            }
         }
 
         /** 다음에 깨어나야 하는 시각까지 남은 나노초. 기한이 없으면 {@link Long#MAX_VALUE}. */
@@ -1767,135 +1720,371 @@ final class ConnectionEngine {
             drive();
         }
 
-        /**
-         * 출력을 채널이 받아 주는 만큼 쓰고 실제 쓰기량(TCP) 또는 평문 소비량(TLS)을 보고한다. 0은 보고하지 않는다.
-         *
-         * @return 한 바이트라도 소비했거나 쓸 출력이 없으면 true, 채널이 받아 주지 않아 막혔으면 false
-         */
+        /** 출력을 쓴다. 전송 방식에 맞는 {@link Outbound}가 한다. */
         private boolean writeOutputs() throws IOException {
-            if (wire != null) {
-                return writeWireOutputs(wire);
+            return outbound.write();
+        }
+
+        /** 바이트 스트림(TCP)의 읽기: 바이트를 유한 단위로 core에 넣고 소비한 만큼 위치를 옮긴다. */
+        private final class StreamInbound implements Inbound {
+            private final ArrayDeque<byte[]> inputQueue = new ArrayDeque<>();
+            private byte[] input = EMPTY;
+            private int inputPos;
+
+            @Override
+            public void offer(byte[] plain) {
+                inputQueue.add(plain);
             }
-            boolean progressed = false;
-            for (; ; ) {
-                EndpointOutput output = endpoint.nextOutput();
-                if (output == null) {
-                    releaseWriting();
-                    // 더 쓸 출력이 없다. 시작하지 못한 채 사라진 출력이 쥐고 있던 바이트 예약도 돌려준다.
-                    returnAllHeldBytes();
-                    return true;
-                }
-                if (writing == null || writing.id() != output.id()) {
-                    releaseWriting();
-                    writing = output;
-                    writingBytes = output.readOnlyBytes();
-                    writingOffset = 0;
-                    if (tls == null) {
-                        // 출력마다 직접 버퍼 하나. 전체 전달·철회·채널 정리에서 정확히 한 번 반환한다.
-                        ByteBuf buffer = p.allocator.directBuffer(writingBytes.length);
-                        buffer.writeBytes(writingBytes);
-                        writingBuffer = buffer;
+
+            @Override
+            public boolean hasBufferedBytes() {
+                return !inputQueue.isEmpty() || inputPos < input.length;
+            }
+
+            @Override
+            public boolean hasPendingInput() {
+                return hasBufferedBytes();
+            }
+
+            @Override
+            public PreparationStage stageAfterSecurity() {
+                return PreparationStage.HELLO;
+            }
+
+            @Override
+            public boolean upgraded() {
+                return true;
+            }
+
+            @Override
+            public void release() {}
+
+            @Override
+            public void process() throws IOException {
+                while (!transportGone && !abandoned) {
+                    if (inputPos >= input.length) {
+                        byte[] next = inputQueue.poll();
+                        if (next == null) {
+                            return;
+                        }
+                        input = next;
+                        inputPos = 0;
                     }
-                }
-                int remaining = writingBytes.length - writingOffset;
-                int count = write(remaining);
-                if (count > 0) {
-                    endpoint.outputProgress(output.id(), count);
-                    writingOffset += count;
-                    progressed = true;
-                    if (writingOffset == writingBytes.length) {
-                        releaseWriting();
+                    ReceiveProgress progress = endpoint.receiveBounded(
+                            input, inputPos, input.length - inputPos, MAX_UNITS_PER_STEP, collectionSpace);
+                    inputPos += progress.consumed();
+                    collectEvents();
+                    if (closedSeen) {
+                        // 연결이 끝난 뒤의 입력은 core가 받지 않는다. 남겨 두면 읽기가 꺼진 채 상대의 TCP 종료를 보지 못한다.
+                        inputPos = input.length;
+                        inputQueue.clear();
+                        return;
                     }
-                }
-                // TCP는 남기고 못 쓴 것이 막힘이다. TLS는 레코드 하나씩 소비하므로 0일 때(암호문 공간이 차거나 핸드셰이크 전)만 막힘이다.
-                if (count == 0 || (tls == null && count < remaining)) {
-                    return progressed;
+                    if (progress.collectionRequired()) {
+                        boolean progressed = writeOutputs();
+                        collectEvents();
+                        if (!progressed) {
+                            // 출력이 막혀 수거할 수 없다. 쓰기가 풀리면 같은 위치에서 재개한다.
+                            return;
+                        }
+                    } else if (progress.consumed() == 0) {
+                        return;
+                    }
                 }
             }
         }
 
         /**
-         * 메시지 통로의 쓰기. 통로가 내보낼 바이트(업그레이드 요청·응답, 프레임)를 먼저 소켓(또는 TLS)에 비우고, 다 비우면 core 출력 하나를 메시지 하나로 통로에 넘긴다.
-         * 메시지는 통로가 받는 순간 전체를 넘긴 것이므로 전체 길이를 진행으로 보고한다. 업그레이드를 마치기 전에는 core 출력을 가져가지 않는다.
-         *
-         * @return 한 바이트라도 소비했거나 쓸 출력이 없으면 true, 소켓이 받아 주지 않아 막혔으면 false
+         * 메시지 통로(WebSocket)의 읽기. 읽은 평문을 통로에 넣어 업그레이드와 프레임 변환을 맡기고, 바이너리 메시지는 core에 단위 입력으로, 바이트로 넘길 수 없는 입력은
+         * "받았다" 신호로 넣는다. 수거 공간이 모자라면 사건을 수거하고 쓰기를 진행한 뒤 같은 입력을 다시 넣는다.
          */
-        private boolean writeWireOutputs(MessageWire messages) throws IOException {
-            boolean progressed = false;
-            for (; ; ) {
-                if (!flushWire(messages)) {
-                    return progressed;
+        private final class MessageInbound implements Inbound {
+            private final MessageWire messages;
+            private final ArrayDeque<byte[]> inputQueue = new ArrayDeque<>();
+            /** 통로가 넘긴 입력 가운데 core가 아직 받지 못한 하나(수거 공간이 모자라 같은 입력을 다시 넣어야 한다). */
+            private @Nullable WireMessage pendingMessage;
+
+            private MessageInbound(MessageWire messages) {
+                this.messages = messages;
+            }
+
+            @Override
+            public void offer(byte[] plain) {
+                inputQueue.add(plain);
+            }
+
+            @Override
+            public boolean hasBufferedBytes() {
+                return !inputQueue.isEmpty();
+            }
+
+            @Override
+            public boolean hasPendingInput() {
+                return !inputQueue.isEmpty() || pendingMessage != null || messages.hasMessages();
+            }
+
+            @Override
+            public PreparationStage stageAfterSecurity() {
+                return PreparationStage.UPGRADE;
+            }
+
+            @Override
+            public boolean upgraded() {
+                return messages.established();
+            }
+
+            @Override
+            public void release() {
+                messages.release();
+            }
+
+            @Override
+            public void process() throws IOException {
+                while (!transportGone && !abandoned) {
+                    WireMessage message = pendingMessage;
+                    if (message == null) {
+                        message = messages.pollMessage();
+                    }
+                    if (message == null) {
+                        byte[] chunk = inputQueue.poll();
+                        if (chunk == null) {
+                            return;
+                        }
+                        try {
+                            messages.feed(chunk);
+                            if (stage == PreparationStage.UPGRADE && messages.established()) {
+                                // 같은 읽기에서 이어진 입력이 준비 결과를 정하기 전에 단계를 옮긴다.
+                                stage = PreparationStage.HELLO;
+                            }
+                        } catch (WireUpgradeException e) {
+                            transportFailed(
+                                    new WebSocketUpgradeException(String.valueOf(e.getMessage()), e.httpStatus(), e));
+                            return;
+                        }
+                        continue;
+                    }
+                    pendingMessage = null;
+                    if (message.kind() == WireMessage.Kind.PEER_CLOSED) {
+                        // 상대가 통로를 닫았다. 바이트 스트림이 끊긴 것과 같다.
+                        transportFailed(new EOFException("상대가 WebSocket Close를 보냈다"));
+                        return;
+                    }
+                    if (closedSeen) {
+                        // 연결이 끝난 뒤의 입력은 core가 받지 않는다. 통로는 상대의 Close를 볼 때까지 계속 읽는다.
+                        continue;
+                    }
+                    ReceiveProgress progress = message.kind() == WireMessage.Kind.BINARY
+                            ? endpoint.receiveUnit(message.bytes(), 0, message.bytes().length, collectionSpace)
+                            : endpoint.receiveUnsupportedInput(collectionSpace);
+                    collectEvents();
+                    if (progress.collectionRequired()) {
+                        pendingMessage = message;
+                        boolean progressed = writeOutputs();
+                        collectEvents();
+                        if (!progressed) {
+                            // 출력이 막혀 수거할 수 없다. 쓰기가 풀리면 같은 입력부터 재개한다.
+                            return;
+                        }
+                    }
                 }
-                if (!messages.established()) {
-                    return true;
-                }
-                EndpointOutput output = endpoint.nextOutput();
-                if (output == null) {
-                    // 더 쓸 출력이 없다. 시작하지 못한 채 사라진 출력이 쥐고 있던 바이트 예약도 돌려준다.
-                    returnAllHeldBytes();
-                    return true;
-                }
-                byte[] frame = output.readOnlyBytes();
-                messages.sendMessage(frame);
-                endpoint.outputProgress(output.id(), frame.length);
-                returnHeldBytes(output.applicationStreamId());
-                progressed = true;
             }
         }
 
-        /**
-         * 통로가 내보내려는 바이트를 소켓(또는 TLS)이 받아 주는 만큼 쓴다.
-         *
-         * @return 모두 썼으면 true, 받아 주지 않아 남았으면 false
-         */
-        private boolean flushWire(MessageWire messages) throws IOException {
-            for (; ; ) {
-                byte[] bytes = wireBytes;
-                if (bytes == null) {
-                    bytes = messages.pollWire();
-                    if (bytes == null) {
+        /** 바이트 스트림(TCP)의 쓰기: core 출력 하나를 바이트 단위로 쓰고, 쓴 만큼 진행을 보고한다. */
+        private final class StreamOutbound implements Outbound {
+            private @Nullable EndpointOutput writing;
+            private byte[] writingBytes = EMPTY;
+            private int writingOffset;
+            private @Nullable ByteBuf writingBuffer;
+
+            @Override
+            public boolean write() throws IOException {
+                boolean progressed = false;
+                for (; ; ) {
+                    EndpointOutput output = endpoint.nextOutput();
+                    if (output == null) {
+                        release();
+                        // 더 쓸 출력이 없다. 시작하지 못한 채 사라진 출력이 쥐고 있던 바이트 예약도 돌려준다.
+                        returnAllHeldBytes();
                         return true;
                     }
-                    wireBytes = bytes;
-                    wireOffset = 0;
+                    if (writing == null || writing.id() != output.id()) {
+                        release();
+                        writing = output;
+                        writingBytes = output.readOnlyBytes();
+                        writingOffset = 0;
+                        if (tls == null) {
+                            // 출력마다 직접 버퍼 하나. 전체 전달·철회·채널 정리에서 정확히 한 번 반환한다.
+                            ByteBuf buffer = p.allocator.directBuffer(writingBytes.length);
+                            buffer.writeBytes(writingBytes);
+                            writingBuffer = buffer;
+                        }
+                    }
+                    int remaining = writingBytes.length - writingOffset;
+                    int count = writeSome(remaining);
+                    if (count > 0) {
+                        endpoint.outputProgress(output.id(), count);
+                        writingOffset += count;
+                        progressed = true;
+                        if (writingOffset == writingBytes.length) {
+                            release();
+                        }
+                    }
+                    // TCP는 남기고 못 쓴 것이 막힘이다. TLS는 레코드 하나씩 소비하므로 0일 때(암호문 공간이 차거나 핸드셰이크 전)만 막힘이다.
+                    if (count == 0 || (tls == null && count < remaining)) {
+                        return progressed;
+                    }
                 }
-                int remaining = bytes.length - wireOffset;
-                int count = tls != null
-                        ? tls.writePlain(bytes, wireOffset, remaining)
-                        : channel.writeAttempt(ByteBuffer.wrap(bytes, wireOffset, remaining));
-                wireOffset += count;
-                if (wireOffset == bytes.length) {
-                    wireBytes = null;
-                } else if (count == 0 || tls == null) {
-                    // TCP는 남기고 못 쓴 것이 막힘이다. TLS는 레코드 하나씩 소비하므로 0일 때만 막힘이다.
-                    return false;
+            }
+
+            private int writeSome(int remaining) throws IOException {
+                if (tls != null) {
+                    return tls.writePlain(writingBytes, writingOffset, remaining);
+                }
+                ByteBuf buffer = Objects.requireNonNull(writingBuffer);
+                int count = channel.writeAttempt(buffer.nioBuffer());
+                buffer.skipBytes(count);
+                return count;
+            }
+
+            @Override
+            public boolean pending() {
+                return writing != null || endpoint.nextOutput() != null;
+            }
+
+            @Override
+            public boolean writingNow() {
+                return writing != null;
+            }
+
+            @Override
+            public boolean isWriting(long streamId) {
+                return writing != null && writing.applicationStreamId() == streamId;
+            }
+
+            @Override
+            public boolean finishClose(CloseReason reason) {
+                return true;
+            }
+
+            /** 쓰던 출력의 참조(core 출력 본문과 채널 쓰기용 복사본)를 놓고, 그 출력 때문에 유지하던 바이트 예약을 돌려준다. */
+            @Override
+            public void release() {
+                EndpointOutput released = writing;
+                writing = null;
+                writingBytes = EMPTY;
+                if (released != null) {
+                    returnHeldBytes(released.applicationStreamId());
+                }
+                ByteBuf buffer = writingBuffer;
+                if (buffer != null) {
+                    writingBuffer = null;
+                    buffer.release();
                 }
             }
         }
 
-        private int write(int remaining) throws IOException {
-            if (tls != null) {
-                return tls.writePlain(writingBytes, writingOffset, remaining);
-            }
-            ByteBuf buffer = Objects.requireNonNull(writingBuffer);
-            int count = channel.writeAttempt(buffer.nioBuffer());
-            buffer.skipBytes(count);
-            return count;
-        }
+        /**
+         * 메시지 통로(WebSocket)의 쓰기. 통로가 내보낼 바이트(업그레이드 요청·응답, 프레임)를 먼저 소켓(또는 TLS)에 비우고, 다 비우면 core 출력 하나를 메시지 하나로
+         * 통로에 넘긴다. 메시지는 통로가 받는 순간 전체를 넘긴 것이므로 전체 길이를 진행으로 보고한다. 업그레이드를 마치기 전에는 core 출력을 가져가지 않는다.
+         */
+        private final class MessageOutbound implements Outbound {
+            private final MessageWire messages;
+            /** 통로가 내보내려고 내준 바이트 가운데 소켓(또는 TLS)이 아직 다 받지 않은 것. */
+            private byte @Nullable [] pendingBytes;
 
-        /** 쓰던 출력의 참조(core 출력 본문과 채널 쓰기용 복사본)를 놓고, 그 출력 때문에 유지하던 바이트 예약을 돌려준다. */
-        private void releaseWriting() {
-            EndpointOutput released = writing;
-            writing = null;
-            writingBytes = EMPTY;
-            if (released != null) {
-                returnHeldBytes(released.applicationStreamId());
+            private int pendingOffset;
+
+            private MessageOutbound(MessageWire messages) {
+                this.messages = messages;
             }
-            ByteBuf buffer = writingBuffer;
-            if (buffer != null) {
-                writingBuffer = null;
-                buffer.release();
+
+            @Override
+            public boolean write() throws IOException {
+                boolean progressed = false;
+                for (; ; ) {
+                    if (!flush()) {
+                        return progressed;
+                    }
+                    if (!messages.established()) {
+                        return true;
+                    }
+                    EndpointOutput output = endpoint.nextOutput();
+                    if (output == null) {
+                        // 더 쓸 출력이 없다. 시작하지 못한 채 사라진 출력이 쥐고 있던 바이트 예약도 돌려준다.
+                        returnAllHeldBytes();
+                        return true;
+                    }
+                    byte[] frame = output.readOnlyBytes();
+                    messages.sendMessage(frame);
+                    endpoint.outputProgress(output.id(), frame.length);
+                    returnHeldBytes(output.applicationStreamId());
+                    progressed = true;
+                }
             }
+
+            /**
+             * 통로가 내보내려는 바이트를 소켓(또는 TLS)이 받아 주는 만큼 쓴다.
+             *
+             * @return 모두 썼으면 true, 받아 주지 않아 남았으면 false
+             */
+            private boolean flush() throws IOException {
+                for (; ; ) {
+                    byte[] bytes = pendingBytes;
+                    if (bytes == null) {
+                        bytes = messages.pollWire();
+                        if (bytes == null) {
+                            return true;
+                        }
+                        pendingBytes = bytes;
+                        pendingOffset = 0;
+                    }
+                    int remaining = bytes.length - pendingOffset;
+                    int count = tls != null
+                            ? tls.writePlain(bytes, pendingOffset, remaining)
+                            : channel.writeAttempt(ByteBuffer.wrap(bytes, pendingOffset, remaining));
+                    pendingOffset += count;
+                    if (pendingOffset == bytes.length) {
+                        pendingBytes = null;
+                    } else if (count == 0 || tls == null) {
+                        // TCP는 남기고 못 쓴 것이 막힘이다. TLS는 레코드 하나씩 소비하므로 0일 때만 막힘이다.
+                        return false;
+                    }
+                }
+            }
+
+            @Override
+            public boolean pending() {
+                return pendingBytes != null
+                        || (messages.established() && endpoint.nextOutput() != null)
+                        || messages.wirePending();
+            }
+
+            @Override
+            public boolean writingNow() {
+                return false;
+            }
+
+            @Override
+            public boolean isWriting(long streamId) {
+                return false;
+            }
+
+            @Override
+            public boolean finishClose(CloseReason reason) throws IOException {
+                if (messages.established()) {
+                    // 남은 출력(CLOSE 포함)을 모두 보낸 뒤에 원인에 대응하는 WebSocket Close를 보낸다.
+                    int status = WebSocketStatus.of(reason);
+                    if (status != WebSocketStatus.NONE) {
+                        messages.sendClose(status);
+                    }
+                    return flush();
+                }
+                return true;
+            }
+
+            @Override
+            public void release() {}
         }
 
         private void collectEvents() {
@@ -1962,7 +2151,7 @@ final class ConnectionEngine {
 
         /** 지금 쓰는 출력(core 출력 본문과 채널 쓰기용 복사본을 쥔다)이 이 스트림의 애플리케이션 프레임인가. 쓰기 전 프레임은 core가 철회하지만 복사본은 다음 쓰기 걸음까지 남는다. */
         private boolean isBeingWritten(long streamId) {
-            return streamId > 0 && writing != null && writing.applicationStreamId() == streamId;
+            return streamId > 0 && outbound.isWriting(streamId);
         }
 
         private void onClientAuthenticated(Event event) {
@@ -2010,7 +2199,7 @@ final class ConnectionEngine {
             finalNotice = notice;
             finishDeadline = Saturating.add(p.nanoClock.getAsLong(), p.closeFinishNanos);
             closedSeen = true;
-            wireCloseStatus = WebSocketStatus.of(reason);
+            closeReason = reason;
             if (preparing) {
                 PreparationStage at = isAuthenticationEnd(reason) ? PreparationStage.AUTHENTICATION : stage;
                 failPreparation(at, cause != null ? cause : new ConnectionEndedException(notice));
@@ -2072,10 +2261,9 @@ final class ConnectionEngine {
             // 단계가 SECURITY인 것은 TLS 연결뿐이다.
             if (stage == PreparationStage.SECURITY
                     && Objects.requireNonNull(tls).handshakeComplete()) {
-                stage = wire != null ? PreparationStage.UPGRADE : PreparationStage.HELLO;
+                stage = inbound.stageAfterSecurity();
             }
-            if (stage == PreparationStage.UPGRADE
-                    && Objects.requireNonNull(wire).established()) {
+            if (stage == PreparationStage.UPGRADE && inbound.upgraded()) {
                 stage = PreparationStage.HELLO;
             }
             // 준비 중에는 CLOSED를 내지 않았다(CLOSED는 준비 결과를 먼저 확정한다).
@@ -2096,18 +2284,12 @@ final class ConnectionEngine {
                 finished = true;
                 return;
             }
-            if (outputShutdown || writing != null || endpoint.nextOutput() != null) {
+            if (outputShutdown || outbound.writingNow() || endpoint.nextOutput() != null) {
                 return;
             }
-            if (wire != null && wire.established()) {
-                // 남은 출력(CLOSE 포함)을 모두 보낸 뒤에 WebSocket Close를 보낸다.
-                if (wireCloseStatus != WebSocketStatus.NONE) {
-                    wire.sendClose(wireCloseStatus);
-                }
-                if (!flushWire(wire)) {
-                    blocked = true;
-                    return;
-                }
+            if (!outbound.finishClose(Objects.requireNonNull(closeReason))) {
+                blocked = true;
+                return;
             }
             if (tls != null) {
                 if (tls.pendingOutput()) {
@@ -2138,11 +2320,9 @@ final class ConnectionEngine {
                 }
                 collectEvents();
             } finally {
-                releaseWriting();
+                outbound.release();
                 returnAllHeldBytes();
-                if (wire != null) {
-                    wire.release();
-                }
+                inbound.release();
                 if (tls != null) {
                     tls.release();
                 }
