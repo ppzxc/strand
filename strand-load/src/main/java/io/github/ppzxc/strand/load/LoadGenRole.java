@@ -46,6 +46,9 @@ final class LoadGenRole {
     private final RunConfig config;
     private final ExecutorService executor = LoadSupport.newExecutor("strand-load-client");
     private final byte[] body;
+    /** 요청은 불변이라 매번 만들지 않고 하나를 재사용한다. */
+    private final Request echo;
+
     private final AtomicBoolean stopped = new AtomicBoolean();
     private final AtomicLong sent = new AtomicLong();
     private final AtomicLong responded = new AtomicLong();
@@ -70,6 +73,7 @@ final class LoadGenRole {
     private LoadGenRole(RunConfig config) {
         this.config = config;
         this.body = new byte[config.bodyBytes];
+        this.echo = Request.of(LoadSupport.ECHO_TYPE, body);
     }
 
     static int run(RunConfig config, int port, PrintStream out) throws Exception {
@@ -322,7 +326,7 @@ final class LoadGenRole {
                 sendLag.recordValue(Math.max(0, (System.nanoTime() - intended) / 1_000));
             }
         }
-        connection.request(Request.of(LoadSupport.ECHO_TYPE, body)).result().observe(result -> {
+        connection.request(echo).result().observe(result -> {
             long done = System.nanoTime();
             if (tag == MEASURE && classify(result)) {
                 latency.recordValue(Math.max(0, (done - intended) / 1_000));

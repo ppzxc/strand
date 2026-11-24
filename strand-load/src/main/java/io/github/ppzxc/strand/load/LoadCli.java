@@ -93,10 +93,10 @@ public final class LoadCli {
                     longRun = true;
                     break;
                 case "--duration":
-                    duration = args.get(++i);
+                    duration = valueOf(args, ++i, arg);
                     break;
                 case "--rate":
-                    rate = args.get(++i);
+                    rate = valueOf(args, ++i, arg);
                     break;
                 default:
                     translated.add(arg);
@@ -126,6 +126,13 @@ public final class LoadCli {
         }
         new Orchestrator(config, out).runSoak();
         return 0;
+    }
+
+    private static String valueOf(List<String> args, int index, String name) throws RunConfig.Invalid {
+        if (index >= args.size()) {
+            throw new RunConfig.Invalid(name + " 값이 없다");
+        }
+        return args.get(index);
     }
 
     /** {@code table --input <matrix.json>}: 행렬 결과 JSON에서 표를 만든다. */

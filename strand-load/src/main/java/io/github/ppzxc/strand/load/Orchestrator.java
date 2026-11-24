@@ -63,14 +63,7 @@ final class Orchestrator {
     /** 측정하고 결과 JSON을 돌려준다. 프로세스는 모두 정리한다. */
     JsonObject execute() throws RunFailed, IOException, InterruptedException {
         try {
-            if (config.tls) {
-                if (presetKeystore != null) {
-                    keystorePath = presetKeystore;
-                } else {
-                    keystoreDir = Files.createTempDirectory("strand-load-tls");
-                    keystorePath = LoadTls.createKeystore(keystoreDir).toString();
-                }
-            }
+            prepareKeystore();
             if (config.jfr || config.asyncProfiler != null) {
                 Files.createDirectories(Paths.get(config.profileDir));
             }
@@ -80,12 +73,22 @@ final class Orchestrator {
         }
     }
 
+    /** TLS를 켠 실행이면 키 저장소를 준비한다. 행렬이 미리 만들어 넘긴 것이 있으면 그것을 쓴다. */
+    private void prepareKeystore() throws IOException, InterruptedException {
+        if (!config.tls) {
+            return;
+        }
+        if (presetKeystore != null) {
+            keystorePath = presetKeystore;
+        } else {
+            keystoreDir = Files.createTempDirectory("strand-load-tls");
+            keystorePath = LoadTls.createKeystore(keystoreDir).toString();
+        }
+    }
+
     private void cleanupKeystore() throws IOException {
         if (keystoreDir != null) {
-            try (var files = Files.walk(keystoreDir)) {
-                files.sorted(java.util.Comparator.reverseOrder())
-                        .forEach(p -> p.toFile().delete());
-            }
+            LoadTls.deleteTree(keystoreDir);
         }
     }
 
@@ -94,14 +97,7 @@ final class Orchestrator {
      */
     JsonObject executeSoak() throws RunFailed, IOException, InterruptedException {
         try {
-            if (config.tls) {
-                if (presetKeystore != null) {
-                    keystorePath = presetKeystore;
-                } else {
-                    keystoreDir = Files.createTempDirectory("strand-load-tls");
-                    keystorePath = LoadTls.createKeystore(keystoreDir).toString();
-                }
-            }
+            prepareKeystore();
             JsonObject run = runOnce(config.rate, false);
             JsonObject measurement = run.getAsJsonObject("measurement");
 
@@ -237,14 +233,7 @@ final class Orchestrator {
      */
     JsonObject executeStall() throws RunFailed, IOException, InterruptedException {
         try {
-            if (config.tls) {
-                if (presetKeystore != null) {
-                    keystorePath = presetKeystore;
-                } else {
-                    keystoreDir = Files.createTempDirectory("strand-load-tls");
-                    keystorePath = LoadTls.createKeystore(keystoreDir).toString();
-                }
-            }
+            prepareKeystore();
             return stallOnce();
         } finally {
             cleanupKeystore();
@@ -335,11 +324,7 @@ final class Orchestrator {
         if (!this.config.tls) {
             config.addProperty("plaintextControl", true);
         }
-        JsonObject metadata = new JsonObject();
-        metadata.addProperty("jdk", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"));
-        metadata.addProperty("os", System.getProperty("os.name") + " " + System.getProperty("os.version"));
-        metadata.addProperty("cores", Runtime.getRuntime().availableProcessors());
-        metadata.addProperty("gitSha", gitSha());
+        JsonObject metadata = environmentMetadata();
         metadata.add("config", config);
         return metadata;
     }
@@ -652,11 +637,7 @@ final class Orchestrator {
             config.addProperty("serverDelayMillis", this.config.serverDelay.toMillis());
         }
 
-        JsonObject metadata = new JsonObject();
-        metadata.addProperty("jdk", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"));
-        metadata.addProperty("os", System.getProperty("os.name") + " " + System.getProperty("os.version"));
-        metadata.addProperty("cores", Runtime.getRuntime().availableProcessors());
-        metadata.add("gitSha", new com.google.gson.JsonPrimitive(gitSha()));
+        JsonObject metadata = environmentMetadata();
         metadata.add("config", config);
 
         com.google.gson.JsonArray runArray = new com.google.gson.JsonArray();
@@ -720,7 +701,27 @@ final class Orchestrator {
         return stats;
     }
 
-    static String gitSha() {
+    /** 결과 JSON의 환경 메타데이터(JDK·OS·코어 수·git SHA). 모든 결과가 같은 키를 쓴다. */
+    static JsonObject environmentMetadata() {
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("jdk", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"));
+        metadata.addProperty("os", System.getProperty("os.name") + " " + System.getProperty("os.version"));
+        metadata.addProperty("cores", Runtime.getRuntime().availableProcessors());
+        metadata.addProperty("gitSha", gitSha());
+        return metadata;
+    }
+
+    private static String cachedGitSha;
+
+    /** 현재 커밋. {@code git}을 프로세스당 한 번만 부른다. */
+    static synchronized String gitSha() {
+        if (cachedGitSha == null) {
+            cachedGitSha = readGitSha();
+        }
+        return cachedGitSha;
+    }
+
+    private static String readGitSha() {
         try {
             Process process = new ProcessBuilder("git", "rev-parse", "HEAD")
                     .redirectErrorStream(true)

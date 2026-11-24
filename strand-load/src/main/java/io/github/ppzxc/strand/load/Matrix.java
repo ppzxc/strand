@@ -135,11 +135,7 @@ final class Matrix {
         JsonObject result = new JsonObject();
         result.addProperty("schemaVersion", 1);
         result.addProperty("kind", "matrix");
-        JsonObject metadata = new JsonObject();
-        metadata.addProperty("jdk", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"));
-        metadata.addProperty("os", System.getProperty("os.name") + " " + System.getProperty("os.version"));
-        metadata.addProperty("cores", Runtime.getRuntime().availableProcessors());
-        metadata.addProperty("gitSha", Orchestrator.gitSha());
+        JsonObject metadata = Orchestrator.environmentMetadata();
         metadata.addProperty("extended", extended);
         metadata.addProperty("warmup", warmup);
         metadata.addProperty("measure", measure);
@@ -162,10 +158,7 @@ final class Matrix {
                     cellArray.add(runCell(cell, keystore));
                 }
             } finally {
-                try (var files = Files.walk(keystoreDir)) {
-                    files.sorted(java.util.Comparator.reverseOrder())
-                            .forEach(p -> p.toFile().delete());
-                }
+                LoadTls.deleteTree(keystoreDir);
             }
             result.addProperty("status", "OK");
         }

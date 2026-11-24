@@ -71,6 +71,14 @@ final class LoadTls {
         return store;
     }
 
+    /** 임시 디렉터리를 통째로 지운다. */
+    static void deleteTree(Path dir) throws IOException {
+        try (var files = Files.walk(dir)) {
+            files.sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> p.toFile().delete());
+        }
+    }
+
     static SSLContext serverContext(Path store) throws Exception {
         KeyStore keyStore = load(store);
         KeyManagerFactory keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
