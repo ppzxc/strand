@@ -1428,9 +1428,9 @@ final class ConnectionEngine {
     /** 전송 방식마다 다른 쓰기. core 출력을 소켓(또는 TLS)에 쓰고 진행을 core에 보고한다. */
     private interface Outbound {
         /**
-         * 출력을 채널이 받아 주는 만큼 쓰고 진행을 보고한다. 0은 보고하지 않는다.
+         * 출력을 소켓(또는 TLS)이 받아 주는 만큼 쓰고 진행을 보고한다. 0은 보고하지 않는다.
          *
-         * @return 한 바이트라도 소비했거나 쓸 출력이 없으면 true, 채널이 받아 주지 않아 막혔으면 false
+         * @return 한 바이트라도 소비했거나 쓸 출력이 없으면 true, 소켓(또는 TLS)이 받아 주지 않아 막혔으면 false
          */
         boolean write() throws IOException;
 
@@ -1446,10 +1446,10 @@ final class ConnectionEngine {
         /**
          * CLOSE로 끝난 연결에서 남은 출력을 모두 보낸 뒤에 할 일(전송 방식이 요구하는 종료 메시지)을 한다.
          *
-         * @param closeStatus 연결이 끝난 원인에 대응하는 WebSocket Close 상태 코드. 없으면 {@link WebSocketStatus#NONE}
+         * @param reason 연결이 끝난 원인
          * @return 모두 내보냈으면 true, 소켓이 받아 주지 않아 남았으면 false
          */
-        boolean finishClose(int closeStatus) throws IOException;
+        boolean finishClose(CloseReason reason) throws IOException;
 
         /** 쓰던 출력의 참조를 놓는다. 여러 번 불러도 된다. */
         void release();
@@ -1505,8 +1505,8 @@ final class ConnectionEngine {
         private @Nullable Throwable endCause;
         private @Nullable ScheduledFuture<?> timer;
         private long timerAtNanos;
-        /** 연결이 끝났을 때 보낼 WebSocket Close 상태 코드. 끝나기 전에는 {@link WebSocketStatus#NONE}. */
-        private int wireCloseStatus = WebSocketStatus.NONE;
+        /** 연결이 끝난 원인. 끝나기 전에는 null. */
+        private @Nullable CloseReason closeReason;
 
         Loop() throws IOException {
             this.origin = p.nanoClock.getAsLong();
@@ -1802,7 +1802,7 @@ final class ConnectionEngine {
             private final MessageWire messages;
             private final ArrayDeque<byte[]> inputQueue = new ArrayDeque<>();
             /** 통로가 넘긴 입력 가운데 core가 아직 받지 못한 하나(수거 공간이 모자라 같은 입력을 다시 넣어야 한다). */
-            private @Nullable WireMessage wireCurrent;
+            private @Nullable WireMessage pendingMessage;
 
             private MessageInbound(MessageWire messages) {
                 this.messages = messages;
@@ -1820,7 +1820,7 @@ final class ConnectionEngine {
 
             @Override
             public boolean hasPendingInput() {
-                return !inputQueue.isEmpty() || wireCurrent != null || messages.hasMessages();
+                return !inputQueue.isEmpty() || pendingMessage != null || messages.hasMessages();
             }
 
             @Override
@@ -1841,7 +1841,7 @@ final class ConnectionEngine {
             @Override
             public void process() throws IOException {
                 while (!transportGone && !abandoned) {
-                    WireMessage message = wireCurrent;
+                    WireMessage message = pendingMessage;
                     if (message == null) {
                         message = messages.pollMessage();
                     }
@@ -1863,7 +1863,7 @@ final class ConnectionEngine {
                         }
                         continue;
                     }
-                    wireCurrent = null;
+                    pendingMessage = null;
                     if (message.kind() == WireMessage.Kind.PEER_CLOSED) {
                         // 상대가 통로를 닫았다. 바이트 스트림이 끊긴 것과 같다.
                         transportFailed(new EOFException("상대가 WebSocket Close를 보냈다"));
@@ -1878,7 +1878,7 @@ final class ConnectionEngine {
                             : endpoint.receiveUnsupportedInput(collectionSpace);
                     collectEvents();
                     if (progress.collectionRequired()) {
-                        wireCurrent = message;
+                        pendingMessage = message;
                         boolean progressed = writeOutputs();
                         collectEvents();
                         if (!progressed) {
@@ -1963,7 +1963,7 @@ final class ConnectionEngine {
             }
 
             @Override
-            public boolean finishClose(int closeStatus) {
+            public boolean finishClose(CloseReason reason) {
                 return true;
             }
 
@@ -1991,9 +1991,9 @@ final class ConnectionEngine {
         private final class MessageOutbound implements Outbound {
             private final MessageWire messages;
             /** 통로가 내보내려고 내준 바이트 가운데 소켓(또는 TLS)이 아직 다 받지 않은 것. */
-            private byte @Nullable [] wireBytes;
+            private byte @Nullable [] pendingBytes;
 
-            private int wireOffset;
+            private int pendingOffset;
 
             private MessageOutbound(MessageWire messages) {
                 this.messages = messages;
@@ -2030,22 +2030,22 @@ final class ConnectionEngine {
              */
             private boolean flush() throws IOException {
                 for (; ; ) {
-                    byte[] bytes = wireBytes;
+                    byte[] bytes = pendingBytes;
                     if (bytes == null) {
                         bytes = messages.pollWire();
                         if (bytes == null) {
                             return true;
                         }
-                        wireBytes = bytes;
-                        wireOffset = 0;
+                        pendingBytes = bytes;
+                        pendingOffset = 0;
                     }
-                    int remaining = bytes.length - wireOffset;
+                    int remaining = bytes.length - pendingOffset;
                     int count = tls != null
-                            ? tls.writePlain(bytes, wireOffset, remaining)
-                            : channel.writeAttempt(ByteBuffer.wrap(bytes, wireOffset, remaining));
-                    wireOffset += count;
-                    if (wireOffset == bytes.length) {
-                        wireBytes = null;
+                            ? tls.writePlain(bytes, pendingOffset, remaining)
+                            : channel.writeAttempt(ByteBuffer.wrap(bytes, pendingOffset, remaining));
+                    pendingOffset += count;
+                    if (pendingOffset == bytes.length) {
+                        pendingBytes = null;
                     } else if (count == 0 || tls == null) {
                         // TCP는 남기고 못 쓴 것이 막힘이다. TLS는 레코드 하나씩 소비하므로 0일 때만 막힘이다.
                         return false;
@@ -2055,7 +2055,7 @@ final class ConnectionEngine {
 
             @Override
             public boolean pending() {
-                return wireBytes != null
+                return pendingBytes != null
                         || (messages.established() && endpoint.nextOutput() != null)
                         || messages.wirePending();
             }
@@ -2071,11 +2071,12 @@ final class ConnectionEngine {
             }
 
             @Override
-            public boolean finishClose(int closeStatus) throws IOException {
+            public boolean finishClose(CloseReason reason) throws IOException {
                 if (messages.established()) {
-                    // 남은 출력(CLOSE 포함)을 모두 보낸 뒤에 WebSocket Close를 보낸다.
-                    if (closeStatus != WebSocketStatus.NONE) {
-                        messages.sendClose(closeStatus);
+                    // 남은 출력(CLOSE 포함)을 모두 보낸 뒤에 원인에 대응하는 WebSocket Close를 보낸다.
+                    int status = WebSocketStatus.of(reason);
+                    if (status != WebSocketStatus.NONE) {
+                        messages.sendClose(status);
                     }
                     return flush();
                 }
@@ -2198,7 +2199,7 @@ final class ConnectionEngine {
             finalNotice = notice;
             finishDeadline = Saturating.add(p.nanoClock.getAsLong(), p.closeFinishNanos);
             closedSeen = true;
-            wireCloseStatus = WebSocketStatus.of(reason);
+            closeReason = reason;
             if (preparing) {
                 PreparationStage at = isAuthenticationEnd(reason) ? PreparationStage.AUTHENTICATION : stage;
                 failPreparation(at, cause != null ? cause : new ConnectionEndedException(notice));
@@ -2286,7 +2287,7 @@ final class ConnectionEngine {
             if (outputShutdown || outbound.writingNow() || endpoint.nextOutput() != null) {
                 return;
             }
-            if (!outbound.finishClose(wireCloseStatus)) {
+            if (!outbound.finishClose(Objects.requireNonNull(closeReason))) {
                 blocked = true;
                 return;
             }
