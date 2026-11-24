@@ -79,6 +79,50 @@ final class BenchSupport {
         return endpoint.drainEvents(Integer.MAX_VALUE);
     }
 
+    /** {@code server}가 받아 둔 요청의 스트림 번호를 도착 순서대로 꺼내 {@code order}로 정렬한다. 이벤트는 비운다. */
+    static long[] receivedStreamIds(Endpoint server, ResponseOrder order) {
+        List<Long> ids = new ArrayList<>();
+        for (Event event : drainEvents(server)) {
+            if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
+                ids.add(event.streamId());
+            }
+        }
+        long[] result = new long[ids.size()];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = ids.get(order == ResponseOrder.OLDEST_FIRST ? i : result.length - 1 - i);
+        }
+        return result;
+    }
+
+    /** 쌓인 메시지를 순서대로 {@code to}에 넣는다. */
+    static void receiveAll(Endpoint to, List<OutboundMessage> messages) {
+        for (OutboundMessage message : messages) {
+            receive(to, message.bytes());
+        }
+    }
+
+    /** {@code endpoint}가 쌓은 이벤트를 비우며 {@code kind}인 것의 수를 센다. */
+    static long countEvents(Endpoint endpoint, Event.Kind kind) {
+        return drainEvents(endpoint).stream().filter(e -> e.kind() == kind).count();
+    }
+
+    /** 설정·정리 단계 자체 검사. 기대와 다르면 벤치마크가 의도한 경로를 타지 않은 것이므로 예외를 던진다. */
+    static void expectCount(String what, long expected, long actual) {
+        if (expected != actual) {
+            throw new IllegalStateException(what + "이(가) " + expected + "개가 아니라 " + actual + "개다");
+        }
+    }
+
+    /** 클라이언트가 요청 {@code count}개를 내고 서버가 모두 받아 이벤트로 올린 상태를 만든다. 반환은 {@code {client, server}}. */
+    static Endpoint[] establishWithPendingRequests(int count) {
+        Endpoint[] pair = establish(EndpointConfig.defaults().maxConcurrentStreams(count));
+        for (int i = 0; i < count; i++) {
+            pair[0].request(REQUEST_TYPE, new byte[0]);
+        }
+        pump(pair[0], pair[1]);
+        return pair;
+    }
+
     /** 가상 시계를 밀리초 단위로 앞으로 보내는 나노초 시계. */
     static final class Clock {
         private long elapsedNanos;

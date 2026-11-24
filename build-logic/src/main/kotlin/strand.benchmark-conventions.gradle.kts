@@ -14,6 +14,8 @@ jmh {
   warmupIterations = 3
   timeOnIteration = "2s"
   iterations = 5
+  // 결과는 시간 단위(AverageTime, ms/op)로 통일한다. 개별 벤치마크에는 @BenchmarkMode를 표기하지 않는다.
+  benchmarkMode = listOf("avgt")
   timeUnit = "ms"
   resultFormat = "JSON"
   // 일부만 돌릴 때: ./gradlew :<모듈>:jmh -PjmhIncludes=<정규식>
