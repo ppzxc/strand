@@ -8,18 +8,13 @@ import java.util.List;
 final class ExecutionPaths {
 
     /** core 엔드포인트를 직접 구동한다. */
-    static final ExecutionPath CORE =
-            new Provided(ConformanceReport.CORE_PATH, VectorRunner::unsupportedFeatures, VectorRunner::evaluate);
+    static final ExecutionPath CORE = new MediumPath(ConformanceReport.CORE_PATH, VectorRunner.DIRECT);
 
     /** 제품 NIO 연결 엔진으로 실행한다. 전송 계층 쓰기 경계가 필요한 벡터만 지원한다. */
-    static final ExecutionPath NIO =
-            new Provided(ConformanceReport.NIO_PATH, NioVectorRunner::unsupportedFeatures, NioVectorRunner::evaluate);
+    static final ExecutionPath NIO = new NioPath();
 
     /** 제품 netty WebSocket 통로를 거쳐 실행한다. */
-    static final ExecutionPath NETTY = new Provided(
-            ConformanceReport.NETTY_PATH,
-            vector -> VectorRunner.unsupportedFeatures(vector, NettyMessageWireHarness.MEDIUM),
-            (vector, vectorId) -> VectorRunner.evaluate(vector, vectorId, NettyMessageWireHarness.MEDIUM));
+    static final ExecutionPath NETTY = new MediumPath(ConformanceReport.NETTY_PATH, NettyMessageWireHarness.MEDIUM);
 
     private static final List<ExecutionPath> ALL = Collections.unmodifiableList(Arrays.asList(CORE, NIO, NETTY));
 
@@ -44,18 +39,14 @@ final class ExecutionPaths {
         throw new IllegalArgumentException("알 수 없는 실행 경로: " + name);
     }
 
-    private static final class Provided implements ExecutionPath {
+    /** 엔드포인트를 {@link VectorRunner}로 구동하는 경로. 경로마다 다른 부분은 {@link VectorRunner.Medium}이 정한다. */
+    private static final class MediumPath implements ExecutionPath {
         private final String name;
-        private final java.util.function.Function<ConformanceVector, List<String>> unsupported;
-        private final java.util.function.BiFunction<ConformanceVector, String, VectorOutcome> evaluator;
+        private final VectorRunner.Medium medium;
 
-        private Provided(
-                String name,
-                java.util.function.Function<ConformanceVector, List<String>> unsupported,
-                java.util.function.BiFunction<ConformanceVector, String, VectorOutcome> evaluator) {
+        private MediumPath(String name, VectorRunner.Medium medium) {
             this.name = name;
-            this.unsupported = unsupported;
-            this.evaluator = evaluator;
+            this.medium = medium;
         }
 
         @Override
@@ -65,12 +56,30 @@ final class ExecutionPaths {
 
         @Override
         public List<String> unsupportedFeatures(ConformanceVector vector) {
-            return unsupported.apply(vector);
+            return VectorRunner.unsupportedFeatures(vector, medium);
         }
 
         @Override
         public VectorOutcome evaluate(ConformanceVector vector, String vectorId) {
-            return evaluator.apply(vector, vectorId);
+            return VectorRunner.evaluate(vector, vectorId, medium);
+        }
+    }
+
+    /** 엔드포인트가 아니라 제품 NIO 연결 엔진을 구동하는 경로. */
+    private static final class NioPath implements ExecutionPath {
+        @Override
+        public String name() {
+            return ConformanceReport.NIO_PATH;
+        }
+
+        @Override
+        public List<String> unsupportedFeatures(ConformanceVector vector) {
+            return NioVectorRunner.unsupportedFeatures(vector);
+        }
+
+        @Override
+        public VectorOutcome evaluate(ConformanceVector vector, String vectorId) {
+            return NioVectorRunner.evaluate(vector, vectorId);
         }
     }
 }

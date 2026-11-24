@@ -284,9 +284,7 @@ final class VectorRunner {
     static List<String> unsupportedFeatures(ConformanceVector vector, Medium medium) {
         JsonObject setup = vector.setup();
         List<String> unsupported = new ArrayList<>();
-        for (String what : medium.unsupportedSetup(setup)) {
-            addIfUnsupported(unsupported, false, what);
-        }
+        unsupported.addAll(medium.unsupportedSetup(setup));
         for (String key : setup.keySet()) {
             addIfUnsupported(unsupported, SUPPORTED_SETUP.contains(key), "setup." + key);
         }

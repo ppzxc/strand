@@ -22,6 +22,7 @@ import io.netty.handler.codec.http.websocketx.WebSocket13FrameEncoder;
 import io.netty.handler.codec.http.websocketx.WebSocketDecoderConfig;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.util.ReferenceCountUtil;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -83,7 +84,8 @@ final class NettyMessageWireHarness implements Transmission {
 
     @Override
     public void apply(EndpointDriver driver, JsonObject step, Map<String, Long> requestTickets) {
-        if (StepKind.of(step).inbound() == StepKind.Inbound.MESSAGE) {
+        StepKind kind = StepKind.of(step);
+        if (kind.inbound() == StepKind.Inbound.MESSAGE) {
             // 메시지 하나를 제품 통로에 프레임으로 넣는다. 통로가 core에 단위 입력 또는 "받았다" 신호로 넘긴다.
             inbound(
                     driver,
@@ -91,7 +93,7 @@ final class NettyMessageWireHarness implements Transmission {
                     Bytes.fromHex(step.get("hex").getAsString()));
             return;
         }
-        StepKind.of(step).execute(driver, step, requestTickets);
+        kind.execute(driver, step, requestTickets);
     }
 
     @Override
@@ -108,7 +110,7 @@ final class NettyMessageWireHarness implements Transmission {
         assertThat(peerEncoder.writeOutbound(frame)).as("메시지 프레임 인코딩").isTrue();
         try {
             wire.feed(readAll(peerEncoder));
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new AssertionError("업그레이드를 마친 통로가 입력을 거절했다", e);
         }
         WireMessage message = wire.pollMessage();
@@ -138,7 +140,7 @@ final class NettyMessageWireHarness implements Transmission {
             for (OutboundMessage message : messages) {
                 wire.sendMessage(message.bytes());
             }
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             throw new AssertionError("통로가 엔드포인트의 메시지를 보내지 못했다", e);
         }
         return decodeWire();
