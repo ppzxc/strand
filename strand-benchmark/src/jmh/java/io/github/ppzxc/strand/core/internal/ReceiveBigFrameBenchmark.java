@@ -18,7 +18,7 @@ public class ReceiveBigFrameBenchmark {
     private static final int PIECE_SIZE = 1024;
 
     /** 큰 프레임 하나의 크기(바이트, 길이 필드 포함). */
-    @Param({"131072", "1048576"})
+    @Param({"32768", "131072", "1048576"})
     public int frameBytes;
 
     private Endpoint endpoint;

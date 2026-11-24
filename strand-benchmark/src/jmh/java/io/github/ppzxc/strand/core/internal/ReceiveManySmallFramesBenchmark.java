@@ -16,7 +16,7 @@ public class ReceiveManySmallFramesBenchmark {
     private static final int SMALL_FRAME_SIZE = 20;
 
     /** 청크 하나의 크기(바이트). */
-    @Param({"1048576", "8388608"})
+    @Param({"131072", "1048576", "8388608"})
     public int chunkBytes;
 
     private Endpoint endpoint;
