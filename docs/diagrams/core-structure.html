@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>strand-core 구조 · Architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper: #f5f5f5; --color-ink: #2d3142; --color-muted: #4f5d75; --color-accent: #bf4520;
+      --font-sans: 'Geist', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+      --font-serif: 'Instrument Serif', 'Noto Serif', 'Noto Serif KR', serif;
+      --font-mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1400px; width: 100%; min-width: 0; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 1280px; display: block; }
+    .notes { display: grid; grid-template-columns: 1.1fr 1fr 0.9fr; gap: 1rem; margin-top: 1.5rem; }
+    .note { background: #fff; border: 1px solid rgba(45,49,66,0.12); border-radius: 6px; padding: 0.9rem 1rem; font-size: 0.82rem; line-height: 1.55; color: var(--color-muted); }
+    .note b { display: block; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-ink); margin-bottom: 0.35rem; }
+    .note code { font-family: var(--font-mono); font-size: 0.74rem; color: var(--color-ink); }
+    @media (max-width: 720px) { .notes { grid-template-columns: 1fr; } }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · Diagram Design</p>
+    <h1>strand-core 구조: 입출력 없는 상태 기계</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="core-structure-title core-structure-desc" style="min-width:1280px">
+        <title id="core-structure-title">strand-core 구조: 입출력 없는 상태 기계</title>
+        <desc id="core-structure-desc">전송 모듈이 넣은 바이트와 시각이 Endpoint 안에서 단위 자르기, 연결 단계, 내 요청 장부, 쓰기 대기열, 출력 진행을 거쳐 출력과 이벤트로 쌓이고, 전송 모듈과 애플리케이션이 그것을 꺼내 가는 구조.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          <marker id="arrow-rev" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-link-rev" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          <marker id="arrow-accent-rev" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+        </defs>
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+                <rect x="200" y="84" width="880" height="496" rx="8" fill="rgba(191,69,32,0.04)" stroke="#bf4520" stroke-width="1.4"/>
+        <text x="216" y="104" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="start" letter-spacing="0.14em">ENDPOINT · STRAND-CORE</text>
+        <text x="362" y="104" fill="#5a6580" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="start">입출력·스레드·시계가 없는 순수 상태 기계</text>
+                <line x1="160" y1="184" x2="248" y2="184" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link-rev)"/>
+        <line x1="160" y1="328" x2="248" y2="328" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link-rev)"/>
+        <line x1="248" y1="472" x2="160" y2="472" stroke="#2e5aa8" stroke-width="1.2" marker-start="url(#arrow-link-rev)" marker-end="url(#arrow-link-rev)"/>
+        <line x1="1120" y1="460" x2="1032" y2="460" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link-rev)"/>
+        <line x1="1032" y1="484" x2="1120" y2="484" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link-rev)"/>
+        <line x1="1032" y1="328" x2="1120" y2="328" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link-rev)"/>
+        <path d="M428,184 H934 Q942,184 942,192 V292" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="428" y1="328" x2="852" y2="328" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="942" y1="364" x2="942" y2="436" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="852" y1="472" x2="730" y2="472" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="550" y1="472" x2="428" y2="472" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <path d="M338,508 V540 Q338,548 346,548 H934 Q942,548 942,540 V508" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+                <rect x="182" y="162" width="44" height="16" rx="2" fill="#f5f5f5"/><text x="204" y="174" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">바이트</text>
+        <rect x="188" y="306" width="32" height="16" rx="2" fill="#f5f5f5"/><text x="204" y="318" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">시각</text>
+        <rect x="172" y="450" width="64" height="16" rx="2" fill="#f5f5f5"/><text x="204" y="462" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">출력·보고</text>
+        <rect x="1052" y="442" width="48" height="12" rx="2" fill="#f5f5f5"/><text x="1076" y="451" fill="#5a6580" font-size="8" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.06em">REQUEST</text>
+        <rect x="1060" y="490" width="32" height="16" rx="2" fill="#f5f5f5"/><text x="1076" y="502" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">결과</text>
+        <rect x="1054" y="306" width="44" height="16" rx="2" fill="#f5f5f5"/><text x="1076" y="318" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">이벤트</text>
+        <rect x="618" y="162" width="44" height="16" rx="2" fill="#f5f5f5"/><text x="640" y="174" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">프레임</text>
+        <rect x="608" y="306" width="64" height="16" rx="2" fill="#f5f5f5"/><text x="640" y="318" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">만료 판단</text>
+        <rect x="952" y="392" width="32" height="16" rx="2" fill="#f5f5f5"/><text x="968" y="404" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">사건</text>
+        <rect x="749" y="450" width="84" height="16" rx="2" fill="#f5f5f5"/><text x="791" y="462" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">쓰기 전 요청</text>
+        <rect x="457" y="450" width="64" height="16" rx="2" fill="#f5f5f5"/><text x="489" y="462" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">다음 출력</text>
+        <rect x="598" y="526" width="84" height="16" rx="2" fill="#f5f5f5"/><text x="640" y="538" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">쓰기 시작·끝</text>
+        <rect x="32" y="108" width="128" height="400" rx="6" fill="#f5f5f5"/>
+<rect x="32" y="108" width="128" height="400" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.45)" stroke-width="1"/>
+<rect x="40" y="116" width="52" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="66.0" y="125" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">EXTERNAL</text>
+<text x="96.0" y="152" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">전송 모듈</text>
+<text x="96.0" y="168" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">nio · netty</text>
+<text x="96.0" y="188" fill="#2d3142" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">receiveBounded</text>
+<text x="96.0" y="332" fill="#2d3142" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">advanceTo(now)</text>
+<text x="96.0" y="468" fill="#2d3142" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">nextOutput()</text>
+<text x="96.0" y="480" fill="#2d3142" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">outputProgress()</text>
+<rect x="1120" y="108" width="128" height="400" rx="6" fill="#f5f5f5"/>
+<rect x="1120" y="108" width="128" height="400" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.45)" stroke-width="1"/>
+<rect x="1128" y="116" width="52" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="1154.0" y="125" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">EXTERNAL</text>
+<text x="1184.0" y="152" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">애플리케이션</text>
+<text x="1184.0" y="168" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">your code</text>
+<text x="1184.0" y="332" fill="#2d3142" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">drainEvents()</text>
+<text x="1184.0" y="464" fill="#2d3142" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">request()</text>
+<text x="1184.0" y="488" fill="#2d3142" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">drainEvents()</text>
+<rect x="248" y="148" width="180" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="248" y="148" width="180" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="256" y="156" width="36" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="274.0" y="165" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">PARSE</text>
+<text x="338.0" y="192" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">단위 자르기</text>
+<text x="338.0" y="208" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">UnitSlicer</text>
+<rect x="248" y="292" width="180" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="248" y="292" width="180" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="256" y="300" width="32" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="272.0" y="309" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">TIME</text>
+<text x="338.0" y="336" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">생존 확인 타이머</text>
+<text x="338.0" y="352" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">LivenessTimers</text>
+<rect x="248" y="436" width="180" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="248" y="436" width="180" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="256" y="444" width="36" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="274.0" y="453" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">WRITE</text>
+<text x="338.0" y="480" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">출력 진행</text>
+<text x="338.0" y="496" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">OutputProgress</text>
+<rect x="852" y="292" width="180" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="852" y="292" width="180" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="860" y="300" width="36" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="878.0" y="309" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+<text x="942.0" y="336" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">연결 단계</text>
+<text x="942.0" y="352" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">ConnectionPhase</text>
+<rect x="852" y="436" width="180" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="852" y="436" width="180" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="860" y="444" width="36" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="878.0" y="453" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+<text x="942.0" y="480" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">내 요청 장부</text>
+<text x="942.0" y="496" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">OwnRequestLedger</text>
+<rect x="550" y="436" width="180" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="550" y="436" width="180" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="558" y="444" width="36" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="576.0" y="453" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">QUEUE</text>
+<text x="640.0" y="480" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">쓰기 대기열</text>
+<text x="640.0" y="496" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">Outbox</text>
+        <line x1="32" y1="604" x2="1248" y2="604" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+<text x="32" y="624" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">범례</text>
+<rect x="88" y="614" width="20" height="12" rx="3" fill="rgba(191,69,32,0.04)" stroke="#bf4520" stroke-width="1"/>
+<text x="116" y="624" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">Endpoint (strand-core)</text>
+<rect x="310.4" y="614" width="20" height="12" rx="3" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.45)" stroke-width="1"/>
+<text x="338.4" y="624" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">core 밖 (전송 · 앱)</text>
+<line x1="501.6" y1="620" x2="525.6" y2="620" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+<text x="533.6" y="624" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">경계 호출</text>
+<line x1="624.8000000000001" y1="620" x2="648.8000000000001" y2="620" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="656.8000000000001" y="624" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">Endpoint 안의 호출</text>
+      </svg>
+    </div>
+    <div class="notes">
+      <div class="note"><b>들어오는 것</b>바이트(<code>receiveBounded</code>), 가상 시각(<code>advanceTo</code>), 앱 호출(<code>request</code> · <code>respond</code> · <code>close</code>) 세 가지뿐이다. 소켓도 스레드도 실제 시계도 만지지 않는다.</div>
+      <div class="note"><b>나가는 것</b>보낼 출력은 <code>nextOutput</code>으로 보고 쓴 만큼을 <code>outputProgress</code>로 알린다. 앱 이벤트는 <code>drainEvents</code>로 꺼낸다. 쌓기만 하고 밀어내지 않는다.</div>
+      <div class="note"><b>스레드</b>연결 하나의 Endpoint는 한 스레드만 부른다. 입력 처리 중 같은 Endpoint에 다시 입력하는 재진입은 막혀 있다.</div>
+    </div>
+  </div>
+</body>
+</html>
