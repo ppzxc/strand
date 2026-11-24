@@ -19,7 +19,7 @@
 |---|---|
 | `ReceiveManySmallFramesBenchmark` | 청크 하나에 작은 프레임이 가득 찬 입력의 `receive()` |
 | `ReceiveBigFrameBenchmark` | 큰 프레임 하나가 작은 조각으로 도착하는 입력의 `receive()` |
-| `ReceiveRequestFramesBenchmark` | 실제 요청 프레임 1024개(본문 64B/1KiB/64KiB)를 서버가 받는 비용. 파싱과 `REQUEST_RECEIVED` 이벤트 생성 포함. 위 두 Receive 벤치마크의 예약 프레임이 대조군이다 |
+| `ReceiveRequestFramesBenchmark` | 실제 요청 프레임 1024개(본문 64B/1KiB/64KiB)를 서버가 받는 비용. 호출 하나가 서버 256/16/1대를 받으므로(호출당 측정 시간 확보, #429) 서버 한 대 비용은 결과를 그 수로 나눈다. 파싱과 `REQUEST_RECEIVED` 이벤트 생성 포함. 위 두 Receive 벤치마크의 예약 프레임이 대조군이다 |
 | `ReceivePingBenchmark` | PING 1000/10000/100000개를 받고 ACK를 쌓는 비용 |
 | `OutboxBenchmark` | 오류로 닫기, 번호표 취소, 번호표 상태 조회, 기한 확인의 쓰기 대기열 비용 |
 | `TicketLookupBenchmark` | 번호 없는 대기열 요청, 번호 받은 쓰기 전 요청, 쓰기 시작한 요청을 번호표로 상태 조회, 취소 후 재충전하는 비용. 대기 수 2000/20000/200000에서 퍼뜨린 표본과 이웃 표본을 비교한다. 대기 수와 무관해야 한다(#207) |
