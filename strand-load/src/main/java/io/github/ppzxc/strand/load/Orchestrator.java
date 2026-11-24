@@ -162,7 +162,12 @@ final class Orchestrator {
         processes.addProperty("loadgen", loadgenPid);
 
         JsonObject config = new JsonObject();
+        // 서버 전송이 유일한 변수다. 부하 생성기는 항상 nio 클라이언트 코드 경로를 쓴다.
         config.addProperty("transport", this.config.transport);
+        config.addProperty("loadgenTransport", "nio");
+        if ("netty".equals(this.config.transport)) {
+            config.addProperty("nettyEventLoops", ServerRole.NETTY_EVENT_LOOPS);
+        }
         config.addProperty("tls", false);
         config.addProperty("connections", this.config.connections);
         config.addProperty("bodyBytes", this.config.bodyBytes);

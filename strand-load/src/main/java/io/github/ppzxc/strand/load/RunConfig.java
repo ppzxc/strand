@@ -19,7 +19,7 @@ final class RunConfig {
         }
     }
 
-    static final Set<String> TRANSPORTS = Set.of("nio");
+    static final Set<String> TRANSPORTS = Set.of("nio", "netty");
 
     final String transport;
     final int connections;

@@ -11,6 +11,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** 하네스 CLI가 유일한 seam이다. 결과 JSON과 종료 상태만 검증하고 내부 구조는 보지 않는다. */
 class LoadCliTest {
@@ -40,14 +42,15 @@ class LoadCliTest {
         return JsonParser.parseString(Files.readString(file)).getAsJsonObject();
     }
 
-    @Test
-    void smokeRunWithNioEndsWithoutErrorsAndWritesTheResultJson() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"nio", "netty"})
+    void smokeRunEndsWithoutErrorsAndRecordsTheServerTransport(String transport) throws Exception {
         Path result = dir.resolve("result.json");
 
         Outcome outcome = run(
                 "run",
                 "--transport",
-                "nio",
+                transport,
                 "--connections",
                 "1",
                 "--body-bytes",
@@ -69,7 +72,9 @@ class LoadCliTest {
         assertThat(metadata.get("cores").getAsInt()).isPositive();
         assertThat(metadata.has("gitSha")).isTrue();
         JsonObject config = metadata.getAsJsonObject("config");
-        assertThat(config.get("transport").getAsString()).isEqualTo("nio");
+        assertThat(config.get("transport").getAsString()).isEqualTo(transport);
+        // 부하 생성기 코드 경로는 서버 전송과 무관하게 고정이다.
+        assertThat(config.get("loadgenTransport").getAsString()).isEqualTo("nio");
         assertThat(config.get("connections").getAsInt()).isEqualTo(1);
         assertThat(config.get("bodyBytes").getAsInt()).isEqualTo(64);
         assertThat(config.get("loadModel").getAsString()).isEqualTo("closed-loop");
