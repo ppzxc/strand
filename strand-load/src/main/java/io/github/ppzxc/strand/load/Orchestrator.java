@@ -64,9 +64,6 @@ final class Orchestrator {
     JsonObject execute() throws RunFailed, IOException, InterruptedException {
         try {
             prepareKeystore();
-            if (config.jfr || config.asyncProfiler != null) {
-                Files.createDirectories(Paths.get(config.profileDir));
-            }
             return runAll();
         } finally {
             cleanupKeystore();
@@ -75,6 +72,10 @@ final class Orchestrator {
 
     /** TLS를 켠 실행이면 키 저장소를 준비한다. 행렬이 미리 만들어 넘긴 것이 있으면 그것을 쓴다. */
     private void prepareKeystore() throws IOException, InterruptedException {
+        if (config.jfr || config.asyncProfiler != null) {
+            // 모든 시나리오(run·soak·stall)가 같은 경로로 프로파일 디렉터리를 만든다.
+            Files.createDirectories(Paths.get(config.profileDir));
+        }
         if (!config.tls) {
             return;
         }
@@ -114,6 +115,7 @@ final class Orchestrator {
             trend.add("loadgen", trendJson(loadgen));
 
             JsonObject leaks = new JsonObject();
+            lastServerErr.drain();
             leaks.addProperty("count", lastServerErr.leakCount());
             com.google.gson.JsonArray leakLines = new com.google.gson.JsonArray();
             lastServerErr.leakLines().forEach(leakLines::add);
@@ -241,6 +243,7 @@ final class Orchestrator {
     }
 
     private JsonObject stallOnce() throws RunFailed, IOException, InterruptedException {
+        lastClosed = null;
         Process server = null;
         Process peer = null;
         try {
@@ -372,6 +375,7 @@ final class Orchestrator {
     /** 서버와 부하 생성기를 새로 띄워 한 번 측정한다. 끝나면 두 프로세스를 정리한다. */
     private JsonObject runOnce(double rate, boolean closedOverride)
             throws RunFailed, IOException, InterruptedException {
+        serverSeries.clear();
         Process server = null;
         Process loadgen = null;
         try {
@@ -400,8 +404,13 @@ final class Orchestrator {
         }
     }
 
-    private static JsonObject runJson(JsonObject raw, JsonObject serverResources, long serverPid, long loadgenPid) {
-        double seconds = raw.get("measureNanos").getAsLong() / 1e9;
+    private static JsonObject runJson(JsonObject raw, JsonObject serverResources, long serverPid, long loadgenPid)
+            throws RunFailed {
+        long measureNanos = raw.get("measureNanos").getAsLong();
+        if (measureNanos <= 0) {
+            throw new RunFailed("부하 생성기가 측정 구간이 시작되기 전에 도착률 일정을 지키지 못해 포기했다. 도착률을 낮추거나 코어를 나눠 다시 잰다");
+        }
+        double seconds = measureNanos / 1e9;
         long responses = raw.get("responses").getAsLong();
         JsonObject measurement = new JsonObject();
         measurement.addProperty("requests", raw.get("requests").getAsLong());
@@ -601,7 +610,7 @@ final class Orchestrator {
 
     private JsonObject buildResult(List<JsonObject> runs, Double saturation, double rate) {
         JsonObject config = new JsonObject();
-        // 서버 전송이 유일한 변수다. 부하 생성기는 항상 nio 클라이언트 코드 경로를 쓴다.
+        // 서버 전송이 주 변수다. 부하 생성기 전송은 loadgenTransport로 함께 기록한다.
         config.addProperty("transport", this.config.transport);
         config.addProperty("loadgenTransport", this.config.loadgenTransport);
         config.addProperty("binding", this.config.binding);
@@ -767,17 +776,11 @@ final class Orchestrator {
         return process.isAlive() ? "실행 중" : String.valueOf(process.exitValue());
     }
 
-    private static void sleepQuietly() {
-        try {
-            Thread.sleep(10);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
     /** 자식 프로세스의 표준 오류를 모아 두었다가 실패 메시지에 붙인다. */
     private static final class StderrCapture {
         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
+        private final Thread reader;
 
         StderrCapture(InputStream stream) {
             Thread thread = new Thread(() -> {
@@ -795,6 +798,12 @@ final class Orchestrator {
             });
             thread.setDaemon(true);
             thread.start();
+            this.reader = thread;
+        }
+
+        /** 프로세스가 끝난 뒤 남은 출력을 모두 읽을 때까지 잠시 기다린다. */
+        void drain() throws InterruptedException {
+            reader.join(2_000);
         }
 
         /** 누수 감지기가 남긴 {@code LEAK:} 줄의 수와 앞부분 몇 줄. */

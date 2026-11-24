@@ -45,6 +45,12 @@ final class LoadGenRole {
 
     private final RunConfig config;
     private final ExecutorService executor = LoadSupport.newExecutor("strand-load-client");
+    private final java.util.concurrent.ScheduledExecutorService retry =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "strand-load-client-retry");
+                thread.setDaemon(true);
+                return thread;
+            });
     private final byte[] body;
     /** 요청은 불변이라 매번 만들지 않고 하나를 재사용한다. */
     private final Request echo;
@@ -284,7 +290,8 @@ final class LoadGenRole {
         phase = DRAIN;
         stopped.set(true);
         drain();
-        return Math.max(1, measureEnd - measureBegin);
+        // 측정 구간이 시작되기 전에 일정을 포기했으면 0이다. 진행자는 이를 실패로 처리한다(왜곡된 처리량을 내지 않는다).
+        return Math.max(0, measureEnd - measureBegin);
     }
 
     /** 서버 핸들러가 준비되기 전에 온 첫 요청은 거절될 수 있다(규격 4.5절). 거절은 다시 보내도 안전하므로 유한하게 다시 보낸다. */
@@ -331,10 +338,19 @@ final class LoadGenRole {
             if (tag == MEASURE && classify(result)) {
                 latency.recordValue(Math.max(0, (done - intended) / 1_000));
             }
+            boolean failed = result.certainty() != Certainty.RESPONSE || result.status() != Status.OK;
             outstanding.decrementAndGet();
             if (!config.openLoop) {
-                // 전송 스레드를 붙들지 않도록 다음 요청은 앱 실행기에서 보낸다.
-                executor.execute(() -> send(connection, System.nanoTime()));
+                // 전송 스레드를 붙들지 않도록 다음 요청은 앱 실행기에서 보낸다. 실패하면 잠시 쉰다:
+                // 연결이 끝난 뒤 실패 결과가 즉시 돌아와 CPU를 태우며 오류만 쌓는 것을 막는다.
+                if (failed) {
+                    retry.schedule(
+                            () -> executor.execute(() -> send(connection, System.nanoTime())),
+                            10,
+                            TimeUnit.MILLISECONDS);
+                } else {
+                    executor.execute(() -> send(connection, System.nanoTime()));
+                }
             }
         });
     }

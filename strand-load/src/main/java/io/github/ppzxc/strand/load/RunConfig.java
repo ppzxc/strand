@@ -40,7 +40,6 @@ final class RunConfig {
     final boolean tls;
     /** 자식 프로세스 전용: 진행자가 만든 키 저장소 경로. */
     final String keystore;
-    /** JFR 기록을 켠다. 기록은 {@link #profileDir}에 프로세스별로 남는다. */
     /** 쓰기 정체 시나리오({@code stall} 명령)용: 서버가 상대에게 계속 요청을 밀어 넣는다. */
     final boolean stall;
     /** soak 실행: 일정 부하로 오래 돌리며 자원 추이를 표본으로 남긴다. */
@@ -55,6 +54,7 @@ final class RunConfig {
     final Duration idlePing;
     final Duration ackTimeout;
     final Duration maxWait;
+    /** JFR 기록을 켠다. 기록은 {@link #profileDir}에 프로세스별로 남는다. */
     final boolean jfr;
     /** async-profiler 네이티브 라이브러리 경로. null이면 쓰지 않는다(선택 사항). */
     final String asyncProfiler;
@@ -266,7 +266,6 @@ final class RunConfig {
         }
     }
 
-    /** 개방형에서 미완료 요청이 쌓여도 자원 한도 때문에 거절되지 않도록 넉넉히 잡는 창 크기. */
     /**
      * 연결별 요청 한도. 결과 알림이 한도 반환보다 먼저 올 수 있어, 다음 요청이 일시적으로 한도를 넘어 거절되지 않도록 미완료 창의 두 배를 한도로 둔다. 한도는 계산만 하며 실제 미완료 수는 창이 정한다.
      */
