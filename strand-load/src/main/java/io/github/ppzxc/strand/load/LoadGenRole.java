@@ -93,6 +93,15 @@ final class LoadGenRole {
             connections.add(connection);
         }
 
+        // 측정 구간 경계의 첫 표본이 JMX 초기화로 수십 ms 걸리면 개방형 스케줄러가 멈춰 지연이 부풀려진다. 부하 전에 한 번 떠 둔다.
+        ResourceSampler.sample();
+        // 히스토그램도 처음 기록할 때 배열을 키우므로 미리 넓은 범위를 기록해 두고 비운다.
+        for (long v = 1; v < 3_600_000_000L; v = v * 3 / 2 + 1) {
+            latency.recordValue(v);
+            sendLag.recordValue(v);
+        }
+        latency.reset();
+        sendLag.reset();
         if (config.stall) {
             return runStalledPeer(connections.get(0), out);
         }
