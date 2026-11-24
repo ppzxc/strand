@@ -64,23 +64,28 @@ class VectorConformanceTest {
         Assumptions.assumeTrue("integrated".equals(executionPath()));
         List<VectorOutcome> coreOutcomes = new ArrayList<>();
         List<VectorOutcome> nioOutcomes = new ArrayList<>();
+        List<VectorOutcome> nettyOutcomes = new ArrayList<>();
         for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
             String fileKey = VectorSuite.fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 String vectorId = fileKey + "/" + vector.id();
                 coreOutcomes.add(VectorRunner.evaluate(vector, vectorId));
                 nioOutcomes.add(NioVectorRunner.evaluate(vector, vectorId));
+                nettyOutcomes.add(NettyVectorRunner.evaluate(vector, vectorId));
             }
         }
         Map<String, List<VectorOutcome>> outcomesByPath = new LinkedHashMap<>();
         outcomesByPath.put(ConformanceReport.CORE_PATH, coreOutcomes);
         outcomesByPath.put(ConformanceReport.NIO_PATH, nioOutcomes);
+        outcomesByPath.put(ConformanceReport.NETTY_PATH, nettyOutcomes);
         ConformanceReport coreReport = ConformanceReport.forPath(ConformanceReport.CORE_PATH, coreOutcomes);
         ConformanceReport nioReport = ConformanceReport.forPath(ConformanceReport.NIO_PATH, nioOutcomes);
+        ConformanceReport nettyReport = ConformanceReport.forPath(ConformanceReport.NETTY_PATH, nettyOutcomes);
         ConformanceReport integrated = ConformanceReport.integrated(outcomesByPath);
 
         reporter.publishEntry(ConformanceReport.CORE_PATH, coreReport.summary());
         reporter.publishEntry(ConformanceReport.NIO_PATH, nioReport.summary());
+        reporter.publishEntry(ConformanceReport.NETTY_PATH, nettyReport.summary());
         reporter.publishEntry(
                 ConformanceReport.INTEGRATED_PATH,
                 (integrated.passes() ? "전체 적합성 통과: " : "전체 적합성 실패: ") + integrated.summary());
@@ -91,30 +96,75 @@ class VectorConformanceTest {
         assertThat(nioReport.count(VectorOutcome.Status.FAIL))
                 .as("nio 경로 결과: %s", nioReport.summary())
                 .isZero();
+        assertThat(nettyReport.count(VectorOutcome.Status.FAIL))
+                .as("netty 경로 결과: %s", nettyReport.summary())
+                .isZero();
         int vectorCount = VectorSuite.jsonFiles(VectorSuite.defaultDirectory()).stream()
                 .mapToInt(file -> VectorLoader.load(file).size())
                 .sum();
         assertThat(coreOutcomes).hasSize(vectorCount);
         assertThat(nioOutcomes).hasSize(vectorCount);
+        assertThat(nettyOutcomes).hasSize(vectorCount);
         assertThat(integrated.passes())
                 .as("통합 적합성 결과: %s", integrated.summary())
                 .isTrue();
+    }
+
+    /** netty 경로는 {@code transport: websocket} 벡터를 모두 통과시키고, 바이트 스트림 벡터는 미지원으로 보고한다. */
+    @Test
+    void nettyPathPassesEveryWebSocketVectorAndReportsTheRestUnsupported() {
+        int webSocketVectors = 0;
+        for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
+            for (ConformanceVector vector : VectorLoader.load(file)) {
+                VectorOutcome outcome =
+                        NettyVectorRunner.evaluate(vector, VectorSuite.fileKey(file) + "/" + vector.id());
+                boolean webSocket = vector.setup().has("transport")
+                        && VectorSchema.WEBSOCKET.equals(
+                                vector.setup().get("transport").getAsString());
+                if (webSocket) {
+                    webSocketVectors++;
+                    assertThat(outcome.status())
+                            .as("%s: %s", outcome.vectorId(), outcome.details())
+                            .isEqualTo(VectorOutcome.Status.PASS);
+                } else {
+                    assertThat(outcome.status()).isEqualTo(VectorOutcome.Status.UNSUPPORTED);
+                }
+            }
+        }
+        assertThat(webSocketVectors).isPositive();
+    }
+
+    /** WebSocket Close(1000)를 기대하는 벡터는 core 경로에서 미지원이고 netty 경로가 통과시킨다. */
+    @Test
+    void webSocketCloseVectorsAreUnsupportedOnCoreAndPassOnNetty() {
+        int closeVectors = 0;
+        for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
+            for (ConformanceVector vector : VectorLoader.load(file)) {
+                if (!vector.steps().toString().contains("WEBSOCKET_CLOSE")) {
+                    continue;
+                }
+                closeVectors++;
+                String id = VectorSuite.fileKey(file) + "/" + vector.id();
+                assertThat(VectorRunner.evaluate(vector, id).status()).isEqualTo(VectorOutcome.Status.UNSUPPORTED);
+                assertThat(NettyVectorRunner.evaluate(vector, id).status()).isEqualTo(VectorOutcome.Status.PASS);
+            }
+        }
+        assertThat(closeVectors).isPositive();
     }
 
     /** 별도 경로 명령은 해당 경로의 미지원도 실패로 반환한다. */
     @Test
     void selectedExecutionPathReportHasNoFailuresOrUnsupportedVectors(TestReporter reporter) {
         String path = executionPath();
-        Assumptions.assumeTrue(ConformanceReport.CORE_PATH.equals(path) || ConformanceReport.NIO_PATH.equals(path));
+        Assumptions.assumeTrue(ConformanceReport.CORE_PATH.equals(path)
+                || ConformanceReport.NIO_PATH.equals(path)
+                || ConformanceReport.NETTY_PATH.equals(path));
         List<VectorOutcome> outcomes = new ArrayList<>();
         for (Path file : VectorSuite.jsonFiles(VectorSuite.defaultDirectory())) {
             String fileKey = VectorSuite.fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 String vectorId = fileKey + "/" + vector.id();
-                outcomes.add(
-                        path.equals(ConformanceReport.CORE_PATH)
-                                ? VectorRunner.evaluate(vector, vectorId)
-                                : NioVectorRunner.evaluate(vector, vectorId));
+                outcomes.add(evaluateOn(path, vector, vectorId));
             }
         }
         ConformanceReport report = ConformanceReport.forPath(path, outcomes);
@@ -123,6 +173,17 @@ class VectorConformanceTest {
         assertThat(report.passes())
                 .as("%s 실행 경로 적합성 결과: %s", path, report.summary())
                 .isTrue();
+    }
+
+    private static VectorOutcome evaluateOn(String path, ConformanceVector vector, String vectorId) {
+        switch (path) {
+            case ConformanceReport.CORE_PATH:
+                return VectorRunner.evaluate(vector, vectorId);
+            case ConformanceReport.NIO_PATH:
+                return NioVectorRunner.evaluate(vector, vectorId);
+            default:
+                return NettyVectorRunner.evaluate(vector, vectorId);
+        }
     }
 
     private static String executionPath() {

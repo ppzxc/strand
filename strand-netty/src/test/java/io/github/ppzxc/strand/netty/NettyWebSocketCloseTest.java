@@ -1,0 +1,278 @@
+package io.github.ppzxc.strand.netty;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import io.github.ppzxc.strand.api.CloseNotice;
+import io.github.ppzxc.strand.api.Request;
+import io.github.ppzxc.strand.api.Status;
+import io.github.ppzxc.strand.core.internal.ErrorCode;
+import io.github.ppzxc.strand.core.internal.Event;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+
+/**
+ * WebSocket Close의 상태 코드와 순서(규격 1.2절, #409 결정): {@code NO_ERROR}는 남은 출력을 보낸 뒤 1000, CLOSE를 보내는 종료는 CLOSE 송신 뒤 Close, 오류 종료는 원인별 코드
+ * (보내든 받든 같은 표), 사유 문자열은 늘 비어 있고, WebSocket Ping·Pong은 생존 확인에 쓰이지 않는다. 이 표는 strand-netty의 동작이며 규격과 벡터는 단언하지 않는다.
+ */
+class NettyWebSocketCloseTest {
+    private static final String PATH = "/strand";
+
+    private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
+    private final CompletableFuture<NettyStrandConnection> accepted = new CompletableFuture<>();
+    private AppFixture fixture;
+    private int port;
+
+    @AfterEach
+    void cleanUp() throws Exception {
+        for (AutoCloseable closeable : closeables) {
+            closeable.close();
+        }
+    }
+
+    private void startServer(CredentialVerifier verifier, ConnectionHandlerFactory factory, Duration idle, Duration ack)
+            throws Exception {
+        fixture = AppFixture.plain();
+        closeables.add(fixture);
+        NettyStrandServer.Builder builder =
+                fixture.serverBuilder().authenticate(verifier).handlerFactory(factory);
+        if (idle != null) {
+            builder.idlePingInterval(idle);
+        }
+        if (ack != null) {
+            builder.ackTimeout(ack);
+        }
+        Listener listener = AppFixture.get(builder.build().listen(AppFixture.anyLoopback(), Transport.webSocket(PATH)));
+        closeables.add(listener::close);
+        port = AppFixture.loopback(listener).getPort();
+    }
+
+    private void startServer() throws Exception {
+        startServer(
+                credentials -> AuthenticationResult.accepted("peer"),
+                connection -> {
+                    accepted.complete(connection);
+                    return PreparedHandler.of(request -> request.respond(Status.OK, request.payload()));
+                },
+                null,
+                null);
+    }
+
+    private WsPeer peer() throws Exception {
+        WsPeer peer = WsPeer.connect(port, PATH);
+        closeables.add(peer);
+        return peer;
+    }
+
+    private static void awaitOpen(WsPeer peer) throws Exception {
+        WsPeer.await(() -> peer.events().stream().anyMatch(event -> event.kind() == Event.Kind.AUTHENTICATED));
+    }
+
+    private static void awaitWebSocketClose(WsPeer peer) throws Exception {
+        WsPeer.await(() -> !peer.closes().isEmpty());
+    }
+
+    private static int status(WsPeer peer) {
+        return peer.closes().get(0).closeStatus();
+    }
+
+    private static String lastArrival(WsPeer peer) {
+        List<String> arrivals = peer.arrivals();
+        return arrivals.get(arrivals.size() - 1);
+    }
+
+    @Test
+    void normalCloseEndsWithConnectionCloseThenWebSocketClose1000() throws Exception {
+        startServer();
+        WsPeer peer = peer();
+        awaitOpen(peer);
+        NettyStrandConnection connection = accepted.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+
+        connection.close();
+
+        awaitWebSocketClose(peer);
+        assertThat(status(peer)).isEqualTo(1000);
+        assertThat(peer.closes().get(0).closeReason()).isEmpty();
+        // 상대는 CLOSE 프레임을 읽을 수 있어야 한다: WebSocket Close는 CLOSE 송신 뒤에만 나간다.
+        List<String> arrivals = peer.arrivals();
+        assertThat(arrivals.indexOf("CLOSE:1000")).isGreaterThan(arrivals.lastIndexOf("BINARY"));
+        assertThat(peer.events())
+                .anyMatch(event -> event.kind() == Event.Kind.CLOSED
+                        && event.closeReason().get().errorCode() == ErrorCode.NO_ERROR);
+    }
+
+    @Test
+    void remainingOutputIsSentBeforeTheWebSocketClose() throws Exception {
+        startServer();
+        WsPeer peer = peer();
+        awaitOpen(peer);
+        NettyStrandConnection connection = accepted.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+        int before = peer.binaryMessages().size();
+
+        // 크기가 큰 요청 여러 개를 내고 곧바로 닫는다: 남은 출력(요청)이 모두 간 뒤에 Close가 나가야 한다.
+        for (int i = 0; i < 4; i++) {
+            connection.request(Request.of(AppFixture.TYPE, new byte[64 * 1024]));
+        }
+        connection.close();
+
+        awaitWebSocketClose(peer);
+        assertThat(lastArrival(peer)).isEqualTo("CLOSE:1000");
+        assertThat(peer.binaryMessages().size()).isGreaterThan(before);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "PROTOCOL_ERROR, 1002",
+        "EXCESSIVE_USE, 1008",
+        "INTERNAL_ERROR, 1011",
+        "UNRESPONSIVE, 1011",
+        "UNAUTHENTICATED, 1008",
+    })
+    void aPeerSentErrorCloseUsesTheSameTable(String code, int expectedStatus) throws Exception {
+        startServer();
+        WsPeer peer = peer();
+        awaitOpen(peer);
+        int errorCode = errorCodeOf(code);
+
+        peer.run(endpoint -> endpoint.close(errorCode));
+
+        awaitWebSocketClose(peer);
+        assertThat(status(peer)).isEqualTo(expectedStatus);
+        assertThat(status(peer)).isNotEqualTo(1000);
+        assertThat(peer.closes().get(0).closeReason()).isEmpty();
+    }
+
+    private static int errorCodeOf(String name) {
+        switch (name) {
+            case "PROTOCOL_ERROR":
+                return ErrorCode.PROTOCOL_ERROR;
+            case "EXCESSIVE_USE":
+                return ErrorCode.EXCESSIVE_USE;
+            case "INTERNAL_ERROR":
+                return ErrorCode.INTERNAL_ERROR;
+            case "UNRESPONSIVE":
+                return ErrorCode.UNRESPONSIVE;
+            default:
+                return ErrorCode.UNAUTHENTICATED;
+        }
+    }
+
+    @Test
+    void excessiveUseCloseSentByTheServerUses1008() throws Exception {
+        startServer();
+        WsPeer peer = peer();
+        awaitOpen(peer);
+        NettyStrandConnection connection = accepted.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+
+        connection.closeExcessiveUse();
+
+        awaitWebSocketClose(peer);
+        assertThat(status(peer)).isEqualTo(1008);
+        assertThat(peer.closes().get(0).closeReason()).isEmpty();
+    }
+
+    @Test
+    void rejectedAuthenticationClosesWith1008() throws Exception {
+        startServer(
+                credentials -> AuthenticationResult.rejected(),
+                connection -> PreparedHandler.of(request -> request.respond(Status.OK, request.payload())),
+                null,
+                null);
+        WsPeer peer = peer();
+
+        awaitWebSocketClose(peer);
+
+        assertThat(status(peer)).isEqualTo(1008);
+        assertThat(peer.events())
+                .anyMatch(event -> event.kind() == Event.Kind.CLOSED
+                        && event.closeReason().get().errorCode() == ErrorCode.UNAUTHENTICATED);
+    }
+
+    @Test
+    void anUnresponsivePeerClosesWith1011() throws Exception {
+        startServer(
+                credentials -> AuthenticationResult.accepted("peer"),
+                connection -> {
+                    accepted.complete(connection);
+                    return PreparedHandler.of(request -> request.respond(Status.OK, request.payload()));
+                },
+                Duration.ofMillis(100),
+                Duration.ofMillis(200));
+        WsPeer peer = peer();
+        awaitOpen(peer);
+
+        peer.goSilent();
+
+        awaitWebSocketClose(peer);
+        assertThat(status(peer)).isEqualTo(1011);
+        NettyStrandConnection connection = accepted.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
+        CloseNotice notice = fixture.result(connection.closed());
+        assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.ERROR_CLOSE);
+    }
+
+    @Test
+    void closeWithoutAConnectionCloseUses1002() throws Exception {
+        startServer();
+        WsPeer peer = peer();
+        awaitOpen(peer);
+
+        peer.sendText("not binary");
+
+        awaitWebSocketClose(peer);
+        assertThat(status(peer)).isEqualTo(1002);
+        assertThat(peer.closes().get(0).closeReason()).isEmpty();
+    }
+
+    @Test
+    void aPrefaceErrorClosesWith1002() throws Exception {
+        startServer();
+        WsPeer peer = WsPeer.connect(port, PATH, io.github.ppzxc.strand.core.internal.EndpointConfig.defaults(), false);
+        closeables.add(peer);
+
+        peer.sendBinary(new byte[8]);
+
+        awaitWebSocketClose(peer);
+        assertThat(status(peer)).isEqualTo(1002);
+    }
+
+    @Test
+    void aWebSocketPingIsAnsweredButIsNotALivenessProbe() throws Exception {
+        startServer();
+        WsPeer peer = peer();
+        awaitOpen(peer);
+
+        peer.sendPing(new byte[] {1, 2, 3});
+
+        WsPeer.await(() -> peer.arrivals().contains("PONG"));
+        assertThat(peer.pongs().get(0).payload).containsExactly(1, 2, 3);
+        assertThat(peer.sawClosed()).isFalse();
+    }
+
+    @Test
+    void webSocketPingsDoNotReplaceTheIdleStrandPing() throws Exception {
+        startServer(
+                credentials -> AuthenticationResult.accepted("peer"),
+                connection -> PreparedHandler.of(request -> request.respond(Status.OK, request.payload())),
+                Duration.ofMillis(300),
+                null);
+        WsPeer peer = peer();
+        awaitOpen(peer);
+        int framesBefore = peer.binaryMessages().size();
+
+        // WebSocket Ping만 계속 보내도 유휴 간격이 지나면 서버는 Strand PING을 낸다(규격 3.3절·3.4.1절).
+        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(900);
+        while (System.nanoTime() < until) {
+            peer.sendPing(new byte[0]);
+            Thread.sleep(40);
+        }
+
+        assertThat(peer.binaryMessages().size()).isGreaterThan(framesBefore);
+        assertThat(peer.sawClosed()).isFalse();
+    }
+}

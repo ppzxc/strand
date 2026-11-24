@@ -474,7 +474,7 @@ class VectorRunnerTest {
     private static final String CLOSE_STEP_NO_ERROR = "\"error_code\":\"NO_ERROR\",";
 
     @Test
-    void webSocketCloseItemIsComparedAfterTheCloseFrame() {
+    void webSocketCloseItemIsComparedAfterTheCloseFrameOnTheNettyPath() {
         ConformanceVector v = vector(
                 WEBSOCKET_ESTABLISHED,
                 step(
@@ -483,20 +483,20 @@ class VectorRunnerTest {
                         "[" + CLOSE_NO_ERROR + "," + WEBSOCKET_CLOSE_1000 + "]",
                         "[{\"event\":\"closed\"}]"));
 
-        assertThatCode(() -> VectorRunner.run(v)).doesNotThrowAnyException();
+        assertThatCode(() -> NettyVectorRunner.run(v)).doesNotThrowAnyException();
     }
 
     @Test
-    void aMissingWebSocketCloseItemFails() {
+    void aMissingWebSocketCloseItemFailsOnTheNettyPath() {
         ConformanceVector v = vector(
                 WEBSOCKET_ESTABLISHED,
                 step("close", CLOSE_STEP_NO_ERROR, "[" + CLOSE_NO_ERROR + "]", "[{\"event\":\"closed\"}]"));
 
-        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> NettyVectorRunner.run(v)).isInstanceOf(AssertionError.class);
     }
 
     @Test
-    void aWebSocketCloseItemBeforeTheCloseFrameFails() {
+    void aWebSocketCloseItemBeforeTheCloseFrameFailsOnTheNettyPath() {
         ConformanceVector v = vector(
                 WEBSOCKET_ESTABLISHED,
                 step(
@@ -505,7 +505,41 @@ class VectorRunnerTest {
                         "[" + WEBSOCKET_CLOSE_1000 + "," + CLOSE_NO_ERROR + "]",
                         "[{\"event\":\"closed\"}]"));
 
-        assertThatThrownBy(() -> VectorRunner.run(v)).isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> NettyVectorRunner.run(v)).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void theCoreRunnerNoLongerObservesWebSocketClose() {
+        ConformanceVector v = vector(
+                WEBSOCKET_ESTABLISHED,
+                step(
+                        "close",
+                        CLOSE_STEP_NO_ERROR,
+                        "[" + CLOSE_NO_ERROR + "," + WEBSOCKET_CLOSE_1000 + "]",
+                        "[{\"event\":\"closed\"}]"));
+
+        assertThat(VectorRunner.unsupportedFeatures(v)).containsExactly("프레임 \"WEBSOCKET_CLOSE\"");
+        assertThat(VectorRunner.evaluate(v).status()).isEqualTo(VectorOutcome.Status.UNSUPPORTED);
+    }
+
+    @Test
+    void theNettyRunnerSupportsOnlyWebSocketVectors() {
+        ConformanceVector byteStream =
+                vector(ESTABLISHED, recv(PING, String.format(PING_ACK_SEND, "0102030405060708"), "[]"));
+
+        assertThat(NettyVectorRunner.unsupportedFeatures(byteStream)).containsExactly("setup.transport");
+        assertThat(NettyVectorRunner.evaluate(byteStream, "v").status()).isEqualTo(VectorOutcome.Status.UNSUPPORTED);
+    }
+
+    @Test
+    void aTextMessageClosesWithAConnectionErrorOnTheNettyPath() {
+        ConformanceVector v = vector(
+                WEBSOCKET_ESTABLISHED,
+                "{\"kind\":\"recv_message\",\"opcode\":\"text\",\"hex\":\"6869\",\"send\":["
+                        + "{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\",\"last_stream_id\":\"0\"}],"
+                        + "\"events\":[{\"event\":\"closed\"}]}");
+
+        assertThatCode(() -> NettyVectorRunner.run(v)).doesNotThrowAnyException();
     }
 
     @Test

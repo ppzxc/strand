@@ -82,7 +82,19 @@ public final class TlsEngines {
         return client(context, host, port, SYSTEM);
     }
 
-    static SSLEngine client(SSLContext context, String host, int port, Alpn alpn) {
+    /**
+     * WebSocket 전송의 클라이언트 엔진. ALPN을 제시하지 않는다(규격 3.7절: ALPN은 TCP에만 적용된다). 나머지는 {@link #client(SSLContext, String, int)}와 같다.
+     *
+     * @param context TLS 컨텍스트
+     * @param host 서버 인증서가 가리켜야 하는 호스트 이름 또는 주소
+     * @param port 서버 포트
+     * @return 클라이언트 엔진
+     */
+    public static SSLEngine clientWithoutAlpn(SSLContext context, String host, int port) {
+        return client(context, host, port, null);
+    }
+
+    static SSLEngine client(SSLContext context, String host, int port, @Nullable Alpn alpn) {
         SSLEngine engine = context.createSSLEngine(host, port);
         engine.setUseClientMode(true);
         configure(engine, true, alpn);
@@ -100,18 +112,28 @@ public final class TlsEngines {
         return server(context, SYSTEM);
     }
 
-    static SSLEngine server(SSLContext context, Alpn alpn) {
+    /**
+     * WebSocket 전송의 서버 엔진. ALPN을 요구하지 않는다(규격 3.7절: ALPN은 TCP에만 적용된다). 나머지는 {@link #server(SSLContext)}와 같다.
+     *
+     * @param context TLS 컨텍스트
+     * @return 서버 엔진
+     */
+    public static SSLEngine serverWithoutAlpn(SSLContext context) {
+        return server(context, null);
+    }
+
+    static SSLEngine server(SSLContext context, @Nullable Alpn alpn) {
         SSLEngine engine = context.createSSLEngine();
         engine.setUseClientMode(false);
         configure(engine, false, alpn);
         return engine;
     }
 
-    private static void configure(SSLEngine engine, boolean verifyHostName, Alpn alpn) {
-        if (!alpn.supported()) {
+    /** @param alpn 런타임의 ALPN API. null이면 ALPN을 쓰지 않는다(WebSocket) */
+    private static void configure(SSLEngine engine, boolean verifyHostName, @Nullable Alpn alpn) {
+        if (alpn != null && !alpn.supported()) {
             throw new IllegalStateException("이 런타임은 ALPN을 지원하지 않아 strand over TCP의 TLS를 쓸 수 없다");
         }
-        Method setter = Objects.requireNonNull(alpn.setter);
         List<String> supported = Arrays.asList(engine.getSupportedProtocols());
         List<String> enabled = new ArrayList<>(PREFERRED_PROTOCOLS);
         enabled.retainAll(supported);
@@ -123,10 +145,13 @@ public final class TlsEngines {
         if (verifyHostName) {
             parameters.setEndpointIdentificationAlgorithm("HTTPS");
         }
-        try {
-            setter.invoke(parameters, (Object) new String[] {ALPN_IDENTIFIER});
-        } catch (IllegalAccessException | InvocationTargetException e) {
-            throw new IllegalStateException("ALPN 식별자를 설정하지 못했다", e);
+        if (alpn != null) {
+            Method setter = Objects.requireNonNull(alpn.setter);
+            try {
+                setter.invoke(parameters, (Object) new String[] {ALPN_IDENTIFIER});
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new IllegalStateException("ALPN 식별자를 설정하지 못했다", e);
+            }
         }
         engine.setSSLParameters(parameters);
     }

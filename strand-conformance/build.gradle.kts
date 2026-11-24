@@ -3,8 +3,15 @@ plugins {
   id("strand.vector-compat-conventions")
 }
 
+// 제품 netty 경로(WebSocket 코덱)를 돌리는 Netty 버전. -PnettyVersion=<버전>으로 바꿔 반복 실행한다(strand-netty와 같다).
+val nettyVersion = providers.gradleProperty("nettyVersion").orElse("4.1.101.Final")
+
 dependencies {
   testImplementation(project(":strand-core"))
+  // 적합성 netty 경로: 제품 WebSocket 통로(strand-netty)와 그 코덱을 EmbeddedChannel로 돌린다.
+  testImplementation(project(":strand-netty"))
+  testImplementation("io.netty:netty-transport:${nettyVersion.get()}")
+  testImplementation("io.netty:netty-codec-http:${nettyVersion.get()}")
   testImplementation(testFixtures(project(":strand-core")))
   testImplementation(testFixtures(project(":strand-nio")))
   testImplementation(libs.gson)
@@ -22,7 +29,7 @@ tasks.test {
   inputs.file(rootProject.layout.projectDirectory.file("gradle.properties"))
   // 러너는 작업 디렉터리가 아니라 이 프로퍼티로 벡터 디렉터리를 찾는다. (다른 디렉터리의 벡터를 돌릴 때도 같은 프로퍼티를 쓴다.)
   systemProperty("strand.conformance.vectors.dir", layout.projectDirectory.dir("vectors").asFile.absolutePath)
-  // 기본 검사는 실행 경로를 통합한다. `-Dstrand.conformance.execution.path=core|nio`로 단일 경로를 강제할 수 있다.
+  // 기본 검사는 실행 경로를 통합한다. `-Dstrand.conformance.execution.path=core|nio|netty`로 단일 경로를 강제할 수 있다.
   systemProperty(
     "strand.conformance.execution.path",
     System.getProperty("strand.conformance.execution.path", "integrated"),

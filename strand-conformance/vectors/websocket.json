@@ -223,9 +223,10 @@
     },
     {
       "id": "text-message-after-first-frame-closes",
-      "description": "첫 프레임 뒤에 텍스트 메시지가 오면 내용이 유효한 PING이어도 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보내고 닫는다",
+      "description": "첫 프레임 뒤에 텍스트 메시지가 오면 내용이 유효한 PING이어도 연결 오류다. CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 오류 종료이므로 WebSocket Close 1000을 보내지 않는다",
       "requirements": [
         "req-ws-message-boundary-violation",
+        "req-ws-close-error-not-1000",
         "req-check-connection-error-close"
       ],
       "setup": {
