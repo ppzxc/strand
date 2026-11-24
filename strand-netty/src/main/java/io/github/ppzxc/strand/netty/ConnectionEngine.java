@@ -1470,14 +1470,21 @@ final class ConnectionEngine {
 
         /** 처리하지 못한 입력(바이트, 또는 core가 받지 못한 메시지)이 남아 읽기를 멈춰야 하는가. */
         boolean hasPendingInput();
+
+        /** 보안 협상을 마친 직후의 준비 단계. 전송 방식이 업그레이드를 요구하면 {@link PreparationStage#UPGRADE}다. */
+        PreparationStage stageAfterSecurity();
+
+        /** 전송 방식의 업그레이드를 마쳤는가. 업그레이드가 없는 전송 방식은 늘 true다. */
+        boolean upgraded();
+
+        /** 입력 쪽이 쥔 내부 버퍼를 놓는다. 여러 번 불러도 된다. */
+        void release();
     }
 
     /** 이벤트 루프 안에서만 쓰는 상태와 구동 순서. */
     private final class Loop {
         final Endpoint endpoint;
         final @Nullable TlsPipe tls;
-        /** WebSocket 전송이면 메시지 통로, 바이트 스트림(TCP)이면 null. */
-        final @Nullable MessageWire wire;
         /** 읽기 쪽: 전송 방식에 맞는 구현 하나를 만들 때 고른다. */
         final Inbound inbound;
         /** 쓰기 쪽: 전송 방식에 맞는 구현 하나를 만들 때 고른다. */
@@ -1524,12 +1531,17 @@ final class ConnectionEngine {
                 }
                 this.tls = new TlsPipe(engine, security.sizes, p.allocator, channel::writeAttempt, alpn);
             }
-            this.wire = p.transport.isWebSocket() ? createWire() : null;
-            if (wire != null && p.role == ConnectionParams.Role.CLIENT) {
-                wire.start();
+            if (p.transport.isWebSocket()) {
+                MessageWire wire = createWire();
+                if (p.role == ConnectionParams.Role.CLIENT) {
+                    wire.start();
+                }
+                this.inbound = new MessageInbound(wire);
+                this.outbound = new MessageOutbound(wire);
+            } else {
+                this.inbound = new StreamInbound();
+                this.outbound = new StreamOutbound();
             }
-            this.inbound = wire == null ? new StreamInbound() : new MessageInbound(wire);
-            this.outbound = wire == null ? new StreamOutbound() : new MessageOutbound(wire);
         }
 
         private MessageWire createWire() throws IOException {
@@ -1735,6 +1747,19 @@ final class ConnectionEngine {
             }
 
             @Override
+            public PreparationStage stageAfterSecurity() {
+                return PreparationStage.HELLO;
+            }
+
+            @Override
+            public boolean upgraded() {
+                return true;
+            }
+
+            @Override
+            public void release() {}
+
+            @Override
             public void process() throws IOException {
                 while (!transportGone && !abandoned) {
                     if (inputPos >= input.length) {
@@ -1796,6 +1821,21 @@ final class ConnectionEngine {
             @Override
             public boolean hasPendingInput() {
                 return !inputQueue.isEmpty() || wireCurrent != null || messages.hasMessages();
+            }
+
+            @Override
+            public PreparationStage stageAfterSecurity() {
+                return PreparationStage.UPGRADE;
+            }
+
+            @Override
+            public boolean upgraded() {
+                return messages.established();
+            }
+
+            @Override
+            public void release() {
+                messages.release();
             }
 
             @Override
@@ -2220,10 +2260,9 @@ final class ConnectionEngine {
             // 단계가 SECURITY인 것은 TLS 연결뿐이다.
             if (stage == PreparationStage.SECURITY
                     && Objects.requireNonNull(tls).handshakeComplete()) {
-                stage = wire != null ? PreparationStage.UPGRADE : PreparationStage.HELLO;
+                stage = inbound.stageAfterSecurity();
             }
-            if (stage == PreparationStage.UPGRADE
-                    && Objects.requireNonNull(wire).established()) {
+            if (stage == PreparationStage.UPGRADE && inbound.upgraded()) {
                 stage = PreparationStage.HELLO;
             }
             // 준비 중에는 CLOSED를 내지 않았다(CLOSED는 준비 결과를 먼저 확정한다).
@@ -2282,9 +2321,7 @@ final class ConnectionEngine {
             } finally {
                 outbound.release();
                 returnAllHeldBytes();
-                if (wire != null) {
-                    wire.release();
-                }
+                inbound.release();
                 if (tls != null) {
                     tls.release();
                 }
