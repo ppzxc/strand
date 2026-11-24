@@ -45,6 +45,10 @@ final class RunConfig {
     final boolean stall;
     /** soak 실행: 일정 부하로 오래 돌리며 자원 추이를 표본으로 남긴다. */
     final boolean soak;
+    /** netty 전송 바인딩: {@code tcp} 또는 {@code websocket}(ADR 0007, netty만 지원). */
+    final String binding;
+    /** 부하 생성기의 클라이언트 전송. 기본 nio로 고정하고, 클라이언트 전송 비교나 WebSocket에서만 netty를 쓴다. */
+    final String loadgenTransport;
 
     final Duration sampleInterval;
 
@@ -69,6 +73,18 @@ final class RunConfig {
         this.connections = positiveInt(options, "--connections", 1);
         this.stall = options.containsKey("--stall");
         this.soak = options.containsKey("--soak");
+        this.binding = options.getOrDefault("--binding", "tcp");
+        if (!binding.equals("tcp") && !binding.equals("websocket")) {
+            throw new Invalid("--binding 값 '" + binding + "'을(를) 지원하지 않는다. 지원: tcp, websocket");
+        }
+        this.loadgenTransport = options.getOrDefault("--loadgen-transport", "nio");
+        if (!loadgenTransport.equals("nio") && !loadgenTransport.equals("netty")) {
+            throw new Invalid("--loadgen-transport 값 '" + loadgenTransport + "'을(를) 지원하지 않는다. 지원: nio, netty");
+        }
+        if (binding.equals("websocket") && !(transport.equals("netty") && loadgenTransport.equals("netty"))) {
+            throw new Invalid(
+                    "--binding websocket은 서버와 부하 생성기 모두 netty여야 한다(--transport netty --loadgen-transport netty, ADR 0007)");
+        }
         this.sampleInterval = duration(options, "--sample-interval", Duration.ofSeconds(10), false);
         // 쓰기 정체는 버퍼가 빨리 차도록 큰 본문과 넉넉한 미완료 수를 기본으로 한다.
         this.bodyBytes = positiveInt(options, "--body-bytes", stall ? 65_536 : 64);
@@ -169,6 +185,8 @@ final class RunConfig {
                 "--saturation",
                 "--stall",
                 "--soak",
+                "--binding",
+                "--loadgen-transport",
                 "--sample-interval",
                 "--idle-ping",
                 "--ack-timeout",
@@ -249,6 +267,13 @@ final class RunConfig {
     }
 
     /** 개방형에서 미완료 요청이 쌓여도 자원 한도 때문에 거절되지 않도록 넉넉히 잡는 창 크기. */
+    /**
+     * 연결별 요청 한도. 결과 알림이 한도 반환보다 먼저 올 수 있어, 다음 요청이 일시적으로 한도를 넘어 거절되지 않도록 미완료 창의 두 배를 한도로 둔다. 한도는 계산만 하며 실제 미완료 수는 창이 정한다.
+     */
+    int requestLimit() {
+        return 2 * effectiveInflight();
+    }
+
     int effectiveInflight() {
         return openLoop ? Math.max(inflight, 1024) : inflight;
     }
@@ -282,6 +307,7 @@ final class RunConfig {
         if (stall) {
             args.add("--stall");
         }
+        args.addAll(List.of("--binding", binding, "--loadgen-transport", loadgenTransport));
         if (soak) {
             args.addAll(List.of("--soak", "--sample-interval", sampleInterval.toMillis() + "ms"));
         }

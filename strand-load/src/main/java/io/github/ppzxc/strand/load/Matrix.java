@@ -27,6 +27,8 @@ final class Matrix {
     private static final List<Integer> EXTENDED_CONNECTIONS = List.of(1, 100, 1000);
     private static final List<Integer> EXTENDED_BODIES = List.of(64, 1024, 65_536);
     private static final List<String> TRANSPORTS = List.of("nio", "netty");
+    /** 바인딩 비교용 셀 이름: 서버·부하 생성기 모두 netty이고 TCP 또는 WebSocket이다(ADR 0007). */
+    private static final List<String> BINDING_TRANSPORTS = List.of("netty-tcp", "netty-ws");
 
     private final List<Integer> connections;
     private final List<Integer> bodies;
@@ -47,7 +49,7 @@ final class Matrix {
         String t = options.get("--transports");
         this.transports = t == null ? TRANSPORTS : Arrays.asList(t.split(","));
         for (String transport : transports) {
-            if (!RunConfig.TRANSPORTS.contains(transport)) {
+            if (!RunConfig.TRANSPORTS.contains(transport) && !BINDING_TRANSPORTS.contains(transport)) {
                 throw new RunConfig.Invalid("--transports 값 '" + transport + "'을(를) 지원하지 않는다");
             }
         }
@@ -198,7 +200,7 @@ final class Matrix {
             throws Orchestrator.RunFailed, IOException, InterruptedException, RunConfig.Invalid {
         List<String> base = new ArrayList<>(List.of(
                 "--transport",
-                cell.transport(),
+                cell.transport().startsWith("netty-") ? "netty" : cell.transport(),
                 "--connections",
                 String.valueOf(cell.connections()),
                 "--body-bytes",
@@ -209,6 +211,14 @@ final class Matrix {
                 measure,
                 "--repetitions",
                 repetitions));
+        if (cell.transport().startsWith("netty-")) {
+            // 바인딩 비교는 클라이언트도 netty로 맞춘다. 같은 조건에서 TCP와 WebSocket만 다르다.
+            base.addAll(List.of(
+                    "--loadgen-transport",
+                    "netty",
+                    "--binding",
+                    cell.transport().equals("netty-ws") ? "websocket" : "tcp"));
+        }
         if (!cell.tls()) {
             base.add("--plaintext");
         }

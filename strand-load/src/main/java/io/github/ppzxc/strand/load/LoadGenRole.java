@@ -81,35 +81,14 @@ final class LoadGenRole {
     private int execute(int port, PrintStream out) throws Exception {
         javax.net.ssl.SSLContext tlsContext =
                 config.tls ? LoadTls.clientContext(java.nio.file.Paths.get(config.keystore)) : null;
-        NioSecurity security = config.tls ? NioSecurity.tls(tlsContext) : NioSecurity.externallySecured();
-        MinimumProgressSpace space = NioMinimumProgress.of(
-                security,
-                LoadSupport.maxFrameSize(config.bodyBytes),
-                config.effectiveInflight(),
-                config.effectiveInflight());
-        ResourceLimits limits =
-                LoadSupport.limits(space, config.connections, config.effectiveInflight(), config.bodyBytes);
-        NioStrandClient client = NioStrandClient.builder()
-                .executor(executor)
-                .resourceLimits(limits)
-                .preparationDeadline(LoadSupport.PREPARATION_DEADLINE)
-                .shutdownGrace(LoadSupport.SHUTDOWN_GRACE)
-                .shutdownDeadline(LoadSupport.SHUTDOWN_DEADLINE)
-                .writeQueueBytes(LoadSupport.WRITE_QUEUE_BYTES)
-                .closeFinishDeadline(LoadSupport.CLOSE_FINISH_DEADLINE)
-                .maxFrameSize(LoadSupport.maxFrameSize(config.bodyBytes))
-                .security(security)
-                .credentials(Credentials.of(LoadSupport.AUTH_MECHANISM, LoadSupport.AUTH_SECRET))
-                .handler(request -> request.respond(Status.OK, new byte[0]))
-                .build();
         InetSocketAddress address = new InetSocketAddress(InetAddress.getLoopbackAddress(), port);
         JsonObject negotiated = config.tls ? probeTls(tlsContext, address) : null;
-        List<NioStrandConnection> connections = new ArrayList<>();
+        ClientSide clientSide = config.loadgenTransport.equals("netty")
+                ? new NettyClientSide(config, executor, tlsContext)
+                : new NioClientSide(config, executor, tlsContext);
+        List<LoadConnection> connections = new ArrayList<>();
         for (int i = 0; i < config.connections; i++) {
-            NioStrandConnection connection = client.connectAttempt(address)
-                    .result()
-                    .toCompletableFuture()
-                    .get(LoadSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+            LoadConnection connection = clientSide.connect(address);
             awaitServerReady(connection);
             connections.add(connection);
         }
@@ -152,10 +131,10 @@ final class LoadGenRole {
         out.println(result);
         out.flush();
 
-        for (NioStrandConnection connection : connections) {
+        for (LoadConnection connection : connections) {
             connection.close();
         }
-        client.shutdown().toCompletableFuture().get(LoadSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+        clientSide.shutdown();
         executor.shutdownNow();
         return 0;
     }
@@ -200,7 +179,7 @@ final class LoadGenRole {
     /**
      * 쓰기 정체 시나리오의 상대. 연결해 서버가 요청을 밀어 넣게 한 뒤 {@code PEER_READY}를 알리고 기다린다. 진행자가 이 프로세스를 멈춰(SIGSTOP) 읽기를 멈춘 상대를 만든다. 표준 입력이 닫히면 끝난다.
      */
-    private int runStalledPeer(NioStrandConnection connection, PrintStream out) throws Exception {
+    private int runStalledPeer(LoadConnection connection, PrintStream out) throws Exception {
         connection
                 .request(Request.of(LoadSupport.STALL_TYPE, new byte[0]))
                 .result()
@@ -233,8 +212,8 @@ final class LoadGenRole {
         thread.start();
     }
 
-    private long runClosed(List<NioStrandConnection> connections) throws Exception {
-        for (NioStrandConnection connection : connections) {
+    private long runClosed(List<LoadConnection> connections) throws Exception {
+        for (LoadConnection connection : connections) {
             for (int i = 0; i < config.inflight; i++) {
                 send(connection, System.nanoTime());
             }
@@ -253,7 +232,7 @@ final class LoadGenRole {
     }
 
     /** 고정 도착률로 예정 시각마다 연결을 돌아가며 보낸다. 늦어도 건너뛰지 않고 바로 보내 밀린 만큼 지연에 드러나게 한다. */
-    private long runOpen(List<NioStrandConnection> connections) throws Exception {
+    private long runOpen(List<LoadConnection> connections) throws Exception {
         double intervalNanos = 1e9 / config.rate;
         long start = System.nanoTime();
         long warmupEnd = start + config.warmup.toNanos();
@@ -296,7 +275,7 @@ final class LoadGenRole {
     }
 
     /** 서버 핸들러가 준비되기 전에 온 첫 요청은 거절될 수 있다(규격 4.5절). 거절은 다시 보내도 안전하므로 유한하게 다시 보낸다. */
-    private void awaitServerReady(NioStrandConnection connection) throws Exception {
+    private void awaitServerReady(LoadConnection connection) throws Exception {
         long limit =
                 System.nanoTime() + Duration.ofSeconds(LoadSupport.WAIT_SECONDS).toNanos();
         long pauseMillis = 5;
@@ -322,7 +301,7 @@ final class LoadGenRole {
     }
 
     /** @param intended 이 요청의 예정 시각(nanoTime). 폐쇄형은 보내는 시각이다. */
-    private void send(NioStrandConnection connection, long intended) {
+    private void send(LoadConnection connection, long intended) {
         if (stopped.get()) {
             return;
         }
@@ -374,6 +353,140 @@ final class LoadGenRole {
     private static void sleep(Duration duration) throws InterruptedException {
         if (!duration.isZero()) {
             Thread.sleep(duration.toMillis());
+        }
+    }
+
+    /** 전송별 연결. 두 전송의 연결 타입이 달라 요청과 종료만 얇게 감싼다. 요청 결과 타입은 공통 API다. */
+    interface LoadConnection {
+        io.github.ppzxc.strand.api.RequestHandle request(Request request);
+
+        io.github.ppzxc.strand.api.RequestHandle request(Request request, RequestOptions options);
+
+        void close();
+    }
+
+    /** 부하 생성기의 클라이언트 쪽. 전송이 달라도 부하 코드는 같다. */
+    interface ClientSide {
+        LoadConnection connect(InetSocketAddress address) throws Exception;
+
+        void shutdown() throws Exception;
+    }
+
+    private static ResourceLimits clientLimits(RunConfig config, MinimumProgressSpace space) {
+        return LoadSupport.limits(space, config.connections, config.requestLimit(), config.bodyBytes);
+    }
+
+    private static final class NioClientSide implements ClientSide {
+        private final NioStrandClient client;
+
+        NioClientSide(RunConfig config, ExecutorService executor, javax.net.ssl.SSLContext tlsContext) {
+            NioSecurity security = config.tls ? NioSecurity.tls(tlsContext) : NioSecurity.externallySecured();
+            MinimumProgressSpace space = NioMinimumProgress.of(
+                    security, LoadSupport.maxFrameSize(config.bodyBytes), config.requestLimit(), config.requestLimit());
+            this.client = NioStrandClient.builder()
+                    .executor(executor)
+                    .resourceLimits(clientLimits(config, space))
+                    .preparationDeadline(LoadSupport.PREPARATION_DEADLINE)
+                    .shutdownGrace(LoadSupport.SHUTDOWN_GRACE)
+                    .shutdownDeadline(LoadSupport.SHUTDOWN_DEADLINE)
+                    .writeQueueBytes(LoadSupport.WRITE_QUEUE_BYTES)
+                    .closeFinishDeadline(LoadSupport.CLOSE_FINISH_DEADLINE)
+                    .maxFrameSize(LoadSupport.maxFrameSize(config.bodyBytes))
+                    .security(security)
+                    .credentials(Credentials.of(LoadSupport.AUTH_MECHANISM, LoadSupport.AUTH_SECRET))
+                    .handler(request -> request.respond(Status.OK, new byte[0]))
+                    .build();
+        }
+
+        @Override
+        public LoadConnection connect(InetSocketAddress address) throws Exception {
+            NioStrandConnection connection = client.connectAttempt(address)
+                    .result()
+                    .toCompletableFuture()
+                    .get(LoadSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+            return new LoadConnection() {
+                @Override
+                public io.github.ppzxc.strand.api.RequestHandle request(Request request) {
+                    return connection.request(request);
+                }
+
+                @Override
+                public io.github.ppzxc.strand.api.RequestHandle request(Request request, RequestOptions options) {
+                    return connection.request(request, options);
+                }
+
+                @Override
+                public void close() {
+                    connection.close();
+                }
+            };
+        }
+
+        @Override
+        public void shutdown() throws Exception {
+            client.shutdown().toCompletableFuture().get(LoadSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+        }
+    }
+
+    private static final class NettyClientSide implements ClientSide {
+        private static final int EVENT_LOOPS = 2;
+        private final io.netty.channel.EventLoopGroup eventLoops =
+                new io.netty.channel.nio.NioEventLoopGroup(EVENT_LOOPS);
+        private final io.github.ppzxc.strand.netty.NettyStrandClient client;
+        private final io.github.ppzxc.strand.netty.Transport transport;
+
+        NettyClientSide(RunConfig config, ExecutorService executor, javax.net.ssl.SSLContext tlsContext) {
+            io.github.ppzxc.strand.netty.NettySecurity security = config.tls
+                    ? io.github.ppzxc.strand.netty.NettySecurity.tls(tlsContext)
+                    : io.github.ppzxc.strand.netty.NettySecurity.externallySecured();
+            MinimumProgressSpace space = io.github.ppzxc.strand.netty.NettyMinimumProgress.of(
+                    security, LoadSupport.maxFrameSize(config.bodyBytes), config.requestLimit(), config.requestLimit());
+            this.transport = config.binding.equals("websocket")
+                    ? io.github.ppzxc.strand.netty.Transport.webSocket(LoadSupport.WS_PATH)
+                    : io.github.ppzxc.strand.netty.Transport.tcp();
+            this.client = io.github.ppzxc.strand.netty.NettyStrandClient.builder()
+                    .eventLoopGroup(eventLoops)
+                    .executor(executor)
+                    .resourceLimits(clientLimits(config, space))
+                    .preparationDeadline(LoadSupport.PREPARATION_DEADLINE)
+                    .shutdownGrace(LoadSupport.SHUTDOWN_GRACE)
+                    .shutdownDeadline(LoadSupport.SHUTDOWN_DEADLINE)
+                    .writeQueueBytes(LoadSupport.WRITE_QUEUE_BYTES)
+                    .closeFinishDeadline(LoadSupport.CLOSE_FINISH_DEADLINE)
+                    .maxFrameSize(LoadSupport.maxFrameSize(config.bodyBytes))
+                    .security(security)
+                    .credentials(io.github.ppzxc.strand.netty.Credentials.of(
+                            LoadSupport.AUTH_MECHANISM, LoadSupport.AUTH_SECRET))
+                    .handler(request -> request.respond(Status.OK, new byte[0]))
+                    .build();
+        }
+
+        @Override
+        public LoadConnection connect(InetSocketAddress address) throws Exception {
+            io.github.ppzxc.strand.netty.NettyStrandConnection connection =
+                    client.connectAttempt(address, transport).result().get(LoadSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+            return new LoadConnection() {
+                @Override
+                public io.github.ppzxc.strand.api.RequestHandle request(Request request) {
+                    return connection.request(request);
+                }
+
+                @Override
+                public io.github.ppzxc.strand.api.RequestHandle request(Request request, RequestOptions options) {
+                    return connection.request(request, options);
+                }
+
+                @Override
+                public void close() {
+                    connection.close();
+                }
+            };
+        }
+
+        @Override
+        public void shutdown() throws Exception {
+            client.shutdown().get(LoadSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+            eventLoops.shutdownGracefully(0, 2, TimeUnit.SECONDS).syncUninterruptibly();
         }
     }
 }

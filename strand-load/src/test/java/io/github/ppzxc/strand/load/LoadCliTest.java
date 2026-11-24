@@ -639,4 +639,82 @@ class LoadCliTest {
                 .isTrue();
         assertThat(json.getAsJsonObject("load").get("errors").getAsLong()).isZero();
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"tcp", "websocket"})
+    void nettyBindingsRunWithANettyClientAndRecordTheBinding(String binding) throws Exception {
+        Path result = dir.resolve("binding-" + binding + ".json");
+
+        Outcome outcome = run(
+                "run",
+                "--transport",
+                "netty",
+                "--binding",
+                binding,
+                "--loadgen-transport",
+                "netty",
+                "--warmup",
+                "300ms",
+                "--measure",
+                "1s",
+                "--repetitions",
+                "1",
+                "--output",
+                result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        JsonObject json = readResult(result);
+        JsonObject config = json.getAsJsonObject("metadata").getAsJsonObject("config");
+        assertThat(config.get("binding").getAsString()).isEqualTo(binding);
+        assertThat(config.get("loadgenTransport").getAsString()).isEqualTo("netty");
+        JsonObject measurement = firstRun(json).getAsJsonObject("measurement");
+        assertThat(measurement.get("errors").getAsLong()).isZero();
+        assertThat(measurement.get("responses").getAsLong())
+                .isEqualTo(measurement.get("requests").getAsLong());
+        assertThat(measurement.get("requests").getAsLong()).isPositive();
+    }
+
+    @Test
+    void websocketBindingNeedsNettyOnBothSides() {
+        Outcome outcome = run("run", "--transport", "nio", "--binding", "websocket");
+
+        assertThat(outcome.exit).isEqualTo(2);
+        assertThat(outcome.err).contains("--binding");
+    }
+
+    @Test
+    void tcpAndWebSocketBindingsComeOutInTheSameSchema() throws Exception {
+        Path result = dir.resolve("bindings.json");
+
+        Outcome outcome = execute(
+                "matrix",
+                "--transports",
+                "netty-tcp,netty-ws",
+                "--connections-list",
+                "1",
+                "--bodies-list",
+                "64",
+                "--warmup",
+                "200ms",
+                "--measure",
+                "600ms",
+                "--repetitions",
+                "1",
+                "--output",
+                result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        com.google.gson.JsonArray cells = readResult(result).getAsJsonArray("cells");
+        assertThat(cells).hasSize(2);
+        JsonObject tcp = cells.get(0).getAsJsonObject();
+        JsonObject ws = cells.get(1).getAsJsonObject();
+        assertThat(tcp.get("transport").getAsString()).isEqualTo("netty-tcp");
+        assertThat(ws.get("transport").getAsString()).isEqualTo("netty-ws");
+        assertThat(ws.keySet()).isEqualTo(tcp.keySet());
+        assertThat(ws.getAsJsonObject("closedLoop").getAsJsonObject("summary").keySet())
+                .isEqualTo(tcp.getAsJsonObject("closedLoop")
+                        .getAsJsonObject("summary")
+                        .keySet());
+        assertThat(ws.get("errors").getAsLong()).isZero();
+    }
 }

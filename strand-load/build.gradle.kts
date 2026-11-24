@@ -11,6 +11,8 @@ dependencies {
   implementation(project(":strand-nio"))
   implementation(project(":strand-netty"))
   implementation("io.netty:netty-transport:${nettyVersion.get()}")
+  // WebSocket 전송(Transport.webSocket)은 앱이 netty-codec-http를 제공해야 쓸 수 있다.
+  implementation("io.netty:netty-codec-http:${nettyVersion.get()}")
   implementation(libs.hdrhistogram)
   implementation(libs.gson)
 }

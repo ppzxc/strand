@@ -127,12 +127,9 @@ final class ServerRole {
                             LoadTls.serverContext(java.nio.file.Paths.get(config.keystore)))
                     : io.github.ppzxc.strand.nio.NioSecurity.externallySecured();
             MinimumProgressSpace space = io.github.ppzxc.strand.nio.NioMinimumProgress.of(
-                    security,
-                    LoadSupport.maxFrameSize(config.bodyBytes),
-                    config.effectiveInflight(),
-                    config.effectiveInflight());
+                    security, LoadSupport.maxFrameSize(config.bodyBytes), config.requestLimit(), config.requestLimit());
             ResourceLimits limits =
-                    LoadSupport.limits(space, config.connections, config.effectiveInflight(), config.bodyBytes);
+                    LoadSupport.limits(space, config.connections, config.requestLimit(), config.bodyBytes);
             this.server = io.github.ppzxc.strand.nio.NioStrandServer.builder()
                     .executor(executor)
                     .resourceLimits(limits)
@@ -187,21 +184,20 @@ final class ServerRole {
 
     private static final class NettyBackend implements Backend {
         private final EventLoopGroup eventLoops = new NioEventLoopGroup(NETTY_EVENT_LOOPS);
+        private final RunConfig config;
         private final io.github.ppzxc.strand.netty.NettyStrandServer server;
         private io.github.ppzxc.strand.netty.Listener listener;
 
         NettyBackend(RunConfig config, ExecutorService executor, PrintStream out) throws Exception {
+            this.config = config;
             io.github.ppzxc.strand.netty.NettySecurity security = config.tls
                     ? io.github.ppzxc.strand.netty.NettySecurity.tls(
                             LoadTls.serverContext(java.nio.file.Paths.get(config.keystore)))
                     : io.github.ppzxc.strand.netty.NettySecurity.externallySecured();
             MinimumProgressSpace space = io.github.ppzxc.strand.netty.NettyMinimumProgress.of(
-                    security,
-                    LoadSupport.maxFrameSize(config.bodyBytes),
-                    config.effectiveInflight(),
-                    config.effectiveInflight());
+                    security, LoadSupport.maxFrameSize(config.bodyBytes), config.requestLimit(), config.requestLimit());
             ResourceLimits limits =
-                    LoadSupport.limits(space, config.connections, config.effectiveInflight(), config.bodyBytes);
+                    LoadSupport.limits(space, config.connections, config.requestLimit(), config.bodyBytes);
             this.server = io.github.ppzxc.strand.netty.NettyStrandServer.builder()
                     .eventLoopGroup(eventLoops)
                     .executor(executor)
@@ -244,7 +240,9 @@ final class ServerRole {
         public int listen() throws Exception {
             listener = server.listen(
                             new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
-                            io.github.ppzxc.strand.netty.Transport.tcp())
+                            config.binding.equals("websocket")
+                                    ? io.github.ppzxc.strand.netty.Transport.webSocket(LoadSupport.WS_PATH)
+                                    : io.github.ppzxc.strand.netty.Transport.tcp())
                     .get(LoadSupport.WAIT_SECONDS, TimeUnit.SECONDS);
             return ((InetSocketAddress) listener.localAddress()).getPort();
         }
