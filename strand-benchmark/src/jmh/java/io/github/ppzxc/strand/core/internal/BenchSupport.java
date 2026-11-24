@@ -79,6 +79,31 @@ final class BenchSupport {
         return endpoint.drainEvents(Integer.MAX_VALUE);
     }
 
+    /** {@code server}가 받아 둔 요청의 스트림 번호를 도착 순서대로 꺼내 {@code order}로 정렬한다. 이벤트는 비운다. */
+    static long[] receivedStreamIds(Endpoint server, ResponseOrder order) {
+        List<Long> ids = new ArrayList<>();
+        for (Event event : drainEvents(server)) {
+            if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
+                ids.add(event.streamId());
+            }
+        }
+        long[] result = new long[ids.size()];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = ids.get(order == ResponseOrder.OLDEST_FIRST ? i : result.length - 1 - i);
+        }
+        return result;
+    }
+
+    /** 클라이언트가 요청 {@code count}개를 내고 서버가 모두 받아 이벤트로 올린 상태를 만든다. 반환은 {@code {client, server}}. */
+    static Endpoint[] establishWithPendingRequests(int count) {
+        Endpoint[] pair = establish(EndpointConfig.defaults().maxConcurrentStreams(count));
+        for (int i = 0; i < count; i++) {
+            pair[0].request(REQUEST_TYPE, new byte[0]);
+        }
+        pump(pair[0], pair[1]);
+        return pair;
+    }
+
     /** 가상 시계를 밀리초 단위로 앞으로 보내는 나노초 시계. */
     static final class Clock {
         private long elapsedNanos;
