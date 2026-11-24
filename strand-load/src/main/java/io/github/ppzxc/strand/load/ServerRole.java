@@ -30,6 +30,44 @@ final class ServerRole {
 
     private ServerRole() {}
 
+    /** 상대가 읽지 않는 연결로 요청을 계속 밀어 넣는다. 하나가 끝나면 다음을 보내 미완료 수를 유지한다. 연결이 끝나면 결과가 실패로 돌아와 멈춘다. */
+    private static void push(io.github.ppzxc.strand.nio.NioStrandConnection connection, int bodyBytes) {
+        connection
+                .request(io.github.ppzxc.strand.api.Request.of(LoadSupport.ECHO_TYPE, new byte[bodyBytes]))
+                .result()
+                .observe(result -> {
+                    if (result.status() == Status.OK) {
+                        push(connection, bodyBytes);
+                    }
+                });
+    }
+
+    private static void push(io.github.ppzxc.strand.netty.NettyStrandConnection connection, int bodyBytes) {
+        connection
+                .request(io.github.ppzxc.strand.api.Request.of(LoadSupport.ECHO_TYPE, new byte[bodyBytes]))
+                .result()
+                .observe(result -> {
+                    if (result.status() == Status.OK) {
+                        push(connection, bodyBytes);
+                    }
+                });
+    }
+
+    /** 서버 쪽 연결 종료를 {@code CLOSED <json>} 한 줄로 알린다. */
+    private static void announceClosed(PrintStream out, io.github.ppzxc.strand.api.CloseNotice notice) {
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        json.addProperty("kind", notice.kind().name());
+        json.addProperty("errorCode", notice.errorCode());
+        json.addProperty("sender", notice.sender().map(Enum::name).orElse("none"));
+        json.addProperty(
+                "cause",
+                notice.cause()
+                        .map(c -> c.getClass().getName() + ": " + c.getMessage())
+                        .orElse("none"));
+        out.println("CLOSED " + json);
+        out.flush();
+    }
+
     /** 하네스 자체 시험용 지연. 0이면 바로 응답한다. */
     private static void respondAfterDelay(RunConfig config, Runnable respond) {
         if (config.serverDelay.isZero()) {
@@ -50,8 +88,8 @@ final class ServerRole {
     static int run(RunConfig config, PrintStream out) throws Exception {
         ExecutorService executor = LoadSupport.newExecutor("strand-load-server");
         Backend backend = "netty".equals(config.transport)
-                ? new NettyBackend(config, executor)
-                : new NioBackend(config, executor);
+                ? new NettyBackend(config, executor, out)
+                : new NioBackend(config, executor, out);
         try {
             int port = backend.listen();
             out.println("READY " + port);
@@ -83,7 +121,7 @@ final class ServerRole {
         private final io.github.ppzxc.strand.nio.NioStrandServer server;
         private io.github.ppzxc.strand.nio.Listener listener;
 
-        NioBackend(RunConfig config, ExecutorService executor) throws Exception {
+        NioBackend(RunConfig config, ExecutorService executor, PrintStream out) throws Exception {
             io.github.ppzxc.strand.nio.NioSecurity security = config.tls
                     ? io.github.ppzxc.strand.nio.NioSecurity.tls(
                             LoadTls.serverContext(java.nio.file.Paths.get(config.keystore)))
@@ -101,6 +139,8 @@ final class ServerRole {
                     .preparationDeadline(LoadSupport.PREPARATION_DEADLINE)
                     .shutdownGrace(LoadSupport.SHUTDOWN_GRACE)
                     .shutdownDeadline(LoadSupport.SHUTDOWN_DEADLINE)
+                    .idlePingInterval(config.idlePing)
+                    .ackTimeout(config.ackTimeout)
                     .writeQueueBytes(LoadSupport.WRITE_QUEUE_BYTES)
                     .closeFinishDeadline(LoadSupport.CLOSE_FINISH_DEADLINE)
                     .maxFrameSize(LoadSupport.maxFrameSize(config.bodyBytes))
@@ -109,9 +149,23 @@ final class ServerRole {
                                     && Arrays.equals(LoadSupport.AUTH_SECRET, credentials.secret())
                             ? io.github.ppzxc.strand.nio.AuthenticationResult.accepted(LoadSupport.PRINCIPAL)
                             : io.github.ppzxc.strand.nio.AuthenticationResult.rejected())
-                    .handlerFactory(connection -> io.github.ppzxc.strand.nio.PreparedHandler.of(
-                            request -> respondAfterDelay(config, () -> request.respond(Status.OK, request.payload())),
-                            () -> {}))
+                    .handlerFactory(connection -> {
+                        if (config.stall) {
+                            connection.closed().observe(notice -> announceClosed(out, notice));
+                        }
+                        return io.github.ppzxc.strand.nio.PreparedHandler.of(
+                                request -> {
+                                    if (config.stall && request.type() == LoadSupport.STALL_TYPE) {
+                                        request.respond(Status.OK, new byte[0]);
+                                        for (int i = 0; i < config.inflight; i++) {
+                                            push(request.connection(), config.bodyBytes);
+                                        }
+                                        return;
+                                    }
+                                    respondAfterDelay(config, () -> request.respond(Status.OK, request.payload()));
+                                },
+                                () -> {});
+                    })
                     .onConnectionFailure(failure -> System.err.println("준비 실패: " + failure))
                     .build();
         }
@@ -136,7 +190,7 @@ final class ServerRole {
         private final io.github.ppzxc.strand.netty.NettyStrandServer server;
         private io.github.ppzxc.strand.netty.Listener listener;
 
-        NettyBackend(RunConfig config, ExecutorService executor) throws Exception {
+        NettyBackend(RunConfig config, ExecutorService executor, PrintStream out) throws Exception {
             io.github.ppzxc.strand.netty.NettySecurity security = config.tls
                     ? io.github.ppzxc.strand.netty.NettySecurity.tls(
                             LoadTls.serverContext(java.nio.file.Paths.get(config.keystore)))
@@ -155,6 +209,8 @@ final class ServerRole {
                     .preparationDeadline(LoadSupport.PREPARATION_DEADLINE)
                     .shutdownGrace(LoadSupport.SHUTDOWN_GRACE)
                     .shutdownDeadline(LoadSupport.SHUTDOWN_DEADLINE)
+                    .idlePingInterval(config.idlePing)
+                    .ackTimeout(config.ackTimeout)
                     .writeQueueBytes(LoadSupport.WRITE_QUEUE_BYTES)
                     .closeFinishDeadline(LoadSupport.CLOSE_FINISH_DEADLINE)
                     .maxFrameSize(LoadSupport.maxFrameSize(config.bodyBytes))
@@ -163,9 +219,23 @@ final class ServerRole {
                                     && Arrays.equals(LoadSupport.AUTH_SECRET, credentials.secret())
                             ? io.github.ppzxc.strand.netty.AuthenticationResult.accepted(LoadSupport.PRINCIPAL)
                             : io.github.ppzxc.strand.netty.AuthenticationResult.rejected())
-                    .handlerFactory(connection -> io.github.ppzxc.strand.netty.PreparedHandler.of(
-                            request -> respondAfterDelay(config, () -> request.respond(Status.OK, request.payload())),
-                            () -> {}))
+                    .handlerFactory(connection -> {
+                        if (config.stall) {
+                            connection.closed().observe(notice -> announceClosed(out, notice));
+                        }
+                        return io.github.ppzxc.strand.netty.PreparedHandler.of(
+                                request -> {
+                                    if (config.stall && request.type() == LoadSupport.STALL_TYPE) {
+                                        request.respond(Status.OK, new byte[0]);
+                                        for (int i = 0; i < config.inflight; i++) {
+                                            push(request.connection(), config.bodyBytes);
+                                        }
+                                        return;
+                                    }
+                                    respondAfterDelay(config, () -> request.respond(Status.OK, request.payload()));
+                                },
+                                () -> {});
+                    })
                     .onConnectionFailure(failure -> System.err.println("준비 실패: " + failure))
                     .build();
         }

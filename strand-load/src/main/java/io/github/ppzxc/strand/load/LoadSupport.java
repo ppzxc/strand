@@ -14,6 +14,8 @@ import java.util.concurrent.Executors;
 final class LoadSupport {
     /** 규격 4.1절: 애플리케이션 type은 256 이상이다. */
     static final int ECHO_TYPE = 256;
+    /** 쓰기 정체 시나리오에서 서버가 이 요청을 받으면 같은 연결로 요청을 밀어 넣기 시작한다. */
+    static final int STALL_TYPE = 257;
 
     static final String AUTH_MECHANISM = "BEARER";
     static final String PRINCIPAL = "load-client";

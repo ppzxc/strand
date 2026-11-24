@@ -9,6 +9,7 @@ import java.util.List;
  *
  * <pre>
  * matrix   [--extended] [--output matrix.json]   핵심 행렬(8셀) 한 명령 실행
+ * stall    [--transport nio|netty] [--idle-ping 1s] [--ack-timeout 2s]   읽지 않는 상대를 붙여 감지 시간 측정
  * table    --input matrix.json                   행렬 결과 JSON에서 표 생성
  * run      --transport nio --connections 1 --body-bytes 64 --warmup 30s --measure 60s --output result.json
  * server   (내부용) 서버 프로세스 역할
@@ -42,6 +43,12 @@ public final class LoadCli {
                 case "matrix":
                     Matrix.parse(rest, out).run();
                     return 0;
+                case "stall": {
+                    java.util.List<String> withFlag = new java.util.ArrayList<>(rest);
+                    withFlag.add("--stall");
+                    new Orchestrator(RunConfig.parse(withFlag), out).runStall();
+                    return 0;
+                }
                 case "table":
                     return table(rest, out, err);
                 case "server":
@@ -49,7 +56,7 @@ public final class LoadCli {
                 case "loadgen":
                     return LoadGenRole.run(RunConfig.parse(withoutPort(rest)), portOf(rest), out);
                 default:
-                    err.println("모르는 명령 '" + command + "'. 지원: run, matrix, table");
+                    err.println("모르는 명령 '" + command + "'. 지원: run, matrix, stall, table");
                     return 2;
             }
         } catch (RunConfig.Invalid e) {

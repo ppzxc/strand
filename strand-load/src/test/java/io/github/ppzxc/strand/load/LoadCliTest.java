@@ -535,4 +535,48 @@ class LoadCliTest {
         assertThat(outcome.exit).isEqualTo(2);
         assertThat(outcome.err).contains("--async-profiler").contains("libasyncProfiler.so");
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"nio", "netty"})
+    void stallScenarioDetectsAPeerThatStoppedReadingWithTheExistingTimers(String transport) throws Exception {
+        Path result = dir.resolve("stall-" + transport + ".json");
+
+        Outcome outcome = run(
+                "stall",
+                "--transport",
+                transport,
+                "--idle-ping",
+                "500ms",
+                "--ack-timeout",
+                "1s",
+                "--max-wait",
+                "40s",
+                "--output",
+                result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        JsonObject json = readResult(result);
+        assertThat(json.get("kind").getAsString()).isEqualTo("write-stall");
+        JsonObject stall = json.getAsJsonObject("stall");
+        assertThat(stall.get("detected").getAsBoolean()).isTrue();
+        // 새 타이머 없이 기존 PING·확인 대기 설정(여기서는 0.5s + 1s)으로 끊겨야 한다.
+        assertThat(stall.get("detectionMillis").getAsLong()).isBetween(1L, 30_000L);
+        JsonObject close = stall.getAsJsonObject("close");
+        assertThat(close.get("kind").getAsString()).isNotBlank();
+        assertThat(close.has("cause")).isTrue();
+        JsonObject memory = stall.getAsJsonObject("memory");
+        assertThat(memory.get("baselineRssBytes").getAsLong()).isPositive();
+        assertThat(memory.get("peakRssBytes").getAsLong())
+                .isGreaterThanOrEqualTo(memory.get("baselineRssBytes").getAsLong());
+        assertThat(memory.has("peakGrowthBytes")).isTrue();
+    }
+
+    @Test
+    void stallScenarioFailsWhenTheStalledPeerIsNeverDetected() {
+        // 유휴 PING을 꺼 두면 읽기 멈춤만으로는 끊기지 않는다(ADR 0004의 한계). 감지하지 못하면 실패로 끝난다.
+        Outcome outcome = run("stall", "--idle-ping", "0s", "--ack-timeout", "1s", "--max-wait", "4s");
+
+        assertThat(outcome.exit).isEqualTo(1);
+        assertThat(outcome.err).contains("감지");
+    }
 }

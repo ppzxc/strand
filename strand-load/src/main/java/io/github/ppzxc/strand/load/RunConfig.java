@@ -41,6 +41,12 @@ final class RunConfig {
     /** 자식 프로세스 전용: 진행자가 만든 키 저장소 경로. */
     final String keystore;
     /** JFR 기록을 켠다. 기록은 {@link #profileDir}에 프로세스별로 남는다. */
+    /** 쓰기 정체 시나리오({@code stall} 명령)용: 서버가 상대에게 계속 요청을 밀어 넣는다. */
+    final boolean stall;
+
+    final Duration idlePing;
+    final Duration ackTimeout;
+    final Duration maxWait;
     final boolean jfr;
     /** async-profiler 네이티브 라이브러리 경로. null이면 쓰지 않는다(선택 사항). */
     final String asyncProfiler;
@@ -57,8 +63,13 @@ final class RunConfig {
             throw new Invalid("--transport 값 '" + transport + "'을(를) 지원하지 않는다. 지원: " + new ArrayList<>(TRANSPORTS));
         }
         this.connections = positiveInt(options, "--connections", 1);
-        this.bodyBytes = positiveInt(options, "--body-bytes", 64);
-        this.inflight = positiveInt(options, "--inflight", 8);
+        this.stall = options.containsKey("--stall");
+        // 쓰기 정체는 버퍼가 빨리 차도록 큰 본문과 넉넉한 미완료 수를 기본으로 한다.
+        this.bodyBytes = positiveInt(options, "--body-bytes", stall ? 65_536 : 64);
+        this.inflight = positiveInt(options, "--inflight", stall ? 32 : 8);
+        this.idlePing = duration(options, "--idle-ping", Duration.ofSeconds(30), true);
+        this.ackTimeout = duration(options, "--ack-timeout", Duration.ofSeconds(5), false);
+        this.maxWait = duration(options, "--max-wait", Duration.ofSeconds(60), false);
         this.warmup = duration(options, "--warmup", Duration.ofSeconds(30), true);
         this.measure = duration(options, "--measure", Duration.ofSeconds(60), false);
         String model = options.getOrDefault("--load-model", "closed");
@@ -150,6 +161,10 @@ final class RunConfig {
                 "--repetitions",
                 "--server-delay",
                 "--saturation",
+                "--stall",
+                "--idle-ping",
+                "--ack-timeout",
+                "--max-wait",
                 "--jfr",
                 "--profile-dir",
                 "--async-profiler",
@@ -157,7 +172,7 @@ final class RunConfig {
                 "--keystore",
                 "--child");
         Map<String, String> options = new HashMap<>();
-        Set<String> flags = Set.of("--plaintext", "--child", "--jfr");
+        Set<String> flags = Set.of("--plaintext", "--child", "--jfr", "--stall");
         for (int i = 0; i < args.size(); i++) {
             String name = args.get(i);
             if (!known.contains(name)) {
@@ -251,7 +266,14 @@ final class RunConfig {
                 "--measure",
                 measure.toMillis() + "ms",
                 "--server-delay",
-                serverDelay.toMillis() + "ms"));
+                serverDelay.toMillis() + "ms",
+                "--idle-ping",
+                idlePing.toMillis() + "ms",
+                "--ack-timeout",
+                ackTimeout.toMillis() + "ms"));
+        if (stall) {
+            args.add("--stall");
+        }
         args.add("--child");
         if (tls) {
             args.addAll(List.of("--keystore", keystorePath));

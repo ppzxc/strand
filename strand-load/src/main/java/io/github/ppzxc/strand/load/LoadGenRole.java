@@ -112,6 +112,9 @@ final class LoadGenRole {
             connections.add(connection);
         }
 
+        if (config.stall) {
+            return runStalledPeer(connections.get(0), out);
+        }
         long measureNanos = config.openLoop ? runOpen(connections) : runClosed(connections);
         JsonObject resources = ResourceSampler.delta(resourceStart, resourceEnd);
 
@@ -179,6 +182,25 @@ final class LoadGenRole {
         resourceEnd = ResourceSampler.sample();
         control.println("PHASE MEASURE_END");
         control.flush();
+    }
+
+    /**
+     * 쓰기 정체 시나리오의 상대. 연결해 서버가 요청을 밀어 넣게 한 뒤 {@code PEER_READY}를 알리고 기다린다. 진행자가 이 프로세스를 멈춰(SIGSTOP) 읽기를 멈춘 상대를 만든다. 표준 입력이 닫히면 끝난다.
+     */
+    private int runStalledPeer(NioStrandConnection connection, PrintStream out) throws Exception {
+        connection
+                .request(Request.of(LoadSupport.STALL_TYPE, new byte[0]))
+                .result()
+                .toCompletionStage(executor)
+                .toCompletableFuture()
+                .get(LoadSupport.WAIT_SECONDS, TimeUnit.SECONDS);
+        out.println("PEER_READY");
+        out.flush();
+        byte[] buffer = new byte[64];
+        while (System.in.read(buffer) >= 0) {
+            // 입력은 무시한다.
+        }
+        return 0;
     }
 
     private long runClosed(List<NioStrandConnection> connections) throws Exception {

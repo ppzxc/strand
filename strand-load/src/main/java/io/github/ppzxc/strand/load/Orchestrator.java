@@ -76,13 +76,22 @@ final class Orchestrator {
             }
             return runAll();
         } finally {
-            if (keystoreDir != null) {
-                try (var files = Files.walk(keystoreDir)) {
-                    files.sorted(java.util.Comparator.reverseOrder())
-                            .forEach(p -> p.toFile().delete());
-                }
+            cleanupKeystore();
+        }
+    }
+
+    private void cleanupKeystore() throws IOException {
+        if (keystoreDir != null) {
+            try (var files = Files.walk(keystoreDir)) {
+                files.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> p.toFile().delete());
             }
         }
+    }
+
+    /** 쓰기 정체 시나리오를 돌려 결과를 {@code --output}에 쓴다. */
+    void runStall() throws RunFailed, IOException, InterruptedException {
+        emit(executeStall());
     }
 
     private JsonObject runAll() throws RunFailed, IOException, InterruptedException {
@@ -108,6 +117,154 @@ final class Orchestrator {
         }
         return buildResult(runs, saturation, rate);
     }
+
+    /**
+     * 쓰기 정체 시나리오. 서버가 밀어 넣는 요청을 상대(부하 생성기 프로세스)가 읽지 않게 멈춘 뒤, 서버 메모리 증가와 연결이 끊기기까지의 시간·원인을 잰다. 서버는 기존 유휴 PING·확인 대기로만 끊어야 한다(ADR
+     * 0004). 시간 안에 끊기지 않으면 실패다.
+     */
+    JsonObject executeStall() throws RunFailed, IOException, InterruptedException {
+        try {
+            if (config.tls) {
+                if (presetKeystore != null) {
+                    keystorePath = presetKeystore;
+                } else {
+                    keystoreDir = Files.createTempDirectory("strand-load-tls");
+                    keystorePath = LoadTls.createKeystore(keystoreDir).toString();
+                }
+            }
+            return stallOnce();
+        } finally {
+            cleanupKeystore();
+        }
+    }
+
+    private JsonObject stallOnce() throws RunFailed, IOException, InterruptedException {
+        Process server = null;
+        Process peer = null;
+        try {
+            List<String> args = config.childArgs(0, true, keystorePath);
+            server = start(List.of("server"), args);
+            StderrCapture serverErr = new StderrCapture(server.getErrorStream());
+            Lines serverLines = new Lines(server.getInputStream());
+            int port = awaitReady(server, serverLines, serverErr);
+
+            List<String> peerArgs = new ArrayList<>(args);
+            peerArgs.addAll(List.of("--port", String.valueOf(port)));
+            peer = start(List.of("loadgen"), peerArgs);
+            StderrCapture peerErr = new StderrCapture(peer.getErrorStream());
+            Lines peerLines = new Lines(peer.getInputStream());
+            awaitLine(peerLines, "PEER_READY", peer, peerErr, Duration.ofSeconds(60), "상대");
+
+            long baseline =
+                    sampleServer(server, serverLines, serverErr).get("rssBytes").getAsLong();
+            long peak = baseline;
+            stopProcess(peer, "STOP");
+            long stoppedAt = System.nanoTime();
+            long deadline = stoppedAt + config.maxWait.toNanos();
+            String closedJson = null;
+            long detectedAt = 0;
+            long end = baseline;
+            while (System.nanoTime() < deadline) {
+                end = sampleServer(server, serverLines, serverErr)
+                        .get("rssBytes")
+                        .getAsLong();
+                peak = Math.max(peak, end);
+                if (lastClosed != null) {
+                    closedJson = lastClosed;
+                    detectedAt = System.nanoTime();
+                    break;
+                }
+                Thread.sleep(250);
+            }
+            stopProcess(peer, "CONT");
+            if (closedJson == null) {
+                throw new RunFailed("쓰기가 막힌 연결이 " + config.maxWait.toMillis()
+                        + "ms 안에 감지되어 끊기지 않았다(유휴 PING 간격 " + config.idlePing.toMillis() + "ms, 확인 대기 "
+                        + config.ackTimeout.toMillis() + "ms). 서버 RSS 증가 "
+                        + (peak - baseline) + "바이트");
+            }
+
+            JsonObject stall = new JsonObject();
+            stall.addProperty("detected", true);
+            stall.addProperty("detectionMillis", Math.max(1, (detectedAt - stoppedAt) / 1_000_000));
+            stall.add("close", JsonParser.parseString(closedJson).getAsJsonObject());
+            JsonObject memory = new JsonObject();
+            memory.addProperty("baselineRssBytes", baseline);
+            memory.addProperty("peakRssBytes", peak);
+            memory.addProperty("peakGrowthBytes", peak - baseline);
+            memory.addProperty("endRssBytes", end);
+            stall.add("memory", memory);
+            stall.addProperty("idlePingMillis", config.idlePing.toMillis());
+            stall.addProperty("ackTimeoutMillis", config.ackTimeout.toMillis());
+            stall.addProperty("maxWaitMillis", config.maxWait.toMillis());
+            stall.addProperty("bodyBytes", config.bodyBytes);
+
+            JsonObject result = new JsonObject();
+            result.addProperty("schemaVersion", 1);
+            result.addProperty("kind", "write-stall");
+            result.addProperty("status", "OK");
+            result.add("metadata", stallMetadata());
+            result.add("stall", stall);
+            return result;
+        } finally {
+            if (peer != null) {
+                stopProcess(peer, "CONT");
+            }
+            terminate(peer);
+            terminate(server);
+        }
+    }
+
+    private JsonObject stallMetadata() {
+        JsonObject config = new JsonObject();
+        config.addProperty("transport", this.config.transport);
+        config.addProperty("tls", this.config.tls);
+        if (!this.config.tls) {
+            config.addProperty("plaintextControl", true);
+        }
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("jdk", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"));
+        metadata.addProperty("os", System.getProperty("os.name") + " " + System.getProperty("os.version"));
+        metadata.addProperty("cores", Runtime.getRuntime().availableProcessors());
+        metadata.addProperty("gitSha", gitSha());
+        metadata.add("config", config);
+        return metadata;
+    }
+
+    /** 프로세스에 SIGSTOP/SIGCONT를 보낸다. 멈춘 프로세스는 소켓을 읽지 않아 상대의 쓰기가 막힌다. */
+    private static void stopProcess(Process process, String signal) throws RunFailed, InterruptedException {
+        try {
+            Process kill = new ProcessBuilder("kill", "-" + signal, String.valueOf(process.pid()))
+                    .redirectErrorStream(true)
+                    .start();
+            if (!kill.waitFor(10, TimeUnit.SECONDS) || kill.exitValue() != 0) {
+                throw new RunFailed("kill -" + signal + " 실패: 쓰기 정체 시나리오는 kill 명령이 있는 Linux/macOS가 필요하다");
+            }
+        } catch (IOException e) {
+            throw new RunFailed("kill 명령을 실행할 수 없다: 쓰기 정체 시나리오는 kill 명령이 필요하다(" + e.getMessage() + ")");
+        }
+    }
+
+    private void awaitLine(Lines lines, String expected, Process process, StderrCapture err, Duration limit, String who)
+            throws RunFailed, InterruptedException {
+        long end = System.nanoTime() + limit.toNanos();
+        while (System.nanoTime() < end) {
+            String line = lines.poll(100);
+            if (line == null) {
+                continue;
+            }
+            if (line.equals(expected)) {
+                return;
+            }
+            if (line.equals(Lines.EOF)) {
+                break;
+            }
+        }
+        throw new RunFailed(who + " 프로세스가 " + expected + "를 알리지 않았다(종료 코드 " + exitCode(process) + "): " + err.text());
+    }
+
+    /** 서버가 알린 마지막 {@code CLOSED} 줄의 JSON. 없으면 null. */
+    private String lastClosed;
 
     /** 서버와 부하 생성기를 새로 띄워 한 번 측정한다. 끝나면 두 프로세스를 정리한다. */
     private JsonObject runOnce(double rate, boolean closedOverride)
@@ -289,6 +446,9 @@ final class Orchestrator {
             }
             if (line.equals(Lines.EOF)) {
                 break;
+            }
+            if (line.startsWith("CLOSED ")) {
+                lastClosed = line.substring("CLOSED ".length());
             }
             if (line.startsWith("SAMPLE ")) {
                 return JsonParser.parseString(line.substring("SAMPLE ".length()))
