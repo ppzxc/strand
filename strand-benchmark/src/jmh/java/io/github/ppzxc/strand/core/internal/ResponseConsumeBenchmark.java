@@ -41,25 +41,16 @@ public class ResponseConsumeBenchmark {
             server.respond(streamId, 0, BODY);
         }
         responses = BenchSupport.drainMessages(server);
-        if (responses.size() != pending) {
-            throw new IllegalStateException("응답 프레임이 " + pending + "개가 아니라 " + responses.size() + "개다");
-        }
+        BenchSupport.expectCount("응답 프레임", pending, responses.size());
     }
 
     @Benchmark
     public void consumeAll() {
-        for (OutboundMessage response : responses) {
-            BenchSupport.receive(client, response.bytes());
-        }
+        BenchSupport.receiveAll(client, responses);
     }
 
     @TearDown(Level.Invocation)
     public void verify() {
-        long results = BenchSupport.drainEvents(client).stream()
-                .filter(e -> e.kind() == Event.Kind.RESULT)
-                .count();
-        if (results != pending) {
-            throw new IllegalStateException("RESULT 이벤트가 " + pending + "개가 아니라 " + results + "개다");
-        }
+        BenchSupport.expectCount("RESULT 이벤트", pending, BenchSupport.countEvents(client, Event.Kind.RESULT));
     }
 }

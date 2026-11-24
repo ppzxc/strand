@@ -20,7 +20,7 @@ import org.openjdk.jmh.annotations.TearDown;
 @State(Scope.Benchmark)
 public class ReceiveRequestFramesBenchmark {
 
-    static final int REQUESTS = 1024;
+    private static final int REQUESTS = 1024;
 
     /** 요청 본문 크기(바이트). */
     @Param({"64", "1024", "65536"})
@@ -31,7 +31,8 @@ public class ReceiveRequestFramesBenchmark {
 
     @Setup(Level.Invocation)
     public void prepare() {
-        EndpointConfig config = EndpointConfig.defaults().maxConcurrentStreams(REQUESTS).maxFrameSize(1_048_576);
+        EndpointConfig config =
+                EndpointConfig.defaults().maxConcurrentStreams(REQUESTS).maxFrameSize(1_048_576);
         Endpoint[] pair = BenchSupport.establish(config);
         server = pair[1];
         byte[] body = new byte[bodyBytes];
@@ -39,25 +40,17 @@ public class ReceiveRequestFramesBenchmark {
             pair[0].request(BenchSupport.REQUEST_TYPE, body);
         }
         frames = BenchSupport.drainMessages(pair[0]);
-        if (frames.size() != REQUESTS) {
-            throw new IllegalStateException("요청 프레임이 " + REQUESTS + "개가 아니라 " + frames.size() + "개다");
-        }
+        BenchSupport.expectCount("요청 프레임", REQUESTS, frames.size());
     }
 
     @Benchmark
     public void receive() {
-        for (OutboundMessage frame : frames) {
-            BenchSupport.receive(server, frame.bytes());
-        }
+        BenchSupport.receiveAll(server, frames);
     }
 
     @TearDown(Level.Invocation)
     public void verify() {
-        long received = BenchSupport.drainEvents(server).stream()
-                .filter(e -> e.kind() == Event.Kind.REQUEST_RECEIVED)
-                .count();
-        if (received != REQUESTS) {
-            throw new IllegalStateException("REQUEST_RECEIVED가 " + REQUESTS + "개가 아니라 " + received + "개다");
-        }
+        BenchSupport.expectCount(
+                "REQUEST_RECEIVED 이벤트", REQUESTS, BenchSupport.countEvents(server, Event.Kind.REQUEST_RECEIVED));
     }
 }

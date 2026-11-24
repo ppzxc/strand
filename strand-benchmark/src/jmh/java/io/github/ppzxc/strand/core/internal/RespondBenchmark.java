@@ -33,9 +33,7 @@ public class RespondBenchmark {
     public void prepare() {
         server = BenchSupport.establishWithPendingRequests(pending)[1];
         streamIds = BenchSupport.receivedStreamIds(server, order);
-        if (streamIds.length != pending) {
-            throw new IllegalStateException("받은 요청이 " + pending + "개가 아니라 " + streamIds.length + "개다");
-        }
+        BenchSupport.expectCount("받은 요청", pending, streamIds.length);
     }
 
     @Benchmark
@@ -47,9 +45,7 @@ public class RespondBenchmark {
 
     @TearDown(Level.Invocation)
     public void verify() {
-        int responses = BenchSupport.drainMessages(server).size();
-        if (responses != pending) {
-            throw new IllegalStateException("응답 송신이 " + pending + "개가 아니라 " + responses + "개다");
-        }
+        BenchSupport.expectCount(
+                "응답 송신", pending, BenchSupport.drainMessages(server).size());
     }
 }

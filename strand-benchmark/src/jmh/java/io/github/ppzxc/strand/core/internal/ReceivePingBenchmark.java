@@ -32,23 +32,17 @@ public class ReceivePingBenchmark {
             pair[0].ping(payload);
         }
         frames = BenchSupport.drainMessages(pair[0]);
-        if (frames.size() != pings) {
-            throw new IllegalStateException("PING 프레임이 " + pings + "개가 아니라 " + frames.size() + "개다");
-        }
+        BenchSupport.expectCount("PING 프레임", pings, frames.size());
     }
 
     @Benchmark
     public void receive() {
-        for (OutboundMessage frame : frames) {
-            BenchSupport.receive(server, frame.bytes());
-        }
+        BenchSupport.receiveAll(server, frames);
     }
 
     @TearDown(Level.Invocation)
     public void verify() {
-        int acks = BenchSupport.drainMessages(server).size();
-        if (acks != pings) {
-            throw new IllegalStateException("ACK 출력이 " + pings + "개가 아니라 " + acks + "개다");
-        }
+        BenchSupport.expectCount(
+                "ACK 출력", pings, BenchSupport.drainMessages(server).size());
     }
 }
