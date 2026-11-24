@@ -15,5 +15,6 @@ include("strand-conformance")
 include("strand-examples")
 include("strand-integration-test")
 include("strand-benchmark")
+include("strand-load")
 
 include("strand-api")
