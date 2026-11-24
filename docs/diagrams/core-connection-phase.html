@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ConnectionPhase 상태 기계 · State machine</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper: #f5f5f5; --color-ink: #2d3142; --color-muted: #4f5d75; --color-accent: #bf4520;
+      --font-sans: 'Geist', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+      --font-serif: 'Instrument Serif', 'Noto Serif', 'Noto Serif KR', serif;
+      --font-mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1400px; width: 100%; min-width: 0; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 1288px; display: block; }
+    .notes { display: grid; grid-template-columns: 1.1fr 1fr 0.9fr; gap: 1rem; margin-top: 1.5rem; }
+    .note { background: #fff; border: 1px solid rgba(45,49,66,0.12); border-radius: 6px; padding: 0.9rem 1rem; font-size: 0.82rem; line-height: 1.55; color: var(--color-muted); }
+    .note b { display: block; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-ink); margin-bottom: 0.35rem; }
+    .note code { font-family: var(--font-mono); font-size: 0.74rem; color: var(--color-ink); }
+    @media (max-width: 720px) { .notes { grid-template-columns: 1fr; } }
+    @media print { .diagram-container { overflow-x: visible; } svg { min-width: 0; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">State machine · Diagram Design</p>
+    <h1>ConnectionPhase 상태 기계: 연결의 수립과 종료</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1288 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="core-connection-phase-title core-connection-phase-desc" style="min-width:1288px">
+        <title id="core-connection-phase-title">ConnectionPhase 상태 기계: 연결의 수립과 종료</title>
+        <desc id="core-connection-phase-desc">서버는 서문 대기, 클라이언트는 첫 프레임 대기에서 시작해 HELLO와 AUTH 관문을 거쳐 열림에 이르고, 어느 단계에서든 CLOSE나 연결 오류로 닫는 중을 거쳐 끝나며 전송이 끊기면 CLOSING 없이 바로 끝나는 연결 단계 상태 기계.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          <marker id="arrow-rev" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-link-rev" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+          <marker id="arrow-accent-rev" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
+        </defs>
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+                <rect x="32" y="104" width="1224" height="160" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+        <text x="1240" y="124" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" text-anchor="end" letter-spacing="0.14em">ESTABLISHING</text>
+        <text x="1155" y="124" fill="#5a6580" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="end">수립 진행 · 어느 단계에서든 아래 경로로 나갈 수 있다</text>
+        <circle cx="124" cy="60" r="6" fill="#2d3142"/>
+        <circle cx="332" cy="60" r="6" fill="#2d3142"/>
+        <circle cx="1164" cy="464" r="8" fill="none" stroke="#2d3142" stroke-width="1.2"/><circle cx="1164" cy="464" r="5" fill="#2d3142"/>
+                <line x1="124" y1="66" x2="124" y2="160" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="332" y1="66" x2="332" y2="160" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="184" y1="196" x2="272" y2="196" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="392" y1="196" x2="480" y2="196" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="600" y1="196" x2="688" y2="196" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="808" y1="196" x2="896" y2="196" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="1016" y1="196" x2="1104" y2="196" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="748" y1="264" x2="748" y2="348" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="1164" y1="264" x2="1164" y2="348" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-rev)"/>
+        <line x1="808" y1="384" x2="1104" y2="384" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+        <line x1="1164" y1="420" x2="1164" y2="456" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow-rev)"/>
+                <rect x="134" y="84" width="32" height="16" rx="2" fill="#f5f5f5"/><text x="150" y="96" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">서버</text>
+        <rect x="342" y="84" width="68" height="16" rx="2" fill="#f5f5f5"/><text x="376" y="96" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">클라이언트</text>
+        <rect x="196" y="174" width="64" height="16" rx="2" fill="#f5f5f5"/><text x="228" y="186" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">서문 확인</text>
+        <rect x="404" y="174" width="64" height="16" rx="2" fill="#f5f5f5"/><text x="436" y="186" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">첫 프레임</text>
+        <rect x="612" y="174" width="64" height="16" rx="2" fill="#f5f5f5"/><text x="644" y="186" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">ACK 보냄</text>
+        <rect x="820" y="174" width="64" height="16" rx="2" fill="#f5f5f5"/><text x="852" y="186" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">ACK 받음</text>
+        <rect x="1026" y="174" width="68" height="16" rx="2" fill="#f5f5f5"/><text x="1060" y="186" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">AUTH 통과</text>
+        <rect x="758" y="298" width="124" height="16" rx="2" fill="#f5f5f5"/><text x="820" y="310" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">CLOSE · 연결 오류</text>
+        <rect x="1090" y="298" width="64" height="16" rx="2" fill="#f5f5f5"/><text x="1122" y="310" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">전송 끊김</text>
+        <rect x="920" y="362" width="72" height="16" rx="2" fill="#f5f5f5"/><text x="956" y="374" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">스트림 0개</text>
+        <rect x="64" y="160" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="64" y="160" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="72" y="168" width="20" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="82.0" y="177" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">01</text>
+<text x="124.0" y="204" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">서문 대기</text>
+<text x="124.0" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">PREFACE</text>
+<rect x="272" y="160" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="272" y="160" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="280" y="168" width="20" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="290.0" y="177" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">02</text>
+<text x="332.0" y="204" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">첫 프레임 대기</text>
+<text x="332.0" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">FIRST_FRAME</text>
+<rect x="480" y="160" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="480" y="160" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="488" y="168" width="20" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="498.0" y="177" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">03</text>
+<text x="540.0" y="204" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">상대 HELLO 처리</text>
+<text x="540.0" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">PEER_HELLO</text>
+<rect x="688" y="160" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="688" y="160" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="696" y="168" width="20" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="706.0" y="177" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">04</text>
+<text x="748.0" y="204" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">HELLO ACK 대기</text>
+<text x="748.0" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">OWN_HELLO_ACK</text>
+<rect x="896" y="160" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="896" y="160" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="904" y="168" width="20" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="914.0" y="177" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">05</text>
+<text x="956.0" y="204" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">AUTH 관문</text>
+<text x="956.0" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">AUTH</text>
+<rect x="1104" y="160" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="1104" y="160" width="120" height="72" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<rect x="1112" y="168" width="20" height="12" rx="2" fill="transparent" stroke="#bf4520" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="1122.0" y="177" fill="#bf4520" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">06</text>
+<text x="1164.0" y="204" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">열림</text>
+<text x="1164.0" y="220" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">OPEN</text>
+<rect x="688" y="348" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="688" y="348" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="696" y="356" width="36" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="714.0" y="365" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">CLOSE</text>
+<text x="748.0" y="392" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">닫는 중</text>
+<text x="748.0" y="408" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">CLOSING</text>
+<rect x="1104" y="348" width="120" height="72" rx="6" fill="#f5f5f5"/>
+<rect x="1104" y="348" width="120" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<rect x="1112" y="356" width="28" height="12" rx="2" fill="transparent" stroke="#4f5d75" stroke-opacity="0.5" stroke-width="0.8"/>
+<text x="1126.0" y="365" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">END</text>
+<text x="1164.0" y="392" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif" text-anchor="middle">끝남</text>
+<text x="1164.0" y="408" fill="#4f5d75" font-size="9" font-family="'Geist Mono',monospace" text-anchor="middle">CLOSED</text>
+        <text x="64" y="332" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif','Noto Serif','Noto Serif KR',serif">CLOSING이 되어도 수립 진행 값은 그대로 보존된다</text><text x="64" y="352" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif','Noto Serif','Noto Serif KR',serif">(HELLO를 마쳤는지 계속 답하기 위해서)</text><path d="M 400 326 Q 580 318 744 322" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/><circle cx="748" cy="322" r="2" fill="#2d3142"/>
+<text x="64" y="472" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif','Noto Serif','Noto Serif KR',serif">오류 CLOSE · 연결 오류는 스트림을 기다리지 않고</text><text x="64" y="492" fill="#2d3142" font-size="14" font-style="italic" font-family="'Instrument Serif','Noto Serif','Noto Serif KR',serif">CLOSING으로 친 뒤 곧바로 닫는다</text><path d="M 419 468 Q 860 476 1000 384" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/><circle cx="1000" cy="384" r="2" fill="#2d3142"/>
+<line x1="32" y1="544" x2="1256" y2="544" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+<text x="32" y="564" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">범례</text>
+<rect x="88" y="554" width="20" height="12" rx="3" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+<text x="116" y="564" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">연결이 열려 앱 프레임을 주고받는 상태</text>
+<rect x="380.0" y="554" width="20" height="12" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="408.0" y="564" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">상태</text>
+<line x1="468.0" y1="560" x2="492.0" y2="560" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="500.0" y="564" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">전이</text>
+<line x1="560.0" y1="560" x2="584.0" y2="560" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<text x="592.0" y="564" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif">CLOSE 없는 경로</text>
+      </svg>
+    </div>
+    <div class="notes">
+      <div class="note"><b>값이 둘로 나뉜다</b>수립 진행(<code>PREFACE</code>→<code>OPEN</code>)과 닫는 일의 진행(<code>NONE</code> · <code>CLOSING</code> · <code>DRAINED</code> · <code>FAILED</code> · <code>DISCONNECTED</code>)을 따로 가진다. <code>phase()</code>는 끝났으면 <code>CLOSED</code>, CLOSE를 교환했으면 <code>CLOSING</code>, 아니면 수립 진행을 돌려준다.</div>
+      <div class="note"><b>프레임 관문</b><code>admit</code>이 받아도 되는 프레임인지 묻는다. CLOSE는 어느 단계에서나 받는다. HELLO·AUTH는 정해진 단계에서만, PING·RESET·앱 프레임은 <code>OPEN</code>에서만 받고 어긋나면 연결 오류다.</div>
+      <div class="note"><b>송신</b>AUTH 관문 전의 요청과 PING은 뒤로 미루고(<code>DEFER</code>) 연결이 끝나면 거절한다. 유휴 PING은 <code>OPEN</code> 이후 종료 중에도 보낸다.</div>
+    </div>
+  </div>
+</body>
+</html>
