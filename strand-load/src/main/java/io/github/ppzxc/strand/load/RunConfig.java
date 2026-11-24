@@ -27,6 +27,14 @@ final class RunConfig {
     final int inflight;
     final Duration warmup;
     final Duration measure;
+    final boolean openLoop;
+    /** 개방형 도착률(요청/초, 전체 연결 합). 절대값이면 rateFraction은 0이다. */
+    final double rate;
+    /** {@code --rate 50%}처럼 포화 처리량의 비율로 준 경우 0~1. 아니면 0이다. */
+    final double rateFraction;
+
+    final int repetitions;
+    final Duration serverDelay; // 하네스 자체 시험용: 서버가 응답을 이만큼 미룬다.
     final String output; // null이면 표준 출력
     final Duration chaosKillServerAfter; // null이면 사용하지 않는다(하네스 자체 시험용)
 
@@ -40,6 +48,42 @@ final class RunConfig {
         this.inflight = positiveInt(options, "--inflight", 8);
         this.warmup = duration(options, "--warmup", Duration.ofSeconds(30), true);
         this.measure = duration(options, "--measure", Duration.ofSeconds(60), false);
+        String model = options.getOrDefault("--load-model", "closed");
+        if (!model.equals("closed") && !model.equals("open")) {
+            throw new Invalid("--load-model 값 '" + model + "'을(를) 지원하지 않는다. 지원: closed, open");
+        }
+        this.openLoop = model.equals("open");
+        String rawRate = options.get("--rate");
+        if (openLoop && rawRate == null) {
+            throw new Invalid("--load-model open에는 --rate(요청/초 또는 포화 처리량의 비율 예: 50%)가 필요하다");
+        }
+        if (!openLoop && rawRate != null) {
+            throw new Invalid("--rate는 --load-model open에서만 쓴다");
+        }
+        double parsedRate = 0;
+        double parsedFraction = 0;
+        if (rawRate != null) {
+            try {
+                if (rawRate.endsWith("%")) {
+                    parsedFraction = Double.parseDouble(rawRate.substring(0, rawRate.length() - 1)) / 100.0;
+                    if (!(parsedFraction > 0 && parsedFraction <= 1.0)) {
+                        throw new Invalid("--rate 비율은 0 초과 100% 이하여야 한다: " + rawRate);
+                    }
+                } else {
+                    parsedRate = Double.parseDouble(rawRate);
+                    if (!(parsedRate > 0)) {
+                        throw new Invalid("--rate는 양수여야 한다: " + rawRate);
+                    }
+                }
+            } catch (NumberFormatException e) {
+                throw new Invalid("--rate는 숫자 또는 비율(예: 50%)이어야 한다: " + rawRate);
+            }
+        }
+        this.rate = parsedRate;
+        this.rateFraction = parsedFraction;
+        this.repetitions = positiveInt(options, "--repetitions", 3);
+        String delay = options.get("--server-delay");
+        this.serverDelay = delay == null ? Duration.ZERO : parseDuration("--server-delay", delay, true);
         this.output = options.get("--output");
         String chaos = options.get("--chaos-kill-server-after");
         this.chaosKillServerAfter = chaos == null ? null : parseDuration("--chaos-kill-server-after", chaos, false);
@@ -55,7 +99,11 @@ final class RunConfig {
                 "--warmup",
                 "--measure",
                 "--output",
-                "--chaos-kill-server-after");
+                "--chaos-kill-server-after",
+                "--load-model",
+                "--rate",
+                "--repetitions",
+                "--server-delay");
         Map<String, String> options = new HashMap<>();
         for (int i = 0; i < args.size(); i += 2) {
             String name = args.get(i);
@@ -120,9 +168,19 @@ final class RunConfig {
         }
     }
 
-    /** 자식 프로세스에 그대로 넘기는 인자. */
-    List<String> childArgs() {
-        return Arrays.asList(
+    /** 개방형에서 미완료 요청이 쌓여도 자원 한도 때문에 거절되지 않도록 넉넉히 잡는 창 크기. */
+    int effectiveInflight() {
+        return openLoop ? Math.max(inflight, 1024) : inflight;
+    }
+
+    /**
+     * 자식 프로세스에 넘기는 인자. 도착률 비율은 진행자가 포화 처리량으로 풀어 절대값으로 넘긴다.
+     *
+     * @param resolvedRate 개방형이면 요청/초, 폐쇄형이면 무시
+     * @param closedOverride true면 설정과 무관하게 폐쇄형으로 돌린다(포화 처리량 측정용)
+     */
+    List<String> childArgs(double resolvedRate, boolean closedOverride) {
+        List<String> args = new ArrayList<>(Arrays.asList(
                 "--transport",
                 transport,
                 "--connections",
@@ -134,6 +192,12 @@ final class RunConfig {
                 "--warmup",
                 warmup.toMillis() + "ms",
                 "--measure",
-                measure.toMillis() + "ms");
+                measure.toMillis() + "ms",
+                "--server-delay",
+                serverDelay.toMillis() + "ms"));
+        if (openLoop && !closedOverride) {
+            args.addAll(List.of("--load-model", "open", "--rate", Double.toString(resolvedRate)));
+        }
+        return args;
     }
 }

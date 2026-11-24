@@ -21,7 +21,23 @@ final class ServerRole {
     /** netty 서버가 쓰는 이벤트 루프 스레드 수. 독립 실행(자체 이벤트 루프)만 잰다. */
     static final int NETTY_EVENT_LOOPS = 2;
 
+    private static final java.util.concurrent.ScheduledExecutorService DELAYS =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "strand-load-server-delay");
+                thread.setDaemon(true);
+                return thread;
+            });
+
     private ServerRole() {}
+
+    /** 하네스 자체 시험용 지연. 0이면 바로 응답한다. */
+    private static void respondAfterDelay(RunConfig config, Runnable respond) {
+        if (config.serverDelay.isZero()) {
+            respond.run();
+        } else {
+            DELAYS.schedule(respond, config.serverDelay.toNanos(), TimeUnit.NANOSECONDS);
+        }
+    }
 
     /** 전송별 서버. 두 전송의 공개 진입점이 서로 다른 타입이라 얇게 감싼다. */
     private interface Backend {
@@ -64,8 +80,12 @@ final class ServerRole {
             io.github.ppzxc.strand.nio.NioSecurity security =
                     io.github.ppzxc.strand.nio.NioSecurity.externallySecured();
             MinimumProgressSpace space = io.github.ppzxc.strand.nio.NioMinimumProgress.of(
-                    security, LoadSupport.maxFrameSize(config.bodyBytes), config.inflight, config.inflight);
-            ResourceLimits limits = LoadSupport.limits(space, config.connections, config.inflight, config.bodyBytes);
+                    security,
+                    LoadSupport.maxFrameSize(config.bodyBytes),
+                    config.effectiveInflight(),
+                    config.effectiveInflight());
+            ResourceLimits limits =
+                    LoadSupport.limits(space, config.connections, config.effectiveInflight(), config.bodyBytes);
             this.server = io.github.ppzxc.strand.nio.NioStrandServer.builder()
                     .executor(executor)
                     .resourceLimits(limits)
@@ -81,7 +101,8 @@ final class ServerRole {
                             ? io.github.ppzxc.strand.nio.AuthenticationResult.accepted(LoadSupport.PRINCIPAL)
                             : io.github.ppzxc.strand.nio.AuthenticationResult.rejected())
                     .handlerFactory(connection -> io.github.ppzxc.strand.nio.PreparedHandler.of(
-                            request -> request.respond(Status.OK, request.payload()), () -> {}))
+                            request -> respondAfterDelay(config, () -> request.respond(Status.OK, request.payload())),
+                            () -> {}))
                     .onConnectionFailure(failure -> System.err.println("준비 실패: " + failure))
                     .build();
         }
@@ -110,8 +131,12 @@ final class ServerRole {
             io.github.ppzxc.strand.netty.NettySecurity security =
                     io.github.ppzxc.strand.netty.NettySecurity.externallySecured();
             MinimumProgressSpace space = io.github.ppzxc.strand.netty.NettyMinimumProgress.of(
-                    security, LoadSupport.maxFrameSize(config.bodyBytes), config.inflight, config.inflight);
-            ResourceLimits limits = LoadSupport.limits(space, config.connections, config.inflight, config.bodyBytes);
+                    security,
+                    LoadSupport.maxFrameSize(config.bodyBytes),
+                    config.effectiveInflight(),
+                    config.effectiveInflight());
+            ResourceLimits limits =
+                    LoadSupport.limits(space, config.connections, config.effectiveInflight(), config.bodyBytes);
             this.server = io.github.ppzxc.strand.netty.NettyStrandServer.builder()
                     .eventLoopGroup(eventLoops)
                     .executor(executor)
@@ -128,7 +153,8 @@ final class ServerRole {
                             ? io.github.ppzxc.strand.netty.AuthenticationResult.accepted(LoadSupport.PRINCIPAL)
                             : io.github.ppzxc.strand.netty.AuthenticationResult.rejected())
                     .handlerFactory(connection -> io.github.ppzxc.strand.netty.PreparedHandler.of(
-                            request -> request.respond(Status.OK, request.payload()), () -> {}))
+                            request -> respondAfterDelay(config, () -> request.respond(Status.OK, request.payload())),
+                            () -> {}))
                     .onConnectionFailure(failure -> System.err.println("준비 실패: " + failure))
                     .build();
         }

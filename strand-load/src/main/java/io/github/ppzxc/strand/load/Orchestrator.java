@@ -45,31 +45,72 @@ final class Orchestrator {
     }
 
     void run() throws RunFailed, IOException, InterruptedException {
+        double rate = config.rate;
+        Double saturation = null;
+        if (config.openLoop && config.rateFraction > 0) {
+            // 포화 처리량은 같은 설정을 폐쇄형으로 한 번 돌려 얻는다. 도착률은 그 비율이다.
+            JsonObject saturationRun = runOnce(0, true);
+            saturation = saturationRun
+                    .getAsJsonObject("measurement")
+                    .get("throughputPerSecond")
+                    .getAsDouble();
+            rate = saturation * config.rateFraction;
+        }
+        List<JsonObject> runs = new ArrayList<>();
+        for (int i = 0; i < config.repetitions; i++) {
+            runs.add(runOnce(rate, false));
+        }
+        writeResult(runs, saturation, rate);
+    }
+
+    /** 서버와 부하 생성기를 새로 띄워 한 번 측정한다. 끝나면 두 프로세스를 정리한다. */
+    private JsonObject runOnce(double rate, boolean closedOverride)
+            throws RunFailed, IOException, InterruptedException {
         Process server = null;
         Process loadgen = null;
-        StderrCapture serverErr = null;
-        StderrCapture loadgenErr = null;
         try {
-            server = start(List.of("server"), config.childArgs());
-            serverErr = new StderrCapture(server.getErrorStream());
+            List<String> args = config.childArgs(rate, closedOverride);
+            server = start(List.of("server"), args);
+            StderrCapture serverErr = new StderrCapture(server.getErrorStream());
             int port = awaitReady(server, serverErr);
 
             if (config.chaosKillServerAfter != null) {
                 scheduleKill(server, config.chaosKillServerAfter);
             }
 
-            List<String> loadgenArgs = new ArrayList<>(config.childArgs());
+            List<String> loadgenArgs = new ArrayList<>(args);
             loadgenArgs.addAll(List.of("--port", String.valueOf(port)));
             loadgen = start(List.of("loadgen"), loadgenArgs);
-            loadgenErr = new StderrCapture(loadgen.getErrorStream());
+            StderrCapture loadgenErr = new StderrCapture(loadgen.getErrorStream());
             String resultLine = awaitLoadGen(loadgen, loadgenErr, server, serverErr);
-
-            JsonObject measurement = JsonParser.parseString(resultLine).getAsJsonObject();
-            writeResult(measurement, server.pid(), loadgen.pid());
+            return runJson(JsonParser.parseString(resultLine).getAsJsonObject(), server.pid(), loadgen.pid());
         } finally {
             terminate(loadgen);
             terminate(server);
         }
+    }
+
+    private static JsonObject runJson(JsonObject raw, long serverPid, long loadgenPid) {
+        double seconds = raw.get("measureNanos").getAsLong() / 1e9;
+        long responses = raw.get("responses").getAsLong();
+        JsonObject measurement = new JsonObject();
+        measurement.addProperty("requests", raw.get("requests").getAsLong());
+        measurement.addProperty("responses", responses);
+        measurement.addProperty("errors", raw.get("errors").getAsLong());
+        measurement.addProperty("unknown", raw.get("unknown").getAsLong());
+        measurement.addProperty("measureSeconds", seconds);
+        measurement.addProperty("throughputPerSecond", responses / seconds);
+        measurement.add("latencyMicros", raw.get("latencyMicros"));
+        measurement.add("latencyBasis", raw.get("latencyBasis"));
+        measurement.add("sendLagP99Micros", raw.get("sendLagP99Micros"));
+        measurement.add("loadgenBottleneck", raw.get("loadgenBottleneck"));
+        JsonObject processes = new JsonObject();
+        processes.addProperty("server", serverPid);
+        processes.addProperty("loadgen", loadgenPid);
+        JsonObject run = new JsonObject();
+        run.add("measurement", measurement);
+        run.add("processes", processes);
+        return run;
     }
 
     private Process start(List<String> role, List<String> args) throws IOException {
@@ -146,21 +187,7 @@ final class Orchestrator {
         throw new RunFailed("부하 생성기가 제한 시간 안에 끝나지 않았다");
     }
 
-    private void writeResult(JsonObject measurementRaw, long serverPid, long loadgenPid) throws IOException {
-        double seconds = measurementRaw.get("measureNanos").getAsLong() / 1e9;
-        long responses = measurementRaw.get("responses").getAsLong();
-        JsonObject measurement = new JsonObject();
-        measurement.addProperty("requests", measurementRaw.get("requests").getAsLong());
-        measurement.addProperty("responses", responses);
-        measurement.addProperty("errors", measurementRaw.get("errors").getAsLong());
-        measurement.addProperty("unknown", measurementRaw.get("unknown").getAsLong());
-        measurement.addProperty("measureSeconds", seconds);
-        measurement.addProperty("throughputPerSecond", responses / seconds);
-
-        JsonObject processes = new JsonObject();
-        processes.addProperty("server", serverPid);
-        processes.addProperty("loadgen", loadgenPid);
-
+    private void writeResult(List<JsonObject> runs, Double saturation, double rate) throws IOException {
         JsonObject config = new JsonObject();
         // 서버 전송이 유일한 변수다. 부하 생성기는 항상 nio 클라이언트 코드 경로를 쓴다.
         config.addProperty("transport", this.config.transport);
@@ -171,10 +198,21 @@ final class Orchestrator {
         config.addProperty("tls", false);
         config.addProperty("connections", this.config.connections);
         config.addProperty("bodyBytes", this.config.bodyBytes);
-        config.addProperty("inflight", this.config.inflight);
-        config.addProperty("loadModel", "closed-loop");
+        config.addProperty("inflight", this.config.effectiveInflight());
+        config.addProperty("loadModel", this.config.openLoop ? "open-loop" : "closed-loop");
+        if (this.config.openLoop) {
+            config.addProperty("rateTargetPerSecond", rate);
+            if (saturation != null) {
+                config.addProperty("saturationThroughputPerSecond", saturation);
+                config.addProperty("rateFractionOfSaturation", this.config.rateFraction);
+            }
+        }
         config.addProperty("warmupMillis", this.config.warmup.toMillis());
         config.addProperty("measureMillis", this.config.measure.toMillis());
+        config.addProperty("repetitions", this.config.repetitions);
+        if (!this.config.serverDelay.isZero()) {
+            config.addProperty("serverDelayMillis", this.config.serverDelay.toMillis());
+        }
 
         JsonObject metadata = new JsonObject();
         metadata.addProperty("jdk", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"));
@@ -182,13 +220,16 @@ final class Orchestrator {
         metadata.addProperty("cores", Runtime.getRuntime().availableProcessors());
         metadata.addProperty("gitSha", gitSha());
         metadata.add("config", config);
-        metadata.add("processes", processes);
+
+        com.google.gson.JsonArray runArray = new com.google.gson.JsonArray();
+        runs.forEach(runArray::add);
 
         JsonObject result = new JsonObject();
         result.addProperty("schemaVersion", 1);
         result.addProperty("status", "OK");
         result.add("metadata", metadata);
-        result.add("measurement", measurement);
+        result.add("runs", runArray);
+        result.add("summary", summary(runs));
 
         String json = GSON.toJson(result);
         if (this.config.output == null) {
@@ -201,6 +242,40 @@ final class Orchestrator {
             }
             Files.writeString(path, json + System.lineSeparator());
         }
+    }
+
+    /** 반복별 값을 중앙값과 범위(최소·최대)로 요약한다. */
+    private static JsonObject summary(List<JsonObject> runs) {
+        JsonObject summary = new JsonObject();
+        summary.add(
+                "throughputPerSecond",
+                stats(runs, m -> m.get("throughputPerSecond").getAsDouble()));
+        JsonObject latency = new JsonObject();
+        for (String percentile : new String[] {"p50", "p99", "p999", "max"}) {
+            latency.add(
+                    percentile,
+                    stats(
+                            runs,
+                            m -> m.getAsJsonObject("latencyMicros")
+                                    .get(percentile)
+                                    .getAsDouble()));
+        }
+        summary.add("latencyMicros", latency);
+        return summary;
+    }
+
+    private static JsonObject stats(List<JsonObject> runs, java.util.function.ToDoubleFunction<JsonObject> value) {
+        double[] values = runs.stream()
+                .mapToDouble(run -> value.applyAsDouble(run.getAsJsonObject("measurement")))
+                .sorted()
+                .toArray();
+        int n = values.length;
+        double median = n % 2 == 1 ? values[n / 2] : (values[n / 2 - 1] + values[n / 2]) / 2.0;
+        JsonObject stats = new JsonObject();
+        stats.addProperty("median", median);
+        stats.addProperty("min", values[0]);
+        stats.addProperty("max", values[n - 1]);
+        return stats;
     }
 
     private static String gitSha() {

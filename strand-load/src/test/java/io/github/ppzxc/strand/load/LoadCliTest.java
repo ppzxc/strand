@@ -42,6 +42,10 @@ class LoadCliTest {
         return JsonParser.parseString(Files.readString(file)).getAsJsonObject();
     }
 
+    private static JsonObject firstRun(JsonObject json) {
+        return json.getAsJsonArray("runs").get(0).getAsJsonObject();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"nio", "netty"})
     void smokeRunEndsWithoutErrorsAndRecordsTheServerTransport(String transport) throws Exception {
@@ -80,7 +84,7 @@ class LoadCliTest {
         assertThat(config.get("loadModel").getAsString()).isEqualTo("closed-loop");
         assertThat(config.get("tls").getAsBoolean()).isFalse();
 
-        JsonObject measurement = json.getAsJsonObject("measurement");
+        JsonObject measurement = firstRun(json).getAsJsonObject("measurement");
         long requests = measurement.get("requests").getAsLong();
         assertThat(requests).isPositive();
         assertThat(measurement.get("responses").getAsLong()).isEqualTo(requests);
@@ -96,7 +100,7 @@ class LoadCliTest {
         Outcome outcome = run("run", "--warmup", "200ms", "--measure", "500ms", "--output", result.toString());
 
         assertThat(outcome.exit).as(outcome.err).isZero();
-        JsonObject processes = readResult(result).getAsJsonObject("metadata").getAsJsonObject("processes");
+        JsonObject processes = firstRun(readResult(result)).getAsJsonObject("processes");
         for (String role : new String[] {"server", "loadgen"}) {
             long pid = processes.get(role).getAsLong();
             assertThat(ProcessHandle.of(pid).filter(ProcessHandle::isAlive))
@@ -150,5 +154,133 @@ class LoadCliTest {
         assertThat(outcome.exit).isEqualTo(1);
         assertThat(outcome.err).contains("서버");
         assertThat(result).doesNotExist();
+    }
+
+    private JsonObject openRun(String... extra) throws Exception {
+        Path result = dir.resolve("open.json");
+        java.util.List<String> args = new java.util.ArrayList<>(java.util.List.of(
+                "run",
+                "--load-model",
+                "open",
+                "--rate",
+                "50",
+                "--warmup",
+                "300ms",
+                "--measure",
+                "2s",
+                "--repetitions",
+                "1",
+                "--output",
+                result.toString()));
+        args.addAll(java.util.Arrays.asList(extra));
+        Outcome outcome = run(args.toArray(new String[0]));
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        return readResult(result);
+    }
+
+    private static double latencyMicros(JsonObject run, String percentile) {
+        return run.getAsJsonObject("measurement")
+                .getAsJsonObject("latencyMicros")
+                .get(percentile)
+                .getAsDouble();
+    }
+
+    @Test
+    void openLoopReportsPercentilesAndKeepsTheScheduledRate() throws Exception {
+        JsonObject json = openRun();
+
+        assertThat(json.getAsJsonObject("metadata")
+                        .getAsJsonObject("config")
+                        .get("loadModel")
+                        .getAsString())
+                .isEqualTo("open-loop");
+        JsonObject run = firstRun(json);
+        assertThat(latencyMicros(run, "p50")).isPositive();
+        assertThat(latencyMicros(run, "p99")).isGreaterThanOrEqualTo(latencyMicros(run, "p50"));
+        assertThat(latencyMicros(run, "p999")).isGreaterThanOrEqualTo(latencyMicros(run, "p99"));
+        JsonObject measurement = run.getAsJsonObject("measurement");
+        assertThat(measurement.get("errors").getAsLong()).isZero();
+        assertThat(measurement.get("responses").getAsLong())
+                .isEqualTo(measurement.get("requests").getAsLong());
+        // 50 req/s를 2초 재면 약 100건이다.
+        assertThat(measurement.get("requests").getAsLong()).isBetween(80L, 120L);
+    }
+
+    @Test
+    void openLoopP99ReflectsInjectedServerDelay() throws Exception {
+        JsonObject delayed = openRun("--server-delay", "100ms");
+
+        // 서버에 넣은 100ms 지연이 예정 시각 기준 지연의 p99에 그대로 드러나야 한다(coordinated omission 방지).
+        assertThat(latencyMicros(firstRun(delayed), "p99")).isGreaterThanOrEqualTo(95_000);
+        assertThat(firstRun(delayed)
+                        .getAsJsonObject("measurement")
+                        .get("errors")
+                        .getAsLong())
+                .isZero();
+    }
+
+    @Test
+    void repetitionsAreSummarizedAsMedianAndRange() throws Exception {
+        Path result = dir.resolve("reps.json");
+
+        Outcome outcome = run(
+                "run",
+                "--load-model",
+                "open",
+                "--rate",
+                "50",
+                "--warmup",
+                "100ms",
+                "--measure",
+                "500ms",
+                "--repetitions",
+                "3",
+                "--output",
+                result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        JsonObject json = readResult(result);
+        assertThat(json.getAsJsonArray("runs")).hasSize(3);
+        JsonObject p99 =
+                json.getAsJsonObject("summary").getAsJsonObject("latencyMicros").getAsJsonObject("p99");
+        assertThat(p99.get("min").getAsDouble())
+                .isLessThanOrEqualTo(p99.get("median").getAsDouble());
+        assertThat(p99.get("median").getAsDouble())
+                .isLessThanOrEqualTo(p99.get("max").getAsDouble());
+        assertThat(json.getAsJsonObject("summary")
+                        .getAsJsonObject("throughputPerSecond")
+                        .has("median"))
+                .isTrue();
+    }
+
+    @Test
+    void rateAsPercentOfSaturationIsResolvedFromAClosedLoopRun() throws Exception {
+        JsonObject json = openRun("--rate", "50%");
+
+        JsonObject config = json.getAsJsonObject("metadata").getAsJsonObject("config");
+        double saturation = config.get("saturationThroughputPerSecond").getAsDouble();
+        assertThat(saturation).isPositive();
+        assertThat(config.get("rateTargetPerSecond").getAsDouble())
+                .isCloseTo(saturation * 0.5, org.assertj.core.data.Offset.offset(1.0));
+    }
+
+    @Test
+    void generatorThatCannotKeepTheScheduleIsFlagged() throws Exception {
+        // 도달할 수 없는 도착률을 주면 부하 생성기가 병목이 되고 결과에 표시된다.
+        JsonObject json = openRun("--rate", "50000000");
+
+        assertThat(firstRun(json)
+                        .getAsJsonObject("measurement")
+                        .get("loadgenBottleneck")
+                        .getAsBoolean())
+                .isTrue();
+    }
+
+    @Test
+    void openLoopWithoutRateIsAConfigurationError() {
+        Outcome outcome = run("run", "--load-model", "open");
+
+        assertThat(outcome.exit).isEqualTo(2);
+        assertThat(outcome.err).contains("--rate");
     }
 }
