@@ -74,7 +74,7 @@ public final class LoadCli {
     }
 
     /**
-     * {@code soak [--duration 1h | --long] [--rate 1000] ...}: 일정 부하로 오래 돌린다. 기본 1시간, {@code --long}은 8시간이다. {@code --plan}은 설정만 JSON으로 낸다.
+     * {@code soak [--duration 60m | --long] [--rate 1000] ...}: 일정 부하로 오래 돌린다. 기본 1시간(60m), {@code --long}은 8시간(480m)이다. 시간은 ms·s·m 단위만 받는다. {@code --plan}은 설정만 JSON으로 낸다.
      */
     private static int soak(List<String> args, PrintStream out) throws Exception {
         java.util.List<String> translated = new java.util.ArrayList<>();

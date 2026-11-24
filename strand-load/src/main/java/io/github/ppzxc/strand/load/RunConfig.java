@@ -117,7 +117,7 @@ final class RunConfig {
                     }
                 } else {
                     parsedRate = Double.parseDouble(rawRate);
-                    if (!(parsedRate > 0)) {
+                    if (!(parsedRate > 0) || Double.isInfinite(parsedRate)) {
                         throw new Invalid("--rate는 양수여야 한다: " + rawRate);
                     }
                 }
@@ -136,7 +136,7 @@ final class RunConfig {
             } catch (NumberFormatException e) {
                 throw new Invalid("--saturation은 숫자여야 한다: " + sat);
             }
-            if (!(parsedSaturation > 0)) {
+            if (!(parsedSaturation > 0) || Double.isInfinite(parsedSaturation)) {
                 throw new Invalid("--saturation은 양수여야 한다: " + sat);
             }
         }
