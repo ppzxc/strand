@@ -121,6 +121,9 @@ final class Orchestrator {
             lastServerErr.leakLines().forEach(leakLines::add);
             leaks.add("lines", leakLines);
             leaks.addProperty("detector", "netty ResourceLeakDetector(paranoid), 서버 표준 오류의 LEAK: 줄");
+            // 감지기는 누수된 버퍼가 GC되고 이후 할당이 있어야 알리므로 count는 하한이다. nio 서버는 ByteBuf를 쓰지 않아 해당 없다.
+            leaks.addProperty("lowerBound", true);
+            leaks.addProperty("applicable", config.transport.equals("netty"));
 
             JsonObject load = new JsonObject();
             for (String key : new String[] {"requests", "responses", "errors", "unknown", "throughputPerSecond"}) {
@@ -263,6 +266,9 @@ final class Orchestrator {
             long baseline =
                     sampleServer(server, serverLines, serverErr).get("rssBytes").getAsLong();
             long peak = baseline;
+            if (lastClosed != null) {
+                throw new RunFailed("상대를 멈추기 전에 이미 연결이 끊겼다: " + lastClosed);
+            }
             stopProcess(peer, "STOP");
             long stoppedAt = System.nanoTime();
             long deadline = stoppedAt + config.maxWait.toNanos();
@@ -312,11 +318,19 @@ final class Orchestrator {
             result.add("stall", stall);
             return result;
         } finally {
-            if (peer != null) {
-                stopProcess(peer, "CONT");
+            try {
+                if (peer != null) {
+                    stopProcess(peer, "CONT");
+                }
+            } catch (RunFailed ignored) {
+                // 이미 끝난 상대에는 신호가 가지 않을 수 있다. 정리는 계속해야 한다.
+            } finally {
+                try {
+                    terminate(peer);
+                } finally {
+                    terminate(server);
+                }
             }
-            terminate(peer);
-            terminate(server);
         }
     }
 
@@ -339,7 +353,7 @@ final class Orchestrator {
                     .redirectErrorStream(true)
                     .start();
             if (!kill.waitFor(10, TimeUnit.SECONDS) || kill.exitValue() != 0) {
-                throw new RunFailed("kill -" + signal + " 실패: 쓰기 정체 시나리오는 kill 명령이 있는 Linux/macOS가 필요하다");
+                throw new RunFailed("kill -" + signal + " 실패: 쓰기 정체 시나리오는 kill 명령이 있는 Linux가 필요하다");
             }
         } catch (IOException e) {
             throw new RunFailed("kill 명령을 실행할 수 없다: 쓰기 정체 시나리오는 kill 명령이 필요하다(" + e.getMessage() + ")");

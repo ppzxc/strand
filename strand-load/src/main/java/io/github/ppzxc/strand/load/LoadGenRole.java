@@ -340,7 +340,7 @@ final class LoadGenRole {
             }
             boolean failed = result.certainty() != Certainty.RESPONSE || result.status() != Status.OK;
             outstanding.decrementAndGet();
-            if (!config.openLoop) {
+            if (!config.openLoop && !stopped.get()) {
                 // 전송 스레드를 붙들지 않도록 다음 요청은 앱 실행기에서 보낸다. 실패하면 잠시 쉰다:
                 // 연결이 끝난 뒤 실패 결과가 즉시 돌아와 CPU를 태우며 오류만 쌓는 것을 막는다.
                 if (failed) {

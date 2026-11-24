@@ -103,6 +103,10 @@ public final class LoadCli {
                     break;
             }
         }
+        if (rate.endsWith("%")) {
+            // soak은 포화 처리량을 먼저 재지 않으므로 비율 도착률을 풀 수 없다.
+            throw new RunConfig.Invalid("soak의 --rate는 요청/초 절대값이어야 한다(비율 불가): " + rate);
+        }
         if (duration == null) {
             duration = longRun ? "480m" : "60m";
         }
