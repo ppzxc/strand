@@ -25,6 +25,9 @@ import java.util.concurrent.TimeUnit;
  */
 final class Orchestrator {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    /** 규격 오류 코드 6: 상대가 확인 대기 안에 ACK를 보내지 않음(UNRESPONSIVE). */
+    private static final long UNRESPONSIVE = 6;
+
     private static final Duration STARTUP_LIMIT = Duration.ofSeconds(60);
 
     /** 실행 실패. 종료 상태 1로 끝난다. */
@@ -87,9 +90,14 @@ final class Orchestrator {
         }
     }
 
-    private void cleanupKeystore() throws IOException {
+    /** 정리 실패가 측정 결과나 원래 실패를 가리지 않도록 삼킨다. 임시 디렉터리만 남는다. */
+    private void cleanupKeystore() {
         if (keystoreDir != null) {
-            LoadTls.deleteTree(keystoreDir);
+            try {
+                LoadTls.deleteTree(keystoreDir);
+            } catch (IOException ignored) {
+                // 임시 디렉터리가 남을 뿐이다.
+            }
         }
     }
 
@@ -283,6 +291,14 @@ final class Orchestrator {
                 if (lastClosed != null) {
                     closedJson = lastClosed;
                     detectedAt = System.nanoTime();
+                    JsonObject notice = JsonParser.parseString(closedJson).getAsJsonObject();
+                    // 기존 확인 대기(UNRESPONSIVE, 오류 코드 6)로 끊겨야 한다. 다른 원인이면 ADR 0004 기대를 검증한 것이 아니다.
+                    if (!notice.get("kind").getAsString().equals("ERROR_CLOSE")
+                            || notice.get("errorCode").getAsLong() != UNRESPONSIVE) {
+                        stopProcess(peer, "CONT");
+                        throw new RunFailed("연결이 예상한 확인 대기 초과(ERROR_CLOSE, 오류 코드 " + UNRESPONSIVE
+                                + ")가 아닌 다른 원인으로 끊겼다: " + closedJson);
+                    }
                     break;
                 }
                 Thread.sleep(250);
@@ -426,13 +442,15 @@ final class Orchestrator {
         }
         double seconds = measureNanos / 1e9;
         long responses = raw.get("responses").getAsLong();
+        long windowResponses = raw.get("windowResponses").getAsLong();
         JsonObject measurement = new JsonObject();
         measurement.addProperty("requests", raw.get("requests").getAsLong());
         measurement.addProperty("responses", responses);
         measurement.addProperty("errors", raw.get("errors").getAsLong());
         measurement.addProperty("unknown", raw.get("unknown").getAsLong());
         measurement.addProperty("measureSeconds", seconds);
-        measurement.addProperty("throughputPerSecond", responses / seconds);
+        // 처리량은 측정 구간 안에 완료된 응답만 센다(드레인 구간 완료분 제외).
+        measurement.addProperty("throughputPerSecond", windowResponses / seconds);
         measurement.add("latencyMicros", raw.get("latencyMicros"));
         measurement.add("latencyBasis", raw.get("latencyBasis"));
         measurement.add("sendLagP99Micros", raw.get("sendLagP99Micros"));
@@ -749,8 +767,12 @@ final class Orchestrator {
             Process process = new ProcessBuilder("git", "rev-parse", "HEAD")
                     .redirectErrorStream(true)
                     .start();
+            if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return "unknown";
+            }
             String sha = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-            return process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0 && !sha.isEmpty() ? sha : "unknown";
+            return process.exitValue() == 0 && !sha.isEmpty() ? sha : "unknown";
         } catch (IOException | InterruptedException e) {
             return "unknown";
         }

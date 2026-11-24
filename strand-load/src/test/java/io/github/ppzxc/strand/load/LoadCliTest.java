@@ -717,4 +717,16 @@ class LoadCliTest {
                         .keySet());
         assertThat(ws.get("errors").getAsLong()).isZero();
     }
+
+    @Test
+    void tableOfAPlanFileIsAConfigurationError() throws Exception {
+        Path plan = dir.resolve("plan-for-table.json");
+        assertThat(execute("matrix", "--plan", "--output", plan.toString()).exit)
+                .isZero();
+
+        Outcome outcome = execute("table", "--input", plan.toString());
+
+        assertThat(outcome.exit).isEqualTo(2);
+        assertThat(outcome.err).contains("status");
+    }
 }

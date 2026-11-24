@@ -152,6 +152,10 @@ public final class LoadCli {
         }
         com.google.gson.JsonObject json = com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(input))
                 .getAsJsonObject();
+        if (!json.has("status") || !json.get("status").getAsString().equals("OK")) {
+            err.println("설정 오류: 측정 결과가 아닌 파일이다(--plan 출력 등). status=" + json.get("status"));
+            return 2;
+        }
         out.print(TableReport.markdown(json));
         return 0;
     }

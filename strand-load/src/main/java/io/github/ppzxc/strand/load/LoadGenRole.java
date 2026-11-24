@@ -58,6 +58,9 @@ final class LoadGenRole {
     private final AtomicBoolean stopped = new AtomicBoolean();
     private final AtomicLong sent = new AtomicLong();
     private final AtomicLong responded = new AtomicLong();
+    /** 측정 구간 안에 완료된 정상 응답 수. 처리량은 이것으로 계산해 드레인 구간 완료분이 섞이지 않게 한다. */
+    private final AtomicLong respondedInWindow = new AtomicLong();
+
     private final AtomicLong errors = new AtomicLong();
     private final AtomicLong unknown = new AtomicLong();
     private final AtomicLong outstanding = new AtomicLong();
@@ -121,6 +124,7 @@ final class LoadGenRole {
         JsonObject result = new JsonObject();
         result.addProperty("requests", sent.get());
         result.addProperty("responses", responded.get());
+        result.addProperty("windowResponses", respondedInWindow.get());
         result.addProperty("errors", errors.get());
         result.addProperty("unknown", unknown.get());
         result.addProperty("measureNanos", measureNanos);
@@ -336,6 +340,9 @@ final class LoadGenRole {
         connection.request(echo).result().observe(result -> {
             long done = System.nanoTime();
             if (tag == MEASURE && classify(result)) {
+                if (phase == MEASURE) {
+                    respondedInWindow.incrementAndGet();
+                }
                 latency.recordValue(Math.max(0, (done - intended) / 1_000));
             }
             boolean failed = result.certainty() != Certainty.RESPONSE || result.status() != Status.OK;
