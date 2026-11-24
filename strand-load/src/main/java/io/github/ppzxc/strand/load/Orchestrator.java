@@ -44,7 +44,27 @@ final class Orchestrator {
         this.out = out;
     }
 
+    private Path keystoreDir;
+    private String keystorePath = "";
+
     void run() throws RunFailed, IOException, InterruptedException {
+        try {
+            if (config.tls) {
+                keystoreDir = Files.createTempDirectory("strand-load-tls");
+                keystorePath = LoadTls.createKeystore(keystoreDir).toString();
+            }
+            runAll();
+        } finally {
+            if (keystoreDir != null) {
+                try (var files = Files.walk(keystoreDir)) {
+                    files.sorted(java.util.Comparator.reverseOrder())
+                            .forEach(p -> p.toFile().delete());
+                }
+            }
+        }
+    }
+
+    private void runAll() throws RunFailed, IOException, InterruptedException {
         double rate = config.rate;
         Double saturation = null;
         if (config.openLoop && config.rateFraction > 0) {
@@ -69,7 +89,7 @@ final class Orchestrator {
         Process server = null;
         Process loadgen = null;
         try {
-            List<String> args = config.childArgs(rate, closedOverride);
+            List<String> args = config.childArgs(rate, closedOverride, keystorePath);
             server = start(List.of("server"), args);
             StderrCapture serverErr = new StderrCapture(server.getErrorStream());
             int port = awaitReady(server, serverErr);
@@ -104,6 +124,9 @@ final class Orchestrator {
         measurement.add("latencyBasis", raw.get("latencyBasis"));
         measurement.add("sendLagP99Micros", raw.get("sendLagP99Micros"));
         measurement.add("loadgenBottleneck", raw.get("loadgenBottleneck"));
+        if (raw.has("tls")) {
+            measurement.add("negotiatedTls", raw.get("tls"));
+        }
         JsonObject processes = new JsonObject();
         processes.addProperty("server", serverPid);
         processes.addProperty("loadgen", loadgenPid);
@@ -116,6 +139,9 @@ final class Orchestrator {
     private Process start(List<String> role, List<String> args) throws IOException {
         List<String> command = new ArrayList<>();
         command.add(Paths.get(System.getProperty("java.home"), "bin", "java").toString());
+        if (config.tls) {
+            command.addAll(LoadTls.jvmOptions());
+        }
         command.add("-cp");
         command.add(System.getProperty("java.class.path"));
         command.add(LoadCli.class.getName());
@@ -195,7 +221,17 @@ final class Orchestrator {
         if ("netty".equals(this.config.transport)) {
             config.addProperty("nettyEventLoops", ServerRole.NETTY_EVENT_LOOPS);
         }
-        config.addProperty("tls", false);
+        config.addProperty("tls", this.config.tls);
+        if (this.config.tls) {
+            JsonObject policy = new JsonObject();
+            policy.addProperty("protocol", LoadTls.PROTOCOL);
+            policy.addProperty("cipherSuite", LoadTls.CIPHER_SUITE);
+            policy.addProperty("provider", "JDK default");
+            config.add("tlsPolicy", policy);
+        } else {
+            // 평문은 하네스 한정 대조군이다. 순수 전송 오버헤드를 분리하는 데만 쓰며 제품 설정으로 노출되지 않는다.
+            config.addProperty("plaintextControl", true);
+        }
         config.addProperty("connections", this.config.connections);
         config.addProperty("bodyBytes", this.config.bodyBytes);
         config.addProperty("inflight", this.config.effectiveInflight());

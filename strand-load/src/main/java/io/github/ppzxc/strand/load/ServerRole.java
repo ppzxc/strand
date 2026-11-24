@@ -76,9 +76,11 @@ final class ServerRole {
         private final io.github.ppzxc.strand.nio.NioStrandServer server;
         private io.github.ppzxc.strand.nio.Listener listener;
 
-        NioBackend(RunConfig config, ExecutorService executor) {
-            io.github.ppzxc.strand.nio.NioSecurity security =
-                    io.github.ppzxc.strand.nio.NioSecurity.externallySecured();
+        NioBackend(RunConfig config, ExecutorService executor) throws Exception {
+            io.github.ppzxc.strand.nio.NioSecurity security = config.tls
+                    ? io.github.ppzxc.strand.nio.NioSecurity.tls(
+                            LoadTls.serverContext(java.nio.file.Paths.get(config.keystore)))
+                    : io.github.ppzxc.strand.nio.NioSecurity.externallySecured();
             MinimumProgressSpace space = io.github.ppzxc.strand.nio.NioMinimumProgress.of(
                     security,
                     LoadSupport.maxFrameSize(config.bodyBytes),
@@ -127,9 +129,11 @@ final class ServerRole {
         private final io.github.ppzxc.strand.netty.NettyStrandServer server;
         private io.github.ppzxc.strand.netty.Listener listener;
 
-        NettyBackend(RunConfig config, ExecutorService executor) {
-            io.github.ppzxc.strand.netty.NettySecurity security =
-                    io.github.ppzxc.strand.netty.NettySecurity.externallySecured();
+        NettyBackend(RunConfig config, ExecutorService executor) throws Exception {
+            io.github.ppzxc.strand.netty.NettySecurity security = config.tls
+                    ? io.github.ppzxc.strand.netty.NettySecurity.tls(
+                            LoadTls.serverContext(java.nio.file.Paths.get(config.keystore)))
+                    : io.github.ppzxc.strand.netty.NettySecurity.externallySecured();
             MinimumProgressSpace space = io.github.ppzxc.strand.netty.NettyMinimumProgress.of(
                     security,
                     LoadSupport.maxFrameSize(config.bodyBytes),

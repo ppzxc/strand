@@ -46,7 +46,8 @@ final class LoadSupport {
         long bodyBudget = requests * (bodyBytes + 1024L) * 2;
         long preparationBytes = 1 << 16;
         long observations = Math.max(64, 2L * inflight);
-        long owners = connections;
+        // 연결 수보다 하나 더: 시작 전 TLS 협상 확인용 연결이 닫히는 동안 한도에 걸리지 않게 한다.
+        long owners = connections + 1L;
         return ResourceLimits.builder()
                 .perConnection(ConnectionLimits.builder()
                         .outgoingRequests(requests, bodyBudget)

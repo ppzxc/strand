@@ -34,6 +34,11 @@ final class RunConfig {
     final double rateFraction;
 
     final int repetitions;
+    /** 켠 상태가 주 비교다. {@code --plaintext}는 하네스 한정 대조군이며 제품 설정으로 노출되지 않는다. */
+    final boolean tls;
+    /** 자식 프로세스 전용: 진행자가 만든 키 저장소 경로. */
+    final String keystore;
+
     final Duration serverDelay; // 하네스 자체 시험용: 서버가 응답을 이만큼 미룬다.
     final String output; // null이면 표준 출력
     final Duration chaosKillServerAfter; // null이면 사용하지 않는다(하네스 자체 시험용)
@@ -84,6 +89,11 @@ final class RunConfig {
         this.repetitions = positiveInt(options, "--repetitions", 3);
         String delay = options.get("--server-delay");
         this.serverDelay = delay == null ? Duration.ZERO : parseDuration("--server-delay", delay, true);
+        this.tls = !options.containsKey("--plaintext");
+        this.keystore = options.get("--keystore");
+        if (tls && keystore == null && options.containsKey("--child")) {
+            throw new Invalid("자식 프로세스에 --keystore가 없다");
+        }
         this.output = options.get("--output");
         String chaos = options.get("--chaos-kill-server-after");
         this.chaosKillServerAfter = chaos == null ? null : parseDuration("--chaos-kill-server-after", chaos, false);
@@ -103,18 +113,26 @@ final class RunConfig {
                 "--load-model",
                 "--rate",
                 "--repetitions",
-                "--server-delay");
+                "--server-delay",
+                "--plaintext",
+                "--keystore",
+                "--child");
         Map<String, String> options = new HashMap<>();
-        for (int i = 0; i < args.size(); i += 2) {
+        Set<String> flags = Set.of("--plaintext", "--child");
+        for (int i = 0; i < args.size(); i++) {
             String name = args.get(i);
             if (!known.contains(name)) {
                 throw new Invalid(
                         "모르는 옵션 " + name + ". 지원: " + known.stream().sorted().toList());
             }
+            if (flags.contains(name)) {
+                options.put(name, "true");
+                continue;
+            }
             if (i + 1 >= args.size()) {
                 throw new Invalid(name + " 값이 없다");
             }
-            options.put(name, args.get(i + 1));
+            options.put(name, args.get(++i));
         }
         return new RunConfig(options);
     }
@@ -179,7 +197,7 @@ final class RunConfig {
      * @param resolvedRate 개방형이면 요청/초, 폐쇄형이면 무시
      * @param closedOverride true면 설정과 무관하게 폐쇄형으로 돌린다(포화 처리량 측정용)
      */
-    List<String> childArgs(double resolvedRate, boolean closedOverride) {
+    List<String> childArgs(double resolvedRate, boolean closedOverride, String keystorePath) {
         List<String> args = new ArrayList<>(Arrays.asList(
                 "--transport",
                 transport,
@@ -195,6 +213,12 @@ final class RunConfig {
                 measure.toMillis() + "ms",
                 "--server-delay",
                 serverDelay.toMillis() + "ms"));
+        args.add("--child");
+        if (tls) {
+            args.addAll(List.of("--keystore", keystorePath));
+        } else {
+            args.add("--plaintext");
+        }
         if (openLoop && !closedOverride) {
             args.addAll(List.of("--load-model", "open", "--rate", Double.toString(resolvedRate)));
         }

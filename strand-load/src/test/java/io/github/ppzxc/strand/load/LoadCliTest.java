@@ -25,7 +25,24 @@ class LoadCliTest {
         String err;
     }
 
+    /** TLS와 무관한 시험은 빠르게 평문 대조군으로 돈다. TLS 시험은 {@link #runTls}를 쓴다. */
     private Outcome run(String... args) {
+        java.util.List<String> all = new java.util.ArrayList<>(java.util.Arrays.asList(args));
+        if (!all.contains("--tls-on")) {
+            all.add("--plaintext");
+        } else {
+            all.remove("--tls-on");
+        }
+        return execute(all.toArray(new String[0]));
+    }
+
+    private Outcome runTls(String... args) {
+        java.util.List<String> all = new java.util.ArrayList<>(java.util.Arrays.asList(args));
+        all.add("--tls-on");
+        return run(all.toArray(new String[0]));
+    }
+
+    private Outcome execute(String... args) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         Outcome outcome = new Outcome();
@@ -285,5 +302,52 @@ class LoadCliTest {
 
         assertThat(outcome.exit).isEqualTo(2);
         assertThat(outcome.err).contains("--rate");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"nio", "netty"})
+    void tlsSmokeRunEndsWithoutErrorsAndRecordsTheNegotiatedParameters(String transport) throws Exception {
+        Path result = dir.resolve("tls-" + transport + ".json");
+
+        Outcome outcome = runTls(
+                "run",
+                "--transport",
+                transport,
+                "--warmup",
+                "300ms",
+                "--measure",
+                "1s",
+                "--repetitions",
+                "1",
+                "--output",
+                result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        JsonObject json = readResult(result);
+        JsonObject config = json.getAsJsonObject("metadata").getAsJsonObject("config");
+        assertThat(config.get("tls").getAsBoolean()).isTrue();
+        JsonObject measurement = firstRun(json).getAsJsonObject("measurement");
+        assertThat(measurement.get("errors").getAsLong()).isZero();
+        assertThat(measurement.get("responses").getAsLong())
+                .isEqualTo(measurement.get("requests").getAsLong());
+        // 두 전송 모두 같은 TLS 1.3과 같은 암호 스위트로 협상되어야 한다.
+        JsonObject negotiated = measurement.getAsJsonObject("negotiatedTls");
+        assertThat(negotiated.get("protocol").getAsString()).isEqualTo("TLSv1.3");
+        assertThat(negotiated.get("cipherSuite").getAsString()).isEqualTo("TLS_AES_128_GCM_SHA256");
+    }
+
+    @Test
+    void plaintextIsMarkedAsAHarnessOnlyControl() throws Exception {
+        Path result = dir.resolve("plain.json");
+
+        Outcome outcome = run(
+                "run", "--warmup", "100ms", "--measure", "500ms", "--repetitions", "1", "--output", result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        JsonObject config = readResult(result).getAsJsonObject("metadata").getAsJsonObject("config");
+        assertThat(config.get("tls").getAsBoolean()).isFalse();
+        assertThat(config.get("plaintextControl").getAsBoolean()).isTrue();
+        assertThat(firstRun(readResult(result)).getAsJsonObject("measurement").has("negotiatedTls"))
+                .isFalse();
     }
 }

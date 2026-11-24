@@ -72,7 +72,9 @@ final class LoadGenRole {
     }
 
     private int execute(int port, PrintStream out) throws Exception {
-        NioSecurity security = NioSecurity.externallySecured();
+        javax.net.ssl.SSLContext tlsContext =
+                config.tls ? LoadTls.clientContext(java.nio.file.Paths.get(config.keystore)) : null;
+        NioSecurity security = config.tls ? NioSecurity.tls(tlsContext) : NioSecurity.externallySecured();
         MinimumProgressSpace space = NioMinimumProgress.of(
                 security,
                 LoadSupport.maxFrameSize(config.bodyBytes),
@@ -94,6 +96,7 @@ final class LoadGenRole {
                 .handler(request -> request.respond(Status.OK, new byte[0]))
                 .build();
         InetSocketAddress address = new InetSocketAddress(InetAddress.getLoopbackAddress(), port);
+        JsonObject negotiated = config.tls ? probeTls(tlsContext, address) : null;
         List<NioStrandConnection> connections = new ArrayList<>();
         for (int i = 0; i < config.connections; i++) {
             NioStrandConnection connection = client.connectAttempt(address)
@@ -112,6 +115,9 @@ final class LoadGenRole {
         result.addProperty("errors", errors.get());
         result.addProperty("unknown", unknown.get());
         result.addProperty("measureNanos", measureNanos);
+        if (negotiated != null) {
+            result.add("tls", negotiated);
+        }
         JsonObject latencyMicros = new JsonObject();
         latencyMicros.addProperty("p50", latency.getValueAtPercentile(50.0));
         latencyMicros.addProperty("p99", latency.getValueAtPercentile(99.0));
@@ -133,6 +139,26 @@ final class LoadGenRole {
         client.shutdown().toCompletableFuture().get(LoadSupport.WAIT_SECONDS, TimeUnit.SECONDS);
         executor.shutdownNow();
         return 0;
+    }
+
+    /**
+     * 실제 부하 전에 서버와 TLS 핸드셰이크만 한 번 해 협상된 프로토콜 버전과 암호 스위트를 기록한다. 결과를 전송 사이에 견주어 TLS 조건이 같았는지 확인한다.
+     */
+    private static JsonObject probeTls(javax.net.ssl.SSLContext context, InetSocketAddress address) throws Exception {
+        try (javax.net.ssl.SSLSocket socket = (javax.net.ssl.SSLSocket)
+                context.getSocketFactory().createSocket(address.getAddress(), address.getPort())) {
+            javax.net.ssl.SSLParameters parameters = socket.getSSLParameters();
+            parameters.setApplicationProtocols(new String[] {LoadTls.ALPN});
+            socket.setSSLParameters(parameters);
+            socket.setSoTimeout((int) TimeUnit.SECONDS.toMillis(LoadSupport.WAIT_SECONDS));
+            socket.startHandshake();
+            javax.net.ssl.SSLSession session = socket.getSession();
+            JsonObject tls = new JsonObject();
+            tls.addProperty("protocol", session.getProtocol());
+            tls.addProperty("cipherSuite", session.getCipherSuite());
+            tls.addProperty("alpn", socket.getApplicationProtocol());
+            return tls;
+        }
     }
 
     private long runClosed(List<NioStrandConnection> connections) throws InterruptedException {
