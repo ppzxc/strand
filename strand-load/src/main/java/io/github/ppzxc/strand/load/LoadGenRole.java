@@ -59,6 +59,9 @@ final class LoadGenRole {
     /** 예정보다 이만큼 뒤처지면 더 이상 일정을 지킬 수 없다고 보고 도착을 멈춘다. */
     private static final long GIVE_UP_LAG_NANOS = 1_000_000_000L;
 
+    private PrintStream control;
+    private JsonObject resourceStart;
+    private JsonObject resourceEnd;
     private volatile int phase = WARMUP;
     private boolean gaveUp;
 
@@ -68,7 +71,9 @@ final class LoadGenRole {
     }
 
     static int run(RunConfig config, int port, PrintStream out) throws Exception {
-        return new LoadGenRole(config).execute(port, out);
+        LoadGenRole role = new LoadGenRole(config);
+        role.control = out;
+        return role.execute(port, out);
     }
 
     private int execute(int port, PrintStream out) throws Exception {
@@ -108,6 +113,7 @@ final class LoadGenRole {
         }
 
         long measureNanos = config.openLoop ? runOpen(connections) : runClosed(connections);
+        JsonObject resources = ResourceSampler.delta(resourceStart, resourceEnd);
 
         JsonObject result = new JsonObject();
         result.addProperty("requests", sent.get());
@@ -115,6 +121,7 @@ final class LoadGenRole {
         result.addProperty("errors", errors.get());
         result.addProperty("unknown", unknown.get());
         result.addProperty("measureNanos", measureNanos);
+        result.add("resources", resources);
         if (negotiated != null) {
             result.add("tls", negotiated);
         }
@@ -161,17 +168,32 @@ final class LoadGenRole {
         }
     }
 
-    private long runClosed(List<NioStrandConnection> connections) throws InterruptedException {
+    /** 측정 구간 경계에서 자원 표본을 뜨고 진행자에게 알린다. 진행자는 이 줄을 보고 서버의 표본을 뜬다. */
+    private void markMeasureStart() throws java.io.IOException {
+        resourceStart = ResourceSampler.sample();
+        control.println("PHASE MEASURE_START");
+        control.flush();
+    }
+
+    private void markMeasureEnd() throws java.io.IOException {
+        resourceEnd = ResourceSampler.sample();
+        control.println("PHASE MEASURE_END");
+        control.flush();
+    }
+
+    private long runClosed(List<NioStrandConnection> connections) throws Exception {
         for (NioStrandConnection connection : connections) {
             for (int i = 0; i < config.inflight; i++) {
                 send(connection, System.nanoTime());
             }
         }
         sleep(config.warmup);
+        markMeasureStart();
         long measureStart = System.nanoTime();
         phase = MEASURE;
         sleep(config.measure);
         long measureNanos = System.nanoTime() - measureStart;
+        markMeasureEnd();
         phase = DRAIN;
         stopped.set(true);
         drain();
@@ -179,7 +201,7 @@ final class LoadGenRole {
     }
 
     /** 고정 도착률로 예정 시각마다 연결을 돌아가며 보낸다. 늦어도 건너뛰지 않고 바로 보내 밀린 만큼 지연에 드러나게 한다. */
-    private long runOpen(List<NioStrandConnection> connections) throws InterruptedException {
+    private long runOpen(List<NioStrandConnection> connections) throws Exception {
         double intervalNanos = 1e9 / config.rate;
         long start = System.nanoTime();
         long warmupEnd = start + config.warmup.toNanos();
@@ -204,9 +226,17 @@ final class LoadGenRole {
                     Thread.onSpinWait();
                 }
             }
-            phase = intended < warmupEnd ? WARMUP : MEASURE;
+            int next = intended < warmupEnd ? WARMUP : MEASURE;
+            if (next == MEASURE && phase != MEASURE) {
+                markMeasureStart();
+            }
+            phase = next;
             send(connections.get((int) (i % connections.size())), intended);
         }
+        if (resourceStart == null) {
+            markMeasureStart();
+        }
+        markMeasureEnd();
         phase = DRAIN;
         stopped.set(true);
         drain();

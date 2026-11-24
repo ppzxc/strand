@@ -40,6 +40,12 @@ final class RunConfig {
     final boolean tls;
     /** 자식 프로세스 전용: 진행자가 만든 키 저장소 경로. */
     final String keystore;
+    /** JFR 기록을 켠다. 기록은 {@link #profileDir}에 프로세스별로 남는다. */
+    final boolean jfr;
+    /** async-profiler 네이티브 라이브러리 경로. null이면 쓰지 않는다(선택 사항). */
+    final String asyncProfiler;
+
+    final String profileDir;
 
     final Duration serverDelay; // 하네스 자체 시험용: 서버가 응답을 이만큼 미룬다.
     final String output; // null이면 표준 출력
@@ -109,6 +115,20 @@ final class RunConfig {
         if (tls && keystore == null && options.containsKey("--child")) {
             throw new Invalid("자식 프로세스에 --keystore가 없다");
         }
+        this.jfr = options.containsKey("--jfr");
+        this.asyncProfiler = options.get("--async-profiler");
+        this.profileDir = options.getOrDefault("--profile-dir", "strand-load-profiles");
+        if (jfr && ModuleLayer.boot().findModule("jdk.jfr").isEmpty()) {
+            throw new Invalid("--jfr: 이 JVM에는 JFR(jdk.jfr 모듈)이 없다. JFR이 있는 JDK로 실행한다");
+        }
+        if (asyncProfiler != null && !java.nio.file.Files.isRegularFile(java.nio.file.Paths.get(asyncProfiler))) {
+            throw new Invalid("--async-profiler 라이브러리를 찾을 수 없다: " + asyncProfiler
+                    + " (async-profiler는 선택 사항이다. 받은 libasyncProfiler 경로를 주거나 옵션을 뺀다)");
+        }
+        String unavailable = ResourceSampler.unavailableReason();
+        if (unavailable != null) {
+            throw new Invalid(unavailable);
+        }
         this.output = options.get("--output");
         String chaos = options.get("--chaos-kill-server-after");
         this.chaosKillServerAfter = chaos == null ? null : parseDuration("--chaos-kill-server-after", chaos, false);
@@ -130,11 +150,14 @@ final class RunConfig {
                 "--repetitions",
                 "--server-delay",
                 "--saturation",
+                "--jfr",
+                "--profile-dir",
+                "--async-profiler",
                 "--plaintext",
                 "--keystore",
                 "--child");
         Map<String, String> options = new HashMap<>();
-        Set<String> flags = Set.of("--plaintext", "--child");
+        Set<String> flags = Set.of("--plaintext", "--child", "--jfr");
         for (int i = 0; i < args.size(); i++) {
             String name = args.get(i);
             if (!known.contains(name)) {

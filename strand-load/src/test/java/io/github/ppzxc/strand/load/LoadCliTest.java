@@ -463,4 +463,76 @@ class LoadCliTest {
         assertThat(outcome.exit).isEqualTo(2);
         assertThat(outcome.err).contains("absent.json");
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"nio", "netty"})
+    void resultCarriesResourceUsageNextToThroughput(String transport) throws Exception {
+        Path result = dir.resolve("resources.json");
+
+        Outcome outcome = run(
+                "run",
+                "--transport",
+                transport,
+                "--warmup",
+                "300ms",
+                "--measure",
+                "1500ms",
+                "--repetitions",
+                "1",
+                "--output",
+                result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        JsonObject measurement = firstRun(readResult(result)).getAsJsonObject("measurement");
+        assertThat(measurement.get("throughputPerSecond").getAsDouble()).isPositive();
+        JsonObject resources = measurement.getAsJsonObject("resources");
+        for (String role : new String[] {"server", "loadgen"}) {
+            JsonObject r = resources.getAsJsonObject(role);
+            assertThat(r.get("cpuSeconds").getAsDouble()).as(role + " cpu").isPositive();
+            assertThat(r.get("cpuCores").getAsDouble()).isPositive();
+            assertThat(r.get("rssBytes").getAsLong()).as(role + " rss").isPositive();
+            assertThat(r.get("threads").getAsInt()).isPositive();
+            assertThat(r.get("heapUsedBytes").getAsLong()).isPositive();
+            assertThat(r.get("gcCount").getAsLong()).isGreaterThanOrEqualTo(0);
+            assertThat(r.get("gcTimeMillis").getAsLong()).isGreaterThanOrEqualTo(0);
+            assertThat(r.get("allocatedBytes").getAsLong()).as(role + " alloc").isPositive();
+        }
+    }
+
+    @Test
+    void jfrOptionRecordsBothProcesses() throws Exception {
+        Path result = dir.resolve("jfr.json");
+        Path profiles = dir.resolve("profiles");
+
+        Outcome outcome = run(
+                "run",
+                "--warmup",
+                "200ms",
+                "--measure",
+                "800ms",
+                "--repetitions",
+                "1",
+                "--jfr",
+                "--profile-dir",
+                profiles.toString(),
+                "--output",
+                result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        try (var files = Files.list(profiles)) {
+            java.util.List<String> names =
+                    files.map(p -> p.getFileName().toString()).toList();
+            assertThat(names).anyMatch(n -> n.startsWith("server-") && n.endsWith(".jfr"));
+            assertThat(names).anyMatch(n -> n.startsWith("loadgen-") && n.endsWith(".jfr"));
+        }
+    }
+
+    @Test
+    void missingAsyncProfilerLibraryFailsWithAClearMessage() {
+        Outcome outcome = run(
+                "run", "--async-profiler", dir.resolve("libasyncProfiler.so").toString());
+
+        assertThat(outcome.exit).isEqualTo(2);
+        assertThat(outcome.err).contains("--async-profiler").contains("libasyncProfiler.so");
+    }
 }

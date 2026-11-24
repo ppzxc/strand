@@ -71,6 +71,9 @@ final class Orchestrator {
                     keystorePath = LoadTls.createKeystore(keystoreDir).toString();
                 }
             }
+            if (config.jfr || config.asyncProfiler != null) {
+                Files.createDirectories(Paths.get(config.profileDir));
+            }
             return runAll();
         } finally {
             if (keystoreDir != null) {
@@ -115,7 +118,8 @@ final class Orchestrator {
             List<String> args = config.childArgs(rate, closedOverride, keystorePath);
             server = start(List.of("server"), args);
             StderrCapture serverErr = new StderrCapture(server.getErrorStream());
-            int port = awaitReady(server, serverErr);
+            Lines serverLines = new Lines(server.getInputStream());
+            int port = awaitReady(server, serverLines, serverErr);
 
             if (config.chaosKillServerAfter != null) {
                 scheduleKill(server, config.chaosKillServerAfter);
@@ -125,15 +129,20 @@ final class Orchestrator {
             loadgenArgs.addAll(List.of("--port", String.valueOf(port)));
             loadgen = start(List.of("loadgen"), loadgenArgs);
             StderrCapture loadgenErr = new StderrCapture(loadgen.getErrorStream());
-            String resultLine = awaitLoadGen(loadgen, loadgenErr, server, serverErr);
-            return runJson(JsonParser.parseString(resultLine).getAsJsonObject(), server.pid(), loadgen.pid());
+            Lines loadgenLines = new Lines(loadgen.getInputStream());
+            LoadGenOutcome outcome = awaitLoadGen(loadgen, loadgenLines, loadgenErr, server, serverLines, serverErr);
+            return runJson(
+                    JsonParser.parseString(outcome.resultLine).getAsJsonObject(),
+                    outcome.serverResources,
+                    server.pid(),
+                    loadgen.pid());
         } finally {
             terminate(loadgen);
             terminate(server);
         }
     }
 
-    private static JsonObject runJson(JsonObject raw, long serverPid, long loadgenPid) {
+    private static JsonObject runJson(JsonObject raw, JsonObject serverResources, long serverPid, long loadgenPid) {
         double seconds = raw.get("measureNanos").getAsLong() / 1e9;
         long responses = raw.get("responses").getAsLong();
         JsonObject measurement = new JsonObject();
@@ -150,6 +159,10 @@ final class Orchestrator {
         if (raw.has("tls")) {
             measurement.add("negotiatedTls", raw.get("tls"));
         }
+        JsonObject resources = new JsonObject();
+        resources.add("server", serverResources);
+        resources.add("loadgen", raw.get("resources"));
+        measurement.add("resources", resources);
         JsonObject processes = new JsonObject();
         processes.addProperty("server", serverPid);
         processes.addProperty("loadgen", loadgenPid);
@@ -165,6 +178,17 @@ final class Orchestrator {
         if (config.tls) {
             command.addAll(LoadTls.jvmOptions());
         }
+        String roleName = role.get(0);
+        if (config.jfr) {
+            // JFR 시작 안내가 표준 출력을 어지럽히지 않게 JVM 로그는 끈다.
+            command.add("-Xlog:disable");
+            command.add("-XX:StartFlightRecording=filename=" + Paths.get(config.profileDir, roleName + "-%p.jfr")
+                    + ",dumponexit=true,settings=profile");
+        }
+        if (config.asyncProfiler != null) {
+            command.add("-agentpath:" + config.asyncProfiler + "=start,event=cpu,file="
+                    + Paths.get(config.profileDir, roleName + "-%p.html"));
+        }
         command.add("-cp");
         command.add(System.getProperty("java.class.path"));
         command.add(LoadCli.class.getName());
@@ -175,65 +199,131 @@ final class Orchestrator {
                 .start();
     }
 
-    private int awaitReady(Process server, StderrCapture serverErr) throws RunFailed, IOException {
-        BufferedReader reader =
-                new BufferedReader(new InputStreamReader(server.getInputStream(), StandardCharsets.UTF_8));
+    private int awaitReady(Process server, Lines serverLines, StderrCapture serverErr)
+            throws RunFailed, InterruptedException {
         long limit = System.nanoTime() + STARTUP_LIMIT.toNanos();
         while (System.nanoTime() < limit) {
-            if (reader.ready()) {
-                String line = reader.readLine();
-                if (line == null) {
-                    break;
-                }
-                if (line.startsWith("READY ")) {
-                    return Integer.parseInt(line.substring("READY ".length()).trim());
-                }
-            } else if (!server.isAlive()) {
+            String line = serverLines.poll(100);
+            if (line == null) {
+                continue;
+            }
+            if (line.equals(Lines.EOF)) {
                 break;
-            } else {
-                sleepQuietly();
+            }
+            if (line.startsWith("READY ")) {
+                return Integer.parseInt(line.substring("READY ".length()).trim());
             }
         }
         throw new RunFailed("서버 프로세스가 준비되지 않았다(종료 코드 " + exitCode(server) + "): " + serverErr.text());
     }
 
-    private String awaitLoadGen(Process loadgen, StderrCapture loadgenErr, Process server, StderrCapture serverErr)
-            throws RunFailed, IOException {
+    private static final class LoadGenOutcome {
+        String resultLine;
+        JsonObject serverResources;
+    }
+
+    /**
+     * 부하 생성기의 출력을 읽는다. {@code PHASE MEASURE_START/END} 줄이 오면 서버에 표본을 요청해 같은 구간의 서버 자원 사용을 얻고, 마지막 JSON 줄이 부하 생성기의 결과다.
+     */
+    private LoadGenOutcome awaitLoadGen(
+            Process loadgen,
+            Lines loadgenLines,
+            StderrCapture loadgenErr,
+            Process server,
+            Lines serverLines,
+            StderrCapture serverErr)
+            throws RunFailed, IOException, InterruptedException {
         long limit = System.nanoTime()
                 + config.warmup
                         .plus(config.measure)
                         .plus(Duration.ofSeconds(120))
                         .toNanos();
-        ByteArrayOutputStream collected = new ByteArrayOutputStream();
-        InputStream in = loadgen.getInputStream();
-        byte[] buffer = new byte[4096];
+        JsonObject serverStart = null;
+        JsonObject serverEnd = null;
+        String resultLine = null;
         while (System.nanoTime() < limit) {
-            while (in.available() > 0) {
-                int n = in.read(buffer);
-                if (n < 0) {
-                    break;
-                }
-                collected.write(buffer, 0, n);
-            }
+            String line = loadgenLines.poll(50);
             if (!server.isAlive()) {
                 throw new RunFailed("서버 프로세스가 비정상 종료했다(종료 코드 " + exitCode(server) + "): " + serverErr.text());
             }
-            if (!loadgen.isAlive()) {
-                in.transferTo(collected);
-                if (loadgen.exitValue() != 0) {
-                    throw new RunFailed(
-                            "부하 생성기 프로세스가 비정상 종료했다(종료 코드 " + loadgen.exitValue() + "): " + loadgenErr.text());
+            if (line == null) {
+                continue;
+            }
+            if (line.equals(Lines.EOF)) {
+                loadgen.waitFor(10, TimeUnit.SECONDS);
+                if (loadgen.isAlive() || loadgen.exitValue() != 0) {
+                    throw new RunFailed("부하 생성기 프로세스가 비정상 종료했다(종료 코드 " + exitCode(loadgen) + "): " + loadgenErr.text());
                 }
-                String text = collected.toString(StandardCharsets.UTF_8).strip();
-                String[] lines = text.split("\\R");
-                if (text.isEmpty()) {
+                if (resultLine == null || serverStart == null || serverEnd == null) {
                     throw new RunFailed("부하 생성기가 결과를 내지 않았다: " + loadgenErr.text());
                 }
-                return lines[lines.length - 1];
+                LoadGenOutcome outcome = new LoadGenOutcome();
+                outcome.resultLine = resultLine;
+                outcome.serverResources = ResourceSampler.delta(serverStart, serverEnd);
+                return outcome;
             }
-            sleepQuietly();
+            if (line.equals("PHASE MEASURE_START")) {
+                serverStart = sampleServer(server, serverLines, serverErr);
+            } else if (line.equals("PHASE MEASURE_END")) {
+                serverEnd = sampleServer(server, serverLines, serverErr);
+            } else if (line.startsWith("{")) {
+                resultLine = line;
+            }
         }
         throw new RunFailed("부하 생성기가 제한 시간 안에 끝나지 않았다");
+    }
+
+    private JsonObject sampleServer(Process server, Lines serverLines, StderrCapture serverErr)
+            throws RunFailed, InterruptedException {
+        try {
+            server.getOutputStream().write("SAMPLE\n".getBytes(StandardCharsets.UTF_8));
+            server.getOutputStream().flush();
+        } catch (IOException e) {
+            throw new RunFailed("서버 프로세스가 비정상 종료했다(종료 코드 " + exitCode(server) + "): " + serverErr.text());
+        }
+        long limit = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (System.nanoTime() < limit) {
+            String line = serverLines.poll(100);
+            if (line == null) {
+                continue;
+            }
+            if (line.equals(Lines.EOF)) {
+                break;
+            }
+            if (line.startsWith("SAMPLE ")) {
+                return JsonParser.parseString(line.substring("SAMPLE ".length()))
+                        .getAsJsonObject();
+            }
+        }
+        throw new RunFailed("서버 프로세스가 자원 표본에 답하지 않았다(종료 코드 " + exitCode(server) + "): " + serverErr.text());
+    }
+
+    /** 자식 프로세스의 표준 출력을 줄 단위로 모은다. 끝나면 {@link #EOF}를 넣는다. */
+    private static final class Lines {
+        static final String EOF = "\u0000EOF";
+        private final java.util.concurrent.BlockingQueue<String> queue =
+                new java.util.concurrent.LinkedBlockingQueue<>();
+
+        Lines(InputStream stream) {
+            Thread thread = new Thread(() -> {
+                try (BufferedReader reader =
+                        new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        queue.add(line);
+                    }
+                } catch (IOException ignored) {
+                    // 프로세스가 끝났다.
+                }
+                queue.add(EOF);
+            });
+            thread.setDaemon(true);
+            thread.start();
+        }
+
+        String poll(long millis) throws InterruptedException {
+            return queue.poll(millis, TimeUnit.MILLISECONDS);
+        }
     }
 
     private JsonObject buildResult(List<JsonObject> runs, Double saturation, double rate) {

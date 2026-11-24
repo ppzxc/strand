@@ -56,7 +56,7 @@ final class ServerRole {
             int port = backend.listen();
             out.println("READY " + port);
             out.flush();
-            awaitStdinClosed();
+            serveControl(out);
             backend.shutdown();
         } finally {
             executor.shutdownNow();
@@ -64,11 +64,18 @@ final class ServerRole {
         return 0;
     }
 
-    /** 하네스가 표준 입력을 닫거나 죽으면 서버도 끝난다. 고아 서버가 남지 않게 한다. */
-    private static void awaitStdinClosed() throws IOException {
-        byte[] buffer = new byte[64];
-        while (System.in.read(buffer) >= 0) {
-            // 입력은 무시한다.
+    /**
+     * 하네스가 표준 입력을 닫거나 죽으면 서버도 끝난다. 고아 서버가 남지 않게 한다. 입력 줄 {@code SAMPLE}에는 자원 표본 한 줄({@code SAMPLE <json>})로 답한다.
+     */
+    private static void serveControl(PrintStream out) throws IOException {
+        java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(System.in, java.nio.charset.StandardCharsets.UTF_8));
+        String line;
+        while ((line = reader.readLine()) != null) {
+            if (line.equals("SAMPLE")) {
+                out.println("SAMPLE " + ResourceSampler.sample());
+                out.flush();
+            }
         }
     }
 
