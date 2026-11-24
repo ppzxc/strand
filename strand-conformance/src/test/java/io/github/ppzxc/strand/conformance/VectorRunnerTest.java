@@ -483,7 +483,7 @@ class VectorRunnerTest {
                         "[" + CLOSE_NO_ERROR + "," + WEBSOCKET_CLOSE_1000 + "]",
                         "[{\"event\":\"closed\"}]"));
 
-        assertThatCode(() -> NettyVectorRunner.run(v)).doesNotThrowAnyException();
+        assertThatCode(() -> ExecutionPaths.NETTY.run(v)).doesNotThrowAnyException();
     }
 
     @Test
@@ -492,7 +492,7 @@ class VectorRunnerTest {
                 WEBSOCKET_ESTABLISHED,
                 step("close", CLOSE_STEP_NO_ERROR, "[" + CLOSE_NO_ERROR + "]", "[{\"event\":\"closed\"}]"));
 
-        assertThatThrownBy(() -> NettyVectorRunner.run(v)).isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> ExecutionPaths.NETTY.run(v)).isInstanceOf(AssertionError.class);
     }
 
     @Test
@@ -505,7 +505,7 @@ class VectorRunnerTest {
                         "[" + WEBSOCKET_CLOSE_1000 + "," + CLOSE_NO_ERROR + "]",
                         "[{\"event\":\"closed\"}]"));
 
-        assertThatThrownBy(() -> NettyVectorRunner.run(v)).isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> ExecutionPaths.NETTY.run(v)).isInstanceOf(AssertionError.class);
     }
 
     @Test
@@ -527,8 +527,8 @@ class VectorRunnerTest {
         ConformanceVector byteStream =
                 vector(ESTABLISHED, recv(PING, String.format(PING_ACK_SEND, "0102030405060708"), "[]"));
 
-        assertThat(NettyVectorRunner.unsupportedFeatures(byteStream)).containsExactly("setup.transport");
-        assertThat(NettyVectorRunner.evaluate(byteStream, "v").status()).isEqualTo(VectorOutcome.Status.UNSUPPORTED);
+        assertThat(ExecutionPaths.NETTY.unsupportedFeatures(byteStream)).containsExactly("setup.transport");
+        assertThat(ExecutionPaths.NETTY.evaluate(byteStream, "v").status()).isEqualTo(VectorOutcome.Status.UNSUPPORTED);
     }
 
     @Test
@@ -539,7 +539,7 @@ class VectorRunnerTest {
                         + "{\"type\":\"CLOSE\",\"error_code\":\"PROTOCOL_ERROR\",\"last_stream_id\":\"0\"}],"
                         + "\"events\":[{\"event\":\"closed\"}]}");
 
-        assertThatCode(() -> NettyVectorRunner.run(v)).doesNotThrowAnyException();
+        assertThatCode(() -> ExecutionPaths.NETTY.run(v)).doesNotThrowAnyException();
     }
 
     @Test

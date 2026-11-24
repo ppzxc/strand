@@ -2,6 +2,7 @@ package io.github.ppzxc.strand.conformance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.google.gson.JsonObject;
 import io.github.ppzxc.strand.core.internal.EndpointDriver;
 import io.github.ppzxc.strand.core.internal.Event;
 import io.github.ppzxc.strand.core.internal.OutboundMessage;
@@ -22,7 +23,9 @@ import io.netty.handler.codec.http.websocketx.WebSocketDecoderConfig;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.util.ReferenceCountUtil;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 적합성 {@code netty} 경로의 제품 통로. 제품 WebSocket 통로({@link WebSocketWire}: Netty의 WebSocket 13 코덱과 조각 집계기)를 {@link EmbeddedChannel}에 얹고,
@@ -31,8 +34,28 @@ import java.util.List;
  *
  * <p>종료 원인에 대응하는 Close 상태 코드는 제품 규칙({@link WebSocketStatus})이다. 벡터 형식 2는 1000만 관측하므로 그 밖의 상태는 비교에서 뺀다.
  */
-final class NettyPipeline {
+final class NettyMessageWireHarness implements Transmission {
     private static final int RECEIVE_LIMIT = 1 << 26;
+
+    /** netty 경로: {@code transport: websocket} 벡터만 실행하고 WebSocket Close까지 관측한다. */
+    static final VectorRunner.Medium MEDIUM = new VectorRunner.Medium() {
+        @Override
+        public List<String> unsupportedSetup(JsonObject setup) {
+            boolean webSocket = setup.has("transport")
+                    && VectorSchema.WEBSOCKET.equals(setup.get("transport").getAsString());
+            return webSocket ? Collections.<String>emptyList() : Collections.singletonList("setup.transport");
+        }
+
+        @Override
+        public boolean carriesFrame(JsonObject frame) {
+            return true;
+        }
+
+        @Override
+        public Transmission open(boolean client, boolean webSocket, int maxFrameSize) {
+            return new NettyMessageWireHarness(client, maxFrameSize);
+        }
+    };
 
     private final MessageWire wire;
     /** 상대가 엔드포인트에 보내는 프레임을 만든다: 상대가 클라이언트(엔드포인트가 서버)일 때만 마스킹한다. */
@@ -42,7 +65,7 @@ final class NettyPipeline {
 
     private final List<Integer> closeStatuses = new ArrayList<>();
 
-    NettyPipeline(boolean endpointIsClient, int maxMessageBytes) {
+    NettyMessageWireHarness(boolean endpointIsClient, int maxMessageBytes) {
         this.wire = WebSocketWire.established(endpointIsClient, maxMessageBytes);
         this.peerEncoder = new EmbeddedChannel(new WebSocket13FrameEncoder(!endpointIsClient));
         this.peerDecoder = new EmbeddedChannel(new WebSocket13FrameDecoder(WebSocketDecoderConfig.newBuilder()
@@ -51,6 +74,31 @@ final class NettyPipeline {
                 .maxFramePayloadLength(RECEIVE_LIMIT)
                 .closeOnProtocolViolation(false)
                 .build()));
+    }
+
+    @Override
+    public void deliver(EndpointDriver driver, byte[] bytes) {
+        inbound(driver, true, bytes);
+    }
+
+    @Override
+    public void apply(EndpointDriver driver, JsonObject step, Map<String, Long> requestTickets) {
+        if (StepKind.of(step).inbound() == StepKind.Inbound.MESSAGE) {
+            // 메시지 하나를 제품 통로에 프레임으로 넣는다. 통로가 core에 단위 입력 또는 "받았다" 신호로 넘긴다.
+            inbound(
+                    driver,
+                    step.get("opcode").getAsString().equals("binary"),
+                    Bytes.fromHex(step.get("hex").getAsString()));
+            return;
+        }
+        StepKind.of(step).execute(driver, step, requestTickets);
+    }
+
+    @Override
+    public List<String> observeAfter(List<Event> events) {
+        return closesNormally(events)
+                ? Collections.singletonList(FrameKind.webSocketClose(Protocol.NORMAL_CLOSURE))
+                : Collections.<String>emptyList();
     }
 
     /** 상대가 메시지 하나를 보낸다. 통로가 프레임을 풀어 core에 단위 입력으로, 바이트로 넘길 수 없는 입력은 "받았다" 신호로 넣는다. */
@@ -84,7 +132,8 @@ final class NettyPipeline {
     /**
      * 엔드포인트가 낸 메시지를 제품 통로로 보내고, 통로가 내보낸 바이트를 프레임으로 풀어 바이너리 메시지의 내용을 돌려준다. Close 프레임은 {@link #closeStatuses}에 쌓는다.
      */
-    List<byte[]> transmit(List<OutboundMessage> messages) {
+    @Override
+    public List<byte[]> transmit(List<OutboundMessage> messages) {
         try {
             for (OutboundMessage message : messages) {
                 wire.sendMessage(message.bytes());
