@@ -63,6 +63,8 @@ class LoadCliTest {
                 "500ms",
                 "--measure",
                 "1500ms",
+                "--repetitions",
+                "1",
                 "--output",
                 result.toString());
 
@@ -97,7 +99,8 @@ class LoadCliTest {
     void processesAreGoneAfterTheRun() throws Exception {
         Path result = dir.resolve("result.json");
 
-        Outcome outcome = run("run", "--warmup", "200ms", "--measure", "500ms", "--output", result.toString());
+        Outcome outcome = run(
+                "run", "--warmup", "200ms", "--measure", "500ms", "--repetitions", "1", "--output", result.toString());
 
         assertThat(outcome.exit).as(outcome.err).isZero();
         JsonObject processes = firstRun(readResult(result)).getAsJsonObject("processes");
