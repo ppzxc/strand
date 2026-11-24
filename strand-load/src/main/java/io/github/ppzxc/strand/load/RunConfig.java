@@ -34,6 +34,8 @@ final class RunConfig {
     final double rateFraction;
 
     final int repetitions;
+    /** 이미 잰 포화 처리량(요청/초). 0이면 없다. 행렬 실행이 같은 셀의 폐쇄형 결과를 개방형에 넘길 때 쓴다. */
+    final double saturation;
     /** 켠 상태가 주 비교다. {@code --plaintext}는 하네스 한정 대조군이며 제품 설정으로 노출되지 않는다. */
     final boolean tls;
     /** 자식 프로세스 전용: 진행자가 만든 키 저장소 경로. */
@@ -87,6 +89,19 @@ final class RunConfig {
         this.rate = parsedRate;
         this.rateFraction = parsedFraction;
         this.repetitions = positiveInt(options, "--repetitions", 3);
+        String sat = options.get("--saturation");
+        double parsedSaturation = 0;
+        if (sat != null) {
+            try {
+                parsedSaturation = Double.parseDouble(sat);
+            } catch (NumberFormatException e) {
+                throw new Invalid("--saturation은 숫자여야 한다: " + sat);
+            }
+            if (!(parsedSaturation > 0)) {
+                throw new Invalid("--saturation은 양수여야 한다: " + sat);
+            }
+        }
+        this.saturation = parsedSaturation;
         String delay = options.get("--server-delay");
         this.serverDelay = delay == null ? Duration.ZERO : parseDuration("--server-delay", delay, true);
         this.tls = !options.containsKey("--plaintext");
@@ -114,6 +129,7 @@ final class RunConfig {
                 "--rate",
                 "--repetitions",
                 "--server-delay",
+                "--saturation",
                 "--plaintext",
                 "--keystore",
                 "--child");

@@ -39,21 +39,39 @@ final class Orchestrator {
     private final RunConfig config;
     private final PrintStream out;
 
+    /** 행렬 실행이 한 번 만든 키 저장소를 여러 실행에 재사용할 때 쓴다. null이면 실행마다 만든다. */
+    private final String presetKeystore;
+
     Orchestrator(RunConfig config, PrintStream out) {
+        this(config, out, null);
+    }
+
+    Orchestrator(RunConfig config, PrintStream out, String presetKeystore) {
         this.config = config;
         this.out = out;
+        this.presetKeystore = presetKeystore;
     }
 
     private Path keystoreDir;
     private String keystorePath = "";
 
+    /** 측정하고 결과를 {@code --output}(없으면 표준 출력)에 쓴다. */
     void run() throws RunFailed, IOException, InterruptedException {
+        emit(execute());
+    }
+
+    /** 측정하고 결과 JSON을 돌려준다. 프로세스는 모두 정리한다. */
+    JsonObject execute() throws RunFailed, IOException, InterruptedException {
         try {
             if (config.tls) {
-                keystoreDir = Files.createTempDirectory("strand-load-tls");
-                keystorePath = LoadTls.createKeystore(keystoreDir).toString();
+                if (presetKeystore != null) {
+                    keystorePath = presetKeystore;
+                } else {
+                    keystoreDir = Files.createTempDirectory("strand-load-tls");
+                    keystorePath = LoadTls.createKeystore(keystoreDir).toString();
+                }
             }
-            runAll();
+            return runAll();
         } finally {
             if (keystoreDir != null) {
                 try (var files = Files.walk(keystoreDir)) {
@@ -64,23 +82,28 @@ final class Orchestrator {
         }
     }
 
-    private void runAll() throws RunFailed, IOException, InterruptedException {
+    private JsonObject runAll() throws RunFailed, IOException, InterruptedException {
         double rate = config.rate;
         Double saturation = null;
         if (config.openLoop && config.rateFraction > 0) {
-            // 포화 처리량은 같은 설정을 폐쇄형으로 한 번 돌려 얻는다. 도착률은 그 비율이다.
-            JsonObject saturationRun = runOnce(0, true);
-            saturation = saturationRun
-                    .getAsJsonObject("measurement")
-                    .get("throughputPerSecond")
-                    .getAsDouble();
+            if (config.saturation > 0) {
+                // 같은 셀에서 이미 잰 포화 처리량을 쓴다(행렬 실행).
+                saturation = config.saturation;
+            } else {
+                // 포화 처리량은 같은 설정을 폐쇄형으로 한 번 돌려 얻는다. 도착률은 그 비율이다.
+                JsonObject saturationRun = runOnce(0, true);
+                saturation = saturationRun
+                        .getAsJsonObject("measurement")
+                        .get("throughputPerSecond")
+                        .getAsDouble();
+            }
             rate = saturation * config.rateFraction;
         }
         List<JsonObject> runs = new ArrayList<>();
         for (int i = 0; i < config.repetitions; i++) {
             runs.add(runOnce(rate, false));
         }
-        writeResult(runs, saturation, rate);
+        return buildResult(runs, saturation, rate);
     }
 
     /** 서버와 부하 생성기를 새로 띄워 한 번 측정한다. 끝나면 두 프로세스를 정리한다. */
@@ -213,7 +236,7 @@ final class Orchestrator {
         throw new RunFailed("부하 생성기가 제한 시간 안에 끝나지 않았다");
     }
 
-    private void writeResult(List<JsonObject> runs, Double saturation, double rate) throws IOException {
+    private JsonObject buildResult(List<JsonObject> runs, Double saturation, double rate) {
         JsonObject config = new JsonObject();
         // 서버 전송이 유일한 변수다. 부하 생성기는 항상 nio 클라이언트 코드 경로를 쓴다.
         config.addProperty("transport", this.config.transport);
@@ -254,7 +277,7 @@ final class Orchestrator {
         metadata.addProperty("jdk", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"));
         metadata.addProperty("os", System.getProperty("os.name") + " " + System.getProperty("os.version"));
         metadata.addProperty("cores", Runtime.getRuntime().availableProcessors());
-        metadata.addProperty("gitSha", gitSha());
+        metadata.add("gitSha", new com.google.gson.JsonPrimitive(gitSha()));
         metadata.add("config", config);
 
         com.google.gson.JsonArray runArray = new com.google.gson.JsonArray();
@@ -267,6 +290,10 @@ final class Orchestrator {
         result.add("runs", runArray);
         result.add("summary", summary(runs));
 
+        return result;
+    }
+
+    private void emit(JsonObject result) throws IOException {
         String json = GSON.toJson(result);
         if (this.config.output == null) {
             out.println(json);
@@ -314,7 +341,7 @@ final class Orchestrator {
         return stats;
     }
 
-    private static String gitSha() {
+    static String gitSha() {
         try {
             Process process = new ProcessBuilder("git", "rev-parse", "HEAD")
                     .redirectErrorStream(true)

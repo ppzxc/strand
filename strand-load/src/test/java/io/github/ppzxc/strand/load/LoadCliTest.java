@@ -350,4 +350,117 @@ class LoadCliTest {
         assertThat(firstRun(readResult(result)).getAsJsonObject("measurement").has("negotiatedTls"))
                 .isFalse();
     }
+
+    private JsonObject plan(String... extra) throws Exception {
+        Path result = dir.resolve("plan.json");
+        java.util.List<String> args =
+                new java.util.ArrayList<>(java.util.List.of("matrix", "--plan", "--output", result.toString()));
+        args.addAll(java.util.Arrays.asList(extra));
+        Outcome outcome = execute(args.toArray(new String[0]));
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        return readResult(result);
+    }
+
+    @Test
+    void coreMatrixPlanIsTheEightTlsCells() throws Exception {
+        JsonObject json = plan();
+
+        com.google.gson.JsonArray cells = json.getAsJsonArray("cells");
+        assertThat(cells).hasSize(8);
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (com.google.gson.JsonElement element : cells) {
+            JsonObject cell = element.getAsJsonObject();
+            assertThat(cell.get("tls").getAsBoolean()).isTrue();
+            seen.add(cell.get("transport").getAsString() + "/"
+                    + cell.get("connections").getAsInt() + "/"
+                    + cell.get("bodyBytes").getAsInt());
+        }
+        assertThat(seen)
+                .containsExactlyInAnyOrder(
+                        "nio/1/64",
+                        "nio/1/1024",
+                        "nio/100/64",
+                        "nio/100/1024",
+                        "netty/1/64",
+                        "netty/1/1024",
+                        "netty/100/64",
+                        "netty/100/1024");
+    }
+
+    @Test
+    void extendedMatrixAddsThousandConnectionsLargeBodiesAndPlaintext() throws Exception {
+        JsonObject json = plan("--extended");
+
+        boolean thousand = false;
+        boolean large = false;
+        boolean plaintext = false;
+        for (com.google.gson.JsonElement element : json.getAsJsonArray("cells")) {
+            JsonObject cell = element.getAsJsonObject();
+            thousand |= cell.get("connections").getAsInt() == 1000;
+            large |= cell.get("bodyBytes").getAsInt() == 65536;
+            plaintext |= !cell.get("tls").getAsBoolean();
+        }
+        assertThat(json.getAsJsonArray("cells").size()).isGreaterThan(8);
+        assertThat(thousand && large && plaintext).isTrue();
+    }
+
+    @Test
+    void matrixRunProducesCellsWithMedianRangeErrorsAndATableFromTheJson() throws Exception {
+        Path result = dir.resolve("matrix.json");
+
+        Outcome outcome = execute(
+                "matrix",
+                "--connections-list",
+                "1",
+                "--bodies-list",
+                "64",
+                "--warmup",
+                "200ms",
+                "--measure",
+                "600ms",
+                "--repetitions",
+                "1",
+                "--output",
+                result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        JsonObject json = readResult(result);
+        assertThat(json.get("status").getAsString()).isEqualTo("OK");
+        assertThat(json.getAsJsonObject("metadata").get("jdk").getAsString()).isNotBlank();
+        com.google.gson.JsonArray cells = json.getAsJsonArray("cells");
+        assertThat(cells).hasSize(2);
+        for (com.google.gson.JsonElement element : cells) {
+            JsonObject cell = element.getAsJsonObject();
+            JsonObject closed = cell.getAsJsonObject("closedLoop");
+            assertThat(closed.getAsJsonObject("summary")
+                            .getAsJsonObject("throughputPerSecond")
+                            .has("median"))
+                    .isTrue();
+            assertThat(closed.getAsJsonObject("summary")
+                            .getAsJsonObject("throughputPerSecond")
+                            .has("min"))
+                    .isTrue();
+            JsonObject open = cell.getAsJsonObject("openLoop");
+            assertThat(open.has("50") && open.has("80")).isTrue();
+            assertThat(open.getAsJsonObject("50")
+                            .getAsJsonObject("config")
+                            .get("rateFractionOfSaturation")
+                            .getAsDouble())
+                    .isEqualTo(0.5);
+            assertThat(cell.get("errors").getAsLong()).isZero();
+            assertThat(cell.has("unknown")).isTrue();
+        }
+
+        Outcome table = execute("table", "--input", result.toString());
+        assertThat(table.exit).as(table.err).isZero();
+        assertThat(table.out).contains("| transport").contains("nio").contains("netty");
+    }
+
+    @Test
+    void tableOfAMissingFileFailsWithAClearMessage() {
+        Outcome outcome = execute("table", "--input", dir.resolve("absent.json").toString());
+
+        assertThat(outcome.exit).isEqualTo(2);
+        assertThat(outcome.err).contains("absent.json");
+    }
 }
