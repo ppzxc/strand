@@ -579,4 +579,64 @@ class LoadCliTest {
         assertThat(outcome.exit).isEqualTo(1);
         assertThat(outcome.err).contains("감지");
     }
+
+    @Test
+    void soakDefaultsToOneHourAndLongSelectsEightHours() throws Exception {
+        Path normal = dir.resolve("soak-plan.json");
+        Path longer = dir.resolve("soak-plan-long.json");
+
+        assertThat(execute("soak", "--plan", "--output", normal.toString()).exit)
+                .isZero();
+        assertThat(execute("soak", "--plan", "--long", "--output", longer.toString()).exit)
+                .isZero();
+
+        assertThat(readResult(normal)
+                        .getAsJsonObject("config")
+                        .get("durationMillis")
+                        .getAsLong())
+                .isEqualTo(3_600_000L);
+        assertThat(readResult(longer)
+                        .getAsJsonObject("config")
+                        .get("durationMillis")
+                        .getAsLong())
+                .isEqualTo(28_800_000L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"nio", "netty"})
+    void soakRecordsResourceTrendsAndLeakCount(String transport) throws Exception {
+        Path result = dir.resolve("soak-" + transport + ".json");
+
+        Outcome outcome = run(
+                "soak",
+                "--transport",
+                transport,
+                "--duration",
+                "6s",
+                "--warmup",
+                "500ms",
+                "--sample-interval",
+                "1s",
+                "--rate",
+                "50",
+                "--output",
+                result.toString());
+
+        assertThat(outcome.exit).as(outcome.err).isZero();
+        JsonObject json = readResult(result);
+        assertThat(json.get("kind").getAsString()).isEqualTo("soak");
+        for (String role : new String[] {"server", "loadgen"}) {
+            com.google.gson.JsonArray series = json.getAsJsonObject("series").getAsJsonArray(role);
+            assertThat(series.size()).as(role + " samples").isGreaterThanOrEqualTo(4);
+            JsonObject last = series.get(series.size() - 1).getAsJsonObject();
+            assertThat(last.get("rssBytes").getAsLong()).isPositive();
+            assertThat(last.get("threads").getAsInt()).isPositive();
+            assertThat(last.get("tSeconds").getAsDouble()).isGreaterThan(3.0);
+            assertThat(last.has("gcCount")).isTrue();
+        }
+        assertThat(json.getAsJsonObject("leaks").get("count").getAsLong()).isZero();
+        assertThat(json.getAsJsonObject("trend").getAsJsonObject("server").has("rssGrowthBytesPerHour"))
+                .isTrue();
+        assertThat(json.getAsJsonObject("load").get("errors").getAsLong()).isZero();
+    }
 }

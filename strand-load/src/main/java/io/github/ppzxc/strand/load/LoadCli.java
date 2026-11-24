@@ -49,6 +49,8 @@ public final class LoadCli {
                     new Orchestrator(RunConfig.parse(withFlag), out).runStall();
                     return 0;
                 }
+                case "soak":
+                    return soak(rest, out);
                 case "table":
                     return table(rest, out, err);
                 case "server":
@@ -56,7 +58,7 @@ public final class LoadCli {
                 case "loadgen":
                     return LoadGenRole.run(RunConfig.parse(withoutPort(rest)), portOf(rest), out);
                 default:
-                    err.println("모르는 명령 '" + command + "'. 지원: run, matrix, stall, table");
+                    err.println("모르는 명령 '" + command + "'. 지원: run, matrix, stall, soak, table");
                     return 2;
             }
         } catch (RunConfig.Invalid e) {
@@ -69,6 +71,61 @@ public final class LoadCli {
             err.println("실행 실패: " + e);
             return 1;
         }
+    }
+
+    /**
+     * {@code soak [--duration 1h | --long] [--rate 1000] ...}: 일정 부하로 오래 돌린다. 기본 1시간, {@code --long}은 8시간이다. {@code --plan}은 설정만 JSON으로 낸다.
+     */
+    private static int soak(List<String> args, PrintStream out) throws Exception {
+        java.util.List<String> translated = new java.util.ArrayList<>();
+        boolean plan = false;
+        boolean longRun = false;
+        String duration = null;
+        String output = null;
+        String rate = "1000";
+        for (int i = 0; i < args.size(); i++) {
+            String arg = args.get(i);
+            switch (arg) {
+                case "--plan":
+                    plan = true;
+                    break;
+                case "--long":
+                    longRun = true;
+                    break;
+                case "--duration":
+                    duration = args.get(++i);
+                    break;
+                case "--rate":
+                    rate = args.get(++i);
+                    break;
+                default:
+                    translated.add(arg);
+                    break;
+            }
+        }
+        if (duration == null) {
+            duration = longRun ? "480m" : "60m";
+        }
+        translated.addAll(java.util.List.of(
+                "--load-model", "open", "--rate", rate, "--repetitions", "1", "--measure", duration, "--soak"));
+        RunConfig config = RunConfig.parse(translated);
+        if (plan) {
+            com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+            com.google.gson.JsonObject c = new com.google.gson.JsonObject();
+            c.addProperty("durationMillis", config.measure.toMillis());
+            c.addProperty("sampleIntervalMillis", config.sampleInterval.toMillis());
+            c.addProperty("rateTargetPerSecond", config.rate);
+            c.addProperty("transport", config.transport);
+            json.add("config", c);
+            if (config.output == null) {
+                out.println(json);
+            } else {
+                java.nio.file.Files.writeString(java.nio.file.Paths.get(config.output), json + System.lineSeparator());
+            }
+            return 0;
+        }
+        new Orchestrator(config, out).runSoak();
+        return 0;
     }
 
     /** {@code table --input <matrix.json>}: 행렬 결과 JSON에서 표를 만든다. */

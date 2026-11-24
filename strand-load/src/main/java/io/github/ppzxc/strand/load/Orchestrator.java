@@ -89,6 +89,119 @@ final class Orchestrator {
         }
     }
 
+    /**
+     * soak. 일정 부하(개방형 고정 도착률)로 오래 돌리며 서버·부하 생성기의 자원 추이(RSS·스레드·힙·GC)와 ByteBuf 누수 감지 결과를 남긴다.
+     */
+    JsonObject executeSoak() throws RunFailed, IOException, InterruptedException {
+        try {
+            if (config.tls) {
+                if (presetKeystore != null) {
+                    keystorePath = presetKeystore;
+                } else {
+                    keystoreDir = Files.createTempDirectory("strand-load-tls");
+                    keystorePath = LoadTls.createKeystore(keystoreDir).toString();
+                }
+            }
+            JsonObject run = runOnce(config.rate, false);
+            JsonObject measurement = run.getAsJsonObject("measurement");
+
+            JsonObject series = new JsonObject();
+            series.add("server", seriesJson(serverSeries));
+            com.google.gson.JsonArray loadgenSamples =
+                    lastRaw.has("samples") ? lastRaw.getAsJsonArray("samples") : new com.google.gson.JsonArray();
+            List<JsonObject> loadgen = new ArrayList<>();
+            loadgenSamples.forEach(e -> loadgen.add(e.getAsJsonObject()));
+            series.add("loadgen", seriesJson(loadgen));
+
+            JsonObject trend = new JsonObject();
+            trend.add("server", trendJson(serverSeries));
+            trend.add("loadgen", trendJson(loadgen));
+
+            JsonObject leaks = new JsonObject();
+            leaks.addProperty("count", lastServerErr.leakCount());
+            com.google.gson.JsonArray leakLines = new com.google.gson.JsonArray();
+            lastServerErr.leakLines().forEach(leakLines::add);
+            leaks.add("lines", leakLines);
+            leaks.addProperty("detector", "netty ResourceLeakDetector(paranoid), 서버 표준 오류의 LEAK: 줄");
+
+            JsonObject load = new JsonObject();
+            for (String key : new String[] {"requests", "responses", "errors", "unknown", "throughputPerSecond"}) {
+                load.add(key, measurement.get(key));
+            }
+            load.add("latencyMicros", measurement.get("latencyMicros"));
+
+            JsonObject soakConfig = new JsonObject();
+            soakConfig.addProperty("transport", config.transport);
+            soakConfig.addProperty("tls", config.tls);
+            soakConfig.addProperty("connections", config.connections);
+            soakConfig.addProperty("bodyBytes", config.bodyBytes);
+            soakConfig.addProperty("rateTargetPerSecond", config.rate);
+            soakConfig.addProperty("durationMillis", config.measure.toMillis());
+            soakConfig.addProperty("sampleIntervalMillis", config.sampleInterval.toMillis());
+
+            JsonObject result = new JsonObject();
+            result.addProperty("schemaVersion", 1);
+            result.addProperty("kind", "soak");
+            result.addProperty("status", "OK");
+            result.add("metadata", stallMetadata());
+            result.add("config", soakConfig);
+            result.add("load", load);
+            result.add("series", series);
+            result.add("trend", trend);
+            result.add("leaks", leaks);
+            return result;
+        } finally {
+            cleanupKeystore();
+        }
+    }
+
+    void runSoak() throws RunFailed, IOException, InterruptedException {
+        emit(executeSoak());
+    }
+
+    /** 표본 목록을 시간순 시계열(시작 기준 경과 초)로 바꾼다. */
+    private static com.google.gson.JsonArray seriesJson(List<JsonObject> samples) {
+        com.google.gson.JsonArray array = new com.google.gson.JsonArray();
+        if (samples.isEmpty()) {
+            return array;
+        }
+        long t0 = samples.get(0).get("nanoTime").getAsLong();
+        for (JsonObject sample : samples) {
+            JsonObject point = new JsonObject();
+            point.addProperty("tSeconds", (sample.get("nanoTime").getAsLong() - t0) / 1e9);
+            point.addProperty("rssBytes", sample.get("rssBytes").getAsLong());
+            point.addProperty("threads", sample.get("threads").getAsInt());
+            point.addProperty("heapUsedBytes", sample.get("heapUsedBytes").getAsLong());
+            point.addProperty("gcCount", sample.get("gcCount").getAsLong());
+            point.addProperty("gcTimeMillis", sample.get("gcTimeMillis").getAsLong());
+            point.addProperty("cpuSeconds", sample.get("cpuNanos").getAsLong() / 1e9);
+            array.add(point);
+        }
+        return array;
+    }
+
+    /** 처음과 마지막 표본의 차이로 추이를 요약한다. 시간당 RSS 증가량이 느린 누수의 신호다. */
+    private static JsonObject trendJson(List<JsonObject> samples) {
+        JsonObject trend = new JsonObject();
+        if (samples.size() < 2) {
+            return trend;
+        }
+        JsonObject first = samples.get(0);
+        JsonObject last = samples.get(samples.size() - 1);
+        double hours = (last.get("nanoTime").getAsLong() - first.get("nanoTime").getAsLong()) / 3.6e12;
+        long rssGrowth =
+                last.get("rssBytes").getAsLong() - first.get("rssBytes").getAsLong();
+        trend.addProperty("rssGrowthBytes", rssGrowth);
+        trend.addProperty("rssGrowthBytesPerHour", hours > 0 ? rssGrowth / hours : 0);
+        trend.addProperty(
+                "threadGrowth",
+                last.get("threads").getAsInt() - first.get("threads").getAsInt());
+        trend.addProperty(
+                "gcCount",
+                last.get("gcCount").getAsLong() - first.get("gcCount").getAsLong());
+        return trend;
+    }
+
     /** 쓰기 정체 시나리오를 돌려 결과를 {@code --output}에 쓴다. */
     void runStall() throws RunFailed, IOException, InterruptedException {
         emit(executeStall());
@@ -263,6 +376,11 @@ final class Orchestrator {
         throw new RunFailed(who + " 프로세스가 " + expected + "를 알리지 않았다(종료 코드 " + exitCode(process) + "): " + err.text());
     }
 
+    // soak: 마지막 실행에서 모은 서버 표본, 서버 표준 오류, 부하 생성기 결과 원본.
+    private final List<JsonObject> serverSeries = new ArrayList<>();
+    private StderrCapture lastServerErr;
+    private JsonObject lastRaw;
+
     /** 서버가 알린 마지막 {@code CLOSED} 줄의 JSON. 없으면 null. */
     private String lastClosed;
 
@@ -275,6 +393,7 @@ final class Orchestrator {
             List<String> args = config.childArgs(rate, closedOverride, keystorePath);
             server = start(List.of("server"), args);
             StderrCapture serverErr = new StderrCapture(server.getErrorStream());
+            lastServerErr = serverErr;
             Lines serverLines = new Lines(server.getInputStream());
             int port = awaitReady(server, serverLines, serverErr);
 
@@ -288,11 +407,8 @@ final class Orchestrator {
             StderrCapture loadgenErr = new StderrCapture(loadgen.getErrorStream());
             Lines loadgenLines = new Lines(loadgen.getInputStream());
             LoadGenOutcome outcome = awaitLoadGen(loadgen, loadgenLines, loadgenErr, server, serverLines, serverErr);
-            return runJson(
-                    JsonParser.parseString(outcome.resultLine).getAsJsonObject(),
-                    outcome.serverResources,
-                    server.pid(),
-                    loadgen.pid());
+            lastRaw = JsonParser.parseString(outcome.resultLine).getAsJsonObject();
+            return runJson(lastRaw, outcome.serverResources, server.pid(), loadgen.pid());
         } finally {
             terminate(loadgen);
             terminate(server);
@@ -336,6 +452,10 @@ final class Orchestrator {
             command.addAll(LoadTls.jvmOptions());
         }
         String roleName = role.get(0);
+        if (config.soak && roleName.equals("server")) {
+            // ByteBuf 누수는 netty의 누수 감지기가 표준 오류로 알린다. soak에서는 모든 버퍼를 추적한다.
+            command.add("-Dio.netty.leakDetection.level=paranoid");
+        }
         if (config.jfr) {
             // JFR 시작 안내가 표준 출력을 어지럽히지 않게 JVM 로그는 끈다.
             command.add("-Xlog:disable");
@@ -398,10 +518,15 @@ final class Orchestrator {
         JsonObject serverStart = null;
         JsonObject serverEnd = null;
         String resultLine = null;
+        long nextSoakSample = System.nanoTime();
         while (System.nanoTime() < limit) {
             String line = loadgenLines.poll(50);
             if (!server.isAlive()) {
                 throw new RunFailed("서버 프로세스가 비정상 종료했다(종료 코드 " + exitCode(server) + "): " + serverErr.text());
+            }
+            if (config.soak && serverStart != null && serverEnd == null && System.nanoTime() >= nextSoakSample) {
+                serverSeries.add(sampleServer(server, serverLines, serverErr));
+                nextSoakSample = System.nanoTime() + config.sampleInterval.toNanos();
             }
             if (line == null) {
                 continue;
@@ -421,8 +546,11 @@ final class Orchestrator {
             }
             if (line.equals("PHASE MEASURE_START")) {
                 serverStart = sampleServer(server, serverLines, serverErr);
+                serverSeries.add(serverStart);
+                nextSoakSample = System.nanoTime() + config.sampleInterval.toNanos();
             } else if (line.equals("PHASE MEASURE_END")) {
                 serverEnd = sampleServer(server, serverLines, serverErr);
+                serverSeries.add(serverEnd);
             } else if (line.startsWith("{")) {
                 resultLine = line;
             }
@@ -665,6 +793,26 @@ final class Orchestrator {
             });
             thread.setDaemon(true);
             thread.start();
+        }
+
+        /** 누수 감지기가 남긴 {@code LEAK:} 줄의 수와 앞부분 몇 줄. */
+        long leakCount() {
+            synchronized (buffer) {
+                return buffer.toString(StandardCharsets.UTF_8)
+                        .lines()
+                        .filter(l -> l.contains("LEAK:"))
+                        .count();
+            }
+        }
+
+        java.util.List<String> leakLines() {
+            synchronized (buffer) {
+                return buffer.toString(StandardCharsets.UTF_8)
+                        .lines()
+                        .filter(l -> l.contains("LEAK:"))
+                        .limit(20)
+                        .toList();
+            }
         }
 
         String text() {

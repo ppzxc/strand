@@ -43,6 +43,10 @@ final class RunConfig {
     /** JFR 기록을 켠다. 기록은 {@link #profileDir}에 프로세스별로 남는다. */
     /** 쓰기 정체 시나리오({@code stall} 명령)용: 서버가 상대에게 계속 요청을 밀어 넣는다. */
     final boolean stall;
+    /** soak 실행: 일정 부하로 오래 돌리며 자원 추이를 표본으로 남긴다. */
+    final boolean soak;
+
+    final Duration sampleInterval;
 
     final Duration idlePing;
     final Duration ackTimeout;
@@ -64,6 +68,8 @@ final class RunConfig {
         }
         this.connections = positiveInt(options, "--connections", 1);
         this.stall = options.containsKey("--stall");
+        this.soak = options.containsKey("--soak");
+        this.sampleInterval = duration(options, "--sample-interval", Duration.ofSeconds(10), false);
         // 쓰기 정체는 버퍼가 빨리 차도록 큰 본문과 넉넉한 미완료 수를 기본으로 한다.
         this.bodyBytes = positiveInt(options, "--body-bytes", stall ? 65_536 : 64);
         this.inflight = positiveInt(options, "--inflight", stall ? 32 : 8);
@@ -162,6 +168,8 @@ final class RunConfig {
                 "--server-delay",
                 "--saturation",
                 "--stall",
+                "--soak",
+                "--sample-interval",
                 "--idle-ping",
                 "--ack-timeout",
                 "--max-wait",
@@ -172,7 +180,7 @@ final class RunConfig {
                 "--keystore",
                 "--child");
         Map<String, String> options = new HashMap<>();
-        Set<String> flags = Set.of("--plaintext", "--child", "--jfr", "--stall");
+        Set<String> flags = Set.of("--plaintext", "--child", "--jfr", "--stall", "--soak");
         for (int i = 0; i < args.size(); i++) {
             String name = args.get(i);
             if (!known.contains(name)) {
@@ -273,6 +281,9 @@ final class RunConfig {
                 ackTimeout.toMillis() + "ms"));
         if (stall) {
             args.add("--stall");
+        }
+        if (soak) {
+            args.addAll(List.of("--soak", "--sample-interval", sampleInterval.toMillis() + "ms"));
         }
         args.add("--child");
         if (tls) {

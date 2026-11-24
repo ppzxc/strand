@@ -62,6 +62,8 @@ final class LoadGenRole {
     private PrintStream control;
     private JsonObject resourceStart;
     private JsonObject resourceEnd;
+    private final java.util.List<JsonObject> soakSamples = java.util.Collections.synchronizedList(new ArrayList<>());
+    private volatile boolean sampling;
     private volatile int phase = WARMUP;
     private boolean gaveUp;
 
@@ -125,6 +127,13 @@ final class LoadGenRole {
         result.addProperty("unknown", unknown.get());
         result.addProperty("measureNanos", measureNanos);
         result.add("resources", resources);
+        if (config.soak) {
+            com.google.gson.JsonArray samples = new com.google.gson.JsonArray();
+            synchronized (soakSamples) {
+                soakSamples.forEach(samples::add);
+            }
+            result.add("samples", samples);
+        }
         if (negotiated != null) {
             result.add("tls", negotiated);
         }
@@ -174,12 +183,16 @@ final class LoadGenRole {
     /** 측정 구간 경계에서 자원 표본을 뜨고 진행자에게 알린다. 진행자는 이 줄을 보고 서버의 표본을 뜬다. */
     private void markMeasureStart() throws java.io.IOException {
         resourceStart = ResourceSampler.sample();
+        if (config.soak) {
+            startSoakSampler();
+        }
         control.println("PHASE MEASURE_START");
         control.flush();
     }
 
     private void markMeasureEnd() throws java.io.IOException {
         resourceEnd = ResourceSampler.sample();
+        sampling = false;
         control.println("PHASE MEASURE_END");
         control.flush();
     }
@@ -201,6 +214,23 @@ final class LoadGenRole {
             // 입력은 무시한다.
         }
         return 0;
+    }
+
+    /** soak: 측정 구간 동안 일정 간격으로 이 프로세스의 자원 표본을 모은다. */
+    private void startSoakSampler() {
+        sampling = true;
+        Thread thread = new Thread(() -> {
+            while (sampling) {
+                try {
+                    soakSamples.add(ResourceSampler.sample());
+                    Thread.sleep(config.sampleInterval.toMillis());
+                } catch (java.io.IOException | InterruptedException e) {
+                    return;
+                }
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private long runClosed(List<NioStrandConnection> connections) throws Exception {
