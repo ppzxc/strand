@@ -54,6 +54,36 @@
     <sourceDirectory>../shared/src/main/java</sourceDirectory>
     <plugins>
       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.6.3</version>
+        <executions>
+          <execution>
+            <id>consumer-dependency-allowlist</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes><exclude>*:*</exclude></excludes>
+                  <includes>
+                    <include>io.github.ppzxc:strand-core</include>
+                    <include>io.github.ppzxc:strand-nio</include>
+                    <include>io.github.ppzxc:strand-netty</include>
+                    <include>io.github.ppzxc:strand-api</include>
+                    <include>io.netty:netty-transport</include>
+                    <include>io.netty:netty-common</include>
+                    <include>io.netty:netty-buffer</include>
+                    <include>io.netty:netty-resolver</include>
+                    <include>org.jspecify:jspecify</include>
+                    <include>com.google.errorprone:error_prone_annotations</include>
+                  </includes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
         <version>3.7.0</version>
