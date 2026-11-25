@@ -30,6 +30,7 @@ abstract class CheckPolicyExceptions : DefaultTask() {
     val configuration = PMDConfiguration()
     val report = PmdAnalysis.create(configuration).use { pmd ->
       pmd.addRuleSet(pmd.newRuleSetLoader().loadFromResource("policy-exception-ruleset.xml"))
+      pmd.addRuleSet(pmd.newRuleSetLoader().loadFromResource("handler-logging-ruleset.xml"))
       sourceFiles.files.forEach { pmd.files().addFile(it.toPath()) }
       pmd.performAnalysisAndCollectReport()
     }

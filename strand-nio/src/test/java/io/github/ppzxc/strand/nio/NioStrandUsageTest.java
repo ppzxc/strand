@@ -24,6 +24,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -241,6 +245,53 @@ class NioStrandUsageTest {
         assertThat(failed.status()).isEqualTo(Status.INTERNAL);
         assertThat(failed.payload()).isEmpty();
         assertThat(next.status()).isEqualTo(Status.OK);
+    }
+
+    @ParameterizedTest
+    @MethodSource("transports")
+    void handlerFailureLogKeepsDiagnosticContextWithoutSensitiveValues(String transport) throws Exception {
+        Logger logger = Logger.getLogger("io.github.ppzxc.strand.nio");
+        List<LogRecord> records = new CopyOnWriteArrayList<>();
+        Handler capture = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (isLoggable(record)) {
+                    records.add(record);
+                }
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        logger.addHandler(capture);
+        closeables.add(() -> logger.removeHandler(capture));
+
+        AppFixture fixture = fixture(transport);
+        NioStrandServer server = fixture.serverBuilder()
+                .authenticate(acceptAll("p"))
+                .handler(request -> {
+                    throw new IllegalStateException("outer-secret", new IllegalArgumentException("inner-secret"));
+                })
+                .build();
+        Listener listener = listen(server);
+        NioStrandConnection connection = connect(fixture.clientBuilder().build(), listener);
+        fixture.result(connection.request(Request.of(TYPE, bytes("body-secret"))).result());
+
+        LogRecord record = records.stream()
+                .filter(value -> value.getMessage().startsWith("받은 요청 핸들러가 예외를 던졌다"))
+                .findFirst()
+                .orElseThrow(AssertionError::new);
+        String rendered = new SimpleFormatter().format(record);
+        assertThat(record.getLevel()).isEqualTo(java.util.logging.Level.WARNING);
+        assertThat(record.getMessage()).contains("type=" + TYPE).doesNotContain("상대=", "body-secret");
+        assertThat(record.getThrown()).isNotNull();
+        assertThat(rendered)
+                .contains("java.lang.IllegalStateException", "java.lang.IllegalArgumentException", "Caused by:")
+                .contains("NioStrandUsageTest", "diagnoseHandlerFailure")
+                .doesNotContain("outer-secret", "inner-secret", "body-secret", "127.0.0.1");
     }
 
     @ParameterizedTest
