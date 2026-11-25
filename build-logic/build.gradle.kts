@@ -1,5 +1,6 @@
 plugins {
   `kotlin-dsl`
+  alias(libs.plugins.spotless)
 }
 
 // 외부 Gradle 플러그인은 버전 카탈로그의 [plugins]에서 플러그인 마커 좌표로 끌어온다.
@@ -33,5 +34,11 @@ tasks.test {
   useJUnitPlatform()
   testLogging {
     exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+  }
+}
+
+spotless {
+  java {
+    palantirJavaFormat(libs.versions.palantir.java.format.get())
   }
 }

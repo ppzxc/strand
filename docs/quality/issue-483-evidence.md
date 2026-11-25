@@ -1,0 +1,12 @@
+# Issue 483 evidence
+
+- Owner: `strand-build`, consumer build owners
+- Rules: TOOL-001, TOOL-006, TOOL-007, NUL-001, NUL-002, STYLE-008
+- Code SHA: `a8aa3b9` (includes compiler enforcement from `d134e60` and the consumer warning gate).
+- Required Error Prone checks are configured as `ERROR` for managed Java compile tasks and the independent Gradle and Maven consumers: `ArrayEquals`, `ArrayToString`, `EqualsIncompatibleType`, `EqualsHashCode`, `ModifyCollectionInEnhancedForLoop`, `ModifySourceCollectionInStream`, `NarrowCalculation`, and `NarrowingCompoundAssignment`.
+- NullAway remains enabled only for deploy `main`; tests and fixtures remain outside that scope. Other NullAway scopes await compatible annotations and explicit `@NullMarked` coverage. PMD's NUL-002 check remains the mechanism for nonstandard nullness patterns.
+- Consumer javac warnings are compared exactly by consumer, task, source set, release, source file and line, diagnostic key, and message. Baseline SHA is `897679e`; four existing `requires-automatic` warnings from `deploy-test/shared/module/module-info.java` (lines 2–5) are recorded for each modulepath consumer. Classpath consumers have empty baselines. Any added, missing, moved, or locationless diagnostic fails the runner. Baseline entries: `deploy-test/scripts/warning-baseline.json`.
+- Java 8 `options` and JSpecify `ElementType.MODULE` exceptions in the library warning collector are scoped by diagnostic, task, source set, target, approver, reason, and review date (`2027-02-23`).
+- Commands: `python3 deploy-test/scripts/test_warning_baseline.py`; `deploy-test/run.sh 0.2.0` (JDK 25); `./gradlew :build-logic:test --tests '*CompilerWarningCollectorTest' --tests '*RequiredErrorProneChecksTest' --tests '*MainWarningFailureTest' --console=plain`; `./gradlew compileJava compileTestJava compileTestFixturesJava --continue --console=plain`.
+- Results: warning baseline tests passed (including foreign-location/new-warning detection); all Gradle and Maven classpath/modulepath consumer builds passed, with 0 warnings in classpath and the exact four approved-to-baseline diagnostics in modulepath. Focused TestKit tests and managed main/test/testFixtures compilation passed. A temporary `ArrayEquals` violation failed in deploy, internal convention, Gradle consumer, and Maven consumer as an Error Prone error.
+- Existing non-required Error Prone diagnostics remain warnings and were not hidden or downgraded from errors. Current OSV findings are outside this ticket's dependency scope; see issue #487 baseline.

@@ -1,0 +1,20 @@
+{
+  "baseline_sha": "897679e",
+  "review": "Initial #483 inventory; entries are exact consumer/task/source set/release/file/line/rule/message tuples.",
+  "consumers": {
+    "gradle-classpath": [],
+    "maven-classpath": [],
+    "gradle-modulepath": [
+      "compileJava|main|11|deploy-test/shared/module/module-info.java:2|requires-automatic|requires directive for an automatic module",
+      "compileJava|main|11|deploy-test/shared/module/module-info.java:3|requires-automatic|requires directive for an automatic module",
+      "compileJava|main|11|deploy-test/shared/module/module-info.java:4|requires-automatic|requires directive for an automatic module",
+      "compileJava|main|11|deploy-test/shared/module/module-info.java:5|requires-automatic|requires directive for an automatic module"
+    ],
+    "maven-modulepath": [
+      "compileJava|main|11|deploy-test/shared/module/module-info.java:2|requires-automatic|requires directive for an automatic module",
+      "compileJava|main|11|deploy-test/shared/module/module-info.java:3|requires-automatic|requires directive for an automatic module",
+      "compileJava|main|11|deploy-test/shared/module/module-info.java:4|requires-automatic|requires directive for an automatic module",
+      "compileJava|main|11|deploy-test/shared/module/module-info.java:5|requires-automatic|requires directive for an automatic module"
+    ]
+  }
+}
