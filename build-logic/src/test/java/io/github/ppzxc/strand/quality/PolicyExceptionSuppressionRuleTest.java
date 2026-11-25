@@ -26,7 +26,7 @@ class PolicyExceptionSuppressionRuleTest {
     @Test
     void mismatchedApprovalFails() {
         assertEquals(
-                1,
+                2,
                 violations("@SuppressWarnings(\"PMD.Rule\")\n"
                         + "@io.github.ppzxc.strand.api.PolicyException(rule=\"PMD.Other\", reason=\"needed\", approvedBy=\"reviewer\", reviewBy=\"2099-12-31\")\n"
                         + "class Example {}"));
@@ -57,6 +57,11 @@ class PolicyExceptionSuppressionRuleTest {
                 1,
                 violations(
                         "@io.github.ppzxc.strand.api.PolicyException(rule=\"PMD.Rule\", reason=\"needed\", approvedBy=\"reviewer\", reviewBy=\"2099-12-31\") class Example {}"));
+    }
+
+    @Test
+    void sameLineSuppressionFindingsRemainDistinct() {
+        assertEquals(2, violations("@SuppressWarnings({\"PMD.Rule\", \"PMD.Other\"}) class Example {}"));
     }
 
     @Test
