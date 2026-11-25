@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -945,11 +946,27 @@ final class ConnectionEngine {
         try {
             LOGGER.log(
                     Level.WARNING,
-                    "받은 요청 핸들러가 예외를 던졌다(type=" + request.type() + ", 상대=" + p.remoteAddress + ")",
-                    failure);
+                    "받은 요청 핸들러가 예외를 던졌다(type=" + request.type() + ")",
+                    sanitizedFailure(failure));
         } catch (RuntimeException ignored) {
 
         }
+    }
+
+    private static Throwable sanitizedFailure(Throwable failure) {
+        Throwable copy = new Throwable(failure.getClass().getName());
+        copy.setStackTrace(failure.getStackTrace());
+        IdentityHashMap<Throwable, Boolean> seen = new IdentityHashMap<>();
+        seen.put(failure, Boolean.TRUE);
+        Throwable tail = copy;
+        for (Throwable cause = failure.getCause(); cause != null && !seen.containsKey(cause); cause = cause.getCause()) {
+            seen.put(cause, Boolean.TRUE);
+            Throwable causeCopy = new Throwable(cause.getClass().getName());
+            causeCopy.setStackTrace(cause.getStackTrace());
+            tail.initCause(causeCopy);
+            tail = causeCopy;
+        }
+        return copy;
     }
 
     private void run() {

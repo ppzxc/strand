@@ -3,12 +3,12 @@ strand-api/src/main/java/io/github/ppzxc/strand/api/ResultCompletion.java:138
 strand-api/src/main/java/io/github/ppzxc/strand/api/ResultCompletion.java:163
 strand-api/src/main/java/io/github/ppzxc/strand/api/ResultCompletion.java:54
 strand-api/src/main/java/io/github/ppzxc/strand/api/ShutdownResult.java:12
-strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:1076
-strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:1274
-strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:257
-strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:313
-strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:330
-strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:431
+strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:1077
+strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:1275
+strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:258
+strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:314
+strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:331
+strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:432
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/Listener.java:48
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/Listener.java:66
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/NettyStrandServer.java:110
@@ -20,7 +20,7 @@ strand-netty/src/main/java/io/github/ppzxc/strand/netty/internal/SerialExecutor.
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/internal/TlsPipe.java:228
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/internal/TlsPipe.java:250
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/internal/WebSocketWire.java:107
-strand-nio/src/main/java/io/github/ppzxc/strand/nio/ConnectionEngine.java:53
+strand-nio/src/main/java/io/github/ppzxc/strand/nio/ConnectionEngine.java:54
 strand-nio/src/main/java/io/github/ppzxc/strand/nio/Listener.java:16
 strand-nio/src/main/java/io/github/ppzxc/strand/nio/NioStrandServer.java:23
 strand-nio/src/main/java/io/github/ppzxc/strand/nio/OwnerShutdown.java:198
