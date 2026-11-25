@@ -42,6 +42,13 @@ val testWithoutCodec = tasks.register<Test>("testWithoutCodec") {
   useJUnitPlatform()
   filter { includeTestsMatching("*NoCodecTest") }
   systemProperty("strand.nettyVersion", nettyVersion.get())
+  providers.gradleProperty("testJavaVersion").orNull?.let { version ->
+    systemProperty("strand.expectedJavaVersion", version)
+    testLogging.showStandardStreams = true
+    javaLauncher = javaToolchains.launcherFor {
+      languageVersion = JavaLanguageVersion.of(version.toInt())
+    }
+  }
 }
 
 tasks.test {

@@ -136,13 +136,13 @@ class SerialExecutorTest {
     }
 
     @Test
-    void aBackingExecutorThatRunsTheDrainInlineStillRunsLaterTasks() {
+    void aBackingExecutorThatRunsTheDrainInlineRejectsWithoutRunningUserTasks() {
         SerialExecutor serial = new SerialExecutor(Runnable::run);
         AtomicInteger ran = new AtomicInteger();
 
-        serial.execute(ran::incrementAndGet);
-        serial.execute(ran::incrementAndGet);
+        assertThatThrownBy(() -> serial.execute(ran::incrementAndGet)).isInstanceOf(RejectedExecutionException.class);
 
-        assertThat(ran).hasValue(2);
+        assertThat(ran).hasValue(0);
+        assertThat(serial.queuedTasks()).isZero();
     }
 }

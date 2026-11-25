@@ -166,8 +166,17 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
         ProgressSpace space = ProgressSpace.derive(outgoing, incoming, maxFrameSize, tlsSizes);
         space.require(resourceLimits);
         SerialExecutor.requireNotDirect(appExecutor);
+        Executor checkedExecutor = task -> {
+            Thread caller = Thread.currentThread();
+            appExecutor.execute(() -> {
+                if (Thread.currentThread() == caller) {
+                    throw new java.util.concurrent.RejectedExecutionException("실행기가 호출 스레드에서 작업을 실행했다");
+                }
+                task.run();
+            });
+        };
         return new Common(
-                appExecutor,
+                checkedExecutor,
                 resourceLimits,
                 new OwnerBudgets(resourceLimits),
                 space,

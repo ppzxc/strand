@@ -27,6 +27,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -80,6 +82,49 @@ class NettySaturationTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    @Test
+    void aSaturatedExecutorCannotRunOneConnectionHandlerOnTheEventLoopAndAnotherConnectionStillProgresses()
+            throws Exception {
+        AppFixture fixture =
+                track(new AppFixture.Spec().connections(2).perConnection(2).plain());
+        AtomicBoolean runNextInline = new AtomicBoolean();
+        AtomicReference<String> inlineThread = new AtomicReference<>();
+        Executor saturated = task -> {
+            if (Thread.currentThread().getName().startsWith("nioEventLoopGroup")
+                    && runNextInline.compareAndSet(true, false)) {
+                inlineThread.set(Thread.currentThread().getName());
+                task.run();
+            } else {
+                fixture.executor.execute(task);
+            }
+        };
+        List<String> handlerThreads = new CopyOnWriteArrayList<>();
+        NettyStrandServer server = acceptingServer(fixture)
+                .executor(saturated)
+                .handler(request -> {
+                    handlerThreads.add(Thread.currentThread().getName());
+                    request.respond(Status.OK, bytes("handled"));
+                })
+                .build();
+        Listener listener = listen(server);
+        NettyStrandClient client = fixture.clientBuilder().executor(saturated).build();
+        NettyStrandConnection first = AppFixture.get(client.connect(AppFixture.loopback(listener)));
+        NettyStrandConnection second = AppFixture.get(client.connect(AppFixture.loopback(listener)));
+
+        runNextInline.set(true);
+        RequestResult firstResult =
+                fixture.result(first.request(Request.of(TYPE, bytes("first"))).result());
+        RequestResult secondResult =
+                fixture.result(second.request(Request.of(TYPE, bytes("second"))).result());
+
+        assertThat(inlineThread.get()).startsWith("nioEventLoopGroup");
+        assertThat(firstResult.status()).isNotEqualTo(Status.OK);
+        assertThat(secondResult.status()).isEqualTo(Status.OK);
+        assertThat(handlerThreads)
+                .hasSize(1)
+                .allSatisfy(name -> assertThat(name).startsWith("app-executor-"));
     }
 
     @Test

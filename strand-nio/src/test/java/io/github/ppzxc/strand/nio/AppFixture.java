@@ -27,6 +27,7 @@ final class AppFixture implements AutoCloseable {
         volatile boolean rejecting;
 
         volatile boolean swallowing;
+        volatile boolean callerRuns;
 
         final java.util.concurrent.atomic.AtomicInteger acceptRemaining =
                 new java.util.concurrent.atomic.AtomicInteger(Integer.MAX_VALUE);
@@ -104,7 +105,11 @@ final class AppFixture implements AutoCloseable {
             if (swallowing) {
                 return;
             }
-            delegate.execute(task);
+            if (callerRuns) {
+                task.run();
+            } else {
+                delegate.execute(task);
+            }
         }
     }
 

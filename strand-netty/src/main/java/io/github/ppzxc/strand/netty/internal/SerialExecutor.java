@@ -3,6 +3,7 @@ package io.github.ppzxc.strand.netty.internal;
 import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class SerialExecutor implements Executor {
@@ -22,7 +23,8 @@ public final class SerialExecutor implements Executor {
             if (!scheduled) {
                 scheduled = true;
                 try {
-                    backing.execute(this::drain);
+                    Thread submitter = Thread.currentThread();
+                    backing.execute(() -> drain(submitter));
                 } catch (RuntimeException | Error e) {
                     scheduled = false;
                     queue.remove(task);
@@ -37,7 +39,10 @@ public final class SerialExecutor implements Executor {
     }
 
     @SuppressWarnings("EmptyCatch")
-    private void drain() {
+    private void drain(Thread submitter) {
+        if (Thread.currentThread() == submitter) {
+            throw new RejectedExecutionException("실행기가 제출 스레드에서 바로 실행했다");
+        }
         for (; ; ) {
             Runnable task;
             synchronized (this) {

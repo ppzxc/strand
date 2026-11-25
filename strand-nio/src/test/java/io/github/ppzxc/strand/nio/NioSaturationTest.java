@@ -27,6 +27,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -298,6 +299,32 @@ class NioSaturationTest {
 
         @Override
         public void close() {}
+    }
+
+    @Test
+    void aSaturatedCallerRunsExecutorDoesNotRunTheHandlerOnTheTransportThread() throws Exception {
+        AppFixture server = track(AppFixture.plain());
+        AppFixture clientFixture = track(AppFixture.plain());
+        AtomicInteger handled = new AtomicInteger();
+        NioStrandServer app = acceptingServer(server)
+                .handler(request -> {
+                    handled.incrementAndGet();
+                    request.respond(Status.OK, bytes("ok"));
+                })
+                .build();
+        Listener listener = listen(app);
+        NioStrandConnection connection =
+                AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
+        server.executor.callerRuns = true;
+
+        RequestResult result = clientFixture.result(
+                connection.request(Request.of(TYPE, bytes("x"))).result());
+
+        assertThat(handled).hasValue(0);
+        assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);
+        assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
+        assertThat(connection.closed().isDone()).isFalse();
+        assertThat(connection.resourceUsage(Resource.HANDLER_TASKS).current()).isZero();
     }
 
     @Test
