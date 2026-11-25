@@ -45,7 +45,7 @@ final class StageCompletion {
             });
         } catch (RuntimeException | Error e) {
             fallback.cancel(false);
-            once.run();
+            Supervisor.COMPLETIONS.execute(once);
         }
     }
 }

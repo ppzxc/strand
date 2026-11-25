@@ -8,6 +8,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class StageCompletionTest {
@@ -47,14 +48,25 @@ class StageCompletionTest {
     }
 
     @Test
-    void aRejectingExecutorCompletesOnTheCallerOnceAndTheDeadlinePathNeverFires() throws Exception {
+    void aRejectingExecutorCompletesOffTheCallerOnceAndTheDeadlinePathNeverFires() throws Exception {
+        CountDownLatch completed = new CountDownLatch(1);
         AtomicInteger completions = new AtomicInteger();
+        AtomicReference<Thread> completionThread = new AtomicReference<>();
+        Thread caller = Thread.currentThread();
         Executor rejecting = task -> {
             throw new java.util.concurrent.RejectedExecutionException();
         };
 
-        StageCompletion.complete(rejecting, completions::incrementAndGet, FALLBACK_NANOS);
-        assertThat(completions).hasValue(1);
+        StageCompletion.complete(
+                rejecting,
+                () -> {
+                    completionThread.set(Thread.currentThread());
+                    completions.incrementAndGet();
+                    completed.countDown();
+                },
+                FALLBACK_NANOS);
+        assertThat(completed.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(completionThread.get()).isNotSameAs(caller);
         Thread.sleep(TimeUnit.NANOSECONDS.toMillis(FALLBACK_NANOS) * 4);
 
         assertThat(completions).hasValue(1);
