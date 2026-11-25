@@ -48,15 +48,28 @@ class JavaCommentScannerTest {
   }
 
   @Test
-  fun `baseline allows registered comments and rejects extra copies`() {
-    val root = Files.createTempDirectory("java-comments").toFile()
-    val source = root.resolve("Sample.java").apply { writeText("class Sample { // line\n}\n") }
-    val baseline = JavaCommentBaseline.contents(listOf(source), root).trim().lines()
+  fun `checkJavaComments rejects a comment and reports its file and line`() {
+    val fixture = BuildFixture(
+      Files.createTempDirectory("java-comments").toFile(),
+      "java",
+      usesCompatExtension = false,
+      gitRepository = false,
+    )
+    fixture.writeAtRepoRoot(
+      "build.gradle.kts",
+      """
+      plugins {
+        id("java")
+        id("strand.java-comments")
+      }
+      """.trimIndent() + "\n",
+    )
+    fixture.writeAtRepoRoot("src/Sample.java", "class Sample { // line\n}\n")
 
-    assertThat(JavaCommentBaseline.newComments(listOf(source), root, baseline)).isEmpty()
+    val result = fixture.fail("checkJavaComments")
 
-    source.writeText("class Sample { // line\n  // line\n}\n")
-    assertThat(JavaCommentBaseline.newComments(listOf(source), root, baseline))
-      .containsExactly("Sample.java:2: new line comment")
+    assertThat(result.output)
+      .contains("금지된 Java 주석 1개")
+      .contains("src/Sample.java:1: line comment")
   }
 }
