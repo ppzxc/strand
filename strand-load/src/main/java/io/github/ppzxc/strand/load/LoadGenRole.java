@@ -341,30 +341,16 @@ final class LoadGenRole {
                 }
             }
         });
-        watchObservation(observation, completed, connection);
-    }
-
-    private void watchObservation(
-            io.github.ppzxc.strand.api.Observation observation,
-            AtomicBoolean completed,
-            LoadConnection connection) {
-        if (completed.get()) {
-            return;
-        }
-        if (observation.isDone()) {
-            if (observation.failureNow().isPresent() && completed.compareAndSet(false, true)) {
-                observationFailures.incrementAndGet();
-                outstanding.decrementAndGet();
-                if (!config.openLoop && !stopped.get()) {
-                    retry.schedule(
-                            () -> executor.execute(() -> send(connection, System.nanoTime())),
-                            10,
-                            TimeUnit.MILLISECONDS);
-                }
+        ObservationMonitor.watch(observation, retry, completed, () -> {
+            observationFailures.incrementAndGet();
+            outstanding.decrementAndGet();
+            if (!config.openLoop && !stopped.get()) {
+                retry.schedule(
+                        () -> executor.execute(() -> send(connection, System.nanoTime())),
+                        10,
+                        TimeUnit.MILLISECONDS);
             }
-            return;
-        }
-        retry.schedule(() -> watchObservation(observation, completed, connection), 1, TimeUnit.MILLISECONDS);
+        });
     }
 
     private boolean classify(RequestResult result) {
