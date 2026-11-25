@@ -65,7 +65,7 @@ No actual hosted CI/PR failure incident was available. The controlled failures a
 
 ### Gaps, exceptions, and review conditions
 
-- **Unverified rule rows:** 104 IDs have no direct rule-specific evidence pointer in the implementation reports. The accountable owner is the §13 role in the source; see the per-ID index and `issue-491-gap-register.md`.
+- **Unverified rule rows:** 104 IDs have no direct rule-specific evidence pointer in the implementation reports. Of these, 96 lack rule-specific execution evidence; 8 have cross-references but no direct execution proof. The accountable owner is the §13 role in the source; see the per-ID index and `issue-491-gap-register.md`.
 - **Actual CI/PR incident history:** absent. Local synthetic failures provide reproductions, causes, prevention changes, and reruns, but do not satisfy the literal “actual CI/PR case” part of §13 item 10.
 - **SCA remediation:** build/module owners must upgrade the CRITICAL Netty and HIGH build-logic dependencies. Keep the gate blocking until the same scan passes on a new SHA.
 - **Hosted CI and live release:** CI owner must record the hosted run SHA/result. Release owner must record upload, `VALIDATED` deployment, and post-upload consumer result before publication; no release was made here.
