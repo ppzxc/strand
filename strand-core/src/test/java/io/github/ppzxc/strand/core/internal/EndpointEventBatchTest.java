@@ -36,8 +36,7 @@ class EndpointEventBatchTest {
             batch.stream().map(Event::streamId).forEach(drainedStreamIds::add);
         }
 
-        assertThat(drainedStreamIds).containsExactly(
-                1L, 3L, 5L, 7L, 9L, 11L, 13L, 15L, 17L,
-                19L, 21L, 23L, 25L, 27L, 29L, 31L, 33L);
+        assertThat(drainedStreamIds)
+                .containsExactly(1L, 3L, 5L, 7L, 9L, 11L, 13L, 15L, 17L, 19L, 21L, 23L, 25L, 27L, 29L, 31L, 33L);
     }
 }
