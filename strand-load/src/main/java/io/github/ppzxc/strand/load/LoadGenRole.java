@@ -54,6 +54,7 @@ final class LoadGenRole {
 
     private final AtomicLong errors = new AtomicLong();
     private final AtomicLong unknown = new AtomicLong();
+    private final AtomicLong observationFailures = new AtomicLong();
     private final AtomicLong outstanding = new AtomicLong();
     private final Histogram latency = new ConcurrentHistogram(3_600_000_000L, 3);
     private final Histogram sendLag = new ConcurrentHistogram(3_600_000_000L, 3);
@@ -117,6 +118,7 @@ final class LoadGenRole {
         result.addProperty("windowResponses", respondedInWindow.get());
         result.addProperty("errors", errors.get());
         result.addProperty("unknown", unknown.get());
+        result.addProperty("observationFailures", observationFailures.get());
         result.addProperty("measureNanos", measureNanos);
         result.add("resources", resources);
         if (config.soak) {
@@ -321,7 +323,11 @@ final class LoadGenRole {
                 sendLag.recordValue(Math.max(0, (System.nanoTime() - intended) / 1_000));
             }
         }
-        connection.request(echo).result().observe(result -> {
+        java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean();
+        io.github.ppzxc.strand.api.Observation observation = connection.request(echo).result().observe(result -> {
+            if (!completed.compareAndSet(false, true)) {
+                return;
+            }
             long done = System.nanoTime();
             if (tag == MEASURE && classify(result)) {
                 if (inMeasurementWindow(done, windowStart, windowEnd)) {
@@ -341,6 +347,16 @@ final class LoadGenRole {
                 } else {
                     executor.execute(() -> send(connection, System.nanoTime()));
                 }
+            }
+        });
+        ObservationMonitor.watch(observation, retry, completed, () -> {
+            observationFailures.incrementAndGet();
+            outstanding.decrementAndGet();
+            if (!config.openLoop && !stopped.get()) {
+                retry.schedule(
+                        () -> executor.execute(() -> send(connection, System.nanoTime())),
+                        10,
+                        TimeUnit.MILLISECONDS);
             }
         });
     }
