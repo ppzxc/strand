@@ -7,7 +7,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
-/** 실행 경로별 결과와 벡터별 통합 결과를 집계한다. */
 final class ConformanceReport {
 
     static final String CORE_PATH = "core";

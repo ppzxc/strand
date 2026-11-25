@@ -20,17 +20,11 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-/**
- * 서버 하나에 클라이언트 여러 개가 붙는 1:N 연결을 실제 TCP 위에서 확인한다. 연결마다 {@code Endpoint}가 독립이라는 점이 대상이다.
- *
- * <p>서버는 요청 {@code type}에서 {@code APPLICATION_TYPE}를 뺀 값을 {@code status}로 응답한다. 클라이언트 {@code i}는 {@code type}
- * {@code APPLICATION_TYPE + i}로 요청하고 {@code status} {@code i}를 기대한다. 응답이 자기 연결로 왔는지는 이 {@code status}로 가른다.
- */
 @ExtendWith(PassageObservation.class)
 class MultiClientIntegrationTest {
 
     private static final int CLIENT_COUNT = 16;
-    /** 규격 4.2절: 클라이언트가 처음 여는 스트림은 1번이다. 연결마다 번호 공간이 따로라 모든 클라이언트가 1번을 쓴다. */
+
     private static final long FIRST_CLIENT_STREAM_ID = 1L;
 
     private static TcpServer startServer(Transport transport) throws Exception {
@@ -47,11 +41,6 @@ class MultiClientIntegrationTest {
         return future.get(Fixtures.TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
 
-    /**
-     * 연결마다 {@code Endpoint}가 따로여야 하는데 상태를 공유하면 응답이 다른 연결로 새거나 스트림 번호가 섞인다. 클라이언트 16개가 동시에 연결해 각자 다른
-     * {@code type}으로 요청을 내고, 각 클라이언트가 자기 요청에 해당하는 {@code status}를 받는지, 서버가 받은 요청이 모두 스트림 1번인지 본다. 모든
-     * 클라이언트가 같은 {@code stream_id} 1을 쓰므로, 연결 사이에 번호 공간이 섞이면 실패한다.
-     */
     @TransportTest
     @DisplayName("클라이언트 16개가 동시에 연결해도 응답이 자기 연결로만 돌아온다 (규격 4.2)")
     void concurrentClientsEachGetTheirOwnResponse(Transport transport) throws Exception {
@@ -70,12 +59,11 @@ class MultiClientIntegrationTest {
                 assertThat(result.certainty()).as("클라이언트 %d의 결과 확정성", i).isEqualTo(Certainty.RESPONSE);
                 assertThat(result.status()).as("클라이언트 %d의 status", i).isEqualTo(i);
             }
-            // 스트림 번호는 통로를 관찰할 수 있는 전송(nio)에서만 본다. netty에서는 위의 응답 매칭까지만 본다.
+
             if (!transport.observesPassage()) {
                 return;
             }
-            // 서버 통로들이 읽은 요청 프레임의 번호로 본다. 제품 API는 받은 요청의 스트림 번호를 드러내지 않는다.
-            // 연결과 통로를 동시에 짝짓기 어려우므로 type이 서로 다른 요청을 모든 서버 쪽 통로에서 모은다.
+
             Map<Integer, Long> streamByType = new HashMap<>();
             for (int i = 0; i < CLIENT_COUNT; i++) {
                 Peer serverSide = server.awaitPeer();
@@ -94,7 +82,6 @@ class MultiClientIntegrationTest {
         }
     }
 
-    /** 신호가 올 때까지 기다렸다가 연결하고 요청을 내서, 연결과 요청이 한꺼번에 몰리게 한다. */
     private static RequestResult connectAndRequest(Transport transport, int port, int index, CountDownLatch start)
             throws Exception {
         start.await();
@@ -103,12 +90,6 @@ class MultiClientIntegrationTest {
         }
     }
 
-    /**
-     * 수립된 연결 하나가 CLOSE 없이 끊겨도 그 연결에서만 끝나야 한다. 실패가 다른 연결에 번지면 나머지 클라이언트가 종료 알림을 일찍 받거나 응답을 받지
-     * 못한다. 클라이언트 16개가 모두 요청·응답을 한 번 주고받아 연결을 수립한 뒤, 15개가 두 번째 요청을 낸 채로 하나를 끊는다. 마지막에 나머지에 연결 종료(CLOSE)를 보내고
-     * 연결마다 받은 요청 수와 종료 알림을 비교한다. 끊긴 쪽은 요청 한 건을 받고 CLOSE 없이 끊김으로 한 번, 나머지는 자기 연결 종료(CLOSE)로 한 번만 알림을 받아야
-     * 한다. 알림이 늦게 번져 한 번 더 오는 것도 연결을 모두 닫은 뒤의 알림 수로 놓치지 않는다(규격 3.5절, 4.2절).
-     */
     @TransportTest
     @DisplayName("수립된 연결 하나가 비정상 종료돼도 나머지 연결은 영향을 받지 않는다 (규격 3.5, 4.2)")
     void oneAbruptDisconnectDoesNotAffectOthers(Transport transport) throws Exception {
@@ -118,7 +99,7 @@ class MultiClientIntegrationTest {
         try (TcpServer server = startServer(transport)) {
             for (int i = 0; i < CLIENT_COUNT; i++) {
                 clients.add(Peer.connect(transport, server.port(), null));
-                // 연결을 하나씩 맺고 바로 받으므로, 받은 서버 쪽 연결은 방금 연결한 클라이언트의 짝이다.
+
                 serverSides.add(server.awaitPeer());
             }
             List<CompletableFuture<RequestResult>> first = new ArrayList<>();
@@ -176,7 +157,7 @@ class MultiClientIntegrationTest {
                     assertThat(serverSides.get(i).drainRequests())
                             .as("서버 쪽 연결 %d의 받은 요청", i)
                             .hasSize(2);
-                    // 결과 두 개가 종료 알림보다 먼저고, 서버는 요청 둘을 받은 뒤에 종료 알림을 받는다.
+
                     assertThat(clients.get(i).log())
                             .as("클라이언트 %d의 기록", i)
                             .containsExactly(Peer.RESULT, Peer.RESULT, Peer.CLOSED);

@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 
-/** 러너가 기대와 다른 동작을 놓치지 않는지 본다. 벡터를 직접 만들어 일부러 어긋나게 한다. */
 class VectorRunnerTest {
 
     private static final String PING = "00000018 00020000 0000000000000000 00000000 0102030405060708";
@@ -343,7 +342,6 @@ class VectorRunnerTest {
                 .containsExactly("request.write_limit_bytes", "request.extensions");
     }
 
-    /** 부분 쓰기를 관찰하는 벡터는 core 러너가 출력 진행 보고로 같은 상황을 만들어 통과한다. */
     @Test
     void partialWriteVectorPassesThroughProgressReports() {
         ConformanceVector v = VectorLoader.load(java.nio.file.Paths.get(
@@ -353,7 +351,6 @@ class VectorRunnerTest {
         assertThat(VectorRunner.evaluate(v).status()).isEqualTo(VectorOutcome.Status.PASS);
     }
 
-    /** 러너는 일괄 수거 방식의 입력·수거와 동기 인증기를 부르지 않는다(스펙 #362). */
     @Test
     void runnerSourcesDoNotUseTheBatchDrivingMode() throws java.io.IOException {
         java.nio.file.Path dir = java.nio.file.Paths.get("src/test/java/io/github/ppzxc/strand/conformance");
@@ -596,11 +593,8 @@ class VectorRunnerTest {
         assertThat(runner.describeMessages(split, false)).hasSize(2);
     }
 
-    // ---- 송신 프레임의 status·reserved·CLOSE reason (벡터 형식 6.1절) ----
-
     private static final String PING_EXPECTED = "{\"type\":\"PING\",\"payload\":\"0102030405060708\"}";
 
-    /** 헤더 20바이트 + payload. reservedHex는 헤더 끝 2바이트, statusHex는 status 1바이트. */
     private static String frameHex(
             String length, String type, String statusHex, String streamId, String reservedHex, String payload) {
         return length + type + "00" + statusHex + streamId + "0000" + reservedHex + payload;
@@ -656,7 +650,7 @@ class VectorRunnerTest {
         String okResponse = frameHex("00000010", "0100", "00", "0000000000000002", "0000", "");
 
         assertThat(sentOnce(true, request)).singleElement().asString().endsWith(" sent_status=1");
-        // 클라이언트 쪽에서 짝수 stream_id는 응답이다. status는 기존대로 기대와 비교한다.
+
         assertThat(sentOnce(true, okResponse))
                 .containsExactly(expectedOf("{\"type\":256,\"stream_id\":\"2\",\"status\":\"OK\"}"));
     }

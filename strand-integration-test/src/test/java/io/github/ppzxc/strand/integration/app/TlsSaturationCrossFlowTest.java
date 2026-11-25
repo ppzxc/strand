@@ -20,10 +20,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/**
- * 실제 TLS에서 TLS 공간을 최소 진행 공간으로 설정하고 상대가 읽기를 멈춰 암호문 공간이 찬 채로 취소·결과 보존·연결 종료가 이어지는지 본다(#328 수용 기준 2번의 TLS 부분,
- * #348). 한도는 최소 진행 공간 조회 API로 정한다(Rig).
- */
 class TlsSaturationCrossFlowTest {
     private static final int PAYLOAD = 8 * 1024;
     private static final int SENT = 3000;
@@ -77,7 +73,6 @@ class TlsSaturationCrossFlowTest {
         App.Conn connection = Rig.get(client.connect(relay.address()));
         closeables.add(connection::abort);
 
-        // 포화 전에 응답으로 확정된 결과를 하나 만든다.
         RequestHandle answeredHandle =
                 connection.request(request("first".getBytes(StandardCharsets.UTF_8)), RequestOptions.noDeadline());
         awaitTrue(() -> held.size() == 1);
@@ -87,7 +82,6 @@ class TlsSaturationCrossFlowTest {
         RequestResult answered = rig.result(answeredHandle.result());
         assertThat(answered.status()).isEqualTo(Status.OK);
 
-        // 상대가 읽기를 멈춘 채 큰 요청을 계속 보내 암호문 공간을 채운다. 서버에 닿는 요청 수가 더 늘지 않는다.
         relay.pauseClientToServer();
         List<RequestHandle> sent = new ArrayList<>();
         byte[] payload = new byte[PAYLOAD];
@@ -98,7 +92,6 @@ class TlsSaturationCrossFlowTest {
         int delivered = held.size();
         assertThat(delivered).as("멈춘 상대에게 모든 요청이 닿지 못해야 한다").isLessThan(SENT + 1);
 
-        // 포화 중에도 아직 전달되지 못한 요청의 취소가 진행된다.
         RequestHandle stuck = sent.get(SENT - 1);
         assertThat(stuck.result().isDone()).isFalse();
         stuck.cancel();
@@ -106,10 +99,8 @@ class TlsSaturationCrossFlowTest {
         RequestResult cancelled = stuck.result().resultNow();
         assertThat(cancelled.status()).isEqualTo(Status.CANCELLED);
 
-        // 이미 확정된 결과는 포화와 취소 뒤에도 그대로다.
         assertThat(answeredHandle.result().resultNow()).isSameAs(answered);
 
-        // 연결 종료도 진행되고 남은 요청은 확정된다.
         connection.abort();
         awaitTrue(() -> connection.closed().isDone());
         for (RequestHandle handle : sent) {
@@ -120,7 +111,6 @@ class TlsSaturationCrossFlowTest {
         assertThat(sent.get(SENT - 2).result().resultNow().certainty())
                 .isIn(Certainty.UNKNOWN, Certainty.NOT_PROCESSED);
 
-        // 시나리오 동안 연결별·소유 객체 한도를 넘지 않는다.
         for (Resource resource : TRACKED) {
             assertThat(client.usage(resource).highWater())
                     .as("client %s", resource)
@@ -131,7 +121,6 @@ class TlsSaturationCrossFlowTest {
         }
         assertThat(client.usage(Resource.TLS_CIPHERTEXT_BYTES).highWater()).isPositive();
 
-        // 연결이 끝나면 모든 예약이 돌아온다.
         relay.close();
         for (Resource resource : TRACKED) {
             awaitTrue(() -> client.usage(resource).current() == 0);
@@ -139,7 +128,6 @@ class TlsSaturationCrossFlowTest {
         }
     }
 
-    /** 서버에 닿은 요청 수가 한동안 변하지 않을 때까지 기다린다. */
     private static void awaitStable(List<App.In> held) throws Exception {
         int last = -1;
         int stableRounds = 0;

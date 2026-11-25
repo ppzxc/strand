@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** 작은 가짜 규격으로 요구사항 색인 도우미의 외부 행동(요구사항 목록과 문제 보고)을 확인한다. */
 class RequirementIndexTest {
 
     private static String spec(String... lines) {

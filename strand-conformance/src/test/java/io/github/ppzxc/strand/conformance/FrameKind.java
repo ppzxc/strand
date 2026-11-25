@@ -17,15 +17,8 @@ import java.util.function.Function;
 import java.util.function.IntPredicate;
 import java.util.regex.Pattern;
 
-/**
- * 프레임 종류 하나의 정의. 종류마다 기대 JSON의 형태, 기대 JSON의 렌더링, 기대 JSON의 바이트 인코딩, 실제 바이트의 디코딩을 한 곳에
- * 모은다. 이름 있는 프레임(PREFACE, HELLO, PING, AUTH, CLOSE, RESET, WEBSOCKET_CLOSE)과 숫자 type 애플리케이션 프레임이 대상이다.
- *
- * <p>기대값 렌더링과 실제 바이트 렌더링은 모두 {@link #format}에서 나온다. 형태 검사 표와 러너의 프레임 표는 이 정의에서 파생된다.
- */
 final class FrameKind {
 
-    /** 렌더링 모델: 필드 이름에서 값 문자열로. 기대 JSON과 실제 바이트가 모두 이 모양으로 모인 뒤 {@link #format}으로 그려진다. */
     private static final class Fields extends LinkedHashMap<String, String> {
         private static final long serialVersionUID = 1L;
 
@@ -35,7 +28,6 @@ final class FrameKind {
         }
     }
 
-    /** 디코딩한 프레임 하나. */
     private static final class Wire {
         final int type;
         final int flags;
@@ -62,7 +54,6 @@ final class FrameKind {
             return (flags & Protocol.ACK_FLAG) != 0;
         }
 
-        /** flags, stream_id, 있으면 extensions. */
         Fields head() {
             Fields fields =
                     new Fields().with("flags", flagsText(flags)).with("stream_id", Long.toUnsignedString(streamId));
@@ -73,7 +64,6 @@ final class FrameKind {
         }
     }
 
-    // 초기화 순서: VectorSchema의 static 초기화는 FrameKind를 건드리지 않는다. VectorSchema가 FrameKind를 부르는 것은 검사 시점뿐이다.
     private static final Shape FRAME_BASE = Shape.EMPTY.require(VectorSchema.FRAME_TAG, FieldCheck.DEFERRED);
 
     private static final byte[] PREFACE_BYTES = Bytes.fromHex(Protocol.PREFACE_HEX);
@@ -233,7 +223,6 @@ final class FrameKind {
                     : wire.head()
                             .with("error_code", Protocol.nameOfError((int) Bytes.readUnsignedInt(wire.payload, 0))));
 
-    /** WebSocket Close는 바이트가 아니라 전송 메시지다. 인코딩·디코딩할 바이트가 없다. */
     private static final FrameKind WEBSOCKET_CLOSE_KIND = new FrameKind(
             WEBSOCKET_CLOSE,
             null,
@@ -242,7 +231,6 @@ final class FrameKind {
             null,
             (wire, client) -> null);
 
-    /** 숫자 type이 256 이상인 애플리케이션 프레임. 확장 영역은 쓰지 않는다. */
     private static final FrameKind APPLICATION_KIND = new FrameKind(
             APP,
             type -> type >= Protocol.FIRST_APPLICATION_TYPE,
@@ -284,14 +272,11 @@ final class FrameKind {
                 return fields.with("payload", Bytes.toHex(wire.payload));
             });
 
-    /** 이름 있는 프레임 종류. 형태 검사 표와 러너의 프레임 표가 여기서 나온다. */
     private static final List<FrameKind> NAMED = Collections.unmodifiableList(Arrays.asList(
             PREFACE_KIND, HELLO_KIND, PING_KIND, AUTH_KIND, CLOSE_KIND, RESET_KIND, WEBSOCKET_CLOSE_KIND));
 
-    /** 실제 바이트를 풀 때 type 번호로 찾는 종류, 앞에서부터. */
     private static final List<FrameKind> DECODING;
 
-    /** 이름 있는 프레임의 이름에서 형태로. */
     private static final Map<String, Shape> SHAPES_BY_NAME;
 
     private static final Map<String, FrameKind> KINDS_BY_NAME;
@@ -314,7 +299,7 @@ final class FrameKind {
     }
 
     private final String name;
-    /** 실제 바이트의 type 번호가 이 종류인가. 바이트에 type이 없는 종류(PREFACE, WEBSOCKET_CLOSE)는 null이다. */
+
     private final IntPredicate onWire;
 
     private final Shape shape;
@@ -341,19 +326,14 @@ final class FrameKind {
         return actual -> actual == type;
     }
 
-    // ---- 파생: 형태 검사 표, 지원 여부 ----
-
-    /** 이름 있는 프레임의 이름에서 형태로. */
     static Map<String, Shape> shapesByName() {
         return SHAPES_BY_NAME;
     }
 
-    /** 숫자 type 애플리케이션 프레임의 형태. */
     static Shape applicationShape() {
         return APPLICATION_KIND.shape;
     }
 
-    /** 기대 프레임이 비교할 수 있는 종류인가: 이름 있는 프레임이거나, 확장 영역 없는 애플리케이션 프레임. */
     static boolean isSupported(JsonObject frame) {
         String type = VectorSchema.frameType(frame);
         if (type != null) {
@@ -363,7 +343,6 @@ final class FrameKind {
                 && APPLICATION_KIND.onWire.test(frame.get("type").getAsInt());
     }
 
-    /** 기대 프레임의 flags를 비교할 수 있는가: 비었거나 ACK뿐. */
     static boolean hasSupportedFlags(JsonObject frame) {
         return !frame.has("flags") || frame.getAsJsonArray("flags").size() == 0 || VectorSchema.hasFlag(frame, "ACK");
     }
@@ -384,15 +363,11 @@ final class FrameKind {
         return kind;
     }
 
-    // ---- 기대 JSON: 렌더링과 인코딩 ----
-
-    /** 기대 프레임을 벡터 {@code send}의 표기로. */
     static String expected(JsonObject frame) {
         FrameKind kind = of(frame);
         return format(kind.name, kind.expected.apply(frame));
     }
 
-    /** 기대 프레임을 바이트로. WEBSOCKET_CLOSE는 바이트가 없어 지원하지 않는다. */
     static byte[] encode(JsonObject frame) {
         FrameKind kind = of(frame);
         if (kind.encoder == null) {
@@ -401,7 +376,6 @@ final class FrameKind {
         return kind.encoder.apply(frame);
     }
 
-    /** 엔드포인트가 낸 WebSocket Close 메시지의 표기. 기대 항목과 같은 정의에서 나온다. */
     static String webSocketClose(int code) {
         return format(WEBSOCKET_CLOSE, webSocketCloseFields(code));
     }
@@ -410,13 +384,6 @@ final class FrameKind {
         return new Fields().with("code", String.valueOf(code));
     }
 
-    // ---- 실제 바이트: 디코딩과 렌더링 ----
-
-    /**
-     * 엔드포인트가 보낸 바이트를 프레임으로 풀어 벡터의 {@code send}와 같은 표기로 바꾼다. 잘린 프레임은 실패시킨다. {@code client}는
-     * 이 쪽 역할로, 애플리케이션 프레임의 status 비교 여부를 정한다. CLOSE는 reason도 그린다. 벡터가 reason을 적지 않은 항목의 reason은
-     * {@link #comparable}이 비교에서 뺀다.
-     */
     static List<String> describe(byte[] output, boolean startsWithPreface, boolean client) {
         List<String> result = new ArrayList<>();
         byte[] rest = output;
@@ -434,15 +401,10 @@ final class FrameKind {
         return result;
     }
 
-    /** 상대의 번호 공간(클라이언트는 짝수, 서버는 홀수)의 프레임은 응답이다. 자기 번호 공간의 프레임은 요청이다. */
     private static boolean isResponse(Wire wire, boolean client) {
         return (wire.streamId & 1) != (client ? 1 : 0);
     }
 
-    /**
-     * 비교 규칙: reserved는 모든 송신 프레임에서, status는 응답이 아닌 프레임에서 늘 0이어야 한다. 기대 표기는 이 필드를 갖지 않으므로 0이
-     * 아니면 어긋난다. 해석하지 못하는 프레임에도 적용한다.
-     */
     private static void markNonZero(Fields fields, Wire wire, boolean response) {
         if (wire.reserved != 0) {
             fields.with("reserved", String.format("0x%04x", wire.reserved));
@@ -466,7 +428,7 @@ final class FrameKind {
                 }
             }
         }
-        // 어느 종류도 아닌 바이트는 type 번호 그대로 그려 비교가 실패하게 한다.
+
         Fields unknown = wire.head().with("payload", Bytes.toHex(wire.payload));
         markNonZero(unknown, wire, false);
         return format(String.format("type=0x%04x", wire.type), unknown);
@@ -474,10 +436,6 @@ final class FrameKind {
 
     private static final Pattern REASON_FIELD = Pattern.compile(" reason=[0-9a-f]*");
 
-    /**
-     * 실제 표기 중 벡터가 {@code reason}을 적지 않은 CLOSE 항목에서 reason을 뺀다. 적은 항목만 바이트까지 비교한다. 규격은 AUTH 거부와
-     * 폐기에서만 reason을 비우라 하고 다른 CLOSE에는 설명을 허용한다(벡터 형식 6.1절).
-     */
     static List<String> comparable(List<String> actual, JsonArray expectedSend) {
         List<String> result = new ArrayList<>(actual);
         for (int i = 0; i < result.size() && i < expectedSend.size(); i++) {
@@ -508,8 +466,6 @@ final class FrameKind {
         return result;
     }
 
-    // ---- 렌더링 형식: 기대값과 실제 바이트가 함께 쓰는 유일한 형식 ----
-
     private static String format(String name, Fields fields) {
         StringBuilder text = new StringBuilder(name);
         for (Map.Entry<String, String> field : fields.entrySet()) {
@@ -525,7 +481,6 @@ final class FrameKind {
         return flags == Protocol.ACK_FLAG ? "ACK" : String.format("0x%02x", flags);
     }
 
-    /** 기대 제어 프레임의 머리말: flags와 0으로 고정된 stream_id. */
     private static Fields controlHead(boolean ack) {
         return new Fields()
                 .with("flags", flagsText(ack ? Protocol.ACK_FLAG : 0))
@@ -548,7 +503,6 @@ final class FrameKind {
         return paramsText(filled);
     }
 
-    /** AUTH(ACK) payload의 항목. {@code credential_lifetime}만 이름이 있고 빈 payload는 {@code -}다. */
     private static String authParamsText(byte[] payload) {
         if (payload.length == 0) {
             return "-";
@@ -566,8 +520,6 @@ final class FrameKind {
         }
         return text.toString();
     }
-
-    // ---- 인코딩 도구 ----
 
     private static byte[] helloPayload(JsonObject frame) {
         Map<String, Long> params = Protocol.helloParams(frame.getAsJsonObject("params"));
@@ -590,12 +542,10 @@ final class FrameKind {
         return payload.toByteArray();
     }
 
-    /** 확장 영역이 없고 {@code status}와 {@code stream_id}가 0인 제어 프레임(규격 2.1절). */
     private static byte[] control(int type, boolean ack, byte[] payload) {
         return Bytes.concat(header(type, ack ? Protocol.ACK_FLAG : 0, 0, 0L, payload.length), payload);
     }
 
-    /** 확장 영역이 없는 프레임의 헤더 20바이트(규격 2.1절). {@code length}는 header 뒤 payload 크기로 채운다. */
     private static byte[] header(int type, int flags, int status, long streamId, int payloadSize) {
         ByteArrayOutputStream header = new ByteArrayOutputStream();
         Bytes.writeInt(header, Protocol.HEADER_SIZE - Protocol.LENGTH_SIZE + payloadSize);

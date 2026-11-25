@@ -33,7 +33,6 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 
-/** strand-netty의 앱 공개 API를 중립 모양으로 감싼다. */
 final class NettyRig extends Rig {
     final EventLoopGroup group = new NioEventLoopGroup(2);
     private final NettySecurity serverSecurity;

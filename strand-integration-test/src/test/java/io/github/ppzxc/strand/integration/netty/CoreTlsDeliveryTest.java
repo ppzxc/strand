@@ -10,7 +10,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/** 실제 Netty NIO 채널과 JDK SSLEngine·TLS 서버에서 TLS 평문 소비량과 암호문 쓰기량을 구별해 보고하는 경계를 검증한다(#315). */
 class CoreTlsDeliveryTest {
     private static final byte[] PING = {1, 2, 3, 4, 5, 6, 7, 8};
 
@@ -18,10 +17,6 @@ class CoreTlsDeliveryTest {
         return values.stream().mapToInt(Integer::intValue).sum();
     }
 
-    /**
-     * PING을 하나씩 보내 "마지막 PING의 평문은 모두 소비했지만 그 암호문은 소켓에 나가지 못하고 대기열에 남은" 상태를 만든다. 커널 버퍼가 늦게
-     * 풀려 쓰기 0이 일시적일 수 있으므로, 30ms 뒤에도 실제 쓴 양이 변하지 않고 암호문이 남아 있을 때만 막힘으로 본다.
-     */
     private static void blockSocket(TlsFixture fixture) throws Exception {
         for (int i = 0; i < 100_000; i++) {
             int zerosBefore = fixture.onLoop(fixture.driver::zeroCiphertextWrites);
@@ -41,7 +36,6 @@ class CoreTlsDeliveryTest {
         throw new AssertionError("socket never stably blocked");
     }
 
-    /** 한 시나리오. 커널이 쓰기 막힘을 일시적으로 풀어 전제가 깨졌으면 false를 돌려주고, 전제가 맞은 실행에서 단언이 어긋나면 던진다. */
     private interface Scenario {
         boolean run(TlsFixture fixture) throws Exception;
     }
@@ -87,7 +81,7 @@ class CoreTlsDeliveryTest {
             int frameLength = 4 + 16 + payload.length;
             AtomicLong ticket = new AtomicLong();
             fixture.driver.command(() -> ticket.set(fixture.endpoint.request(OpenEndpoint.REQUEST_TYPE, payload)));
-            // 상대가 읽지 않으면 암호문 소켓 쓰기가 막혀 평문 소비가 프레임 중간에서 멈춘다.
+
             for (int i = 0; i < 2000 && fixture.onLoop(fixture.driver::budgetBlocks) == 0; i++) {
                 Thread.sleep(2);
             }
@@ -116,10 +110,10 @@ class CoreTlsDeliveryTest {
     @ParameterizedTest
     @ValueSource(strings = {"TLSv1.2", "TLSv1.3"})
     void withdrawalBeforeAnyPlaintextIsConsumedLeavesNoFrameOnTheWire(String protocol) throws Exception {
-        // 예약 한도가 패킷 하나이므로 소켓이 막히면 암호문이 남은 채 다음 프레임의 소비량은 0이다.
+
         whenSocketStaysBlocked(protocol, 1, fixture -> {
             blockSocket(fixture);
-            // 요청 접수, 0 보고, 철회를 이벤트 루프 한 작업으로 묶어 그 사이에 소켓 상태가 바뀌지 않게 한다.
+
             boolean withdrawnAtZero = fixture.onLoop(() -> {
                 long ticket = fixture.endpoint.request(OpenEndpoint.REQUEST_TYPE, new byte[100]);
                 fixture.driver.pump();
@@ -153,7 +147,7 @@ class CoreTlsDeliveryTest {
         int frameLength = 4 + 16 + 1000;
         whenSocketStaysBlocked(protocol, 2, fixture -> {
             blockSocket(fixture);
-            // 예약 한도에 여유가 있어 프레임의 마지막 평문까지 소비했지만 이 프레임의 암호문은 소켓에 한 바이트도 나가지 않은 상태를 한 작업으로 잡는다.
+
             int[] state = fixture.onLoop(() -> {
                 int writtenBefore = sum(fixture.driver.ciphertextWrites());
                 fixture.endpoint.request(OpenEndpoint.REQUEST_TYPE, new byte[1000]);

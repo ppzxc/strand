@@ -14,10 +14,6 @@ import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
-/**
- * 벡터 형식이 정한 단계 종류와 각 종류의 필드, 실행 동작, 확인 대기 해석용 성질을 정의한다. 벡터의 단계별 형태와 일반 실행은 여기서
- * 가져오고, 여러 단계에 걸친 제약은 {@link VectorSchema}에서 검증한다.
- */
 final class StepKind {
 
     static final String TAG = "kind";
@@ -29,12 +25,11 @@ final class StepKind {
     static final String TIME_ADVANCE_FIELD = "ms";
     static final String LABEL = "단계 kind";
 
-    /** 단계가 엔드포인트에 넣는 들어오는 바이트의 성격. */
     enum Inbound {
         NONE,
-        /** 연결 하나의 바이트 흐름에 이어 붙는다(프레임 경계와 무관하게 잘릴 수 있다). */
+
         STREAM,
-        /** 메시지 하나가 따로 들어온다. */
+
         MESSAGE
     }
 
@@ -43,7 +38,6 @@ final class StepKind {
             .require("send", VectorSchema::frames)
             .require("events", VectorSchema::events);
 
-    /** 정의 등록부. 정의를 만들면 여기 들어가므로 별도 목록을 맞출 필요가 없다. */
     private static final Map<String, StepKind> REGISTRY = new LinkedHashMap<>();
 
     private static final StepKind RECV = define(
@@ -59,7 +53,6 @@ final class StepKind {
                     BASE.require("opcode", FieldCheck.oneOf(VectorSchema.OPCODES))
                             .require("hex", Check::hex),
                     (driver, step) -> {
-                        // 메시지 하나는 한 단위다. 텍스트 메시지는 바이트로 넘길 수 없는 입력이다.
                         if (step.get("opcode").getAsString().equals("binary")) {
                             driver.receiveUnit(Bytes.fromHex(step.get("hex").getAsString()));
                         } else {
@@ -130,7 +123,6 @@ final class StepKind {
                 }
             });
 
-    /** CLOSE를 보낼 뿐 연결은 끝나지 않는다(규격 3.3절). */
     private static final StepKind CLOSE = define(
             "close",
             BASE.require("error_code", VectorSchema.ERROR_CODE).allow("reason", Check::string),
@@ -193,7 +185,6 @@ final class StepKind {
         return kind;
     }
 
-    // 성질 지정은 정의 시점(클래스 초기화)에만 쓴다.
     private StepKind inbound(Inbound value) {
         this.inbound = value;
         return this;
@@ -237,15 +228,10 @@ final class StepKind {
         return Collections.unmodifiableMap(shapes);
     }
 
-    /** 형태 검사 표: 단계 종류 이름마다 형태. */
     static Map<String, Shape> shapesByName() {
         return SHAPES_BY_NAME;
     }
 
-    /**
-     * 이 단계의 종류. 적재기를 거친 벡터에는 정의에 없는 종류가 없으므로, 없으면 {@link IllegalArgumentException}을 던진다. 이름만으로
-     * 모르는 종류를 물어야 하면 {@link #named}를 쓴다.
-     */
     static StepKind of(JsonObject step) {
         String name = step.get(TAG).getAsString();
         StepKind kind = REGISTRY.get(name);
@@ -255,7 +241,6 @@ final class StepKind {
         return kind;
     }
 
-    /** 이 종류를 정의에서 찾는다. 던지지 않고 모르는 이름이면 null을 돌려준다(적재기 앞에서 지원 검사를 하는 러너가 쓴다). */
     static StepKind named(String name) {
         return REGISTRY.get(name);
     }
@@ -264,12 +249,10 @@ final class StepKind {
         return name;
     }
 
-    /** 단계를 진행 보고 구동기로 엔드포인트에 적용한다. */
     void execute(EndpointDriver driver, JsonObject step, Map<String, Long> requestTickets) {
         execution.execute(driver, step, requestTickets);
     }
 
-    /** 지원 종류여도 러너가 실행하지 못하는 단계 내용(예: request의 확장). */
     List<String> unsupportedParts(JsonObject step) {
         return unsupportedParts.apply(step);
     }
@@ -278,7 +261,6 @@ final class StepKind {
         return inbound;
     }
 
-    /** 단계의 {@code ms}만큼 시간을 진행하는가. */
     boolean advancesTime() {
         return advancesTime;
     }
@@ -291,12 +273,10 @@ final class StepKind {
         return step.get(TIME_ADVANCE_FIELD).getAsLong();
     }
 
-    /** 이 단계만으로 연결이 끝나는가(상대가 끊었다). */
     boolean endsConnection() {
         return endsConnection;
     }
 
-    /** 단계가 PING을 보내며 그 payload가 단계의 {@code payload}인가. */
     boolean sendsPing() {
         return sendsPing;
     }
@@ -305,7 +285,6 @@ final class StepKind {
         return credentialNotification;
     }
 
-    /** 이 종류를 쓸 수 있는 transport. 제한이 없으면 null. */
     String onlyOnTransport() {
         return onlyOnTransport;
     }

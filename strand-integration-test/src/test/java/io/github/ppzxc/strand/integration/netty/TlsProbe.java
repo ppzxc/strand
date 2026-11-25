@@ -22,7 +22,6 @@ import javax.net.ssl.SSLServerSocket;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.TrustManagerFactory;
 
-/** Experiment only: drives the JDK engine and a Netty NIO channel over a loopback socket. */
 final class TlsProbe {
     static final class Result {
         final int plaintextConsumed;

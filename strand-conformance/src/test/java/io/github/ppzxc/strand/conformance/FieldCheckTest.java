@@ -10,7 +10,6 @@ import java.math.BigInteger;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
-/** 필드 규칙의 내부 불변식: 형태 표가 규칙을 직접 들고, 규칙은 경로가 붙은 같은 형식의 오류를 낸다. */
 class FieldCheckTest {
 
     private static final Check CHECK = Check.forFile("f.json");

@@ -11,24 +11,19 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** 연결 인증 관문(규격 3.3절, 3.3.1절)을 `auth` 벡터 영역이 빠짐없이 단언하는지 본다(#166). core를 실행하지 않는다. */
 class AuthVectorsTest {
 
-    /** 이슈 #166이 요구한 벡터 종류별 `auth/id`. */
     private static final List<String> REQUIRED = Arrays.asList(
-            // 통과
             "auth/server-auth-anonymous-passes-and-gate-opens",
             "auth/server-auth-with-credentials-passes",
             "auth/client-auth-passes-and-gate-opens",
             "auth/client-auth-ack-ignores-unknown-identifier",
-            // 거부, 모르는 메커니즘, 대기 초과
             "auth/server-wrong-credentials-closes-unauthenticated",
             "auth/server-unknown-mechanism-closes-unauthenticated",
             "auth/server-auth-wait-times-out-closes-unauthenticated",
             "auth/server-auth-wait-is-cancelled-by-auth",
             "auth/client-receives-unauthenticated-close",
             "auth/client-auth-ack-wait-times-out-closes-unresponsive",
-            // 관문 통과 전 프레임
             "auth/server-ping-before-auth-closes",
             "auth/server-reset-before-auth-closes",
             "auth/server-application-frame-before-auth-closes",
@@ -37,7 +32,6 @@ class AuthVectorsTest {
             "auth/server-sends-no-request-before-auth-passes",
             "auth/client-sends-no-request-before-auth-ack",
             "auth/auth-before-peer-ack-closes",
-            // 형태 위반
             "auth/server-auth-empty-payload-closes",
             "auth/server-auth-mechanism-length-zero-closes",
             "auth/server-auth-mechanism-length-above-twenty-closes",
@@ -46,12 +40,10 @@ class AuthVectorsTest {
             "auth/server-auth-stream-id-nonzero-closes",
             "auth/client-auth-ack-payload-not-multiple-of-six-closes",
             "auth/client-auth-ack-duplicate-identifier-closes",
-            // 방향 위반, 두 번째 AUTH
             "auth/server-receives-auth-ack-closes",
             "auth/client-receives-auth-closes",
             "auth/server-second-auth-closes",
             "auth/client-second-auth-ack-closes",
-            // WebSocket 위 AUTH 통과
             "auth/websocket-auth-passes",
             "auth/server-auth-transient-failure-closes-internal-error",
             "auth/server-auth-revoked-closes-unauthenticated",
@@ -84,10 +76,6 @@ class AuthVectorsTest {
         assertThat(inFile).containsExactlyInAnyOrderElementsOf(REQUIRED);
     }
 
-    /**
-     * 3.3.x 요구사항이 없고 자기가 확인하는 프레임 검사의 절만 가리키는 AUTH 벡터. 두 벡터의 requirements에 3.3.x 앵커가 없어 옛 "3.3 또는 3.3.1"
-     * 단언을 그대로 복원할 수 없다. 벡터를 더하려면 여기에 올린다.
-     */
     private static final Map<String, String> FRAME_CHECK_SECTIONS = new HashMap<>();
 
     static {
@@ -143,13 +131,12 @@ class AuthVectorsTest {
         assertThat(setup.get("credentials").getAsString()).isNotEmpty();
     }
 
-    /** 0x0005는 AUTH다. 예약 제어 타입으로 무시한다고 기대하는 벡터가 남으면 안 된다. */
     @Test
     void noVectorTreatsType0005AsAReservedControlType() {
         Map<String, JsonObject> all = RawVectors.byKey();
         assertThat(all).doesNotContainKey("control-frames/reserved-type-0005-is-ignored");
         assertThat(all).containsKey("control-frames/reserved-type-0006-is-ignored");
-        // 예약 제어 타입을 보내는 단계의 type이 0x0006이다(0x0005는 AUTH).
+
         assertThat(typeAt("control-frames/reserved-type-0006-is-ignored", 0)).isEqualTo("0006");
         assertThat(typeAt("hello-establishment/ack-gate-allows-reserved-control-type", 2))
                 .isEqualTo("0006");
@@ -167,7 +154,6 @@ class AuthVectorsTest {
         return Bytes.compactHex(hex).substring(8, 12);
     }
 
-    /** AUTH 관문 뒤로 미룬 벡터는 지운 id 목록에 올라 다시 쓰이지 않는다. */
     @Test
     void vectorsThatNoLongerHoldAreGone() {
         Map<String, JsonObject> all = RawVectors.byKey();
@@ -180,7 +166,6 @@ class AuthVectorsTest {
         }
     }
 
-    /** 관문을 통과하기 전의 확립 전 벡터에서 클라이언트가 ACK HELLO를 보내는 단계는 AUTH를 이어 보낸다(규격 3.3절). */
     @Test
     void everyClientStepThatSendsHelloAckSendsAuthRightAfter() {
         int seen = 0;
@@ -209,7 +194,6 @@ class AuthVectorsTest {
         assertThat(seen).isGreaterThanOrEqualTo(10);
     }
 
-    /** 서버 역할 벡터에서 ACK HELLO 뒤에 요청·PING·애플리케이션 프레임을 내보내는 것은 AUTH(ACK) 이후뿐이다. */
     @Test
     void aServerNeverSendsAnythingButAuthAckBeforeTheGateOpens() {
         int seen = 0;

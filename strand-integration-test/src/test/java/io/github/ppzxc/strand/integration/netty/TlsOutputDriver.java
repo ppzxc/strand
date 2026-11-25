@@ -16,11 +16,6 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLException;
 
-/**
- * 검증용 TLS 구동. core 출력 프레임을 하나씩 JDK {@link SSLEngine}으로 wrap해 실제 평문 소비량을 보고하고, 암호문은 별도 대기열에서 실제
- * 소켓 쓰기량대로 내보낸다. wrap 전에 암호문 공간(패킷 버퍼 하나)을 예약하며 예약 합계가 한도를 넘으면 wrap하지 않고 소비량 0을 보고한다. 모든
- * 메서드는 이벤트 루프에서 부른다.
- */
 final class TlsOutputDriver {
     private final BoundaryChannel channel;
     private final Endpoint endpoint;
@@ -62,7 +57,7 @@ final class TlsOutputDriver {
         ByteBuffer application = ByteBuffer.allocate(engine.getSession().getApplicationBufferSize() * 2);
         ByteBuffer empty = ByteBuffer.allocate(0);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        // 검증용이므로 이벤트 루프에서 handshake가 끝날 때까지 기다린다. 제품 구현이 아니다.
+
         while (engine.getHandshakeStatus() != SSLEngineResult.HandshakeStatus.NOT_HANDSHAKING) {
             if (System.nanoTime() > deadline) throw new IllegalStateException("TLS handshake timed out");
             switch (engine.getHandshakeStatus()) {
@@ -93,7 +88,6 @@ final class TlsOutputDriver {
         return engine;
     }
 
-    /** 이벤트 루프에서 core 명령 하나를 실행한 뒤 곧바로 출력을 이어 처리한다. */
     void command(Runnable command) {
         channel.eventLoop().execute(() -> {
             command.run();
@@ -101,7 +95,6 @@ final class TlsOutputDriver {
         });
     }
 
-    /** 명령만 이벤트 루프에 넣는다. 한 번에 밀려 있던 여러 명령 뒤에 {@link #pump()}가 이어지는 경우를 재현한다. */
     void enqueue(Runnable command) {
         channel.eventLoop().execute(command);
     }
@@ -121,7 +114,7 @@ final class TlsOutputDriver {
                     break;
                 }
                 if (reserved() + packetSize > reservationLimit) {
-                    // 암호문 공간을 예약하지 못하면 wrap하지 않는다. 소비량 0은 시작이 아니다.
+
                     endpoint.outputProgress(output.id(), 0);
                     plaintextReports.add(0);
                     budgetBlocks++;
@@ -156,7 +149,6 @@ final class TlsOutputDriver {
         }
     }
 
-    /** 대기 중인 암호문을 실제 소켓 쓰기량만큼만 내보낸다. 0 반환이면 멈춘다. */
     private void flushCiphertext() throws IOException {
         while (!ciphertext.isEmpty()) {
             ByteBuf head = ciphertext.peekFirst();
@@ -192,7 +184,6 @@ final class TlsOutputDriver {
                         TimeUnit.MILLISECONDS);
     }
 
-    /** TLS 종료를 시작한다: close_notify를 암호문 대기열 끝에 넣고, 모두 실제로 쓴 뒤 통로를 닫는다. */
     void closeGracefully() {
         channel.eventLoop().execute(() -> {
             try {
@@ -237,7 +228,6 @@ final class TlsOutputDriver {
         return new ArrayList<>(ciphertextWrites);
     }
 
-    /** core가 아직 내보내지 못한(평문 소비가 끝나지 않은) 출력이 있다. */
     boolean hasPendingOutput() {
         return endpoint.nextOutput() != null;
     }
@@ -246,7 +236,6 @@ final class TlsOutputDriver {
         return zeroCiphertextWrites;
     }
 
-    /** 대기 중인 암호문 조각보다 적게 실제로 쓴 횟수. */
     int partialCiphertextWrites() {
         return partialCiphertextWrites;
     }

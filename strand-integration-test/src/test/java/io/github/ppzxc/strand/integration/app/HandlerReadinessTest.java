@@ -18,7 +18,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** 핸들러가 준비되기 전에 온 요청은 거절되지 않고 보관되었다가 활성화되면 전달된다(#370, #398, 규격 4.5절). */
 class HandlerReadinessTest {
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 
@@ -59,7 +58,7 @@ class HandlerReadinessTest {
 
         RequestHandle early = conn.request(request("early"), RequestOptions.noDeadline());
         Thread.sleep(200);
-        // 준비 전에 온 요청은 거절하지 않고 보관한다. 핸들러가 시작하기 전이라 전달도 되지 않는다.
+
         assertThat(early.result().isDone()).isFalse();
         assertThat(delivered).hasValue(0);
 

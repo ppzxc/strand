@@ -22,7 +22,6 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 
-/** 벡터 형식 문서 형식 벡터 파일 로더의 공개 인터페이스({@link VectorLoader#parse})를 검증한다. */
 class VectorLoaderTest {
 
     private static final String SETUP = "{\"role\":\"server\",\"established\":true}";
@@ -159,7 +158,6 @@ class VectorLoaderTest {
                 .hasMessageContaining("name");
     }
 
-    /** 유효한 벡터 하나에 단계 하나만 바꿔 넣은 파일. */
     private static String fileWithStep(String stepFields) {
         return file(vector("a", "[\"req-a-b\"]", SETUP, "[{" + stepFields + "}]"));
     }
@@ -225,7 +223,6 @@ class VectorLoaderTest {
                 .hasSize(1);
     }
 
-    /** 벡터 형식 6.2절: 번호를 받지 못한 대기열 요청의 CANCELLED와 DEADLINE_EXCEEDED도 stream_id 없는 result다(규격 4.4절, 4.4.1절). */
     @Test
     void acceptsQueuedRequestOutcomesWithoutStreamId() {
         for (String status : new String[] {"UNAVAILABLE", "CANCELLED", "DEADLINE_EXCEEDED"}) {
@@ -268,7 +265,7 @@ class VectorLoaderTest {
 
     @Test
     void optionalFieldsMayBeOmitted() {
-        // setup의 local_hello/peer_hello/config, request의 extensions/payload, 프레임의 flags/params 등을 생략한다.
+
         String steps = "[" + STEP
                 + ",{\"kind\":\"request\",\"type\":256,\"send\":[{\"type\":\"PREFACE\"},{\"type\":\"HELLO\"},"
                 + "{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"0\"},"
@@ -308,7 +305,7 @@ class VectorLoaderTest {
 
     @Test
     void streamNumbersAboveTwoToThe53AreReadExactly() {
-        String big = "9007199254740993"; // 2^53 + 1: double로는 표현할 수 없다
+        String big = "9007199254740993";
         String setup = "{\"role\":\"client\",\"established\":true,\"next_stream_id\":\"" + big + "\"}";
         String steps = "[{\"kind\":\"respond\",\"stream_id\":\"" + big + "\",\"status\":\"OK\","
                 + "\"send\":[{\"type\":\"RESET\",\"stream_id\":\"" + big + "\",\"error_code\":\"CANCEL\"}],"
@@ -616,7 +613,6 @@ class VectorLoaderTest {
                 .hasMessage(expected);
     }
 
-    /** 오류 메시지의 {@code 파일명: [위치](id=...) 경로: 메시지} 형식을 고정한다. */
     @Test
     void errorMessagesFollowFileLocationPathFormat() {
         assertMessage("{\"format\":1,\"vectors\":[]}", "x.json: format: 지원하지 않는 format이다(아는 것은 2): 1");
@@ -690,7 +686,6 @@ class VectorLoaderTest {
         return t.stream();
     }
 
-    /** 이름 대신 쓰는 정수의 예약 값 범위: status는 17~255, error_code는 8~2^32-1. */
     @Test
     void namedCodesAcceptOnlyTheReservedIntegerRange() {
         assertThat(parseStatus(17)).hasSize(1);
@@ -863,13 +858,13 @@ class VectorLoaderTest {
 
     private static final String PING_STEP =
             "{\"kind\":\"ping\",\"payload\":\"0102030405060708\",\"send\":[],\"events\":[]}";
-    /** 서버 역할이 AUTH(ACK)를 보내 AUTH 관문이 열리는 단계. */
+
     private static final String AUTH_ACK_SENT_STEP =
             "{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[{\"type\":\"AUTH\",\"flags\":[\"ACK\"]}],\"events\":[]}";
-    /** 클라이언트 역할이 서버의 AUTH(ACK)를 받아 AUTH 관문이 열리는 단계. */
+
     private static final String AUTH_ACK_RECEIVED_STEP = "{\"kind\":\"recv\","
             + "\"hex\":\"00000010 0005 01 00 0000000000000000 0000 0000\",\"send\":[],\"events\":[]}";
-    /** 서버 HELLO에 ACK를 보냈을 뿐인 단계: AUTH 관문은 아직 닫혀 있다. */
+
     private static final String HELLO_ACK_STEP =
             "{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[{\"type\":\"HELLO\",\"flags\":[\"ACK\"]}],\"events\":[]}";
 
@@ -885,7 +880,6 @@ class VectorLoaderTest {
                 "[" + String.join(",", steps) + "]"));
     }
 
-    /** 벡터 형식 문서 8.1절 3번: AUTH 관문이 열리기 전에는 ping 단계를 쓰지 않는다. */
     @TestFactory
     Stream<DynamicTest> rejectsPingStepBeforeTheAuthGateOpens() {
         List<DynamicTest> t = new ArrayList<>();
@@ -917,12 +911,10 @@ class VectorLoaderTest {
                 .hasSize(1);
         assertThat(VectorLoader.parse("x.json", fileWithEstablished(true, PING_STEP)))
                 .hasSize(1);
-        // 확립 전이라도 ping 단계가 없으면 규칙과 무관하다.
+
         assertThat(VectorLoader.parse("x.json", fileWithEstablished(false, RECV_STEP)))
                 .hasSize(1);
     }
-
-    // ---- 연결 인증(규격 3.3.1절, 벡터 형식 문서 4절·6.1절) ----
 
     private static String authFrame(String fields) {
         return recvWithSend("{\"type\":\"AUTH\"" + (fields.isEmpty() ? "" : "," + fields) + "}");
@@ -1140,7 +1132,6 @@ class VectorLoaderTest {
                 .hasSize(1);
     }
 
-    /** 마크다운 본문에서 ```json 코드 블록의 내용을 줄 끝 표기(LF, CRLF)와 관계없이 모은다. */
     private static List<String> jsonBlocks(String markdown) {
         Matcher m =
                 Pattern.compile("```json\\r?\\n(.*?)\\r?\\n```", Pattern.DOTALL).matcher(markdown);
@@ -1159,13 +1150,11 @@ class VectorLoaderTest {
         assertThat(jsonBlocks(lf.replace("\n", "\r\n"))).containsExactly("{\"a\":1}", "[2]");
     }
 
-    /** 형식 문서의 JSON 블록을 모은다. 위치는 규격 위치에서 구한다. */
     private static String formatDocument() throws IOException {
         Path doc = RequirementIndex.repositoryRoot().resolve("docs/specification/STRAND_CONFORMANCE_VECTORS.md");
         return new String(Files.readAllBytes(doc), StandardCharsets.UTF_8);
     }
 
-    /** 형식 문서의 JSON 예시가 모두 로더를 통과한다. */
     @Test
     void jsonExamplesInTheFormatDocumentPassTheLoader() throws IOException {
         List<String> blocks = jsonBlocks(formatDocument());
@@ -1176,7 +1165,6 @@ class VectorLoaderTest {
         assertThat(blocks).hasSizeGreaterThanOrEqualTo(4);
     }
 
-    /** 문서 2절의 첫 예시는 sample.json의 같은 id 벡터와 같다. hex는 공백만 다를 수 있다. */
     @Test
     void firstFormatDocumentExampleMatchesTheSameVectorInSampleJson() throws IOException {
         List<ConformanceVector> documented = VectorLoader.parse("doc-example-1.json", firstJsonBlockOfSection2());
@@ -1203,7 +1191,6 @@ class VectorLoaderTest {
         }
     }
 
-    /** 형식 문서 2절("## 2. ...")부터 다음 절 제목 전까지에서 첫 json 블록을 꺼낸다. */
     private static String firstJsonBlockOfSection2() throws IOException {
         String doc = formatDocument();
         Matcher section = Pattern.compile("(?m)^## 2\\. [^\\n]*$(.*?)(?=^## |\\z)", Pattern.DOTALL)
@@ -1214,7 +1201,6 @@ class VectorLoaderTest {
         return blocks.get(0);
     }
 
-    /** 단계 JSON의 복사본에서 모든 깊이의 hex 값에서 공백을 지운다. */
     private static JsonObject withoutHexSpaces(JsonObject json) {
         JsonObject copy = json.deepCopy();
         stripHexSpaces(copy);

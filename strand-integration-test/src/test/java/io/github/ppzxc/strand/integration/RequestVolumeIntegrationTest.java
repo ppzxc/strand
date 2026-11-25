@@ -16,21 +16,15 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-/** 한 연결에서 요청이 많이 오가는 경우를 실제 TCP 위에서 확인한다. */
 @ExtendWith(PassageObservation.class)
 class RequestVolumeIntegrationTest {
 
     private static final int TOTAL_REQUESTS = 1000;
-    /** 동시 스트림 한도(기본 100) 안에서 이어 보내도록 아직 응답받지 못한 요청을 이 수 이하로 유지한다. */
+
     private static final int MAX_OUTSTANDING = 50;
-    /** 요청 {@code i}는 {@code type}을 {@code APPLICATION_TYPE + i % 8}로 보내고, 서버는 {@code i % 8}을 {@code status}로 응답한다. */
+
     private static final int STATUS_CYCLE = 8;
 
-    /**
-     * 요청을 이어 보내는 동안 스트림 번호가 어긋나거나 응답이 다른 요청에 매핑되거나 유실되면 결과가 모자라거나 요청별 {@code status}가 달라진다. 클라이언트
-     * 번호 공간은 1, 3, 5...로 늘어나므로(규격 4.2절) {@code i}번째 요청은 {@code stream_id} {@code 2i + 1}을 받는다. 요청 {@value #TOTAL_REQUESTS}개
-     * 모두에 대해 그 요청의 결과 {@code status}가 {@code i % 8}이어야 하고, 서버가 받은 그 요청 본문의 스트림 번호가 {@code 2i + 1}이어야 한다.
-     */
     @TransportTest
     @DisplayName("요청 1,000개를 이어 보내도 각 stream_id의 응답이 자기 요청에 매핑된다 (규격 4.2)")
     void sequentialRequestsKeepStreamNumbersAndResponses(Transport transport) throws Exception {
@@ -52,12 +46,11 @@ class RequestVolumeIntegrationTest {
                 received++;
             }
 
-            // 스트림 번호는 통로를 관찰할 수 있는 전송(nio)에서만 본다. netty에서는 위의 1,000건 응답 매칭까지만 본다.
             if (!transport.observesPassage()) {
                 return;
             }
             Map<String, Long> streamByBody = new HashMap<>();
-            // 서버 통로가 읽은 요청 프레임의 번호로 본다. 제품 API는 받은 요청의 스트림 번호를 드러내지 않는다.
+
             for (ControlledPassage.Frame frame : serverSide.passage().readFrames()) {
                 if (frame.type() >= APPLICATION_TYPE) {
                     streamByBody.put(new String(frame.payload(), StandardCharsets.UTF_8), frame.streamId());

@@ -18,9 +18,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** 응답하지 않는 상대와의 유휴 연결이 builder에 정한 유휴 PING과 확인 대기 시간으로 {@code UNRESPONSIVE}로 끝난다(#364). 끝나기를 조건으로 기다린다. */
 class IdlePingUnresponsiveTest {
-    /** 규격 5.2절의 {@code UNRESPONSIVE} 오류 코드. */
+
     private static final long UNRESPONSIVE = 6;
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();

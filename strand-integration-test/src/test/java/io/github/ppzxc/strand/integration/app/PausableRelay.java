@@ -10,10 +10,6 @@ import java.net.Socket;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/**
- * 암호문 바이트를 그대로 전달하다가 클라이언트 쪽 읽기를 멈출 수 있는 TCP 중계. 상대가 읽기를 멈춘 상황을 만든다. TLS를 풀지 않으므로 양 끝은 실제 TLS를 한다.
- * 수신 버퍼를 작게 잡아 멈춘 동안 커널이 삼키는 양을 줄인다.
- */
 final class PausableRelay implements AutoCloseable {
     private final ServerSocket server;
     private final InetSocketAddress target;
@@ -34,7 +30,6 @@ final class PausableRelay implements AutoCloseable {
         return new InetSocketAddress(InetAddress.getLoopbackAddress(), server.getLocalPort());
     }
 
-    /** 클라이언트에서 서버로 가는 바이트 읽기를 멈춘다. */
     void pauseClientToServer() {
         paused = true;
     }
@@ -61,7 +56,7 @@ final class PausableRelay implements AutoCloseable {
                 pump(Direction.SERVER_TO_CLIENT, upstream, client);
             }
         } catch (IOException closed) {
-            // 닫힘
+
         }
     }
 
@@ -84,7 +79,7 @@ final class PausableRelay implements AutoCloseable {
                             out.flush();
                         }
                     } catch (IOException | InterruptedException ended) {
-                        // 끝
+
                     } finally {
                         closeQuietly(from);
                         closeQuietly(to);
@@ -99,7 +94,7 @@ final class PausableRelay implements AutoCloseable {
         try {
             socket.close();
         } catch (IOException ignored) {
-            // 무시
+
         }
     }
 

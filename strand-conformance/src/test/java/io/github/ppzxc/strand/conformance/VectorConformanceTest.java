@@ -20,7 +20,6 @@ import org.junit.jupiter.api.TestFactory;
 import org.junit.jupiter.api.TestReporter;
 import org.junit.jupiter.api.io.TempDir;
 
-/** 벡터 디렉터리의 모든 벡터 파일을 읽어 벡터마다 동적 테스트 하나를 만든다. 이름은 {@code 파일명/id}(파일명의 {@code .json}은 뺀다). */
 class VectorConformanceTest {
 
     private static final String VECTOR_TEMPLATE =
@@ -39,7 +38,6 @@ class VectorConformanceTest {
         return VectorSuite.dynamicTests(dir).map(DynamicTest::getDisplayName).collect(Collectors.toList());
     }
 
-    /** 실제 벡터 디렉터리의 모든 파일이 형식 2 로더를 통과하는지 본다. core를 실행하지 않는다. 벡터 목록은 단언하지 않는다. */
     @Test
     void realVectorFilesPassTheLoader() {
         List<Path> files = VectorSuite.jsonFiles(VectorSuite.defaultDirectory());
@@ -51,14 +49,12 @@ class VectorConformanceTest {
         }
     }
 
-    /** 실제 벡터 디렉터리의 각 벡터를 지원하는 실행 경로에서 실행한다. 벡터 목록은 단언하지 않는다. */
     @TestFactory
     Stream<DynamicTest> vectors() {
         if (!"integrated".equals(executionPath())) return Stream.empty();
         return VectorSuite.dynamicTests(VectorSuite.defaultDirectory());
     }
 
-    /** 실제 경로 결과를 합쳐 보고한다. core 미지원 벡터는 지원하는 전송 경로에서 통과해야 한다. */
     @Test
     void integratedExecutionPathReportHasNoFailuresOrUnsupportedVectors(TestReporter reporter) {
         Assumptions.assumeTrue("integrated".equals(executionPath()));
@@ -110,7 +106,6 @@ class VectorConformanceTest {
                 .isTrue();
     }
 
-    /** netty 경로는 {@code transport: websocket} 벡터를 모두 통과시키고, 바이트 스트림 벡터는 미지원으로 보고한다. */
     @Test
     void nettyPathPassesEveryWebSocketVectorAndReportsTheRestUnsupported() {
         int webSocketVectors = 0;
@@ -134,7 +129,6 @@ class VectorConformanceTest {
         assertThat(webSocketVectors).isPositive();
     }
 
-    /** WebSocket Close(1000)를 기대하는 벡터는 core 경로에서 미지원이고 netty 경로가 통과시킨다. */
     @Test
     void webSocketCloseVectorsAreUnsupportedOnCoreAndPassOnNetty() {
         int closeVectors = 0;
@@ -153,7 +147,6 @@ class VectorConformanceTest {
         assertThat(closeVectors).isPositive();
     }
 
-    /** 별도 경로 명령은 해당 경로의 미지원도 실패로 반환한다. */
     @Test
     void selectedExecutionPathReportHasNoFailuresOrUnsupportedVectors(TestReporter reporter) {
         String path = executionPath();
@@ -212,7 +205,7 @@ class VectorConformanceTest {
 
     @Test
     void vectorsAreExecutedAndMismatchesFail(@TempDir Path dir) throws IOException {
-        // 아무것도 보내지 않을 입력에 closed를 기대하면 실패해야 한다.
+
         String vector = "{\"id\":\"x\",\"description\":\"d\",\"requirements\":[\"req-ping-ack-reply\"],"
                 + "\"setup\":{\"role\":\"server\",\"established\":true},"
                 + "\"steps\":[{\"kind\":\"recv\",\"hex\":\"00\",\"send\":[],"

@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
-/** 실제 Netty NIO 채널·loopback 소켓에서 core 출력을 TCP 실제 쓰기량으로 보고하는 경계를 검증한다(#315). */
 class CoreTcpDeliveryTest {
     private static byte[] pingPayload() {
         return new byte[] {1, 2, 3, 4, 5, 6, 7, 8};
@@ -22,7 +21,7 @@ class CoreTcpDeliveryTest {
             AtomicLong ticket = new AtomicLong();
             fixture.driver.command(
                     () -> ticket.set(fixture.endpoint.request(OpenEndpoint.REQUEST_TYPE, new byte[100])));
-            // 드라이버는 쓰기가 막히면 1ms마다 다시 시도하므로 0바이트 쓰기의 횟수는 시간에 따라 늘어난다. 횟수가 아니라 0만 보고됐음을 확인한다.
+
             assertThat(fixture.onLoop(fixture.driver::reported)).isNotEmpty().containsOnly(0);
             assertThat(fixture.onLoop(fixture.driver::zeroWrites)).isPositive();
 
