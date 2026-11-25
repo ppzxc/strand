@@ -1,23 +1,25 @@
-package io.github.ppzxc.strand.core;
+package io.github.ppzxc.strand.quality;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 
 import com.tngtech.archunit.core.domain.JavaAnnotation;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaMember;
 import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
-import io.github.ppzxc.strand.api.PolicyException;
-import io.github.ppzxc.strand.api.PolicyExceptions;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.stream.Stream;
 
-final class PolicyExceptionRules {
-    private PolicyExceptionRules() {}
+public final class PolicyExceptionArchRule {
+    private static final String EXCEPTION_NAME = "io.github.ppzxc.strand.api.PolicyException";
+    private static final String EXCEPTIONS_NAME = "io.github.ppzxc.strand.api.PolicyExceptions";
 
-    static void check(com.tngtech.archunit.core.domain.JavaClasses importedClasses, LocalDate today) {
+    private PolicyExceptionArchRule() {}
+
+    public static void check(JavaClasses importedClasses, LocalDate today) {
         classes().should(notHaveExpiredExceptions(today)).check(importedClasses);
     }
 
@@ -33,17 +35,17 @@ final class PolicyExceptionRules {
                                                 item.getConstructors().stream().map(JavaMember::getAnnotations),
                                                 item.getFields().stream().map(JavaMember::getAnnotations))))
                         .flatMap(annotations -> annotations.stream())
-                        .flatMap(PolicyExceptionRules::policyExceptions)
+                        .flatMap(PolicyExceptionArchRule::policyExceptions)
                         .forEach(annotation -> checkReviewDate(item, annotation, today, events));
             }
         };
     }
 
     private static Stream<JavaAnnotation<?>> policyExceptions(JavaAnnotation<?> annotation) {
-        if (annotation.getRawType().getName().equals(PolicyException.class.getName())) {
+        if (annotation.getRawType().getName().equals(EXCEPTION_NAME)) {
             return Stream.of(annotation);
         }
-        if (annotation.getRawType().getName().equals(PolicyExceptions.class.getName())) {
+        if (annotation.getRawType().getName().equals(EXCEPTIONS_NAME)) {
             Object values = annotation.get("value").get();
             return Arrays.stream((JavaAnnotation<?>[]) values);
         }

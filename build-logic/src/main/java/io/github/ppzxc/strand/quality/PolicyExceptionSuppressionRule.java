@@ -84,8 +84,27 @@ public final class PolicyExceptionSuppressionRule extends AbstractJavaRule {
             }
         }
 
-        if (invalidException || !suppressions.equals(exceptions)) {
-            context.addViolation(declaration);
+        if (invalidException) {
+            context.addViolationWithMessage(declaration, "Invalid @PolicyException fields");
+        }
+        reportDifference(declaration, context, suppressions, exceptions, true);
+        reportDifference(declaration, context, exceptions, suppressions, false);
+    }
+
+    private static void reportDifference(
+            ASTBodyDeclaration declaration,
+            RuleContext context,
+            Map<String, Integer> actual,
+            Map<String, Integer> expected,
+            boolean missingException) {
+        for (Map.Entry<String, Integer> entry : actual.entrySet()) {
+            int difference = entry.getValue() - expected.getOrDefault(entry.getKey(), 0);
+            for (int index = 0; index < difference; index++) {
+                String message = missingException
+                        ? "Missing @PolicyException for rule '" + entry.getKey() + "'"
+                        : "Unused @PolicyException for rule '" + entry.getKey() + "'";
+                context.addViolationWithMessage(declaration, message);
+            }
         }
     }
 

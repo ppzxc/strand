@@ -24,6 +24,16 @@ val checkPolicyExceptions = tasks.register<CheckPolicyExceptions>("checkPolicyEx
   group = "verification"
   description = "Fails when new Java suppressions lack same-declaration policy exceptions."
   sourceFiles.from(repositoryJavaSources)
+  productionClassFiles.from(project.rootProject.layout.projectDirectory.dir("build-logic/build/classes/java/main"))
+  dependsOn(project.gradle.includedBuild("build-logic").task(":compileJava"))
+  val policyTask = this
+  project.rootProject.subprojects.forEach { module ->
+    module.plugins.withId("java") {
+      val main = module.extensions.getByType<org.gradle.api.tasks.SourceSetContainer>().named("main")
+      policyTask.productionClassFiles.from(main.map { it.output.classesDirs })
+      policyTask.dependsOn(module.tasks.named("classes"))
+    }
+  }
   baseline.set(layout.projectDirectory.file("docs/quality/pmd-suppression-baseline.txt"))
   projectRoot.set(layout.projectDirectory)
 }
