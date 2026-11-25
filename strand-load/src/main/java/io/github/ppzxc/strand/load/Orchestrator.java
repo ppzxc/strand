@@ -811,7 +811,12 @@ final class Orchestrator {
                         if (line.length() < MAX_LINE_CHARS) line.append(value);
                         if (marker.length() == 5) marker.deleteCharAt(0);
                         marker.append(value);
+                        boolean wasLeak = leak;
                         leak |= marker.indexOf("LEAK:") >= 0;
+                        if (!wasLeak && leak && line.length() == MAX_LINE_CHARS) {
+                            line.setLength(MAX_LINE_CHARS - 5);
+                            line.append("LEAK:");
+                        }
                     }
                     if (!line.isEmpty() || leak) record(line, leak);
                 } catch (IOException ignored) {

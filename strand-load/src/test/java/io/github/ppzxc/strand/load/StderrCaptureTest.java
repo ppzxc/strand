@@ -32,7 +32,7 @@ class StderrCaptureTest {
         capture.drain();
 
         assertThat(capture.leakCount()).isEqualTo(1);
-        assertThat(capture.leakLines()).singleElement().asString().hasSizeLessThanOrEqualTo(2_048);
+        assertThat(capture.leakLines()).singleElement().asString().contains("LEAK:").hasSizeLessThanOrEqualTo(2_048);
         assertThat(capture.text()).hasSizeLessThanOrEqualTo(16_384);
     }
 }
