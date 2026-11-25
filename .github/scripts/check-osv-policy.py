@@ -18,8 +18,14 @@ def severity(vulnerability):
     sources = [vulnerability.get("database_specific", {}), vulnerability.get("ecosystem_specific", {})]
     for source in sources:
         value = source.get("severity")
-        if isinstance(value, str) and value.upper() in {"CRITICAL", "HIGH", "MEDIUM", "LOW"}:
-            return value.upper()
+        if isinstance(value, str):
+            value = value.upper()
+            if value in {"CRITICAL", "HIGH", "MEDIUM", "LOW"}:
+                return value
+            if value == "IMPORTANT":
+                return "HIGH"
+            if value == "MODERATE":
+                return "MEDIUM"
         if isinstance(value, (int, float)):
             return severity_from_score(value)
     for item in vulnerability.get("severity", []):
@@ -46,6 +52,20 @@ def main(path):
         results = report["results"]
         if not isinstance(results, list) or not results:
             raise ValueError("OSV report has no scan results")
+        sources = {result.get("source", {}).get("path", "") for result in results}
+        required_sources = {
+            "strand-netty/gradle.lockfile",
+            "build-logic/gradle.lockfile",
+            "deploy-test/gradle-classpath/gradle.lockfile",
+            "deploy-test/gradle-modulepath/gradle.lockfile",
+            "deploy-test/maven-classpath/target/bom.json",
+            "deploy-test/maven-modulepath/target/bom.json",
+        }
+        missing = sorted(source for source in required_sources if not any(source in path for path in sources))
+        if missing:
+            raise ValueError(f"OSV report is missing required inputs: {', '.join(missing)}")
+        if not any(package for result in results for package in result.get("packages", [])):
+            raise ValueError("OSV report contains no scanned packages")
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
         print(f"Invalid or missing OSV report: {error}", file=sys.stderr)
         return 2

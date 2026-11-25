@@ -3,6 +3,8 @@ name: CI
 # PR 워크플로와 이후 릴리스 워크플로가 이 workflow를 호출한다.
 on:
   workflow_call:
+  schedule:
+    - cron: '30 12 * * 1'
 
 permissions:
   contents: read
@@ -54,6 +56,47 @@ jobs:
       # 배포 테스트 하네스 (a): mavenLocal에 배포한 core를 외부 소비자 4개가 받아 쓰는지 확인한다.
       - name: Deploy test harness (a)
         run: ./gradlew deployTest
+      - name: Resolve SCA inputs
+        run: |
+          ./gradlew --no-configuration-cache --write-locks -I .github/scripts/osv-locks.init.gradle resolveAllForOsv --console=plain
+          for consumer in deploy-test/gradle-classpath deploy-test/gradle-modulepath; do
+            ./gradlew -p "$consumer" --no-configuration-cache --write-locks -I "$GITHUB_WORKSPACE/.github/scripts/osv-locks.init.gradle" -PstrandVersion="$(sed -n 's/^version=//p' gradle.properties)" resolveAllForOsv --console=plain
+          done
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends maven
+          for consumer in deploy-test/maven-classpath deploy-test/maven-modulepath; do
+            mvn -B -DstrandVersion="$(sed -n 's/^version=//p' gradle.properties)" -f "$consumer/pom.xml" org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeAggregateBom
+          done
+      - name: Scan resolved dependencies
+        run: |
+          {
+            echo "target_sha=$GITHUB_SHA"
+            echo "gate=SEC-015"
+            echo "scanner=OSV-Scanner v2.7.1"
+            echo "command=osv-scanner scan source --recursive --no-ignore --format json --verbosity error /src"
+          } > "$RUNNER_TEMP/osv-evidence.txt"
+          docker pull ghcr.io/google/osv-scanner:v2.7.1
+          scan_status=0
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" ghcr.io/google/osv-scanner:v2.7.1 scan source --recursive --no-ignore --format json --verbosity error /src > "$RUNNER_TEMP/osv-report.json" 2> "$RUNNER_TEMP/osv-errors.log" || scan_status=$?
+          echo "scanner_exit=$scan_status" >> "$RUNNER_TEMP/osv-evidence.txt"
+          if [ "$scan_status" -gt 1 ] || [ -s "$RUNNER_TEMP/osv-errors.log" ]; then
+            cat "$RUNNER_TEMP/osv-errors.log"
+            exit 1
+          fi
+          policy_status=0
+          python3 .github/scripts/check-osv-policy.py "$RUNNER_TEMP/osv-report.json" || policy_status=$?
+          echo "policy_exit=$policy_status" >> "$RUNNER_TEMP/osv-evidence.txt"
+          exit "$policy_status"
+      - name: Upload SCA report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: osv-scan-report
+          path: |
+            ${{ runner.temp }}/osv-report.json
+            ${{ runner.temp }}/osv-evidence.txt
+          if-no-files-found: ignore
+          retention-days: 90
       - name: Deploy test harness self-check
         run: deploy-test/self-check.sh "$(sed -n 's/^version=//p' gradle.properties)"
 

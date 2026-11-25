@@ -17,8 +17,17 @@ def finding(severity, fixed=None):
 
 
 class OsvPolicyTest(unittest.TestCase):
-    def run_report(self, vulnerabilities):
-        report = {"results": [{"source": {"path": "test.sbom"}, "packages": [{"package": {"name": "sample", "version": "1"}, "vulnerabilities": vulnerabilities}]}]}
+    def run_report(self, vulnerabilities, sources=None):
+        paths = sources or [
+            "strand-netty/gradle.lockfile",
+            "build-logic/gradle.lockfile",
+            "deploy-test/gradle-classpath/gradle.lockfile",
+            "deploy-test/gradle-modulepath/gradle.lockfile",
+            "deploy-test/maven-classpath/target/bom.json",
+            "deploy-test/maven-modulepath/target/bom.json",
+        ]
+        results = [{"source": {"path": path}, "packages": [{"package": {"name": "sample", "version": "1"}, "vulnerabilities": vulnerabilities}]} for path in paths]
+        report = {"results": results}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as file:
             json.dump(report, file)
             file.flush()
@@ -47,9 +56,17 @@ class OsvPolicyTest(unittest.TestCase):
         self.assertIn("MEDIUM", result.stdout)
         self.assertIn("UNKNOWN", result.stdout)
 
+    def test_osv_severity_names_map_to_policy_levels(self):
+        self.assertEqual(self.run_report([finding("MODERATE", "2")]).returncode, 0)
+        self.assertEqual(self.run_report([finding("IMPORTANT", "2")]).returncode, 1)
+
     def test_missing_or_invalid_input_fails(self):
         result = subprocess.run(["python3", str(SCRIPT), "/missing/report.json"], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
+
+    def test_missing_scan_source_fails(self):
+        result = self.run_report([], sources=["strand-netty/gradle.lockfile"])
+        self.assertEqual(result.returncode, 2)
 
 
 if __name__ == "__main__":
