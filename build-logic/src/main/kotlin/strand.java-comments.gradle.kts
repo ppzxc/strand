@@ -14,8 +14,9 @@ val repositoryJavaSources = fileTree(rootDir) {
 
 val checkJavaComments = tasks.register<CheckJavaComments>("checkJavaComments") {
   group = "verification"
-  description = "Fails when repository Java sources contain comments."
+  description = "Checks repository Java style, allowed comments and public API Javadoc."
   sourceFiles.from(repositoryJavaSources)
+  baseline.set(layout.projectDirectory.file("docs/quality/java-style-baseline.txt"))
   projectRoot.set(layout.projectDirectory)
 }
 
