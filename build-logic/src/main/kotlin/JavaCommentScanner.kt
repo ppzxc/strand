@@ -1,8 +1,8 @@
-/** Finds Java comments after Unicode escape translation while retaining the original source line and spelling. */
+/** Finds Java comments after Unicode escape translation while retaining the original source line. */
 object JavaCommentScanner {
   enum class Kind { LINE, BLOCK, JAVADOC }
 
-  data class Comment(val kind: Kind, val line: Int, val text: String)
+  data class Comment(val kind: Kind, val line: Int)
 
   fun find(source: String): List<Comment> {
     val translated = translateUnicodeEscapes(source)
@@ -12,19 +12,17 @@ object JavaCommentScanner {
       when {
         translated.text.startsWith("//", index) -> {
           val start = index
-          val rawStart = translated.starts[start]
           index += 2
           while (index < translated.text.length && translated.text[index] != '\n' && translated.text[index] != '\r') index++
-          result += comment(source, Kind.LINE, translated, start, index, rawStart)
+          result += comment(Kind.LINE, translated, start)
         }
         translated.text.startsWith("/*", index) -> {
           val start = index
-          val rawStart = translated.starts[start]
           val kind = if (translated.text.startsWith("/**", index)) Kind.JAVADOC else Kind.BLOCK
           index += 2
           while (index < translated.text.length && !translated.text.startsWith("*/", index)) index++
           if (index < translated.text.length) index += 2
-          result += comment(source, kind, translated, start, index, rawStart)
+          result += comment(kind, translated, start)
         }
         translated.text.startsWith("\"\"\"", index) && isTextBlockStart(translated.text, index) -> {
           index += 3
@@ -64,18 +62,16 @@ object JavaCommentScanner {
     return slashes % 2 != 0
   }
 
-  private fun comment(source: String, kind: Kind, translated: Translation, start: Int, end: Int, rawStart: Int): Comment =
-    Comment(kind, translated.lines[start], source.substring(rawStart, translated.ends[end - 1]))
+  private fun comment(kind: Kind, translated: Translation, start: Int) = Comment(kind, translated.lines[start])
 
-  private data class Translation(val text: String, val starts: IntArray, val ends: IntArray, val lines: IntArray)
+  private data class Translation(val text: String, val lines: IntArray)
 
   private fun translateUnicodeEscapes(source: String): Translation {
     val text = StringBuilder()
-    val starts = mutableListOf<Int>()
-    val ends = mutableListOf<Int>()
     val lines = mutableListOf<Int>()
     var index = 0
     var line = 1
+    var previousWasCarriageReturn = false
     var backslashes = 0
     var previousCharacterWasUnicodeEscape = false
     while (index < source.length) {
@@ -94,15 +90,25 @@ object JavaCommentScanner {
         }
       }
       text.append(char)
-      starts += start
-      ends += end
       lines += line
-      if (source.substring(start, end).contains('\n')) line += source.substring(start, end).count { it == '\n' }
+      for (rawChar in source.substring(start, end)) {
+        when (rawChar) {
+          '\r' -> {
+            line++
+            previousWasCarriageReturn = true
+          }
+          '\n' -> {
+            if (!previousWasCarriageReturn) line++
+            previousWasCarriageReturn = false
+          }
+          else -> previousWasCarriageReturn = false
+        }
+      }
       backslashes = if (char == '\\') backslashes + 1 else 0
       previousCharacterWasUnicodeEscape = end > start
       index = end
     }
-    return Translation(text.toString(), starts.toIntArray(), ends.toIntArray(), lines.toIntArray())
+    return Translation(text.toString(), lines.toIntArray())
   }
 
   private fun Char.isHexDigit() = this in '0'..'9' || this in 'a'..'f' || this in 'A'..'F'

@@ -29,6 +29,13 @@ class JavaCommentScannerTest {
   }
 
   @Test
+  fun `counts carriage return line endings`() {
+    val comments = JavaCommentScanner.find("class Sample {\r // line\r}")
+
+    assertThat(comments.map { it.line }).containsExactly(2)
+  }
+
+  @Test
   fun `ignores comment shaped strings chars and text blocks`() {
     val comments = JavaCommentScanner.find(
       listOf(
