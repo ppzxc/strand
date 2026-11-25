@@ -21,6 +21,7 @@ class BuildFixture(
   gitRepository: Boolean = true,
   /** Gradle 프로젝트 디렉터리. git 저장소 루트([dir])의 하위 디렉터리일 수 있다. */
   val projectDir: File = dir,
+  private val configurationCache: Boolean = true,
 ) {
 
   private var extraScript = ""
@@ -116,10 +117,13 @@ class BuildFixture(
     srcRoot.deleteRecursively()
   }
 
-  private fun runner(vararg args: String) = GradleRunner.create()
-    .withProjectDir(projectDir)
-    .withPluginClasspath()
-    .withArguments(*args, "--configuration-cache", "--stacktrace")
+  private fun runner(vararg args: String): GradleRunner {
+    val cache = if (configurationCache) "--configuration-cache" else "--no-configuration-cache"
+    return GradleRunner.create()
+      .withProjectDir(projectDir)
+      .withPluginClasspath()
+      .withArguments(*(args.toList() + cache + "--stacktrace").toTypedArray())
+  }
 
   fun run(vararg args: String): BuildResult = runner(*args).build()
 

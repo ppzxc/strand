@@ -11,15 +11,15 @@ import java.lang.annotation.Target;
 @Target({ElementType.TYPE, ElementType.METHOD, ElementType.CONSTRUCTOR, ElementType.FIELD})
 @Repeatable(PolicyExceptions.class)
 public @interface PolicyException {
-  /** Policy or tool rule identifier. */
-  String rule();
+    /** Policy or tool rule identifier. */
+    String rule();
 
-  /** Reason the exception is safe. */
-  String reason();
+    /** Reason the exception is safe. */
+    String reason();
 
-  /** Independent approver. */
-  String approvedBy();
+    /** Independent approver. */
+    String approvedBy();
 
-  /** ISO-8601 date; the exception expires at 00:00 UTC the following day. */
-  String reviewBy();
+    /** ISO-8601 date; the exception expires at 00:00 UTC the following day. */
+    String reviewBy();
 }
