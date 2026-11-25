@@ -18,6 +18,8 @@ class RequestResultTest {
         byte[] bytes = {1, 2};
         RequestResult result = new RequestResult(Status.OK, Certainty.RESPONSE, bytes);
         bytes[0] = 9;
+        byte[] returned = result.payload();
+        returned[0] = 7;
         assertEquals(Status.OK, result.status());
         assertEquals(Certainty.RESPONSE, result.certainty());
         assertArrayEquals(new byte[] {1, 2}, result.payload());

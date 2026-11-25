@@ -8,6 +8,7 @@ plugins {
 val nettyVersion = providers.gradleProperty("nettyVersion").orElse("4.1.101.Final")
 
 dependencies {
+  testImplementation(libsCatalog.library("archunit"))
   implementation(project(":strand-nio"))
   implementation(project(":strand-netty"))
   implementation("io.netty:netty-transport:${nettyVersion.get()}")
