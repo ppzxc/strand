@@ -18,6 +18,14 @@ jobs:
           persist-credentials: false
           # 호환성 기준선(X.Y.Z 태그)을 계산하려면 태그가 필요하다.
           fetch-depth: 0
+      - name: Scan secrets
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Scan release tree
+        if: github.event_name == 'push'
+        run: gitleaks dir --redact .
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
