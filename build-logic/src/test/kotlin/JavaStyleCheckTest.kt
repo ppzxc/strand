@@ -5,6 +5,50 @@ import java.nio.file.Files
 
 class JavaStyleCheckTest {
   @Test
+  fun `root check works in a fixture without an included build`() {
+    val fixture = BuildFixture(
+      Files.createTempDirectory("java-comments").toFile(),
+      "java",
+      usesCompatExtension = false,
+      gitRepository = false,
+      configurationCache = false,
+    )
+    fixture.writeAtRepoRoot(
+      "build.gradle.kts",
+      """
+      plugins {
+        id("java")
+        id("strand.java-comments")
+      }
+      """.trimIndent() + "\n",
+    )
+    fixture.writeEmptyJavaStyleBaselines()
+    fixture.writeAtRepoRoot("src/Sample.java", "class Sample {}\n")
+
+    val result = fixture.run("check")
+
+    assertThat(result.task(":checkJavaComments")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
+  }
+
+  @Test
+  fun `matching style baseline permits one existing finding`() {
+    assertThat(unapprovedJavaStyleFindings(listOf("existing"), listOf("existing")))
+      .isEmpty()
+  }
+
+  @Test
+  fun `removing an old style finding does not offset a new one`() {
+    assertThat(unapprovedJavaStyleFindings(listOf("new"), listOf("old")))
+      .containsExactly("new")
+  }
+
+  @Test
+  fun `style baseline preserves duplicate findings at one location`() {
+    assertThat(unapprovedJavaStyleFindings(listOf("same", "same"), listOf("same")))
+      .containsExactly("same")
+  }
+
+  @Test
   fun `checkJavaComments rejects a comment and reports its file and line`() {
     val fixture = BuildFixture(
       Files.createTempDirectory("java-comments").toFile(),
@@ -21,7 +65,7 @@ class JavaStyleCheckTest {
       }
       """.trimIndent() + "\n",
     )
-    fixture.writeAtRepoRoot("docs/quality/java-style-baseline.txt", "")
+    fixture.writeEmptyJavaStyleBaselines()
     fixture.writeAtRepoRoot("src/Sample.java", "class Sample { // line\n}\n")
 
     val result = fixture.fail("check")
@@ -50,7 +94,7 @@ class JavaStyleCheckTest {
       }
       """.trimIndent() + "\n",
     )
-    fixture.writeAtRepoRoot("docs/quality/java-style-baseline.txt", "")
+    fixture.writeEmptyJavaStyleBaselines()
     fixture.writeAtRepoRoot(
       "src/Sample.java",
       """
@@ -84,7 +128,7 @@ class JavaStyleCheckTest {
       }
       """.trimIndent() + "\n",
     )
-    fixture.writeAtRepoRoot("docs/quality/java-style-baseline.txt", "")
+    fixture.writeEmptyJavaStyleBaselines()
     fixture.writeAtRepoRoot(
       "strand-api/src/main/java/p/Sample.java",
       "package p;\npublic class Sample { public String value() { return \"sample\"; } }\n",
@@ -114,7 +158,7 @@ class JavaStyleCheckTest {
       }
       """.trimIndent() + "\n",
     )
-    fixture.writeAtRepoRoot("docs/quality/java-style-baseline.txt", "")
+    fixture.writeEmptyJavaStyleBaselines()
     fixture.writeAtRepoRoot(
       "src/Sample.java",
       "import org.jetbrains.annotations.Nullable;\nclass Sample {}\n",
@@ -174,7 +218,7 @@ class JavaStyleCheckTest {
       }
       """.trimIndent() + "\n",
     )
-    fixture.writeAtRepoRoot("docs/quality/java-style-baseline.txt", "")
+    fixture.writeEmptyJavaStyleBaselines()
     fixture.writeAtRepoRoot("generated/Sample.java", "class Sample { // generated\n}\n")
     fixture.writeAtRepoRoot("vendor/Sample.java", "class Sample { // vendor\n}\n")
     fixture.writeAtRepoRoot("third-party/Sample.java", "class Sample { // external\n}\n")
@@ -183,5 +227,10 @@ class JavaStyleCheckTest {
     val result = fixture.run("checkJavaComments")
 
     assertThat(result.output).contains("BUILD SUCCESSFUL")
+  }
+
+  private fun BuildFixture.writeEmptyJavaStyleBaselines() {
+    writeAtRepoRoot("docs/quality/java-style-baseline.txt", "")
+    writeAtRepoRoot("docs/quality/pmd-suppression-baseline.txt", "")
   }
 }

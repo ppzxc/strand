@@ -37,10 +37,23 @@ abstract class CheckJavaComments : DefaultTask() {
         "$path:${violation.beginLine}: ${violation.rule.name}"
       }
     }
-    val approved = baseline.get().asFile.readLines().filter { it.isNotBlank() && !it.startsWith("#") }.toSet()
-    val findings = current.toSet() - approved
+    val approved = baseline.get().asFile.readLines().filter { it.isNotBlank() && !it.startsWith("#") }
+    val findings = unapprovedJavaStyleFindings(current, approved)
     if (findings.isNotEmpty()) {
       throw GradleException("Java 스타일 위반 ${findings.size}개:\n${findings.sorted().joinToString("\n") { "  - $it" }}")
+    }
+  }
+}
+
+internal fun unapprovedJavaStyleFindings(current: List<String>, baseline: List<String>): List<String> {
+  val remaining = baseline.toMutableList()
+  return current.filter { finding ->
+    val baselineIndex = remaining.indexOf(finding)
+    if (baselineIndex == -1) {
+      true
+    } else {
+      remaining.removeAt(baselineIndex)
+      false
     }
   }
 }

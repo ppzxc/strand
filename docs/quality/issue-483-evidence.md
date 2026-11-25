@@ -2,7 +2,8 @@
 
 - Owner: `strand-build`, consumer build owners
 - Rules: TOOL-001, TOOL-006, TOOL-007, NUL-001, NUL-002, STYLE-008
-- Code SHA: `25e5146` (based on current integration tip `c6d25ab`).
+- Initial implementation SHA: `25e5146`.
+- Nullness rule and final verification SHA: `909ef70`; integrated at `b7460f7`.
 - Required Error Prone checks are configured as `ERROR` for managed Java compile tasks and the independent Gradle and Maven consumers: `ArrayEquals`, `ArrayToString`, `EqualsIncompatibleType`, `EqualsHashCode`, `ModifyCollectionInEnhancedForLoop`, `ModifySourceCollectionInStream`, `NarrowCalculation`, and `NarrowingCompoundAssignment`.
 - NullAway remains enabled only for deploy `main`; tests and fixtures remain outside that scope. Other NullAway scopes await compatible annotations and explicit `@NullMarked` coverage. PMD rule `NUL-002` rejects imports of known nullness annotation names (`Nullable`, `NotNull`, `NonNull`, `Nonnull`, and related defaults/check annotations) outside `org.jspecify.annotations`; unrelated annotations such as `javax.annotation.processing.Generated` remain allowed. It runs in `checkJavaComments`, which is a dependency of Gradle `check`, over the repository Java source inventory. No NUL-002 findings are present in the current source inventory or style baseline.
 - Consumer javac warnings are compared exactly by consumer, task, source set, release, source file and line, diagnostic key, and message. Baseline SHA is `897679e`; four existing `requires-automatic` warnings from `deploy-test/shared/module/module-info.java` (lines 2–5) are recorded for each modulepath consumer. Classpath consumers have empty baselines. Any added, missing, moved, or locationless diagnostic fails the runner. Baseline entries: `deploy-test/scripts/warning-baseline.json`.

@@ -25,7 +25,6 @@ val checkPolicyExceptions = tasks.register<CheckPolicyExceptions>("checkPolicyEx
   description = "Fails when new Java suppressions lack same-declaration policy exceptions."
   sourceFiles.from(repositoryJavaSources)
   productionClassFiles.from(project.rootProject.layout.projectDirectory.dir("build-logic/build/classes/java/main"))
-  dependsOn(project.gradle.includedBuild("build-logic").task(":compileJava"))
   val policyTask = this
   project.rootProject.subprojects.forEach { module ->
     module.plugins.withId("java") {

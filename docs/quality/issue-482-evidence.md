@@ -9,4 +9,5 @@
 - Other API immutability: `Request` already copies input and returned payloads. `RequestResult.payload()` now returns a copy; a regression test failed before the fix and passed after it.
 - Commands: `./gradlew :strand-api:test --tests '*DtoRecordTest' --tests '*RequestResultTest' :strand-load:test --tests '*MatrixDtoTest' --console=plain`; `./gradlew :strand-api:compileJava :strand-load:compileJava --rerun-tasks --console=plain`.
 - Results: focused tests passed. Java 8 API compilation and Java 25 load compilation passed.
-- Reviewer: the main ruleset requires one independent approval and approval after the last push. New-type classification still needs designated review on the integration PR.
+- Independent internal review: PASS on integration commit `897679e`; DTO scope matches decision #474.
+- GitHub ruleset: unchanged; zero required approvals, per the solo-maintainer workflow. No external reviewer approval is claimed.
