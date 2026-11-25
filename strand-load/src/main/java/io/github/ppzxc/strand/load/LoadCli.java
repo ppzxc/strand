@@ -4,30 +4,15 @@ import java.io.PrintStream;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * nio·netty 전송 부하 하네스의 진입점(#422). 이 진입점이 하네스의 유일한 시험 seam이다.
- *
- * <pre>
- * matrix   [--extended] [--output matrix.json]   핵심 행렬(8셀) 한 명령 실행
- * stall    [--transport nio|netty] [--idle-ping 1s] [--ack-timeout 2s]   읽지 않는 상대를 붙여 감지 시간 측정
- * table    --input matrix.json                   행렬 결과 JSON에서 표 생성
- * run      --transport nio --connections 1 --body-bytes 64 --warmup 30s --measure 60s --output result.json
- * server   (내부용) 서버 프로세스 역할
- * loadgen  (내부용) 부하 생성기 프로세스 역할
- * </pre>
- *
- * 종료 상태: 0 성공, 1 실행 실패(프로세스 비정상 종료 등), 2 설정 오류.
- */
 public final class LoadCli {
     private LoadCli() {}
 
     public static void main(String[] args) {
         int exit = execute(args, System.out, System.err);
-        // 자식 프로세스 역할에서 남은 비데몬 스레드가 있어도 확실히 끝낸다.
+
         System.exit(exit);
     }
 
-    /** 프로세스를 끝내지 않고 종료 상태를 돌려준다. 시험이 이 메서드를 부른다. */
     public static int execute(String[] args, PrintStream out, PrintStream err) {
         if (args.length == 0) {
             err.println("사용법: run|server|loadgen [옵션]. 자세한 옵션은 strand-load/README.md");
@@ -73,9 +58,6 @@ public final class LoadCli {
         }
     }
 
-    /**
-     * {@code soak [--duration 60m | --long] [--rate 1000] ...}: 일정 부하로 오래 돌린다. 기본 1시간(60m), {@code --long}은 8시간(480m)이다. 시간은 ms·s·m 단위만 받는다. {@code --plan}은 설정만 JSON으로 낸다.
-     */
     private static int soak(List<String> args, PrintStream out) throws Exception {
         java.util.List<String> translated = new java.util.ArrayList<>();
         boolean plan = false;
@@ -104,7 +86,7 @@ public final class LoadCli {
             }
         }
         if (rate.endsWith("%")) {
-            // soak은 포화 처리량을 먼저 재지 않으므로 비율 도착률을 풀 수 없다.
+
             throw new RunConfig.Invalid("soak의 --rate는 요청/초 절대값이어야 한다(비율 불가): " + rate);
         }
         if (duration == null) {
@@ -139,7 +121,6 @@ public final class LoadCli {
         return args.get(index);
     }
 
-    /** {@code table --input <matrix.json>}: 행렬 결과 JSON에서 표를 만든다. */
     private static int table(List<String> args, PrintStream out, PrintStream err) throws java.io.IOException {
         if (args.size() != 2 || !args.get(0).equals("--input")) {
             err.println("사용법: table --input <matrix.json>");
@@ -160,7 +141,6 @@ public final class LoadCli {
         return 0;
     }
 
-    /** 자식 프로세스 전용 {@code --port} 옵션은 설정 검증에서 뺀다. */
     private static List<String> withoutPort(List<String> args) {
         List<String> result = new java.util.ArrayList<>(args);
         int index = result.indexOf("--port");

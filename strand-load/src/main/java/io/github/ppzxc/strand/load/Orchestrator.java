@@ -19,18 +19,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-/**
- * {@code run} 명령의 진행자. 서버 프로세스와 부하 생성기 프로세스를 따로 띄워 한 번 측정하고 결과 JSON을 낸다. 어느 쪽이든 비정상으로 끝나면 실행 전체를 실패로 처리하고 부분 결과는 남기지
- * 않으며, 끝날 때는 두 프로세스를 반드시 정리한다.
- */
 final class Orchestrator {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    /** 규격 오류 코드 6: 상대가 확인 대기 안에 ACK를 보내지 않음(UNRESPONSIVE). */
+
     private static final long UNRESPONSIVE = 6;
 
     private static final Duration STARTUP_LIMIT = Duration.ofSeconds(60);
 
-    /** 실행 실패. 종료 상태 1로 끝난다. */
     static final class RunFailed extends Exception {
         private static final long serialVersionUID = 1L;
 
@@ -42,7 +37,6 @@ final class Orchestrator {
     private final RunConfig config;
     private final PrintStream out;
 
-    /** 행렬 실행이 한 번 만든 키 저장소를 여러 실행에 재사용할 때 쓴다. null이면 실행마다 만든다. */
     private final String presetKeystore;
 
     Orchestrator(RunConfig config, PrintStream out) {
@@ -58,12 +52,10 @@ final class Orchestrator {
     private Path keystoreDir;
     private String keystorePath = "";
 
-    /** 측정하고 결과를 {@code --output}(없으면 표준 출력)에 쓴다. */
     void run() throws RunFailed, IOException, InterruptedException {
         emit(execute());
     }
 
-    /** 측정하고 결과 JSON을 돌려준다. 프로세스는 모두 정리한다. */
     JsonObject execute() throws RunFailed, IOException, InterruptedException {
         try {
             prepareKeystore();
@@ -73,10 +65,9 @@ final class Orchestrator {
         }
     }
 
-    /** TLS를 켠 실행이면 키 저장소를 준비한다. 행렬이 미리 만들어 넘긴 것이 있으면 그것을 쓴다. */
     private void prepareKeystore() throws IOException, InterruptedException {
         if (config.jfr || config.asyncProfiler != null) {
-            // 모든 시나리오(run·soak·stall)가 같은 경로로 프로파일 디렉터리를 만든다.
+
             Files.createDirectories(Paths.get(config.profileDir));
         }
         if (!config.tls) {
@@ -90,20 +81,16 @@ final class Orchestrator {
         }
     }
 
-    /** 정리 실패가 측정 결과나 원래 실패를 가리지 않도록 삼킨다. 임시 디렉터리만 남는다. */
     private void cleanupKeystore() {
         if (keystoreDir != null) {
             try {
                 LoadTls.deleteTree(keystoreDir);
             } catch (IOException ignored) {
-                // 임시 디렉터리가 남을 뿐이다.
+
             }
         }
     }
 
-    /**
-     * soak. 일정 부하(개방형 고정 도착률)로 오래 돌리며 서버·부하 생성기의 자원 추이(RSS·스레드·힙·GC)와 ByteBuf 누수 감지 결과를 남긴다.
-     */
     JsonObject executeSoak() throws RunFailed, IOException, InterruptedException {
         try {
             prepareKeystore();
@@ -129,7 +116,7 @@ final class Orchestrator {
             lastServerErr.leakLines().forEach(leakLines::add);
             leaks.add("lines", leakLines);
             leaks.addProperty("detector", "netty ResourceLeakDetector(paranoid), 서버 표준 오류의 LEAK: 줄");
-            // 감지기는 누수된 버퍼가 GC되고 이후 할당이 있어야 알리므로 count는 하한이다. nio 서버는 ByteBuf를 쓰지 않아 해당 없다.
+
             leaks.addProperty("lowerBound", true);
             leaks.addProperty("applicable", config.transport.equals("netty"));
 
@@ -168,7 +155,6 @@ final class Orchestrator {
         emit(executeSoak());
     }
 
-    /** 표본 목록을 시간순 시계열(시작 기준 경과 초)로 바꾼다. */
     private static com.google.gson.JsonArray seriesJson(List<JsonObject> samples) {
         com.google.gson.JsonArray array = new com.google.gson.JsonArray();
         if (samples.isEmpty()) {
@@ -189,7 +175,6 @@ final class Orchestrator {
         return array;
     }
 
-    /** 처음과 마지막 표본의 차이로 추이를 요약한다. 시간당 RSS 증가량이 느린 누수의 신호다. */
     private static JsonObject trendJson(List<JsonObject> samples) {
         JsonObject trend = new JsonObject();
         if (samples.size() < 2) {
@@ -211,7 +196,6 @@ final class Orchestrator {
         return trend;
     }
 
-    /** 쓰기 정체 시나리오를 돌려 결과를 {@code --output}에 쓴다. */
     void runStall() throws RunFailed, IOException, InterruptedException {
         emit(executeStall());
     }
@@ -221,10 +205,10 @@ final class Orchestrator {
         Double saturation = null;
         if (config.openLoop && config.rateFraction > 0) {
             if (config.saturation > 0) {
-                // 같은 셀에서 이미 잰 포화 처리량을 쓴다(행렬 실행).
+
                 saturation = config.saturation;
             } else {
-                // 포화 처리량은 같은 설정을 폐쇄형으로 한 번 돌려 얻는다. 도착률은 그 비율이다.
+
                 JsonObject saturationRun = runOnce(0, true);
                 saturation = saturationRun
                         .getAsJsonObject("measurement")
@@ -240,10 +224,6 @@ final class Orchestrator {
         return buildResult(runs, saturation, rate);
     }
 
-    /**
-     * 쓰기 정체 시나리오. 서버가 밀어 넣는 요청을 상대(부하 생성기 프로세스)가 읽지 않게 멈춘 뒤, 서버 메모리 증가와 연결이 끊기기까지의 시간·원인을 잰다. 서버는 기존 유휴 PING·확인 대기로만 끊어야 한다(ADR
-     * 0004). 시간 안에 끊기지 않으면 실패다.
-     */
     JsonObject executeStall() throws RunFailed, IOException, InterruptedException {
         try {
             prepareKeystore();
@@ -292,7 +272,7 @@ final class Orchestrator {
                     closedJson = lastClosed;
                     detectedAt = System.nanoTime();
                     JsonObject notice = JsonParser.parseString(closedJson).getAsJsonObject();
-                    // 기존 확인 대기(UNRESPONSIVE, 오류 코드 6)로 끊겨야 한다. 다른 원인이면 ADR 0004 기대를 검증한 것이 아니다.
+
                     if (!notice.get("kind").getAsString().equals("ERROR_CLOSE")
                             || notice.get("errorCode").getAsLong() != UNRESPONSIVE) {
                         stopProcess(peer, "CONT");
@@ -339,7 +319,7 @@ final class Orchestrator {
                     stopProcess(peer, "CONT");
                 }
             } catch (RunFailed ignored) {
-                // 이미 끝난 상대에는 신호가 가지 않을 수 있다. 정리는 계속해야 한다.
+
             } finally {
                 try {
                     terminate(peer);
@@ -362,7 +342,6 @@ final class Orchestrator {
         return metadata;
     }
 
-    /** 프로세스에 SIGSTOP/SIGCONT를 보낸다. 멈춘 프로세스는 소켓을 읽지 않아 상대의 쓰기가 막힌다. */
     private static void stopProcess(Process process, String signal) throws RunFailed, InterruptedException {
         try {
             Process kill = new ProcessBuilder("kill", "-" + signal, String.valueOf(process.pid()))
@@ -394,15 +373,12 @@ final class Orchestrator {
         throw new RunFailed(who + " 프로세스가 " + expected + "를 알리지 않았다(종료 코드 " + exitCode(process) + "): " + err.text());
     }
 
-    // soak: 마지막 실행에서 모은 서버 표본, 서버 표준 오류, 부하 생성기 결과 원본.
     private final List<JsonObject> serverSeries = new ArrayList<>();
     private StderrCapture lastServerErr;
     private JsonObject lastRaw;
 
-    /** 서버가 알린 마지막 {@code CLOSED} 줄의 JSON. 없으면 null. */
     private String lastClosed;
 
-    /** 서버와 부하 생성기를 새로 띄워 한 번 측정한다. 끝나면 두 프로세스를 정리한다. */
     private JsonObject runOnce(double rate, boolean closedOverride)
             throws RunFailed, IOException, InterruptedException {
         serverSeries.clear();
@@ -449,7 +425,7 @@ final class Orchestrator {
         measurement.addProperty("errors", raw.get("errors").getAsLong());
         measurement.addProperty("unknown", raw.get("unknown").getAsLong());
         measurement.addProperty("measureSeconds", seconds);
-        // 처리량은 측정 구간 안에 완료된 응답만 센다(드레인 구간 완료분 제외).
+
         measurement.addProperty("throughputPerSecond", windowResponses / seconds);
         measurement.add("latencyMicros", raw.get("latencyMicros"));
         measurement.add("latencyBasis", raw.get("latencyBasis"));
@@ -479,11 +455,11 @@ final class Orchestrator {
         }
         String roleName = role.get(0);
         if (config.soak && roleName.equals("server")) {
-            // ByteBuf 누수는 netty의 누수 감지기가 표준 오류로 알린다. soak에서는 모든 버퍼를 추적한다.
+
             command.add("-Dio.netty.leakDetection.level=paranoid");
         }
         if (config.jfr) {
-            // JFR 시작 안내가 표준 출력을 어지럽히지 않게 JVM 로그는 끈다.
+
             command.add("-Xlog:disable");
             command.add("-XX:StartFlightRecording=filename=" + Paths.get(config.profileDir, roleName + "-%p.jfr")
                     + ",dumponexit=true,settings=profile");
@@ -525,9 +501,6 @@ final class Orchestrator {
         JsonObject serverResources;
     }
 
-    /**
-     * 부하 생성기의 출력을 읽는다. {@code PHASE MEASURE_START/END} 줄이 오면 서버에 표본을 요청해 같은 구간의 서버 자원 사용을 얻고, 마지막 JSON 줄이 부하 생성기의 결과다.
-     */
     private LoadGenOutcome awaitLoadGen(
             Process loadgen,
             Lines loadgenLines,
@@ -612,7 +585,6 @@ final class Orchestrator {
         throw new RunFailed("서버 프로세스가 자원 표본에 답하지 않았다(종료 코드 " + exitCode(server) + "): " + serverErr.text());
     }
 
-    /** 자식 프로세스의 표준 출력을 줄 단위로 모은다. 끝나면 {@link #EOF}를 넣는다. */
     private static final class Lines {
         static final String EOF = "\u0000EOF";
         private final java.util.concurrent.BlockingQueue<String> queue =
@@ -627,7 +599,7 @@ final class Orchestrator {
                         queue.add(line);
                     }
                 } catch (IOException ignored) {
-                    // 프로세스가 끝났다.
+
                 }
                 queue.add(EOF);
             });
@@ -642,7 +614,7 @@ final class Orchestrator {
 
     private JsonObject buildResult(List<JsonObject> runs, Double saturation, double rate) {
         JsonObject config = new JsonObject();
-        // 서버 전송이 주 변수다. 부하 생성기 전송은 loadgenTransport로 함께 기록한다.
+
         config.addProperty("transport", this.config.transport);
         config.addProperty("loadgenTransport", this.config.loadgenTransport);
         config.addProperty("binding", this.config.binding);
@@ -657,7 +629,7 @@ final class Orchestrator {
             policy.addProperty("provider", "JDK default");
             config.add("tlsPolicy", policy);
         } else {
-            // 평문은 하네스 한정 대조군이다. 순수 전송 오버헤드를 분리하는 데만 쓰며 제품 설정으로 노출되지 않는다.
+
             config.addProperty("plaintextControl", true);
         }
         config.addProperty("connections", this.config.connections);
@@ -708,7 +680,6 @@ final class Orchestrator {
         }
     }
 
-    /** 반복별 값을 중앙값과 범위(최소·최대)로 요약한다. */
     private static JsonObject summary(List<JsonObject> runs) {
         JsonObject summary = new JsonObject();
         summary.add(
@@ -742,7 +713,6 @@ final class Orchestrator {
         return stats;
     }
 
-    /** 결과 JSON의 환경 메타데이터(JDK·OS·코어 수·git SHA). 모든 결과가 같은 키를 쓴다. */
     static JsonObject environmentMetadata() {
         JsonObject metadata = new JsonObject();
         metadata.addProperty("jdk", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"));
@@ -754,7 +724,6 @@ final class Orchestrator {
 
     private static String cachedGitSha;
 
-    /** 현재 커밋. {@code git}을 프로세스당 한 번만 부른다. */
     static synchronized String gitSha() {
         if (cachedGitSha == null) {
             cachedGitSha = readGitSha();
@@ -778,7 +747,6 @@ final class Orchestrator {
         }
     }
 
-    /** 하네스 자체 시험용: 지정한 시간 뒤 서버 프로세스를 강제로 죽인다. */
     private static void scheduleKill(Process server, Duration after) {
         Thread killer = new Thread(() -> {
             try {
@@ -796,11 +764,11 @@ final class Orchestrator {
         if (process == null) {
             return;
         }
-        // 정상 종료는 표준 입력을 닫아 알린다. 안 끝나면 강제로 끝낸다.
+
         try {
             process.getOutputStream().close();
         } catch (IOException ignored) {
-            // 이미 끝난 프로세스다.
+
         }
         if (!process.waitFor(10, TimeUnit.SECONDS)) {
             process.destroyForcibly();
@@ -812,7 +780,6 @@ final class Orchestrator {
         return process.isAlive() ? "실행 중" : String.valueOf(process.exitValue());
     }
 
-    /** 자식 프로세스의 표준 오류를 모아 두었다가 실패 메시지에 붙인다. */
     private static final class StderrCapture {
         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 
@@ -829,7 +796,7 @@ final class Orchestrator {
                         }
                     }
                 } catch (IOException ignored) {
-                    // 프로세스가 끝났다.
+
                 }
             });
             thread.setDaemon(true);
@@ -837,12 +804,10 @@ final class Orchestrator {
             this.reader = thread;
         }
 
-        /** 프로세스가 끝난 뒤 남은 출력을 모두 읽을 때까지 잠시 기다린다. */
         void drain() throws InterruptedException {
             reader.join(2_000);
         }
 
-        /** 누수 감지기가 남긴 {@code LEAK:} 줄의 수와 앞부분 몇 줄. */
         long leakCount() {
             synchronized (buffer) {
                 return buffer.toString(StandardCharsets.UTF_8)

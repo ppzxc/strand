@@ -14,15 +14,10 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
-/**
- * 예제는 전송 모듈의 제품 공개 API 사용법만 보여 준다. 손으로 쓴 드라이브 루프(읽은 것을 넣고, 쌓인 것을 꺼내 쓰고, 시계를 진행)는 전송 모듈이 하는 일이므로 예제 소스에 {@code
- * Endpoint}를 직접 부르는 호출이 없어야 하고, 공개 API가 아닌 {@code ..internal..} 패키지도 쓰지 않는다.
- */
 class ExamplesUseTheTransportModuleTest {
 
     private static final Path SOURCES = Paths.get("src", "main", "java", "io", "github", "ppzxc", "strand", "examples");
 
-    /** {@code Endpoint}의 드라이브용 동작. 요청과 응답은 전송 모듈의 연결 엔진이 낸다. */
     private static final List<String> DRIVE_CALLS = Arrays.asList(
             "Endpoint.client(",
             "Endpoint.server(",
@@ -54,7 +49,7 @@ class ExamplesUseTheTransportModuleTest {
 
     @Test
     void onlyTheNettyModuleHasAWebSocketExample() throws IOException {
-        // strand-nio는 WebSocket을 지원하지 않는다(ADR 0007). WebSocket 예제는 Netty 예제 하나뿐이다.
+
         assertThat(exampleSources())
                 .extracting(path -> path.getFileName().toString())
                 .filteredOn(name -> name.contains("WebSocket"))
@@ -74,7 +69,7 @@ class ExamplesUseTheTransportModuleTest {
 
     @Test
     void noExampleReferencesTheEndpointTypeItself() throws IOException {
-        // 변수로 받은 Endpoint의 ping, close, request 호출도 막으려고 타입 참조 자체를 금지한다. EndpointConfig는 설정이라 쓴다.
+
         Pattern endpointType = Pattern.compile("\\bEndpoint\\b");
         for (Path source : exampleSources()) {
             String text = new String(Files.readAllBytes(source), StandardCharsets.UTF_8);

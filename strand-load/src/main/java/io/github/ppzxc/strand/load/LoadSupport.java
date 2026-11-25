@@ -10,13 +10,12 @@ import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** 서버와 부하 생성기가 함께 쓰는 고정 설정. 두 전송에 같은 값을 주어 서버 전송이 유일한 변수가 되게 한다. */
 final class LoadSupport {
-    /** 규격 4.1절: 애플리케이션 type은 256 이상이다. */
+
     static final int ECHO_TYPE = 256;
 
     static final String WS_PATH = "/strand";
-    /** 쓰기 정체 시나리오에서 서버가 이 요청을 받으면 같은 연결로 요청을 밀어 넣기 시작한다. */
+
     static final int STALL_TYPE = 257;
 
     static final String AUTH_MECHANISM = "BEARER";
@@ -32,7 +31,6 @@ final class LoadSupport {
 
     private LoadSupport() {}
 
-    /** 협상할 최대 프레임 크기. 본문이 한 프레임에 들어가도록 기본 64KiB와 본문 두 배 중 큰 값을 쓴다. */
     static long maxFrameSize(int bodyBytes) {
         return Math.max(65_536L, 2L * bodyBytes);
     }
@@ -50,7 +48,7 @@ final class LoadSupport {
         long bodyBudget = requests * (bodyBytes + 1024L) * 2;
         long preparationBytes = 1 << 16;
         long observations = Math.max(64, 2L * inflight);
-        // 연결 수보다 하나 더: 시작 전 TLS 협상 확인용 연결이 닫히는 동안 한도에 걸리지 않게 한다.
+
         long owners = connections + 1L;
         return ResourceLimits.builder()
                 .perConnection(ConnectionLimits.builder()
@@ -83,7 +81,6 @@ final class LoadSupport {
                 .build();
     }
 
-    /** 앱이 소유하는 실행기. 핸들러와 알림이 여기서 돌고 전송 스레드를 막지 않는다. */
     static ExecutorService newExecutor(String name) {
         return Executors.newCachedThreadPool(runnable -> {
             Thread thread = new Thread(runnable, name);

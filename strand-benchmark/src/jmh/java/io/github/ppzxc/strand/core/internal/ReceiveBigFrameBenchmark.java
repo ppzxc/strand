@@ -7,17 +7,12 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 
-/**
- * 큰 프레임 하나가 작은 조각으로 도착하는 입력의 {@code Endpoint.receive()} 비용 증가율(#200). 프레임이 8배가 되면 시간도 8배 안팎(선형)이어야
- * 한다.
- */
 @State(Scope.Benchmark)
 public class ReceiveBigFrameBenchmark {
 
     private static final int MAX_FRAME_SIZE = 1_048_576;
     private static final int PIECE_SIZE = 1024;
 
-    /** 큰 프레임 하나의 크기(바이트, 길이 필드 포함). */
     @Param({"32768", "131072", "1048576"})
     public int frameBytes;
 

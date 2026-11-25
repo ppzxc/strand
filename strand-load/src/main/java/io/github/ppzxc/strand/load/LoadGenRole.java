@@ -27,17 +27,6 @@ import java.util.concurrent.locks.LockSupport;
 import org.HdrHistogram.ConcurrentHistogram;
 import org.HdrHistogram.Histogram;
 
-/**
- * 부하 생성기 프로세스 역할. 전송과 무관하게 항상 같은 코드 경로로 부하를 건다.
- *
- * <ul>
- *   <li>폐쇄형 포화: 연결마다 미완료 요청 {@code inflight}개를 유지하고 하나가 끝나면 곧바로 다음을 보낸다. 처리량 상한을 잰다.
- *   <li>개방형 고정 도착률: 요청의 예정 시각을 미리 정해 두고 서버가 느려도 그 시각에 보낸다. 지연은 예정 시각부터 응답까지로 재므로 서버가 느려도 지연이 축소되어 보이지 않는다(coordinated
- *       omission 방지).
- * </ul>
- *
- * 워밍업 요청은 세지 않는다. 지연은 HdrHistogram(마이크로초)으로 모은다. 결과는 표준 출력에 JSON 한 줄로 낸다.
- */
 final class LoadGenRole {
     private static final int WARMUP = 0;
     private static final int MEASURE = 1;
@@ -52,13 +41,13 @@ final class LoadGenRole {
                 return thread;
             });
     private final byte[] body;
-    /** 요청은 불변이라 매번 만들지 않고 하나를 재사용한다. */
+
     private final Request echo;
 
     private final AtomicBoolean stopped = new AtomicBoolean();
     private final AtomicLong sent = new AtomicLong();
     private final AtomicLong responded = new AtomicLong();
-    /** 측정 구간 안에 완료된 정상 응답 수. 처리량은 이것으로 계산해 드레인 구간 완료분이 섞이지 않게 한다. */
+
     private final AtomicLong respondedInWindow = new AtomicLong();
 
     private final AtomicLong errors = new AtomicLong();
@@ -66,9 +55,9 @@ final class LoadGenRole {
     private final AtomicLong outstanding = new AtomicLong();
     private final Histogram latency = new ConcurrentHistogram(3_600_000_000L, 3);
     private final Histogram sendLag = new ConcurrentHistogram(3_600_000_000L, 3);
-    /** 부하 생성기가 예정 시각을 이만큼 넘기면 병목으로 본다(마이크로초). 개방형에서만 의미가 있다. */
+
     private static final long BOTTLENECK_LAG_MICROS = 5_000;
-    /** 예정보다 이만큼 뒤처지면 더 이상 일정을 지킬 수 없다고 보고 도착을 멈춘다. */
+
     private static final long GIVE_UP_LAG_NANOS = 1_000_000_000L;
 
     private PrintStream control;
@@ -106,9 +95,8 @@ final class LoadGenRole {
             connections.add(connection);
         }
 
-        // 측정 구간 경계의 첫 표본이 JMX 초기화로 수십 ms 걸리면 개방형 스케줄러가 멈춰 지연이 부풀려진다. 부하 전에 한 번 떠 둔다.
         ResourceSampler.sample();
-        // 히스토그램도 처음 기록할 때 배열을 키우므로 미리 넓은 범위를 기록해 두고 비운다.
+
         for (long v = 1; v < 3_600_000_000L; v = v * 3 / 2 + 1) {
             latency.recordValue(v);
             sendLag.recordValue(v);
@@ -146,7 +134,7 @@ final class LoadGenRole {
         latencyMicros.addProperty("max", latency.getMaxValue());
         latencyMicros.addProperty("mean", latency.getMean());
         result.add("latencyMicros", latencyMicros);
-        // 폐쇄형은 보내는 시각 기준(서버가 느리면 축소되어 보일 수 있다), 개방형은 예정 시각 기준이다.
+
         result.addProperty("latencyBasis", config.openLoop ? "scheduled" : "send");
         long lagP99 = sendLag.getValueAtPercentile(99.0);
         result.addProperty("sendLagP99Micros", lagP99);
@@ -162,9 +150,6 @@ final class LoadGenRole {
         return 0;
     }
 
-    /**
-     * 실제 부하 전에 서버와 TLS 핸드셰이크만 한 번 해 협상된 프로토콜 버전과 암호 스위트를 기록한다. 결과를 전송 사이에 견주어 TLS 조건이 같았는지 확인한다.
-     */
     private static JsonObject probeTls(javax.net.ssl.SSLContext context, InetSocketAddress address) throws Exception {
         try (javax.net.ssl.SSLSocket socket = (javax.net.ssl.SSLSocket)
                 context.getSocketFactory().createSocket(address.getAddress(), address.getPort())) {
@@ -182,7 +167,6 @@ final class LoadGenRole {
         }
     }
 
-    /** 측정 구간 경계에서 자원 표본을 뜨고 진행자에게 알린다. 진행자는 이 줄을 보고 서버의 표본을 뜬다. */
     private void markMeasureStart() throws java.io.IOException {
         resourceStart = ResourceSampler.sample();
         if (config.soak) {
@@ -199,9 +183,6 @@ final class LoadGenRole {
         control.flush();
     }
 
-    /**
-     * 쓰기 정체 시나리오의 상대. 연결해 서버가 요청을 밀어 넣게 한 뒤 {@code PEER_READY}를 알리고 기다린다. 진행자가 이 프로세스를 멈춰(SIGSTOP) 읽기를 멈춘 상대를 만든다. 표준 입력이 닫히면 끝난다.
-     */
     private int runStalledPeer(LoadConnection connection, PrintStream out) throws Exception {
         connection
                 .request(Request.of(LoadSupport.STALL_TYPE, new byte[0]))
@@ -212,13 +193,11 @@ final class LoadGenRole {
         out.println("PEER_READY");
         out.flush();
         byte[] buffer = new byte[64];
-        while (System.in.read(buffer) >= 0) {
-            // 입력은 무시한다.
-        }
+        while (System.in.read(buffer) >= 0) {}
+
         return 0;
     }
 
-    /** soak: 측정 구간 동안 일정 간격으로 이 프로세스의 자원 표본을 모은다. */
     private void startSoakSampler() {
         sampling = true;
         Thread thread = new Thread(() -> {
@@ -254,7 +233,6 @@ final class LoadGenRole {
         return measureNanos;
     }
 
-    /** 고정 도착률로 예정 시각마다 연결을 돌아가며 보낸다. 늦어도 건너뛰지 않고 바로 보내 밀린 만큼 지연에 드러나게 한다. */
     private long runOpen(List<LoadConnection> connections) throws Exception {
         double intervalNanos = 1e9 / config.rate;
         long start = System.nanoTime();
@@ -294,11 +272,10 @@ final class LoadGenRole {
         phase = DRAIN;
         stopped.set(true);
         drain();
-        // 측정 구간이 시작되기 전에 일정을 포기했으면 0이다. 진행자는 이를 실패로 처리한다(왜곡된 처리량을 내지 않는다).
+
         return Math.max(0, measureEnd - measureBegin);
     }
 
-    /** 서버 핸들러가 준비되기 전에 온 첫 요청은 거절될 수 있다(규격 4.5절). 거절은 다시 보내도 안전하므로 유한하게 다시 보낸다. */
     private void awaitServerReady(LoadConnection connection) throws Exception {
         long limit =
                 System.nanoTime() + Duration.ofSeconds(LoadSupport.WAIT_SECONDS).toNanos();
@@ -324,7 +301,6 @@ final class LoadGenRole {
         }
     }
 
-    /** @param intended 이 요청의 예정 시각(nanoTime). 폐쇄형은 보내는 시각이다. */
     private void send(LoadConnection connection, long intended) {
         if (stopped.get()) {
             return;
@@ -348,8 +324,7 @@ final class LoadGenRole {
             boolean failed = result.certainty() != Certainty.RESPONSE || result.status() != Status.OK;
             outstanding.decrementAndGet();
             if (!config.openLoop && !stopped.get()) {
-                // 전송 스레드를 붙들지 않도록 다음 요청은 앱 실행기에서 보낸다. 실패하면 잠시 쉰다:
-                // 연결이 끝난 뒤 실패 결과가 즉시 돌아와 CPU를 태우며 오류만 쌓는 것을 막는다.
+
                 if (failed) {
                     retry.schedule(
                             () -> executor.execute(() -> send(connection, System.nanoTime())),
@@ -362,7 +337,6 @@ final class LoadGenRole {
         });
     }
 
-    /** @return 정상 응답이면 true */
     private boolean classify(RequestResult result) {
         if (result.certainty() == Certainty.UNKNOWN) {
             unknown.incrementAndGet();
@@ -392,7 +366,6 @@ final class LoadGenRole {
         }
     }
 
-    /** 전송별 연결. 두 전송의 연결 타입이 달라 요청과 종료만 얇게 감싼다. 요청 결과 타입은 공통 API다. */
     interface LoadConnection {
         io.github.ppzxc.strand.api.RequestHandle request(Request request);
 
@@ -401,7 +374,6 @@ final class LoadGenRole {
         void close();
     }
 
-    /** 부하 생성기의 클라이언트 쪽. 전송이 달라도 부하 코드는 같다. */
     interface ClientSide {
         LoadConnection connect(InetSocketAddress address) throws Exception;
 
