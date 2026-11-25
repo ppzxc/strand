@@ -11,17 +11,27 @@ import org.junit.jupiter.api.Test;
 class HandlerFailureLoggingRuleTest {
   @Test
   void approvedSanitizedHandlerLogPasses() {
-    assertEquals(0, violations(handler("LOGGER.log(Level.WARNING, \"handler failed(type=\" + request.type() + \")\", sanitizedFailure(failure));")));
+    assertEquals(0, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \")\", sanitizedFailure(failure));")));
   }
 
   @Test
   void addressAndOriginalThrowableInHandlerLogFail() {
-    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"handler failed(type=\" + request.type() + \", remote=\" + p.remoteAddress + \")\", failure);")));
+    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \", remote=\" + p.remoteAddress + \")\", failure);")));
   }
 
   @Test
   void requestPayloadInHandlerLogFails() {
-    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"handler failed(type=\" + request.type() + \", payload=\" + request.payload() + \")\", sanitizedFailure(failure));")));
+    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \", payload=\" + request.payload() + \")\", sanitizedFailure(failure));")));
+  }
+
+  @Test
+  void exceptionMessageAppendedToOtherwiseApprovedLogFails() {
+    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \")\" + \" \" + failure.getMessage(), sanitizedFailure(failure));")));
+  }
+
+  @Test
+  void requestSerializationAppendedToOtherwiseApprovedLogFails() {
+    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \")\" + \" \" + request.toString(), sanitizedFailure(failure));")));
   }
 
   private static String handler(String loggingCall) {
