@@ -144,6 +144,9 @@ jobs:
     needs: [verify, runtime]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # skipped·cancelled도 통과로 치지 않는다. 모두 success여야 한다.
       - name: Require every needed job to succeed
         env:

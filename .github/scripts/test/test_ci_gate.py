@@ -52,6 +52,7 @@ class CiGateTest(unittest.TestCase):
 
         self.assertEqual(set(ci["jobs"]["ci-ok"]["needs"]), {"verify", "runtime"})
         self.assertEqual(ci["jobs"]["ci-ok"]["if"], "always()")
+        self.assertIn("actions/checkout@", str(ci["jobs"]["ci-ok"]["steps"]))
         self.assertIn("./gradlew check", str(ci["jobs"]["verify"]["steps"]))
         self.assertIn("./gradlew deployTest", str(ci["jobs"]["verify"]["steps"]))
         self.assertEqual(ci["jobs"]["runtime"]["strategy"]["matrix"]["java"], [8, 11, 17, 21, 25])
