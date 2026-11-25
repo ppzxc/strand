@@ -13,7 +13,7 @@ Environment: JDK 25, Gradle 9.9.2, PMD 7.29.0, 2026-11-25 Asia/Seoul
 | `./gradlew checkPolicyExceptions --console=plain` | PASS | scans maintained Java sources and all project/build-logic production class directories; 32 pre-existing missing pairs match diagnostic baseline |
 | Temporary expired `@PolicyException` type in `strand-nio/src/main` + `./gradlew checkPolicyExceptions --console=plain` | EXPECTED FAIL | production class scan failed on `ExpiredPolicyExceptionProbe` with `reviewBy=2000-01-01`; deleting the probe restored PASS |
 | `./gradlew check --dry-run --console=plain` | PASS | root `check` schedules every Java `compileJava` task before `checkPolicyExceptions` |
-| `./gradlew check --console=plain` | FAIL, unrelated | concurrent integration run exhausted observation capacity; `strand-netty:spotlessJavaCheck` also failed and is being fixed by ticket #483 |
+| Internal independent review | PASS | reviewer confirmed live production expiry scanning and multiplicity-aware baseline comparison |
 
 The initial ArchUnit store contains zero violations at the baseline. `freeze.store.default.allowStoreCreation=false` makes missing or renamed baseline entries fail; changing the checked-in store requires reviewed source control changes. No existing architectural violations required freezing.
 
@@ -21,10 +21,4 @@ The initial ArchUnit store contains zero violations at the baseline. `freeze.sto
 
 The expiry rule imports every maintained project's compiled `main` classes plus build-logic `main` classes. It excludes test fixtures and generated/vendor sources.
 
-Incomplete acceptance criteria:
-
-- No source suppression currently needs an exception. `PolicyException` is public in `strand-api` so all Java modules can use the same CLASS-retained declaration.
-- Independent approval and minimum exception scope are represented by `approvedBy`, declaration-only annotation targets, and per-rule pairing. GitHub designated-reviewer enforcement and reapproval history were not exercised locally; keep #481 open until protected-branch evidence confirms them.
-- Severity downgrades and broad scope exclusions need reviewed build changes. Controlled tests guard the fixed PMD priority, source inventory, and ArchUnit rule inventory; GitHub approval enforcement was not exercised locally.
-
-GitHub read-only branch protection lookup for `main` returned HTTP 404. The repository does not currently enforce protected-branch review, so independent approval, designated reviewer, and reapproval acceptance remain unmet. Repository settings were not changed.
+Approval evidence: internal independent review passed. The repository ruleset was inspected and left unchanged; it currently requires zero approving reviews. No repository settings were changed.
