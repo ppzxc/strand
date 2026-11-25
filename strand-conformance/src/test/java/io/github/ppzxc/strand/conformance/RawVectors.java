@@ -19,18 +19,12 @@ import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-/**
- * 로더를 거치지 않고 벡터 파일을 JSON 그대로 읽는 테스트 도구. 파일 목록, 파일별 벡터, `byKey()`의 결과를 벡터 디렉터리별로 한 번만
- * 만들어 둔다. 디렉터리가 바뀌면 처음부터 다시 읽는다. 돌려주는 JSON 객체는 모든 호출자가 함께 쓰므로 읽기만 해야 한다(고치면 다른
- * 테스트가 보는 값이 바뀐다).
- */
 final class RawVectors {
 
     private static Snapshot snapshot;
 
     private RawVectors() {}
 
-    /** `파일명/id`에서 벡터 객체로. 파일 순서와 파일 안 순서를 지킨다. */
     static synchronized Map<String, JsonObject> byKey() {
         Snapshot current = current();
         if (current.byKey == null) {
@@ -48,14 +42,12 @@ final class RawVectors {
         return current.byKey;
     }
 
-    /** 같은 키가 두 번 들어오면 앞의 벡터가 가려지므로 거부한다. */
     static void put(Map<String, JsonObject> target, String key, JsonObject vector) {
         if (target.put(key, vector) != null) {
             throw new IllegalStateException("벡터 키가 겹친다: " + key);
         }
     }
 
-    /** 벡터 객체가 적은 요구사항 식별자. */
     static List<String> requirementsOf(JsonObject vector) {
         if (!vector.has("requirements")) {
             throw new IllegalStateException("requirements가 없는 벡터: " + vector.get("id"));
@@ -67,7 +59,6 @@ final class RawVectors {
         return ids;
     }
 
-    /** 벡터 키에서 그 벡터가 적은 요구사항 식별자로. */
     static Map<String, List<String>> requirementsByKey() {
         Map<String, List<String>> result = new TreeMap<>();
         for (Map.Entry<String, JsonObject> vector : byKey().entrySet()) {
@@ -76,12 +67,10 @@ final class RawVectors {
         return result;
     }
 
-    /** 어떤 벡터든 하나라도 가리키는 요구사항 식별자. */
     static SortedSet<String> referencedRequirements() {
         return referencedIn(requirementsByKey());
     }
 
-    /** {@code byVector}의 어느 벡터든 가리키는 식별자. 합성한 대응을 검사하는 시험도 쓴다. */
     static SortedSet<String> referencedIn(Map<String, List<String>> byVector) {
         SortedSet<String> result = new TreeSet<>();
         for (List<String> ids : byVector.values()) {
@@ -98,7 +87,6 @@ final class RawVectors {
         return current().vectors(file);
     }
 
-    /** 지금 벡터 디렉터리의 읽기 결과. 디렉터리가 바뀌었으면 통째로 새로 만든다. */
     private static Snapshot current() {
         Path directory = VectorSuite.defaultDirectory();
         if (snapshot == null || !snapshot.directory.equals(directory)) {
@@ -107,7 +95,6 @@ final class RawVectors {
         return snapshot;
     }
 
-    /** 한 벡터 디렉터리의 파일 목록과, 필요할 때 채우는 파일별 벡터와 `byKey()` 결과. */
     private static final class Snapshot {
         final Path directory;
         final List<Path> files;

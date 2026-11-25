@@ -14,13 +14,8 @@ import java.util.Map;
 import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
-/**
- * #94 B절 신규 벡터가 빠짐없이 있는지 본다(#98). 항목별 필수 벡터 id는 {@code required-vectors.txt}에 있다. 벡터의 기대값은 이 테스트가
- * 아니라 벡터 파일과 규격이 정한다. 여기서는 존재와 인수 조건의 형태만 단언한다.
- */
 class NewVectorCoverageTest {
 
-    /** B-28과 B-32는 벡터를 만들지 않는다. */
     private static final List<Integer> EXCLUDED = Arrays.asList(28, 32);
 
     private static Map<Integer, List<String>> required() throws IOException {
@@ -64,12 +59,11 @@ class NewVectorCoverageTest {
     void aVectorUsesKnownTypesAndExpectsUnimplementedWithoutClosing() {
         JsonObject v = vector("request-checks/unknown-type-request-is-answered-unimplemented");
         assertThat(v.getAsJsonObject("setup").has("known_types")).isTrue();
-        // 모르는 type(258)의 요청에는 UNIMPLEMENTED 응답만 나가고 CLOSE도 연결 종료 이벤트도 없다.
+
         assertThat(sentFrames(v)).contains("258/UNIMPLEMENTED").noneMatch(f -> f.startsWith("CLOSE/"));
         assertThat(eventNames(v)).doesNotContain("closed").contains("request_received");
     }
 
-    /** 벡터 전체 단계에서 구현이 보낸 프레임을 `type/status|error_code` 꼴로 모은다. 애플리케이션 프레임은 type이 숫자다. */
     private static List<String> sentFrames(JsonObject vector) {
         List<String> frames = new ArrayList<>();
         for (JsonElement step : vector.getAsJsonArray("steps")) {
@@ -128,10 +122,6 @@ class NewVectorCoverageTest {
         assertThat(kinds).contains("ping", "advance");
     }
 
-    /**
-     * 확인 대기를 시작하고 시간을 흘리는 모든 벡터는 한도(`ack_timeout_ms`, 없으면 5000)에 정확히 닿지 않는다(형식 문서 8.3절).
-     * `ack_timeout_ms`를 쓰거나 id에 ack-timeout이 있는 벡터는 확인 대기를 시작해야 한다.
-     */
     @Test
     void timeVectorsNeverReachTheLimitExactly() {
         int declared = 0;
@@ -165,7 +155,7 @@ class NewVectorCoverageTest {
                 assertThat(AckWaits.reachesLimitExactly(vector))
                         .as("%s: 한도에 정확히 닿으면 안 된다", entry.getKey())
                         .isFalse();
-                // 한 advance 단계에서 두 대기가 함께 한도를 넘으면 어느 CLOSE가 나갈지 정해지지 않는다.
+
                 assertThat(AckWaits.maxLimitsCrossedInOneAdvance(vector))
                         .as("%s: 한 단계에서 두 대기가 한도를 넘으면 안 된다", entry.getKey())
                         .isLessThanOrEqualTo(1);
@@ -174,26 +164,25 @@ class NewVectorCoverageTest {
         assertThat(declared).isGreaterThanOrEqualTo(11);
     }
 
-    /** 5.1절 5번 (가)→(나)→(다). 어느 검사가 먼저 걸리는지는 송신 프레임으로 본다. */
     @Test
     void requestCheckOrderIsRefusedThenUnimplementedThenInvalidArgument() {
         for (String key : Arrays.asList(
                 "request-checks/limit-refusal-precedes-unknown-type",
                 "request-checks/limit-refusal-precedes-bad-extension-value")) {
-            // (가) 거절만 나간다. (나)·(다)의 응답은 나가지 않는다.
+
             assertThat(sentFrames(vector(key))).as(key).containsExactly("RESET/REFUSED");
         }
-        // CLOSE 뒤의 새 요청은 (가)에서 조용히 버려지므로 (나)·(다)의 응답도 나가지 않는다.
+
         for (String key : Arrays.asList(
                 "request-checks/closing-drops-unknown-type-request",
                 "request-checks/closing-drops-bad-extension-value-request",
                 "request-checks/closing-drops-unknown-type-with-bad-extension-value")) {
             assertThat(sentFrames(vector(key))).as(key).isEmpty();
         }
-        // (나)가 (다)보다 먼저 걸린다.
+
         assertThat(sentFrames(vector("request-checks/unknown-type-precedes-bad-extension-value")))
                 .containsExactly("258/UNIMPLEMENTED");
-        // (다) 단독 사례도 있어야 순서가 의미를 가진다.
+
         assertThat(sentFrames(vector("request-checks/timeout-length-three-is-invalid-argument")))
                 .containsExactly("257/INVALID_ARGUMENT");
     }

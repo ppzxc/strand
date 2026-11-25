@@ -19,10 +19,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/**
- * 연결 {@code closed()}가 알리는 시점과 소유 객체 전체 종료가 끝난 시점에 테스트가 연 소켓·타이머·내부 스레드가 남지 않는지 본다(#328, #326 이월). 완료를 알리는 관찰을 읽는 즉시
- * 소켓 목록을 본다: 완료 알림이 실제 해제보다 빠르면 이 시험이 실패한다.
- */
 class ResourceReleaseTest {
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 
@@ -37,7 +33,6 @@ class ResourceReleaseTest {
         return RigKind.all();
     }
 
-    /** 완료 알림을 읽는 즉시 반응하려고 실행기를 거치지 않고 isDone()을 바로 돈다. 반환·완료를 기다리는 것이지 시간 경합에 기대지 않는다. */
     private static void spinUntilDone(Result<?> result) {
         long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(Rig.WAIT_SECONDS);
         while (!result.isDone()) {
@@ -62,7 +57,7 @@ class ResourceReleaseTest {
         App.Client client = rig.client();
         App.Lsn listener = Rig.get(server.listen());
         closeables.add(listener::close);
-        // 리스닝 소켓은 기준에 포함한다. 연결마다 늘어나는 소켓(클라이언트·서버 쪽 하나씩)만 본다.
+
         Set<String> baseline = ResourceProbe.sockets();
 
         for (int i = 0; i < 10; i++) {
@@ -72,7 +67,7 @@ class ResourceReleaseTest {
                     .result());
             assertThat(echoed.status()).isEqualTo(Status.OK);
             App.Conn accepted = served.get(served.size() - 1).connection();
-            // CLOSE 절차와 즉시 끊기를 번갈아 쓴다.
+
             if (i % 2 == 0) {
                 connection.close();
             } else {
@@ -103,7 +98,7 @@ class ResourceReleaseTest {
         App.Conn closedEarly = Rig.get(client.connect(listener.address()));
         closedEarly.close();
         awaitTrue(() -> closedEarly.closed().isDone());
-        // 요청을 처리 중인 채로 소유 객체 전체 종료를 만난 연결.
+
         App.Conn busy = Rig.get(client.connect(listener.address()));
         io.github.ppzxc.strand.api.RequestHandle pending =
                 busy.request(Request.of(TYPE, "hold".getBytes(StandardCharsets.UTF_8)), RequestOptions.noDeadline());
@@ -126,7 +121,7 @@ class ResourceReleaseTest {
         if (socketsBefore != null) {
             assertThat(ResourceProbe.socketsSince(socketsBefore)).as("남은 소켓").isEmpty();
         }
-        // 내부 스레드는 완료 보고 직후 마지막 정리를 마치므로 끝나기를 기다린다.
+
         awaitTrue(() -> {
             Set<Thread> remaining = ResourceProbe.strandThreads();
             remaining.removeAll(threadsBefore);
@@ -165,7 +160,7 @@ class ResourceReleaseTest {
         long control = client.usage(io.github.ppzxc.strand.api.Resource.TLS_CONTROL_BYTES)
                 .current();
         if (kind.isTls()) {
-            // 평문 소비 공간과 암호문 공간은 서로 다른 저장 공간으로 모두 예약된다.
+
             assertThat(plaintext).isPositive();
             assertThat(ciphertext).isPositive().isNotEqualTo(plaintext);
             assertThat(control).isPositive();
@@ -176,7 +171,7 @@ class ResourceReleaseTest {
         connection.abort();
         awaitTrue(() -> connection.closed().isDone());
         awaitTrue(() -> served.get(0).connection().closed().isDone());
-        // 연결이 끝나고 실제 통로가 정리된 뒤에야 TLS 공간이 모두 돌아온다.
+
         for (io.github.ppzxc.strand.api.Resource resource : new io.github.ppzxc.strand.api.Resource[] {
             io.github.ppzxc.strand.api.Resource.TLS_PLAINTEXT_BYTES,
             io.github.ppzxc.strand.api.Resource.TLS_CIPHERTEXT_BYTES,

@@ -7,7 +7,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
-/** 하네스의 프로토콜 상수 정의({@link Protocol}) 안의 불변식만 본다(internal seam). 값은 규격 쪽 리터럴로 확인한다. */
 class ProtocolTest {
 
     @Test

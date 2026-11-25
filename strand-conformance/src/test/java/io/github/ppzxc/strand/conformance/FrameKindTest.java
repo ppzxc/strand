@@ -10,10 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** 프레임 종류 정의의 내부 불변식: 기대값 렌더링과 실제 바이트 렌더링이 같은 정의에서 나온다. */
 class FrameKindTest {
 
-    /** 프레임 종류마다 기대 JSON 표본. 이름 있는 종류는 하나도 빠지지 않아야 한다. */
     private static final Map<String, String[]> SAMPLES = new LinkedHashMap<>();
 
     static {
@@ -57,7 +55,7 @@ class FrameKindTest {
     void renderingTheExpectedJsonEqualsRenderingItsEncodedBytes() {
         for (Map.Entry<String, String[]> kind : SAMPLES.entrySet()) {
             if (kind.getKey().equals("WEBSOCKET_CLOSE")) {
-                continue; // 바이트가 없는 종류는 아래 시험이 본다.
+                continue;
             }
             for (String sample : kind.getValue()) {
                 JsonObject frame = json(sample);
@@ -75,7 +73,7 @@ class FrameKindTest {
 
     @Test
     void anApplicationFrameRendersTheSameFromJsonAndBytes() {
-        // 클라이언트 역할에서 홀수 stream_id는 자기 요청이라 status를 그리지 않고, 짝수는 상대 응답이라 그린다.
+
         String request = "{\"type\":256,\"stream_id\":\"1\",\"payload\":\"abcd\"}";
         String response = "{\"type\":300,\"stream_id\":\"2\",\"status\":\"NOT_FOUND\",\"payload\":\"\"}";
         String reserved = "{\"type\":256,\"stream_id\":\"4\",\"status\":99}";
@@ -105,7 +103,7 @@ class FrameKindTest {
         assertThat(FrameKind.expected(
                         json("{\"type\":\"CLOSE\",\"error_code\":\"NO_ERROR\",\"last_stream_id\":\"5\"}")))
                 .isEqualTo("CLOSE flags=- stream_id=0 error_code=NO_ERROR last_stream_id=5");
-        // 확장 영역과 ACK 밖의 flags는 실제 바이트에서만 나타난다.
+
         byte[] withExtensions =
                 Bytes.fromHex("00000012" + "0002" + "02" + "00" + "0000000000000000" + "0002" + "0000" + "abcd" + "");
         assertThat(FrameKind.describe(withExtensions, false, true))
@@ -129,11 +127,11 @@ class FrameKindTest {
 
     @Test
     void malformedSentBytesFailAsReadableAssertions() {
-        // length가 최솟값(16) 미만: 헤더를 읽을 수 없다.
+
         byte[] tooShort = Bytes.fromHex("00000004" + "00000000");
-        // length가 2^31 이상: int로 담을 수 없다.
+
         byte[] tooLong = Bytes.fromHex("80000000" + "0010" + "00" + "00" + "0000000000000000" + "00000000");
-        // extensions_length가 프레임 밖까지 간다.
+
         byte[] extensionsOutOfFrame =
                 Bytes.fromHex("00000010" + "0010" + "00" + "00" + "0000000000000000" + "00ff" + "0000");
 

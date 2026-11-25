@@ -14,15 +14,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
-/**
- * 한 전송(NIO 또는 Netty)과 한 보안(TCP 또는 TLS)으로 서버·클라이언트를 만드는 시험 도구. 앱용 실행기와 필수 설정을 모두 채운다. 시간 경합에 기대지 않도록 시험은 {@link
- * #get}과 {@link #awaitTrue}로 반환·완료를 기다린다.
- */
 abstract class Rig implements AutoCloseable {
     static final int TYPE = 0x0100;
     static final long WAIT_SECONDS = 15;
 
-    /** 서버를 만드는 설정. 팩터리가 있으면 핸들러보다 우선한다. */
     static final class ServerSetup {
         App.AuthCheck auth = mechanism -> "peer";
         OptionalLong lifetime = OptionalLong.empty();
@@ -58,7 +53,6 @@ abstract class Rig implements AutoCloseable {
         }
     }
 
-    /** 클라이언트를 만드는 설정. */
     static final class ClientSetup {
         App.Handler handler = request -> {};
         Duration grace = Duration.ofSeconds(1);
@@ -68,14 +62,12 @@ abstract class Rig implements AutoCloseable {
         Duration ackTimeout;
         long writeQueueBytes;
 
-        /** 유휴 PING 간격과 확인 대기 시간을 정한다. 정하지 않으면 builder 기본값이다. */
         ClientSetup liveness(Duration idle, Duration ack) {
             this.idlePingInterval = idle;
             this.ackTimeout = ack;
             return this;
         }
 
-        /** 쓰기 대기열 절대 한도(바이트). 정하지 않으면 builder 기본값이다. */
         ClientSetup writeQueueBytes(long value) {
             this.writeQueueBytes = value;
             return this;
@@ -117,7 +109,6 @@ abstract class Rig implements AutoCloseable {
 
     abstract App.Client client(ClientSetup setup);
 
-    /** 서버 구성만 바꾸는 편의: 기본 설정으로 서버를 만든다. */
     final App.Server server() {
         return server(new ServerSetup());
     }
@@ -148,7 +139,6 @@ abstract class Rig implements AutoCloseable {
         }
     }
 
-    /** 서버 소유 객체 범위의 현재 예약량. */
     static long current(App.Server server, Resource resource) {
         return server.usage(resource).current();
     }

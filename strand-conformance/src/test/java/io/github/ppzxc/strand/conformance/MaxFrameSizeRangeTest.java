@@ -12,7 +12,6 @@ import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** `max_frame_size`의 기본값과 허용 범위가 규격, 형식 문서, 경계 벡터에 같은 값으로 들어 있는지 본다(#164). */
 class MaxFrameSizeRangeTest {
 
     private static final Path SPEC = RequirementIndex.specificationFile();
@@ -22,7 +21,6 @@ class MaxFrameSizeRangeTest {
     private static final long KIB_16 = 16L * 1024;
     private static final long MIB_1 = 1024L * 1024;
 
-    /** 이전 버전의 기본값과 상한. 어느 문서나 벡터 파일에도 남으면 안 된다. */
     private static final List<String> OLD_VALUES =
             Arrays.asList("4 MiB", "16 MiB", "4,194,304", "16,777,216", "16,777,217");
 
@@ -31,7 +29,7 @@ class MaxFrameSizeRangeTest {
     }
 
     private static String helloValue(String hex) {
-        // payload는 (identifier u16, value u32) 하나이고 프레임 끝 4바이트가 값이다.
+
         return hex.substring(hex.length() - 8);
     }
 

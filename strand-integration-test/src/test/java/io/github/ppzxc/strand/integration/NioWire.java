@@ -28,7 +28,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 
-/** strand-nio 제품 공개 API를 중립 모양으로 감싼다. */
 final class NioWire implements Wire {
 
     @Override

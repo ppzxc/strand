@@ -20,10 +20,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/**
- * 반환하지 않는 핸들러 하나가 사이에 있는 한 흐름에서 각 관찰의 완료 경계가 서로 다름을 순서대로 본다(#328): 리스닝 정리는 기존 연결을 기다리지 않고, 연결 종료는 핸들러 반환을
- * 기다리지 않고, 전체 종료 결과는 기한에 고정되며, 실제 자원 종료는 잔존 작업이 풀려야 완료한다.
- */
 class CompletionBoundaryTest {
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 
@@ -70,7 +66,6 @@ class CompletionBoundaryTest {
         stuck.request(request("hold"), RequestOptions.noDeadline());
         assertThat(handlerEntered.await(Rig.WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
 
-        // 리스닝 정리는 기존 연결(과 반환하지 않는 핸들러)을 기다리지 않고 기존 연결은 계속 쓸 수 있다.
         listener.close();
         Rig.get(listener.closed());
         RequestResult echoed = rig.result(
@@ -78,20 +73,17 @@ class CompletionBoundaryTest {
         assertThat(echoed.status()).isEqualTo(Status.OK);
         assertThat(server.usage(Resource.TOTAL_CONNECTIONS).current()).isEqualTo(2);
 
-        // 연결 종료는 핸들러 반환을 기다리지 않는다. 핸들러 작업은 남는다.
         stuck.abort();
         awaitTrue(() -> stuck.closed().isDone());
         awaitTrue(() -> served.get(0).connection().closed().isDone());
         assertThat(server.usage(Resource.HANDLER_TASKS).current()).isEqualTo(1);
 
-        // 전체 종료 결과는 기한에 고정되고 실제 자원 종료는 아직이다.
         server.shutdown();
         awaitTrue(() -> server.shutdownResult().isDone());
         assertThat(server.shutdownResult().resultNow().kind()).isEqualTo(ShutdownKind.DEADLINE_EXCEEDED);
         assertThat(server.shutdownResult().resultNow().remainingResources()).containsEntry(Resource.HANDLER_TASKS, 1L);
         assertThat(server.resourcesTerminated().isDone()).isFalse();
 
-        // 잔존 작업이 풀리면 실제 자원 종료가 완료하고 앞서 고정한 결과는 그대로다.
         releaseHandler.countDown();
         Rig.get(server.resourcesTerminated());
         assertThat(server.shutdownResult().resultNow().kind()).isEqualTo(ShutdownKind.DEADLINE_EXCEEDED);

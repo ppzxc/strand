@@ -12,22 +12,16 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-/** 규격 4.2절 스트림 식별을 실제 TCP 위에서 확인한다. */
 @ExtendWith(PassageObservation.class)
 class RequestResponseIntegrationTest {
 
     private static final int FIRST_TYPE = APPLICATION_TYPE;
     private static final int SECOND_TYPE = APPLICATION_TYPE + 1;
-    /** 서버는 {@link #FIRST_TYPE} 요청에 이 status로, {@link #SECOND_TYPE} 요청에 다른 status로 응답한다. */
+
     private static final int STATUS_FOR_FIRST = 0;
 
     private static final int STATUS_FOR_SECOND = 1;
 
-    /**
-     * 응답이 요청을 낸 스트림에 매칭되지 않으면 클라이언트는 결과를 받지 못하거나 다른 요청의 결과로 처리한다. 요청 하나로는 이 오매칭을 구분할 수
-     * 없어서, 응답을 기다리지 않고 요청 두 개를 겹쳐 낸다. 서버는 요청 {@code type}에 따라 서로 다른 {@code status}로 응답하므로, 각 요청의 Future가
-     * 자기 {@code status}로 끝났는지 알 수 있다. 서버가 받은 요청의 스트림 번호는 클라이언트 번호 공간 1, 3, 5...여야 한다(규격 4.2절).
-     */
     @TransportTest
     @DisplayName("겹쳐 낸 요청마다 응답이 자기 stream_id로 돌아온다 (규격 4.2)")
     void eachOverlappingRequestGetsItsOwnResponse(Transport transport) throws Exception {
@@ -47,11 +41,11 @@ class RequestResponseIntegrationTest {
             assertThat(firstResult.status()).isEqualTo(STATUS_FOR_FIRST);
             assertThat(secondResult.certainty()).isEqualTo(Certainty.RESPONSE);
             assertThat(secondResult.status()).isEqualTo(STATUS_FOR_SECOND);
-            // 스트림 번호는 통로를 관찰할 수 있는 전송(nio)에서만 본다. netty에서는 위의 응답 매칭까지만 본다.
+
             if (!transport.observesPassage()) {
                 return;
             }
-            // 서버 통로가 읽은 요청 프레임의 번호로 본다. 제품 API는 받은 요청의 스트림 번호를 드러내지 않는다.
+
             Map<Integer, Long> streamByType = new java.util.HashMap<>();
             Fixtures.requestTypeByStream(serverSide.passage().readFrames(), true)
                     .forEach((streamId, type) -> streamByType.put(type, streamId));
@@ -59,7 +53,6 @@ class RequestResponseIntegrationTest {
         }
     }
 
-    /** 상대의 응답을 받아 끝난 요청의 결과 확정성은 응답 받음이고 응답 본문이 함께 온다(규격 1.3절, 4.1절). */
     @TransportTest
     @DisplayName("응답을 받은 요청의 결과 확정성은 응답 받음이다 (규격 1.3)")
     void answeredRequestHasResponseCertainty(Transport transport) throws Exception {

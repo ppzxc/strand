@@ -11,10 +11,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
-/**
- * 번호를 받지 못한 대기열 요청과 전송 계층에 넘기기 전에 끝나는 요청의 결과 확정성, 그리고 PING 대기 제한이 규격에 한 절씩 정의되어 있는지 본다(#176). 벡터
- * 형식에는 대기열 요청과 전송 계층에 넘기는 시점이 없어 벡터로 확인할 수 없으므로 규격 본문을 검사한다.
- */
 class QueuedRequestOutcomeSpecTest {
 
     private static final Path ROOT = RequirementIndex.repositoryRoot();
@@ -24,7 +20,6 @@ class QueuedRequestOutcomeSpecTest {
         return Files.readAllLines(SPEC, StandardCharsets.UTF_8);
     }
 
-    /** 제목이 `heading`으로 시작하는 절의 본문을 다음 제목 직전까지 돌려준다. */
     private static String section(String heading) throws IOException {
         List<String> lines = lines();
         int start = -1;
@@ -68,7 +63,7 @@ class QueuedRequestOutcomeSpecTest {
                 .asString()
                 .contains("대기열 요청마다")
                 .contains("로컬 `status` = `UNAVAILABLE`(처리 안 됨)");
-        // 규칙 문장이 한 곳에만 있다.
+
         assertThat(linesWith("대기열 요청마다")).hasSize(1);
     }
 
@@ -91,16 +86,16 @@ class QueuedRequestOutcomeSpecTest {
                 .contains("`CANCELLED`")
                 .contains("처리 안 됨")
                 .doesNotContain("결과 모름");
-        // 쓰기를 시작한 뒤 취소는 결과 모름이다.
+
         assertThat(rows.stream()
                         .filter(l -> l.contains("`CANCELLED`") && l.contains("쓰기를 시작한 뒤"))
                         .collect(Collectors.toList()))
                 .singleElement()
                 .asString()
                 .contains("결과 모름");
-        // 마지막 바이트 기준은 4.4절 표에 남지 않는다(3.5절 연결이 끝날 때만 쓴다).
+
         assertThat(reset).doesNotContain("마지막 바이트");
-        // 쓰기를 시작한 프레임은 끊지 않고 마저 쓴 뒤 RESET을 보낸다.
+
         assertThat(reset).contains("마저 쓴 뒤");
     }
 
@@ -112,7 +107,6 @@ class QueuedRequestOutcomeSpecTest {
                 .contains("대기열 요청")
                 .contains("`RESET` 없이")
                 .contains("`DEADLINE_EXCEEDED`(처리 안 됨)")
-                // 쓰기를 시작한 요청은 그대로다.
                 .contains("`RESET(CANCEL)`")
                 .contains("`DEADLINE_EXCEEDED`(결과 모름)");
         assertThat(rows(section("4.4 스트림 중단")).stream()
@@ -135,7 +129,7 @@ class QueuedRequestOutcomeSpecTest {
         RequirementIndex index = RequirementIndex.ofSpecification();
         UncoveredRequirements uncovered = UncoveredRequirements.load();
         Set<String> referenced = RawVectors.referencedRequirements();
-        // 요청 기한 벡터(deadline_ms)가 4.4.1절의 MUST를 가리키므로 이 절은 제외 목록에 없다(#191).
+
         int checked = 0;
         for (RequirementIndex.Requirement requirement : index.requirements()) {
             if (requirement.section().equals("4.4.1") && requirement.keyword().mandatory()) {

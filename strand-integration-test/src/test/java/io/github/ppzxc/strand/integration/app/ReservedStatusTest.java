@@ -15,7 +15,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** 예약 status(17~255)로 응답하려는 호출은 즉시 예외이고, 그 요청은 유효한 status로 다시 응답할 수 있다(규격 2.5.1절). */
 class ReservedStatusTest {
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 

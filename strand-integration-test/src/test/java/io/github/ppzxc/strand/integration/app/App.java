@@ -16,14 +16,9 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * NIO와 Netty의 앱 공개 API를 같은 시나리오로 실행하기 위한 시험 전용 중립 모양. 전송별 타입(Future/CompletionStage, 핸들러·연결 타입)만 감싸고 동작은 그대로 위임한다. 제품 API가
- * 아니다.
- */
 final class App {
     private App() {}
 
-    /** 한쪽 연결. */
     interface Conn {
         RequestHandle request(Request request, RequestOptions options);
 
@@ -46,7 +41,6 @@ final class App {
         OptionalLong credentialLifetime();
     }
 
-    /** 받은 요청. */
     interface In {
         int type();
 
@@ -63,7 +57,6 @@ final class App {
         void handle(In request) throws Exception;
     }
 
-    /** 활성화되지 못한 결과 전용 폐기를 가진 준비된 핸들러. */
     static final class Prepared {
         final Handler handler;
         final Runnable disposal;
@@ -78,7 +71,6 @@ final class App {
         Prepared create(Conn connection) throws Exception;
     }
 
-    /** 인증 판단. 인증된 상대(principal)를 돌려주고 거절이면 null이다. */
     interface AuthCheck {
         Object verify(String mechanism) throws Exception;
     }

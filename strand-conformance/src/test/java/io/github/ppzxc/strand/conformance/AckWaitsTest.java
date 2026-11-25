@@ -46,7 +46,7 @@ class AckWaitsTest {
 
     @Test
     void ackWaitIsCountedFromTheStepThatStartsIt() {
-        // 대기 시작(PING 송신) 전의 advance 500은 세지 않는다. 구간은 500뿐이므로 한도 1000에 닿지 않는다.
+
         JsonObject v = limit1000(advance(500), PING_START, advance(500));
 
         assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(500L);
@@ -55,7 +55,7 @@ class AckWaitsTest {
 
     @Test
     void ackWaitEndsWhenTheAckIsReceived() {
-        // ACK 수신 뒤의 advance는 같은 대기가 아니다.
+
         JsonObject v = limit1000(PING_START, advance(999), recv(PING_ACK_0102), advance(1));
 
         assertThat(AckWaits.elapsedAtEachAdvance(v)).containsExactly(999L);
@@ -77,7 +77,7 @@ class AckWaitsTest {
 
     @Test
     void aFrameLengthThatOverflowsAnIntDoesNotCrashOrHang() {
-        // 길이 0xC1DE5354와 0x7FFFFFFC(서문이 아닌 바이트를 프레임으로 읽은 것). 완결되지 않은 프레임으로 기다려야 한다.
+
         for (String hex : new String[] {"c1de5354" + "5230ffff", "7ffffffc" + "00020100"}) {
             JsonObject v = limit1000(PING_START, recv(hex), advance(1000));
 
@@ -106,7 +106,7 @@ class AckWaitsTest {
 
     @Test
     void bytesInsideAPayloadAreNotReadAsAFrameHeader() {
-        // 첫 recv는 프레임 하나의 앞부분이고, 둘째 recv의 앞 14자리는 ACK PING 모양이지만 같은 프레임의 payload다.
+
         String fakeAck = "0002010000000000";
         String frame = "00000018" + "0063" + "00" + "00" + "0000000000000000" + "0000" + "0000" + fakeAck;
         JsonObject v = limit1000(PING_START, recv(frame.substring(0, 12)), recv(frame.substring(12)), advance(1000));
@@ -145,7 +145,7 @@ class AckWaitsTest {
 
     @Test
     void aPingAckShorterThanARealPingFrameDoesNotEndTheWait() {
-        // length 0x14인 짧은 프레임은 payload가 8바이트가 아니라 payload를 맞춰 볼 수 없다.
+
         String shortAck = "00000014" + "0002" + "01" + "00" + "0000000000000000" + "0000" + "0000" + "01020304";
         JsonObject v = limit1000(PING_START, recv(shortAck), advance(1000));
 
@@ -163,7 +163,7 @@ class AckWaitsTest {
 
     @Test
     void aCloseStepDoesNotCancelTheOpenWaits() {
-        // CLOSE를 보낸 뒤에도 확인 대기는 이어져 시간 초과로 닫힌다(규격 3.3절).
+
         String close = "{\"kind\":\"close\",\"error_code\":\"NO_ERROR\",\"send\":[],\"events\":[]}";
         JsonObject v = limit1000(PING_START, advance(600), close, advance(400));
 
@@ -205,12 +205,10 @@ class AckWaitsTest {
         assertThat(AckWaits.elapsedAtEachAdvance(v)).isEmpty();
     }
 
-    // ---- AUTH 대기(규격 3.3절, 3.3.1절) ----
-
     private static final String ZERO_STREAM = "0000000000000000";
-    /** 20바이트 헤더의 AUTH(ACK). payload가 비어 있다. */
+
     private static final String AUTH_ACK = "00000010" + "0005" + "01" + "00" + ZERO_STREAM + "0000" + "0000";
-    /** 20바이트 헤더의 AUTH. mechanism `A`, credentials 없음. */
+
     private static final String AUTH_FRAME = "00000012" + "0005" + "00" + "00" + ZERO_STREAM + "0000" + "0000" + "0141";
 
     private static final String CLIENT_AUTH_START =

@@ -10,11 +10,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 
-/**
- * 벡터 형식이 정한 이벤트 종류의 단일 정의. 종류마다 형태(필드 규칙), 기대 JSON 렌더링, 실제 {@link Event} 렌더링을 함께 갖는다. 두
- * 렌더링은 종류마다 하나의 형식 함수를 거치므로 같은 문자열을 낸다. 렌더링은 벡터 형식이 정한 필드만 그리고, 벡터 형식에 없는
- * 이벤트(AUTHENTICATED, REQUEST_RESET)는 그리지 않는다.
- */
 final class EventKind {
 
     static final String TAG = "event";
@@ -31,7 +26,6 @@ final class EventKind {
                     event.has("stream_id") ? String.valueOf(Protocol.streamId(event.get("stream_id"))) : null,
                     Protocol.nameOfStatus(event.get("status")),
                     event.get("certainty").getAsString()),
-            // 스트림을 열기 전에 로컬에서 실패한 요청은 stream_id 없는 result다(벡터 형식 6.2절). core는 번호 0으로 알린다.
             event -> result(
                     event.streamId() == 0 ? null : String.valueOf(event.streamId()),
                     Protocol.nameOfStatus(event.status()),
@@ -79,17 +73,14 @@ final class EventKind {
         return Collections.unmodifiableMap(shapes);
     }
 
-    /** 형태 검사 표: 이벤트 이름마다 형태. */
     static Map<String, Shape> shapesByName() {
         return SHAPES_BY_NAME;
     }
 
-    /** 러너가 비교할 수 있는 이벤트인가. */
     static boolean isSupported(String name) {
         return find(name) != null;
     }
 
-    /** 벡터의 이벤트 항목을 기대 표기로. */
     static String expected(JsonObject event) {
         EventKind kind = find(event.get(TAG).getAsString());
         if (kind == null) {
@@ -98,7 +89,6 @@ final class EventKind {
         return kind.expected.apply(event);
     }
 
-    /** 실제 이벤트를 같은 표기로. 벡터 형식에 없는 이벤트(AUTHENTICATED, REQUEST_RESET)는 null이다. 정의도 없고 제외로 정해지지도 않은 종류는 오류다. */
     private static final java.util.Set<Event.Kind> NOT_IN_VECTOR_FORMAT =
             java.util.EnumSet.of(Event.Kind.AUTHENTICATED, Event.Kind.REQUEST_RESET);
 
@@ -123,7 +113,6 @@ final class EventKind {
         return null;
     }
 
-    /** streamId가 null이면 스트림 없는(로컬) result다. */
     private static String result(String streamId, String status, String certainty) {
         return "result stream_id=" + (streamId == null ? "-" : streamId) + " status=" + status + " certainty="
                 + certainty;

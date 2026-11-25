@@ -13,7 +13,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** 서버가 연결 인증 통과에 실은 {@code credential_lifetime}을 클라이언트가 연결에서 읽는다(규격 3.3.1절, #366). */
 class CredentialLifetimeTest {
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 
@@ -66,7 +65,7 @@ class CredentialLifetimeTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("kinds")
     void libraryDoesNotCloseTheConnectionWhenTheLifetimeIsOver(RigKind kind) throws Exception {
-        // 수명 0은 알린 순간 이미 지난 것이다. 시간을 기다리지 않고도 "지났는데 닫지 않음"을 본다.
+
         App.Conn connection = connect(kind.open(), new Rig.ServerSetup().credentialLifetime(0));
 
         assertThat(connection.credentialLifetime()).hasValue(0);

@@ -13,15 +13,10 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.math.BigDecimal;
 
-/** 벡터 파일의 JSON 문법 계층. 형식 검증({@link Check})과 별개로, 문법과 중복 키만 다룬다. */
 final class StrictJson {
 
     private StrictJson() {}
 
-    /**
-     * 엄격 모드 JsonReader로 트리를 만든다. Gson 트리 API는 한 객체 안의 같은 키를 조용히 덮어쓰므로
-     * 객체를 직접 조립하면서 중복 키를 거부한다.
-     */
     static JsonElement read(String fileName, String json) {
         try (JsonReader reader = new JsonReader(new StringReader(json))) {
             reader.setStrictness(Strictness.STRICT);

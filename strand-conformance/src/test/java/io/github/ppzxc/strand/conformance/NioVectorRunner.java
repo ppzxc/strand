@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** 전송 계층 쓰기 경계가 필요한 벡터를 제품 NIO 연결 엔진으로 실행한다. */
 final class NioVectorRunner {
 
     private NioVectorRunner() {}

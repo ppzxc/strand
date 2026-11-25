@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** 로컬 결과의 결과 확정성(규격 1.3절, 4.4절)을 벡터가 빠짐없이 단언하는지 본다(#161). */
 class ResultCertaintyTest {
 
     private static List<JsonObject> resultEvents(JsonObject vector) {
@@ -50,7 +49,7 @@ class ResultCertaintyTest {
                     assertThat(certainty).as(entry.getKey()).isEqualTo("response");
                 }
                 if (!result.has("stream_id")) {
-                    // 스트림을 열기 전에 실패한 요청은 처리 안 됨이다.
+
                     assertThat(certainty).as(entry.getKey()).isEqualTo("not_processed");
                     assertThat(status).as(entry.getKey()).isIn("UNAVAILABLE", "CANCELLED", "DEADLINE_EXCEEDED");
                 }
@@ -99,7 +98,6 @@ class ResultCertaintyTest {
                 .allMatch(r -> "unknown".equals(r.get("certainty").getAsString()));
     }
 
-    /** 규격 4.4.1절의 기한 결과를 벡터가 보이는지 본다. 쓰기 전 기한(RESET 없음)은 번호 없는 대기열 요청으로, 쓰기 시작 뒤 기한은 RESET(CANCEL)로 보인다. */
     @Test
     void deadlineVectorsAssertBothOutcomesOfSection441() {
         JsonObject queued = RawVectors.byKey().get("streams/request-deadline-of-queued-request-ends-without-stream-id");
@@ -118,7 +116,6 @@ class ResultCertaintyTest {
         });
     }
 
-    /** 벡터 형식 6.2절과 규격 4.4절·4.4.1절이 어긋나지 않는다: stream_id 없는 result의 status 집합이 세 가지다. */
     @Test
     void formatDocumentSection62ListsTheQueuedRequestOutcomes() throws java.io.IOException {
         java.nio.file.Path doc =
