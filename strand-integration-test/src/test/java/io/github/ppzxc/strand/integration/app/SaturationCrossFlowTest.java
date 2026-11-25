@@ -20,10 +20,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/**
- * 연결별·소유 객체 전체 요청 한도가 찬 채로 취소·결과 보존·연결 종료가 이어지고 예약이 반환되어 전체 한도가 유지되는 교차 흐름을 실제 TCP/TLS에서 본다(#328). 개별 포화
- * 시험(#318 #324)이 한 자원씩 보는 것과 달리 한도·취소·응답·종료를 한 연결 흐름에서 잇는다.
- */
 class SaturationCrossFlowTest {
     private static final Resource[] REQUEST_RESOURCES = {
         Resource.OUTGOING_REQUESTS,
@@ -79,7 +75,6 @@ class SaturationCrossFlowTest {
         awaitTrue(() -> held.size() == 2);
         RequestHandle overflow = connection.request(request("three"), RequestOptions.noDeadline());
 
-        // 한도를 넘은 요청은 보내지 않고 처리 안 됨으로 확정된다. 원인과 거절 횟수가 집계에 남는다.
         RequestResult refused = await(rig, overflow);
         assertThat(refused.status()).isEqualTo(Status.RESOURCE_EXHAUSTED);
         assertThat(refused.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
@@ -88,7 +83,6 @@ class SaturationCrossFlowTest {
         assertThat(connection.usage(Resource.OUTGOING_REQUESTS).current()).isEqualTo(2);
         assertThat(connection.usage(Resource.OUTGOING_REQUESTS).rejections()).isEqualTo(1);
 
-        // 포화 중에도 기존 요청 취소가 진행되고 예약이 돌아와 새 요청이 접수된다.
         first.cancel();
         RequestResult cancelled = await(rig, first);
         assertThat(cancelled.status()).isEqualTo(Status.CANCELLED);
@@ -100,7 +94,6 @@ class SaturationCrossFlowTest {
         assertThat(third.result().isDone()).isFalse();
         assertThat(connection.usage(Resource.OUTGOING_REQUESTS).highWater()).isEqualTo(2);
 
-        // 응답은 취소·포화와 상관없이 결과로 보존된다.
         assertThat(rig.result(held.get(1).respond(Status.OK, "answer".getBytes(StandardCharsets.UTF_8)))
                         .kind())
                 .isEqualTo(AcceptanceKind.ACCEPTED);
@@ -109,7 +102,6 @@ class SaturationCrossFlowTest {
         assertThat(answered.certainty()).isEqualTo(Certainty.RESPONSE);
         assertThat(new String(answered.payload(), StandardCharsets.UTF_8)).isEqualTo("answer");
 
-        // 남은 요청 결과는 종료 사건보다 먼저 보존된다. 종료 알림 시점에 결과가 이미 확정되어 있어야 한다.
         AtomicBoolean pendingDoneWhenClosedObserved = new AtomicBoolean();
         connection
                 .closed()
@@ -125,7 +117,6 @@ class SaturationCrossFlowTest {
         assertThat(first.result().resultNow()).isSameAs(cancelled);
         assertThat(second.result().resultNow()).isSameAs(answered);
 
-        // 모든 요청·응답·핸들러 예약이 연결과 소유 객체 양쪽에서 돌아온다.
         for (Resource resource : REQUEST_RESOURCES) {
             awaitTrue(() -> client.usage(resource).current() == 0);
             awaitTrue(() -> server.usage(resource).current() == 0);
@@ -138,7 +129,7 @@ class SaturationCrossFlowTest {
     @MethodSource("kinds")
     void ownerWideSaturationAcrossConnectionsKeepsCancelAndCloseProgressingAndKeepsTheOwnerLimit(RigKind kind)
             throws Exception {
-        // 연결 하나의 한도는 4지만 소유 객체 전체 송신 한도는 2다: 한 연결이 전체 한도를 다 쓰면 다른 연결이 거절된다.
+
         Rig rig = open(kind, new Spec().perConnection(4).connections(2).ownerOutgoingCount(2));
         List<App.In> held = new CopyOnWriteArrayList<>();
         App.Server server = rig.server(new Rig.ServerSetup().handler(held::add));
@@ -162,7 +153,6 @@ class SaturationCrossFlowTest {
         assertThat(client.usage(Resource.OUTGOING_REQUESTS).current()).isEqualTo(2);
         assertThat(client.usage(Resource.OUTGOING_REQUESTS).rejections()).isGreaterThanOrEqualTo(1);
 
-        // 취소가 소유 객체 전체 예약을 돌려주어 다른 연결이 한도 안에서 다시 접수된다.
         a1.cancel();
         assertThat(await(rig, a1).status()).isEqualTo(Status.CANCELLED);
         awaitTrue(() -> client.usage(Resource.OUTGOING_REQUESTS).current() == 1);
@@ -171,7 +161,6 @@ class SaturationCrossFlowTest {
         assertThat(b1.result().isDone()).isFalse();
         assertThat(client.usage(Resource.OUTGOING_REQUESTS).highWater()).isEqualTo(2);
 
-        // 한도가 찬 상태에서 두 연결을 끊어도 남은 결과는 보존되고 전체 예약은 0으로 돌아온다.
         a.abort();
         b.abort();
         awaitTrue(() -> a.closed().isDone() && b.closed().isDone());
@@ -190,7 +179,7 @@ class SaturationCrossFlowTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("kinds")
     void responseAndObservationSaturationKeepCancelResultAndCloseProgressing(RigKind kind) throws Exception {
-        // 응답 바이트는 16바이트, 연결의 관찰 자리는 하나다.
+
         Rig rig = open(kind, new Spec().perConnection(4).bodyBytes(16, 1 << 20).observations(1, 64));
         List<App.In> held = new CopyOnWriteArrayList<>();
         App.Server server = rig.server(new Rig.ServerSetup().handler(held::add));
@@ -202,7 +191,6 @@ class SaturationCrossFlowTest {
         RequestHandle handle = connection.request(request("hold"), RequestOptions.noDeadline());
         awaitTrue(() -> held.size() == 1);
 
-        // 관찰 자리가 차면 다음 관찰은 실패한 Observation이고 원래 결과는 그대로다.
         io.github.ppzxc.strand.api.Observation first = handle.result().observe(result -> {});
         io.github.ppzxc.strand.api.Observation refusedObservation =
                 handle.result().observe(result -> {});
@@ -211,15 +199,13 @@ class SaturationCrossFlowTest {
         assertThat(connection.usage(Resource.OBSERVATIONS).rejections()).isEqualTo(1);
         assertThat(handle.result().isDone()).isFalse();
 
-        // 응답 바이트가 모자라면 접수하지 않고 응답 권한을 소비하지 않는다.
         io.github.ppzxc.strand.api.ResponseAcceptance shortage =
                 rig.result(held.get(0).respond(Status.OK, new byte[64]));
         assertThat(shortage.kind()).isEqualTo(AcceptanceKind.RESOURCE_EXHAUSTED);
         assertThat(shortage.resource()).hasValue(Resource.RESPONSE_BYTES);
 
-        // 관찰·응답이 모두 포화인 채로 취소가 진행되어 결과가 보존되고, 이후 응답 재시도는 종료로 판정된다.
         handle.cancel();
-        // 관찰 자리가 찼으므로 결과는 관찰이 아니라 비차단 조회로 읽는다.
+
         awaitTrue(() -> handle.result().isDone());
         RequestResult cancelled = handle.result().resultNow();
         assertThat(cancelled.status()).isEqualTo(Status.CANCELLED);

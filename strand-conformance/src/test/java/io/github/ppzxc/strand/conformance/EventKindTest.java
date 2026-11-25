@@ -7,7 +7,6 @@ import com.google.gson.JsonParser;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
-/** 이벤트 종류 정의의 내부 불변식: 형태 표와 기대 렌더링이 같은 정의에서 나온다. */
 class EventKindTest {
 
     private static JsonObject json(String text) {

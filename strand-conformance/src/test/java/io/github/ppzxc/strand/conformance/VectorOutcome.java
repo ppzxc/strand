@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/** 벡터의 지원 사전검사와 실행 결과를 분리해 보관한다. */
 final class VectorOutcome {
 
     enum Status {

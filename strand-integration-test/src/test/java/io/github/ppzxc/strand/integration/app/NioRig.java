@@ -31,7 +31,6 @@ import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-/** strand-nio의 앱 공개 API를 중립 모양으로 감싼다. */
 final class NioRig extends Rig {
     private final NioSecurity serverSecurity;
     private final NioSecurity clientSecurity;

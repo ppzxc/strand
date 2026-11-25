@@ -9,10 +9,6 @@ import java.util.Map;
 import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 
-/**
- * core(구동용)와 strand-api(애플리케이션용)는 서로 의존하지 않아 표를 합치지 않는다. 두 표의 값이 같음은 둘을 모두 보는 이 모듈이 고정한다(규격 2.5.1절,
- * 1.3절).
- */
 class TableParityTest {
 
     @Test
@@ -38,7 +34,7 @@ class TableParityTest {
 
     @Test
     void certaintyTablesExposeTheSameValuesAsTheApi() {
-        // 이름·순서에 더해 api가 values()로 노출하는 상수 전체와 서수까지 같아야 한다.
+
         assertThat(ordinals(io.github.ppzxc.strand.core.internal.Certainty.values()))
                 .isEqualTo(ordinals(io.github.ppzxc.strand.api.Certainty.values()));
     }

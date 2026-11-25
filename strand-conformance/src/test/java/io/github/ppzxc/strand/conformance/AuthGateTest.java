@@ -6,7 +6,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
-/** AUTH(ACK) 수신 판정의 내부 불변식. 판정은 확인 대기 해석(AckWaits)과 무관하게 선다. */
 class AuthGateTest {
 
     private static final String ZERO_STREAM = "0000000000000000";

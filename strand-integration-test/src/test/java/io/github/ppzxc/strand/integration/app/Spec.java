@@ -5,7 +5,6 @@ import io.github.ppzxc.strand.api.OwnerLimits;
 import io.github.ppzxc.strand.api.ResourceLimits;
 import io.github.ppzxc.strand.core.internal.EndpointConfig;
 
-/** 시험이 고치는 한도의 사양. 기본은 넉넉하고 진행 공간만 필요한 최소치로 도출한다. */
 final class Spec {
     long perConnection = 8;
     long owner = 8;
@@ -41,7 +40,6 @@ final class Spec {
         return this;
     }
 
-    /** 소유 객체 전체의 송신 요청 수 한도를 직접 정한다(기본은 {@code owner * connections}). */
     Spec ownerOutgoingCount(long value) {
         this.ownerOutgoingCount = value;
         return this;

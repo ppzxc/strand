@@ -15,7 +15,6 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.util.concurrent.Callable;
 
-/** 실제 Netty NIO 채널 하나와 loopback 상대 소켓, 열린 core 엔드포인트, 구동 객체. 송신 버퍼를 작게 잡아 쓰기 막힘을 만든다. */
 final class TcpFixture implements AutoCloseable {
     final NioEventLoopGroup group = new NioEventLoopGroup(1);
     final ServerSocket listener;
@@ -47,7 +46,6 @@ final class TcpFixture implements AutoCloseable {
         return channel.eventLoop().submit(task).sync().getNow();
     }
 
-    /** 소켓이 더 받지 못할 때까지 0바이트를 직접 써서 채운다. 쓴 바이트 수를 돌려준다. */
     int saturate() throws Exception {
         return onLoop(() -> {
             ByteBuffer chunk = ByteBuffer.allocate(65536);
@@ -68,7 +66,6 @@ final class TcpFixture implements AutoCloseable {
         return bytes;
     }
 
-    /** 상대가 EOF를 볼 때까지 읽는다. */
     byte[] readToEnd() throws IOException {
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
         byte[] chunk = new byte[8192];
@@ -77,7 +74,6 @@ final class TcpFixture implements AutoCloseable {
         return out.toByteArray();
     }
 
-    /** 이벤트 루프가 닫힘 정리를 모두 처리할 때까지 기다린다. */
     void closeAndSettle() throws Exception {
         channel.close().sync();
         channel.closeFuture().sync();

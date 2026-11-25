@@ -6,9 +6,6 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * JSON 객체의 형태: 필수 필드와 선택 필드, 각 필드의 값 규칙. 불변이며 {@code require}/{@code allow}는 새 형태를 돌려준다.
- */
 final class Shape {
 
     static final Shape EMPTY =
@@ -38,7 +35,6 @@ final class Shape {
         return required.containsKey(name) || optional.containsKey(name);
     }
 
-    /** 선언된 필드의 값 규칙. */
     FieldCheck checkOf(String name) {
         FieldCheck check = required.containsKey(name) ? required.get(name) : optional.get(name);
         if (check == null) {
@@ -47,7 +43,6 @@ final class Shape {
         return check;
     }
 
-    /** 선언된 모든 필드 이름(필수와 선택). */
     Set<String> names() {
         Set<String> all = new LinkedHashSet<>(required.keySet());
         all.addAll(optional.keySet());

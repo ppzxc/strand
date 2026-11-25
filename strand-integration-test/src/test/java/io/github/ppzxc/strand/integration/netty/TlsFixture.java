@@ -21,7 +21,6 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLServerSocket;
 import javax.net.ssl.SSLSocket;
 
-/** 실제 Netty NIO 채널, JDK SSLEngine 클라이언트, 실제 JDK TLS 서버 소켓. 암호문 송신 버퍼를 작게 잡아 쓰기 막힘을 만든다. */
 final class TlsFixture implements AutoCloseable {
     final NioEventLoopGroup group = new NioEventLoopGroup(1);
     final ExecutorService serverThread = Executors.newSingleThreadExecutor();
@@ -69,7 +68,6 @@ final class TlsFixture implements AutoCloseable {
         return bytes;
     }
 
-    /** 상대가 TLS close_notify나 EOF를 볼 때까지 읽은 평문. */
     byte[] readToEnd() throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] chunk = new byte[8192];

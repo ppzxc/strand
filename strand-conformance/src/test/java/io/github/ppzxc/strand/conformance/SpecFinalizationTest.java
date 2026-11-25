@@ -18,7 +18,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
-/** 규격 0.2.0 마무리 검수(#167): 용어집과 1.3절의 대응, 형식 문서 예시의 형식, 남은 0.1.0 흔적. core를 실행하지 않는다. */
 class SpecFinalizationTest {
 
     private static final Path ROOT = RequirementIndex.repositoryRoot();
@@ -34,7 +33,6 @@ class SpecFinalizationTest {
         return String.join("\n", lines(file));
     }
 
-    /** 규격 1.3절 표의 첫 열에서 굵게 쓴 용어 이름(예: {@code 연결 (Connection)}). */
     private static Set<String> specTerms() throws IOException {
         Set<String> terms = new LinkedHashSet<>();
         boolean in = false;
@@ -51,10 +49,6 @@ class SpecFinalizationTest {
         return terms;
     }
 
-    /**
-     * core jar 매니페스트의 Implementation-Version(StrandVersion)은 프로젝트 version에서 온다. 구현만 고친 패치 릴리스(0.2.1)가 규격 버전(0.2.0)과
-     * 달라도 되므로 major.minor만 같으면 된다.
-     */
     @Test
     void projectVersionMatchesSpecMajorMinor() throws IOException {
         Matcher spec =

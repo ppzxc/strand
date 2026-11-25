@@ -11,13 +11,8 @@ import java.util.Set;
 import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 
-/**
- * 규격과 벡터의 대응을 요구사항 단위로 강제한다. MUST·MUST NOT 요구사항은 어떤 벡터의 {@code requirements}가 가리키거나, {@code
- * uncovered-requirements.txt}에 범주와 사유를 붙여 올라 있어야 한다. SHOULD·SHOULD NOT 요구사항은 커버 의무가 없고 벡터가 가리키면 실패한다.
- */
 class SpecCoverageTest {
 
-    /** 벡터도 제외 목록도 가리키지 않는 MUST·MUST NOT 요구사항. */
     private static List<String> uncoveredMandatory(
             RequirementIndex index, Map<String, List<String>> byVector, UncoveredRequirements exclusions) {
         Set<String> referenced = RawVectors.referencedIn(byVector);
@@ -32,7 +27,6 @@ class SpecCoverageTest {
         return result;
     }
 
-    /** 제외 목록 줄의 오류: 형식·범주, 규격에 없는 식별자, MUST·MUST NOT이 아닌 식별자, 벡터가 가리키는 식별자. */
     private static List<String> exclusionProblems(
             RequirementIndex index, Map<String, List<String>> byVector, UncoveredRequirements exclusions) {
         List<String> problems = new ArrayList<>(exclusions.problems());
@@ -116,8 +110,6 @@ class SpecCoverageTest {
         }
     }
 
-    // ---- 규격의 앵커 ----
-
     @Test
     void specHasNoAnchorProblems() throws IOException {
         assertThat(index().problems())
@@ -141,7 +133,7 @@ class SpecCoverageTest {
     @Test
     void sendAndRecvAnchorsAreSeparateRequirements() throws IOException {
         RequirementIndex index = index();
-        // 같은 어근의 -send/-recv 쌍은 한 문장의 두 앵커라 같은 절에 있고, 각자 별개의 요구사항으로 색인된다.
+
         int pairs = 0;
         for (RequirementIndex.Requirement send : index.requirements()) {
             if (!send.id().endsWith("-send")) {
@@ -187,8 +179,6 @@ class SpecCoverageTest {
         assertThat(requirement.keyword()).as(id + " 키워드").isEqualTo(keyword);
     }
 
-    // ---- 벡터의 requirements ----
-
     private static RequirementIndex index() {
         return RequirementIndex.ofSpecification();
     }
@@ -197,7 +187,6 @@ class SpecCoverageTest {
         return UncoveredRequirements.dataLines("/deleted-requirement-ids.txt");
     }
 
-    /** 규격 색인에 없는 식별자를 가리키는 벡터. 어긋난 곳을 이름으로 짚는다. */
     private static List<String> unknownReferences(RequirementIndex index, Map<String, List<String>> byVector) {
         List<String> problems = new ArrayList<>();
         for (Map.Entry<String, List<String>> vector : byVector.entrySet()) {
@@ -210,7 +199,6 @@ class SpecCoverageTest {
         return problems;
     }
 
-    /** SHOULD·SHOULD NOT 요구사항을 가리키는 벡터. 따르지 않아도 되는 행동은 단언하지 않는다. */
     private static List<String> shouldReferences(RequirementIndex index, Map<String, List<String>> byVector) {
         List<String> problems = new ArrayList<>();
         for (Map.Entry<String, List<String>> vector : byVector.entrySet()) {
@@ -224,7 +212,6 @@ class SpecCoverageTest {
         return problems;
     }
 
-    /** 삭제 목록의 이름이 규격 앵커나 벡터 requirements에 다시 나온 자리. */
     private static List<String> revivedDeletedIds(
             RequirementIndex index,
             Map<String, List<String>> byVector,

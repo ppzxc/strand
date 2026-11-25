@@ -24,18 +24,8 @@ import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
 
-/**
- * 벡터 하나를 엔드포인트에 실행한다. `setup`으로 엔드포인트를 만들고 단계마다 입력을 넣어, 보낸 바이트를 프레임으로 풀어 `send`와,
- * 애플리케이션 이벤트를 `events`와 순서까지 비교한다(벡터 형식 문서 6절, 7절). 엔드포인트의 외부 동작만 본다.
- *
- * <p>실행할 수 없는 설정·단계·프레임이 하나라도 있으면 아무것도 실행하지 않고 실패한다. 건너뛰거나 통과로 위장하지 않으므로 skipped는 늘 0이다.
- */
 final class VectorRunner {
 
-    /**
-     * 러너가 지원하는 setup 키. 형태 검사의 setup 키 목록에서 나오므로 스키마가 허용하는 키는 모두 지원으로 센다. 이 검사가 스키마와의
-     * 어긋남을 잡아 주지는 않는다. 스키마에 키를 더하면 {@link #configOf}가 그 키를 읽게 함께 고쳐야 한다.
-     */
     private static final Set<String> SUPPORTED_SETUP = new HashSet<>(VectorSchema.setupKeys());
 
     private static final class AuthScenario implements EndpointDriver.Authentication {
@@ -52,7 +42,6 @@ final class VectorRunner {
             this.transientFailure = transientFailure;
         }
 
-        /** 인증 설정이 없는 벡터: 기본 메커니즘 하나만 통과시킨다. */
         private static AuthScenario anonymous() {
             return new AuthScenario(Protocol.DEFAULT_AUTH_MECHANISM, "", OptionalLong.empty(), false);
         }
@@ -90,19 +79,15 @@ final class VectorRunner {
         }
     }
 
-    /** 실행 경로마다 다른 부분: 경로가 실행하지 못하는 벡터와, 입력·출력이 지나는 길을 만드는 방법. */
     interface Medium {
-        /** 이 경로가 실행하지 못하는 setup 쪽 항목. 다른 미지원 항목보다 앞에 보고한다. */
+
         List<String> unsupportedSetup(JsonObject setup);
 
-        /** 이 경로가 `send`의 프레임 항목을 실행할 수 있는가. */
         boolean carriesFrame(JsonObject frame);
 
-        /** 한 번의 실행에 쓸 길을 만든다. */
         Transmission open(boolean client, boolean webSocket, int maxFrameSize);
     }
 
-    /** core 경로: 엔드포인트의 입력과 출력을 그대로 주고받는다. WebSocket Close는 전송 모듈의 몫이라 싣지 않는다(ADR 0006). */
     static final Medium DIRECT = new Medium() {
         @Override
         public List<String> unsupportedSetup(JsonObject setup) {
@@ -205,7 +190,6 @@ final class VectorRunner {
         return evaluate(vector, vectorId, DIRECT);
     }
 
-    /** 주어진 실행 경로의 길로 벡터를 실행한다. */
     static VectorOutcome evaluate(ConformanceVector vector, String vectorId, Medium medium) {
         List<String> unsupported = unsupportedFeatures(vector, medium);
         if (!unsupported.isEmpty()) {
@@ -226,7 +210,7 @@ final class VectorRunner {
         AuthScenario auth = AuthScenario.from(setup);
         boolean webSocket = isWebSocket(setup);
         EndpointConfig config = configOf(setup, webSocket, auth);
-        // 인증 판단은 사건으로 위임되고, 러너가 벡터의 인증 설정으로 답한다(EndpointDriver).
+
         Transmission transmission = medium.open(
                 client,
                 webSocket,
@@ -240,7 +224,7 @@ final class VectorRunner {
                 auth.lifetimeSeconds,
                 auth,
                 transmission);
-        // 클라이언트 역할 구현은 연결이 열리자마자 서문과 HELLO를 내보낸다. 수립하지 않는 벡터에서는 첫 단계의 send에 합쳐 비교한다.
+
         List<OutboundMessage> opening = runner.driver.flush();
         if (setup.get("established").getAsBoolean()) {
             runner.establish(opening, setup.getAsJsonObject("peer_hello"), auth);
@@ -255,7 +239,7 @@ final class VectorRunner {
             runner.advanceVirtualCredentialClock(step);
             List<OutboundMessage> sent = new ArrayList<>(opening);
             if (!StepKind.of(step).holdsOutput(step)) {
-                // 넘김은 출력 진행 보고다. 부분 쓰기 한도가 있으면 그 바이트까지만 보고하고 나머지는 다음 단계에서 넘긴다.
+
                 sent.addAll(runner.driver.flush(writeLimit(step)));
             }
             runner.credentialLifetime.observeSentMessages(sent);
@@ -275,12 +259,10 @@ final class VectorRunner {
         return step.has("write_limit_bytes") ? step.get("write_limit_bytes").getAsLong() : Long.MAX_VALUE;
     }
 
-    /** 실행하지 못하는 부분이 있으면 벡터를 실패시킨다(건너뛰지 않는다). 한 단계도 실행하기 전에 판정한다. */
     static List<String> unsupportedFeatures(ConformanceVector vector) {
         return unsupportedFeatures(vector, DIRECT);
     }
 
-    /** 주어진 실행 경로가 실행하지 못하는 부분. */
     static List<String> unsupportedFeatures(ConformanceVector vector, Medium medium) {
         JsonObject setup = vector.setup();
         List<String> unsupported = new ArrayList<>();
@@ -294,7 +276,7 @@ final class VectorRunner {
             }
         }
         for (JsonObject step : vector.steps()) {
-            // 부분 쓰기는 바이트 진행을 보고하는 통로에서만 만든다. 메시지 통로는 메시지 전체만 접수한다.
+
             addIfUnsupported(
                     unsupported, !(step.has("write_limit_bytes") && isWebSocket(setup)), "request.write_limit_bytes");
             String kindName = step.get(StepKind.TAG).getAsString();
@@ -360,10 +342,6 @@ final class VectorRunner {
         return config;
     }
 
-    /**
-     * 규격 3.3절 표준 수립 순서(HELLO 교환 뒤 AUTH 왕복)를 실행하고, 성공을 확인한 뒤 출력과 이벤트를 비운다. 메커니즘과 자격 증명은
-     * {@code setup.auth}에서 정했다.
-     */
     private void establish(List<OutboundMessage> opening, JsonObject peerHello, AuthScenario auth) {
         JsonObject peerHelloFrame = control("HELLO", false);
         if (peerHello != null) {
@@ -389,7 +367,7 @@ final class VectorRunner {
         deliver(FrameKind.encode(peerHelloFrame));
         List<String> afterPeerHello = describeMessages(driver.flush(), false);
         if (client) {
-            // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 보낸다(규격 3.3절 4번).
+
             assertThat(afterPeerHello)
                     .as("수립: 상대 HELLO에 대한 ACK와 AUTH")
                     .containsExactly(FrameKind.expected(helloAck), FrameKind.expected(authFrame));
@@ -410,12 +388,10 @@ final class VectorRunner {
         assertThat(describe(driver.takeEvents())).as("수립: 이벤트").isEmpty();
     }
 
-    /** 수립에 쓰는 입력 하나를 전송 방식에 맞게 넣는다. WebSocket이면 메시지 하나로, 바이트 스트림이면 바이트로 넣는다. */
     private void deliver(byte[] bytes) {
         transmission.deliver(driver, bytes);
     }
 
-    /** 수립 스크립트에 쓰는 기대 프레임 항목. 프레임 인코딩과 렌더링은 {@link FrameKind}가 한다. */
     private static JsonObject control(String type, boolean ack) {
         JsonObject frame = new JsonObject();
         frame.addProperty("type", type);
@@ -509,7 +485,7 @@ final class VectorRunner {
         List<String> result = new ArrayList<>();
         for (Event event : events) {
             String text = EventKind.actual(event);
-            // 벡터 형식에 없는 이벤트(AUTHENTICATED, 6.2절)는 그리지 않는다. credential_lifetime 통지는 core 테스트가 본다.
+
             if (text != null) {
                 result.add(text);
             }
@@ -517,10 +493,6 @@ final class VectorRunner {
         return result;
     }
 
-    /**
-     * 엔드포인트가 보낸 메시지를 벡터의 `send`와 같은 표기로 바꾼다. WebSocket에서는 바이너리 메시지마다 프레임이 정확히 하나여야 한다
-     * (벡터 형식 6.1절). WebSocket Close는 core의 출력이 아니라 {@link #webSocketCloses}가 판단한다. 바이트 스트림에서는 메시지를 이어 붙여 프레임으로 푼다.
-     */
     List<String> describeMessages(List<OutboundMessage> messages, boolean startsWithPreface) {
         return describeBytes(bytesOf(messages), startsWithPreface);
     }

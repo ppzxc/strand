@@ -15,10 +15,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * 제외 목록 {@code uncovered-requirements.txt}: 벡터로 확인하지 않는 MUST·MUST NOT 요구사항. 한 줄에 {@code req-… 범주 사유}이고 범주는
- * {@link #CATEGORIES} 둘뿐이다. {@code #}로 시작하는 줄과 빈 줄은 건너뛴다.
- */
 final class UncoveredRequirements {
 
     static final String UNOBSERVABLE = "관측불가";
@@ -26,7 +22,6 @@ final class UncoveredRequirements {
     static final List<String> CATEGORIES =
             Collections.unmodifiableList(Arrays.asList(UNOBSERVABLE, UNSUPPORTED_FORMAT));
 
-    /** 식별자에서 {범주, 사유}로. 줄 순서를 지킨다. */
     private final Map<String, String[]> entries = new LinkedHashMap<>();
 
     private final List<String> problems = new ArrayList<>();
@@ -62,7 +57,6 @@ final class UncoveredRequirements {
         return parse(resourceLines("/uncovered-requirements.txt"));
     }
 
-    /** 테스트 리소스에서 빈 줄과 {@code #} 주석 줄을 뺀 줄 목록(앞뒤 공백 제거). 데이터 파일을 읽는 곳은 모두 이 규칙을 쓴다. */
     static List<String> dataLines(String name) throws IOException {
         return significant(resourceLines(name));
     }
@@ -74,7 +68,6 @@ final class UncoveredRequirements {
                 .collect(Collectors.toList());
     }
 
-    /** 테스트 리소스의 줄 목록. 리소스가 없으면 이름을 들어 실패한다. */
     static List<String> resourceLines(String name) throws IOException {
         InputStream stream = UncoveredRequirements.class.getResourceAsStream(name);
         if (stream == null) {
@@ -86,7 +79,6 @@ final class UncoveredRequirements {
         }
     }
 
-    /** 형식·범주·중복 오류. 비어 있어야 한다. */
     List<String> problems() {
         return Collections.unmodifiableList(problems);
     }
