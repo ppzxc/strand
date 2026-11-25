@@ -49,7 +49,7 @@ public final class Endpoint {
     private final EndpointConfig config;
     private final Outbox outbox = new Outbox();
 
-    private final List<Event> events = new ArrayList<>();
+    private final Deque<Event> events = new ArrayDeque<>();
 
     private long drainedPeerStreamId;
 
@@ -491,9 +491,8 @@ public final class Endpoint {
             return Collections.emptyList();
         }
         List<Event> drained = new ArrayList<>();
-        int consumed = 0;
-        while (consumed < events.size() && drained.size() < maximum) {
-            Event event = events.get(consumed++);
+        while (!events.isEmpty() && drained.size() < maximum) {
+            Event event = events.removeFirst();
             if (event.kind() == Event.Kind.REQUEST_RECEIVED) {
                 if (refusedRequests.remove(event.streamId())) {
                     continue;
@@ -502,7 +501,6 @@ public final class Endpoint {
             }
             drained.add(event);
         }
-        events.subList(0, consumed).clear();
         return Collections.unmodifiableList(drained);
     }
 
