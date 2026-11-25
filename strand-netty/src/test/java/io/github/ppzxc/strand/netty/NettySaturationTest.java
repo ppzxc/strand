@@ -91,7 +91,8 @@ class NettySaturationTest {
         AtomicBoolean runNextInline = new AtomicBoolean();
         AtomicReference<String> inlineThread = new AtomicReference<>();
         Executor saturated = task -> {
-            if (runNextInline.compareAndSet(true, false)) {
+            if (Thread.currentThread().getName().startsWith("nioEventLoopGroup")
+                    && runNextInline.compareAndSet(true, false)) {
                 inlineThread.set(Thread.currentThread().getName());
                 task.run();
             } else {
@@ -115,10 +116,10 @@ class NettySaturationTest {
         RequestResult firstResult = fixture.result(first.request(Request.of(TYPE, bytes("first"))).result());
         RequestResult secondResult = fixture.result(second.request(Request.of(TYPE, bytes("second"))).result());
 
+        assertThat(inlineThread.get()).startsWith("nioEventLoopGroup");
         assertThat(firstResult.status()).isNotEqualTo(Status.OK);
         assertThat(secondResult.status()).isEqualTo(Status.OK);
-        assertThat(inlineThread.get()).startsWith("nioEventLoopGroup");
-        assertThat(handlerThreads).isNotEmpty().allSatisfy(name -> assertThat(name).startsWith("app-executor-"));
+        assertThat(handlerThreads).hasSize(1).allSatisfy(name -> assertThat(name).startsWith("app-executor-"));
     }
 
     @Test
