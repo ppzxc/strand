@@ -2,7 +2,7 @@
 
 Owner: ppzxc
 Rules: ARC-001–003, STYLE-005, AGT-005; policy §9.4
-Code SHA: pending follow-up commit
+Code SHA: `d61d58d`
 Baseline inspection SHA: `c6d25ab`
 Environment: JDK 25, Gradle 9.9.2, PMD 7.29.0, 2026-11-25 Asia/Seoul
 
