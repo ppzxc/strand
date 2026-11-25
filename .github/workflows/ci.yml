@@ -41,6 +41,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bats python3-yaml
       - name: Test CI scripts (bats)
         run: bats .github/scripts/test
+      - name: Test SCA severity policy
+        run: python3 .github/scripts/test/test_osv_policy.py
       # 배포 테스트 하네스 (a): mavenLocal에 배포한 core를 외부 소비자 4개가 받아 쓰는지 확인한다.
       - name: Deploy test harness (a)
         run: ./gradlew deployTest
