@@ -75,6 +75,31 @@ class PrepareOsvInputsTest(unittest.TestCase):
             self.assertIn(missing, result.stderr)
             self.assertFalse(target.exists())
 
+    def test_symlink_outside_workspace_fails_before_staging_any_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "workspace"
+            target = root / "osv-inputs"
+            outside = root / "outside-lockfile"
+            outside.write_text("outside workspace")
+            for index, relative in enumerate(REQUIRED_INPUTS[1:]):
+                path = source / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"input-{index}")
+            escaped = source / REQUIRED_INPUTS[0]
+            escaped.parent.mkdir(parents=True, exist_ok=True)
+            escaped.symlink_to(outside)
+
+            result = subprocess.run(
+                ["python3", str(SCRIPT), str(source), str(target)],
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("escape workspace", result.stderr)
+            self.assertFalse(target.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
