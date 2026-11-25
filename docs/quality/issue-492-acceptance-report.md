@@ -14,7 +14,7 @@
 | # | Criterion | Status | Evidence and limits |
 |---:|---|---|---|
 | 1 | Technology stack and profiles | PASS locally | `issue-491-gap-register.md`; deployed Java 8 / JDK 25, active and inactive profiles mapped. |
-| 2 | 152 rule records | PARTIAL | This report indexes all 152 source IDs. 32 rows link to dedicated issue evidence; 13 rows cite inactive profiles; 3 rows identify deleted/transferred IDs; 104 rows still lack rule-specific execution evidence. |
+| 2 | 152 rule records | PARTIAL | This report indexes all 152 source IDs. 29 rows link to dedicated issue evidence; 24 rows cite inactive profiles; 3 rows identify deleted/transferred IDs; 96 rows still lack rule-specific execution evidence. |
 | 3 | Architecture and types first | PARTIAL | #480 architecture/dependency samples and #482 DTO/immutability tests pass. Full design review of all API/state invariants is not recorded. |
 | 4 | Working CI | PARTIAL | #490 tests required-result success/fail/cancel/missing gate behavior and active `ci / ci-ok` rule. Hosted CI was not run here; SCA intentionally fails on existing CRITICAL/HIGH findings. |
 | 5 | Custom rule tests | PASS locally | #481/#483/#484/#485 provide normal, violation, and allowed-exception fixtures. See linked evidence. |
@@ -33,7 +33,7 @@
 
 ### Applicability decisions
 
-- The source has 152 current and historical rule rows. The index below preserves every row ID and points to supporting evidence or marks the row unverified.
+- The source has 152 current and historical rule rows. The index below preserves every row ID and points to supporting evidence or marks the row unverified. Audit correction: source rows ARC-001–004 and ARC-006–012 are DDD/hexagonal profile rules and are not applicable while that profile is inactive. Older #481/#491 summaries list ARC-001–003 beside baseline work; those rules do not describe the generic suppression baseline, so this report does not count them as verified.
 - Deleted/transferred IDs remain historical entries; they are not treated as current requirements.
 - Inactive Spring/MyBatis profile rules use the applicability decision in `issue-491-gap-register.md`.
 - Internal reviewer task IDs: `review481` (#481 expiry/baseline), `review482` (#482 DTO scope), and `review485final` (#485 logging). These are internal AI review records, not human GitHub approvals.
@@ -89,18 +89,18 @@ Each linked report contains the owner, rule IDs, commands, results, target commi
 | `CBD-008` | 1. Codebase: 코드와 아키텍처 자체로 오류 예방 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `CBD-009` | 1. Codebase: 코드와 아키텍처 자체로 오류 예방 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `CBD-010` | 1. Codebase: 코드와 아키텍처 자체로 오류 예방 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `ARC-001` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-481-evidence.md, issue-491-gap-register.md |
-| `ARC-002` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-481-evidence.md, issue-491-gap-register.md |
-| `ARC-003` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-481-evidence.md, issue-491-gap-register.md |
-| `ARC-004` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `ARC-001` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-001 |
+| `ARC-002` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-002 |
+| `ARC-003` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-003 |
+| `ARC-004` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-004 |
 | `ARC-005` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-480-evidence.md, issue-491-gap-register.md |
-| `ARC-006` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `ARC-007` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `ARC-008` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `ARC-009` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `ARC-010` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `ARC-011` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `ARC-012` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `ARC-006` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-006 |
+| `ARC-007` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-007 |
+| `ARC-008` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-008 |
+| `ARC-009` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-009 |
+| `ARC-010` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-010 |
+| `ARC-011` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-011 |
+| `ARC-012` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-012 |
 | `OBJ-001` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `OBJ-002` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `OBJ-003` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
