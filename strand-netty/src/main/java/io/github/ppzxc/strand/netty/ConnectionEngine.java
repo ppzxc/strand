@@ -1284,10 +1284,7 @@ final class ConnectionEngine {
             reviewBy = "2027-02-23")
     private void diagnoseHandlerFailure(IncomingRequest request, Throwable failure) {
         try {
-            LOGGER.log(
-                    Level.WARNING,
-                    "받은 요청 핸들러가 예외를 던졌다(type=" + request.type() + ")",
-                    sanitizedFailure(failure));
+            LOGGER.log(Level.WARNING, "받은 요청 핸들러가 예외를 던졌다(type=" + request.type() + ")", sanitizedFailure(failure));
         } catch (RuntimeException ignored) {
         }
     }
@@ -1298,7 +1295,9 @@ final class ConnectionEngine {
         IdentityHashMap<Throwable, Boolean> seen = new IdentityHashMap<>();
         seen.put(failure, Boolean.TRUE);
         Throwable tail = copy;
-        for (Throwable cause = failure.getCause(); cause != null && !seen.containsKey(cause); cause = cause.getCause()) {
+        for (Throwable cause = failure.getCause();
+                cause != null && !seen.containsKey(cause);
+                cause = cause.getCause()) {
             seen.put(cause, Boolean.TRUE);
             Throwable causeCopy = new Throwable(cause.getClass().getName());
             causeCopy.setStackTrace(cause.getStackTrace());

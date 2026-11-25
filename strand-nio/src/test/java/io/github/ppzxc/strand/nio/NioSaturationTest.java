@@ -368,7 +368,10 @@ class NioSaturationTest {
             awaitTrue(() -> capture.records.size() >= 2);
             assertThat(capture.records).allSatisfy(record -> {
                 assertThat(record.getLevel()).isEqualTo(Level.WARNING);
-                assertThat(record.getThrown()).hasMessage("secret-detail");
+                assertThat(record.getThrown()).hasMessage(IllegalStateException.class.getName());
+                assertThat(record.getThrown()).hasStackTraceContaining("NioSaturationTest");
+                assertThat(record.getMessage()).doesNotContain("secret-detail");
+                assertThat(record.getThrown().toString()).doesNotContain("secret-detail");
             });
             awaitTrue(() -> app.resourceUsage(Resource.HANDLER_TASKS).current() == 0);
         } finally {

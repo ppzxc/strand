@@ -24,7 +24,7 @@ class JavaStyleCheckTest {
     fixture.writeAtRepoRoot("docs/quality/java-style-baseline.txt", "")
     fixture.writeAtRepoRoot("src/Sample.java", "class Sample { // line\n}\n")
 
-    val result = fixture.fail("checkJavaComments")
+    val result = fixture.fail("check")
 
     assertThat(result.output)
       .contains("Java 스타일 위반 1개")
@@ -90,11 +90,42 @@ class JavaStyleCheckTest {
       "package p;\npublic class Sample { public String value() { return \"sample\"; } }\n",
     )
 
-    val result = fixture.fail("checkJavaComments")
+    val result = fixture.fail("check")
 
     assertThat(result.output)
       .contains("PublicApiJavadoc")
       .contains("strand-api/src/main/java/p/Sample.java")
+  }
+
+  @Test
+  fun `checkJavaComments rejects non JSpecify nullness imports`() {
+    val fixture = BuildFixture(
+      Files.createTempDirectory("nullness-import").toFile(),
+      "java",
+      usesCompatExtension = false,
+      gitRepository = false,
+    )
+    fixture.writeAtRepoRoot(
+      "build.gradle.kts",
+      """
+      plugins {
+        id("java")
+        id("strand.java-comments")
+      }
+      """.trimIndent() + "\n",
+    )
+    fixture.writeAtRepoRoot("docs/quality/java-style-baseline.txt", "")
+    fixture.writeAtRepoRoot(
+      "src/Sample.java",
+      "import org.jetbrains.annotations.Nullable;\nclass Sample {}\n",
+    )
+
+    val result = fixture.fail("check")
+
+    assertThat(result.output)
+      .contains("Java 스타일 위반 1개")
+      .contains("NUL-002")
+      .contains("src/Sample.java:1")
   }
 
   @Test

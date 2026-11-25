@@ -23,11 +23,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Stream;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -278,7 +278,8 @@ class NioStrandUsageTest {
                 .build();
         Listener listener = listen(server);
         NioStrandConnection connection = connect(fixture.clientBuilder().build(), listener);
-        fixture.result(connection.request(Request.of(TYPE, bytes("body-secret"))).result());
+        fixture.result(
+                connection.request(Request.of(TYPE, bytes("body-secret"))).result());
 
         LogRecord record = records.stream()
                 .filter(value -> value.getMessage().startsWith("받은 요청 핸들러가 예외를 던졌다"))
