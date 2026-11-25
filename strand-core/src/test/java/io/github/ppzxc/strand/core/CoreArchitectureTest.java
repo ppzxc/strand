@@ -6,51 +6,59 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
-import org.junit.jupiter.api.Test;
 import com.tngtech.archunit.lang.ArchRule;
+import com.tngtech.archunit.library.freeze.FreezingArchRule;
+import org.junit.jupiter.api.Test;
 
 class CoreArchitectureTest {
-  @Test
-  void coreHasNoTransportDependencies() {
-    JavaClasses classes = new ClassFileImporter().importPath("build/classes/java/main");
+    @Test
+    void coreHasNoTransportDependencies() {
+        JavaClasses classes = new ClassFileImporter().importPath("build/classes/java/main");
 
-    coreDoesNotDependOnTransportModules().check(classes);
-  }
+        freeze(coreDoesNotDependOnTransportModules()).check(classes);
+    }
 
-  @Test
-  void transportDependencyViolationFailsTheArchitectureRule() {
-    JavaClasses sample = new ClassFileImporter().importClasses(CoreTransportViolationSample.class);
+    @Test
+    void transportDependencyViolationFailsTheArchitectureRule() {
+        JavaClasses sample = new ClassFileImporter().importClasses(CoreTransportViolationSample.class);
 
-    assertThrows(AssertionError.class, () -> coreDoesNotDependOnTransportModules().check(sample));
-  }
+        assertThrows(
+                AssertionError.class,
+                () -> coreDoesNotDependOnTransportModules().check(sample));
+    }
 
-  private static ArchRule coreDoesNotDependOnTransportModules() {
-    return noClasses()
-        .that()
-        .resideInAPackage("io.github.ppzxc.strand.core..")
-        .should()
-        .dependOnClassesThat()
-        .resideInAnyPackage("io.github.ppzxc.strand.nio..", "io.github.ppzxc.strand.netty..");
-  }
+    private static ArchRule coreDoesNotDependOnTransportModules() {
+        return noClasses()
+                .that()
+                .resideInAPackage("io.github.ppzxc.strand.core..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAnyPackage("io.github.ppzxc.strand.nio..", "io.github.ppzxc.strand.netty..");
+    }
 
-  @Test
-  void coreImplementationStaysInInternalPackage() {
-    JavaClasses classes = new ClassFileImporter().importPath("build/classes/java/main");
+    @Test
+    void coreImplementationStaysInInternalPackage() {
+        JavaClasses classes = new ClassFileImporter().importPath("build/classes/java/main");
 
-    noClasses()
-        .that()
-        .resideInAPackage("io.github.ppzxc.strand.core")
-        .and()
-        .areNotAssignableTo(StrandVersion.class)
-        .should()
-        .beAssignableTo(StrandVersion.class)
-        .check(classes);
-  }
+        noClasses()
+                .that()
+                .resideInAPackage("io.github.ppzxc.strand.core")
+                .and()
+                .areNotAssignableTo(StrandVersion.class)
+                .should()
+                .beAssignableTo(StrandVersion.class)
+                .check(classes);
+    }
 
-  @Test
-  void corePackagesHaveNoCycles() {
-    JavaClasses classes = new ClassFileImporter().importPath("build/classes/java/main");
+    @Test
+    void corePackagesHaveNoCycles() {
+        JavaClasses classes = new ClassFileImporter().importPath("build/classes/java/main");
 
-    slices().matching("io.github.ppzxc.strand.core.(*)..").should().beFreeOfCycles().check(classes);
-  }
+        freeze(slices().matching("io.github.ppzxc.strand.core.(*)..").should().beFreeOfCycles())
+                .check(classes);
+    }
+
+    private static ArchRule freeze(ArchRule rule) {
+        return FreezingArchRule.freeze(rule);
+    }
 }

@@ -9,6 +9,7 @@ plugins {
 description = "strand: 바이트 인코딩·디코딩 규격의 Java 구현"
 
 dependencies {
+  testImplementation(project(":strand-api"))
   testImplementation(libsCatalog.library("archunit"))
 }
 
