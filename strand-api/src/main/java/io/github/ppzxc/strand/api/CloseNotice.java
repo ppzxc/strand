@@ -4,7 +4,6 @@ import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
-/** Retained reason for a connection ending, including locally observed failure. */
 public final class CloseNotice {
     public enum Kind {
         CLOSE,

@@ -7,10 +7,6 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
-/**
- * 쓰기를 시작한 요청과 쓰기 전 요청이 같은 {@code advance}에서 함께 만료될 때의 송신 순서(#217). 쓰기 전 요청 뒤에 놓인 CLOSE가 있으면
- * 만료로 보내는 {@code RESET}의 자리는 그 요청의 프레임을 거두는 시점에 달려 있다. 리팩터링 전 구현이 낸 순서를 고정한다.
- */
 class EndpointExpiryCloseOrderTest {
 
     private static final int REQUEST_TYPE = 0x0100;

@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
-/** 전송 모듈이 와이어 배치를 알지 않고도, 쓰고 있는 출력이 어느 스트림의 애플리케이션 프레임인지 안다. */
 class EndpointOutputStreamIdTest {
 
     @Test

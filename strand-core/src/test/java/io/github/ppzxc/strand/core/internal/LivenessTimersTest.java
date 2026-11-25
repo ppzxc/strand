@@ -8,10 +8,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-/**
- * 생존 확인 타이머의 internal seam 테스트. 가상 시계 값만 넣고 판단만 확인한다(핸드셰이크 바이트 없음): 대기 종류별 기한 경계값, AUTH 대기 기한, 유휴 PING 일정, ACK와 가장
- * 오래된 대기의 짝 맞춤, HELLO와 PING 대기의 독립, 꺼내기 전 프레임의 대기 미시작, 연결 끝 정리(규격 3.3절, 3.4절).
- */
 class LivenessTimersTest {
 
     private static final long ACK_TIMEOUT = 1000;
@@ -195,7 +191,6 @@ class LivenessTimersTest {
             timers.started(ids[i], 10L * i);
         }
 
-        // 남은 대기 가운데 가장 이른 기한은 ping(1)의 10 + 1000이다.
         assertThat(timers.expiry(1010)).isEqualTo(Expiry.NONE);
         assertThat(timers.expiry(1011)).isEqualTo(Expiry.UNRESPONSIVE);
         for (int i : new int[] {1, 2, 3, 5, 6, 7}) {

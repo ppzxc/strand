@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Validated request wire extensions. */
 public final class Extensions {
     private final Map<Integer, byte[]> values;
 
@@ -18,10 +17,6 @@ public final class Extensions {
         return new Builder();
     }
 
-    /**
-     * Encodes the items as wire extension bytes (2-byte tag, 2-byte length, value) in ascending tag order. An empty
-     * set encodes to an empty array.
-     */
     public byte[] toWire() {
         java.util.TreeMap<Integer, byte[]> sorted = new java.util.TreeMap<>(values);
         int size = 0;
@@ -40,10 +35,6 @@ public final class Extensions {
         return out;
     }
 
-    /**
-     * Parses wire extension bytes. The bytes were already validated by the core when received, but this applies the
-     * same builder rules, so malformed bytes or an invalid known value fail with {@link IllegalArgumentException}.
-     */
     public static Extensions fromWire(byte[] wire) {
         Objects.requireNonNull(wire, "wire");
         Builder builder = builder();

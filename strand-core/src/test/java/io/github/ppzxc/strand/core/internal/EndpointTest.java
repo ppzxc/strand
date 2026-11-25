@@ -10,27 +10,25 @@ import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
-/** 엔드포인트의 외부 동작만 본다: 받은 바이트와 애플리케이션 호출에 대해 보낸 바이트와 애플리케이션 이벤트. */
 class EndpointTest {
 
-    /** 규격 3.2.3절이 허용하는 {@code max_frame_size}의 최솟값(16 KiB). */
     private static final int MIN_MAX_FRAME_SIZE = 16384;
-    /** 길이 필드(4B)와 헤더·확장 영역 길이를 포함한, payload 없는 프레임의 크기. */
+
     private static final int EMPTY_FRAME_SIZE = 20;
 
     private static final String PREFACE = "c0de535452300000";
     private static final String HELLO = "0000001000010000000000000000000000000000";
-    /** extensions_length의 한도(규격 2.4절). */
+
     private static final int MAX_EXTENSIONS = 8192;
 
     private static final String HELLO_ACK = "0000001000010100000000000000000000000000";
-    /** 메커니즘 {@code ANONYMOUS}에 빈 자격 증명인 {@code AUTH}(규격 3.3.1절). */
+
     private static final String AUTH_ANONYMOUS = "0000001a0005000000000000000000000000000009414e4f4e594d4f5553";
 
     private static final String AUTH_ACK = "0000001000050100000000000000000000000000";
     private static final String PING = "00000018 0002 00 00 0000000000000000 0000 0000 0102030405060708";
     private static final String PING_ACK = "0000001800020100000000000000000000000000" + "0102030405060708";
-    /** CLOSE의 {@code last_stream_id}가 0인 경우(상대 요청이 아직 없다, 규격 3.5절). */
+
     private static final String NO_STREAM = "0000000000000000";
 
     private static final String CLOSE_PROTOCOL_ERROR =
@@ -61,7 +59,6 @@ class EndpointTest {
         return sb.toString();
     }
 
-    /** 파라미터 HELLO 프레임. payload는 hex. */
     private static String helloWith(String payloadHex) {
         return String.format("%08x", 16 + payloadHex.length() / 2) + "00010000" + "0000000000000000" + "00000000"
                 + payloadHex;
@@ -71,7 +68,6 @@ class EndpointTest {
         return hex(concat(Drive.drainMessages(endpoint)));
     }
 
-    /** 보낸 메시지를 이어 붙인 바이트. 바이트 스트림 전송이 보내는 바이트와 같다. */
     private static byte[] concat(List<OutboundMessage> messages) {
         java.io.ByteArrayOutputStream joined = new java.io.ByteArrayOutputStream();
         for (OutboundMessage message : messages) {
@@ -99,7 +95,6 @@ class EndpointTest {
         return serverAfterPreface(EndpointConfig.defaults().idleIntervalMs(0));
     }
 
-    /** 서버: 상대 HELLO에 ACK를 보냈고 상대 ACK도 받은 상태. */
     private static Endpoint established() {
         Endpoint server = serverAfterPreface();
         Drive.receive(server, bytes(HELLO));
@@ -166,19 +161,16 @@ class EndpointTest {
         return Endpoint.client(EndpointConfig.defaults().idleIntervalMs(0));
     }
 
-    /** 클라이언트가 서버의 {@code AUTH(ACK)}를 받아 AUTH 관문을 통과한다. 알림 이벤트는 비운다. */
     private static void clientPassesAuthGate(Endpoint client) {
         Drive.receive(client, bytes(AUTH_ACK));
         assertThat(kinds(client)).containsExactly(Event.Kind.AUTHENTICATED);
     }
 
-    /** 서버가 클라이언트의 {@code ANONYMOUS AUTH}를 통과시킨다. 보낸 {@code AUTH(ACK)}는 비운다. */
     private static void serverPassesAuthGate(Endpoint server) {
         Drive.receive(server, bytes(AUTH_ANONYMOUS));
         Drive.drainMessages(server);
     }
 
-    /** 클라이언트: 서버 HELLO에 ACK를 보냈고 서버 ACK도 받은 상태. */
     private static Endpoint establishedClient() {
         Endpoint client = client();
         Drive.receive(client, bytes(HELLO));
@@ -212,13 +204,11 @@ class EndpointTest {
         assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
     }
 
-    /** 확인 대기 초과(규격 3.3절). */
     private static void assertClosedUnresponsive(Endpoint endpoint) {
         assertThat(sent(endpoint)).isEqualTo(CLOSE_UNRESPONSIVE);
         assertThat(kinds(endpoint)).containsExactly(Event.Kind.CLOSED);
     }
 
-    /** 상대의 요청 번호가 이미 쓰인 뒤라 {@code last_stream_id}가 0이 아닌 CLOSE(PROTOCOL_ERROR)(규격 3.5절). */
     private static void assertClosedWithProtocolError(Endpoint endpoint, long lastStreamId) {
         assertThat(sent(endpoint))
                 .isEqualTo(CLOSE_PROTOCOL_ERROR.substring(0, CLOSE_PROTOCOL_ERROR.length() - NO_STREAM.length())
@@ -236,7 +226,6 @@ class EndpointTest {
         assertThat(Drive.drainEvents(endpoint)).isEmpty();
     }
 
-    /** 로컬에서 실패한 요청: 프레임 없이 stream id 없는 RESULT(UNAVAILABLE)가 정확히 한 번 나온다(규격 2.2.5절, 3.2.1절, 3.5절). */
     private static void assertFailedLocally(Endpoint endpoint) {
         assertThat(Drive.drainMessages(endpoint)).isEmpty();
         assertLocalUnavailableEvents(Drive.drainEvents(endpoint));
@@ -248,8 +237,6 @@ class EndpointTest {
         assertThat(events.get(0).status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(events.get(0).streamId()).isZero();
     }
-
-    // ---- 서버: 연결 서문과 HELLO ----
 
     @Test
     void serverSendsItsHelloRightAfterThePreface() {
@@ -357,8 +344,6 @@ class EndpointTest {
         assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
-    // ---- 첫 프레임 검사(3.2.4절) ----
-
     @Test
     void firstFrameThatIsNotHelloClosesSilently() {
         Endpoint server = serverAfterPreface();
@@ -435,7 +420,6 @@ class EndpointTest {
     void firstFrameHelloAboveTheOwnLimitClosesWithProtocolError() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
 
-        // 헤더 20바이트만으로 판정한다. length = 16381 = 알린 한도 − 4 + 1.
         Drive.receive(server, bytes("00003ffd 0001 00 00 0000000000000000 0000 0000"));
 
         assertClosedWithProtocolError(server);
@@ -458,8 +442,6 @@ class EndpointTest {
 
         assertClosedWithProtocolError(server);
     }
-
-    // ---- HELLO 값과 형태(3.2.3절, 3.2.5절) ----
 
     @Test
     void maxFrameSizeAtTheRangeBoundsIsAccepted() {
@@ -558,8 +540,6 @@ class EndpointTest {
         assertClosedWithProtocolError(server);
     }
 
-    // ---- 프레임 길이 범위(2.2.1절) ----
-
     @Test
     void frameLengthAboveTheAnnouncedLimitClosesWithProtocolError() {
         Endpoint server = serverAfterPreface(EndpointConfig.defaults().maxFrameSize(16384));
@@ -567,7 +547,6 @@ class EndpointTest {
         Drive.receive(server, bytes(HELLO_ACK));
         Drive.drainMessages(server);
 
-        // 본문이 다 오기 전에 length와 type까지만으로 판정한다.
         Drive.receive(server, bytes("00003ffd0002"));
 
         assertClosedWithProtocolError(server);
@@ -648,8 +627,6 @@ class EndpointTest {
         }
     }
 
-    // ---- ACK 관문(3.3절) ----
-
     @Test
     void pingResetAndApplicationFramesBeforeThePeerAckCloseWithProtocolError() {
         for (String frame : new String[] {
@@ -671,7 +648,6 @@ class EndpointTest {
         Drive.receive(server, bytes(HELLO));
         Drive.drainMessages(server);
 
-        // 예약 범위는 0x0000과 0x0006~0x00FF다. 0x0005는 AUTH라서 예약이 아니다(규격 2.2.2절).
         for (String type : new String[] {"0000", "0006", "00ff"}) {
             Drive.receive(server, bytes("00000010" + type + "0000" + "0000000000000000" + "00000000"));
             assertOpenAndSilent(server);
@@ -744,7 +720,6 @@ class EndpointTest {
         Drive.receive(server, bytes(closeNoErrorLast(2)));
         assertOpenAndSilent(server);
 
-        // payload가 8바이트가 아닌 PING은 연결 오류지만 CLOSE를 이미 받았으므로 CLOSE를 보내지 않는다.
         Drive.receive(server, bytes("00000010 0002 00 00 0000000000000000 0000 0000"));
 
         assertThat(Drive.drainMessages(server)).isEmpty();
@@ -759,8 +734,6 @@ class EndpointTest {
 
         assertClosedSilently(server);
     }
-
-    // ---- 확인 대기(3.3절) ----
 
     @Test
     void serverClosesWhenTheAckDoesNotComeInTime() {
@@ -824,12 +797,9 @@ class EndpointTest {
 
         Drive.advance(server, 2000);
 
-        // CLOSE를 이미 받았으므로 확인 대기 초과에도 CLOSE를 보내지 않고 닫는다.
         assertThat(Drive.drainMessages(server)).isEmpty();
         assertThat(kinds(server)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
-
-    // ---- 애플리케이션 호출 ----
 
     @Test
     void requestUsesTheOwnNumberSpaceInOrder() {
@@ -852,7 +822,6 @@ class EndpointTest {
         assertThat(sent(client)).isEqualTo("0000001001010000000000000000000100000000");
     }
 
-    /** 요청 상태(규격 1.3절, 4.4.1절): 번호 없는 대기열, 번호는 받았지만 쓰기 전, 쓰기 시작 뒤. 요청은 낸 순서(0부터)로 가리킨다. */
     @Test
     void requestStateTellsTheQueueThroughWritingStarted() {
         Endpoint client = client();
@@ -875,7 +844,6 @@ class EndpointTest {
         assertThat(client.requestState(second)).isEqualTo(OwnRequestLedger.RequestState.NUMBERED_UNWRITTEN);
     }
 
-    /** CLOSE의 {@code last_stream_id} 컷으로 끝난 요청은 기록에서 사라진다(규격 3.5절). */
     @Test
     void requestCutByCloseLastStreamIdLeavesNoRecord() {
         Endpoint client = establishedClient();
@@ -883,7 +851,6 @@ class EndpointTest {
         long cut = client.request(257, new byte[0]);
         Drive.drainMessages(client);
 
-        // last_stream_id=1: 번호 1은 상대가 처리했고 3은 처리하지 않았다. 1이 남아 있으니 연결은 종료 중으로 열려 있다.
         Drive.receive(
                 client,
                 bytes(CLOSE_NO_ERROR.substring(0, CLOSE_NO_ERROR.length() - NO_STREAM.length()) + "0000000000000001"));
@@ -893,7 +860,6 @@ class EndpointTest {
         assertThat(client.openStreamCount()).isEqualTo(1);
     }
 
-    /** 오래 가는 연결에서 요청을 응답으로 끝낼 때마다 기록이 따라 지워져 쌓이지 않는다. */
     @Test
     void answeredRequestsDoNotAccumulateOnALongLivedConnection() {
         Endpoint client = establishedClient();
@@ -934,7 +900,6 @@ class EndpointTest {
         assertFailedLocally(server);
     }
 
-    /** CLOSE를 보내고도 대기 중인 스트림 때문에 연결이 열려 있는 동안에도 새 요청은 번호를 받지 못한다(장부의 닫는 중과 Endpoint의 CLOSE 교환이 같은 값). */
     @Test
     void requestAfterCloseWasSentWhileAStreamIsPendingIsFailedLocally() {
         Endpoint server = established();
@@ -1016,7 +981,6 @@ class EndpointTest {
                 .isEqualTo(HELLO_ACK + AUTH_ANONYMOUS + requestFrame(257, Long.MAX_VALUE, "") + CLOSE_NO_ERROR);
     }
 
-    /** 미룬 PING은 미룬 때의 앞뒤 요청과의 상대 순서를 지킨다: 번호를 소진시키는 요청 앞의 PING은 나가고 뒤의 PING은 CLOSE 때문에 나가지 않는다. */
     @Test
     void deferredPingKeepsItsPlaceAmongDeferredRequestsWhenTheGateOpens() {
         Endpoint before = Endpoint.client(EndpointConfig.defaults().nextStreamId(Long.MAX_VALUE));
@@ -1118,8 +1082,6 @@ class EndpointTest {
         assertOpenAndSilent(server);
     }
 
-    // ---- 클라이언트 ----
-
     @Test
     void clientSendsThePrefaceAndItsHelloAtOnce() {
         Endpoint client = client();
@@ -1150,7 +1112,6 @@ class EndpointTest {
                         + "0075736572007077");
     }
 
-    /** 3.2.1절: AUTH도 상대 max_frame_size를 넘지 못한다(MUST NOT). 보내지 않고 CLOSE 없이 로컬로 닫는다(#196). */
     @Test
     void clientClosesLocallyWithoutAuthOrCloseWhenItsAuthExceedsThePeerMaxFrameSize() {
         Endpoint client = Endpoint.client(EndpointConfig.defaults().auth("PLAIN", new byte[20000]));
@@ -1159,7 +1120,6 @@ class EndpointTest {
 
         Drive.receive(client, bytes(helloWith("0001" + String.format("%08x", MIN_MAX_FRAME_SIZE))));
 
-        // 상대 HELLO는 유효하므로 ACK는 보내고(3.2.3절), AUTH와 CLOSE는 보내지 않는다.
         assertThat(sent(client)).isEqualTo(HELLO_ACK);
         List<Event> events = Drive.drainEvents(client);
         assertThat(events).hasSize(2);
@@ -1181,7 +1141,6 @@ class EndpointTest {
         assertThat(Drive.drainMessages(client)).hasSize(2);
     }
 
-    /** 쓰기 전 요청이 많아도 상대 CLOSE와 연결 종료가 요청마다 결과를 정확히 한 번씩 내고 프레임을 거둔다. */
     @Test
     void manyUnwrittenRequestsEachEndExactlyOnceOnPeerCloseAndOnTransportLoss() {
         int count = 5000;
@@ -1264,7 +1223,6 @@ class EndpointTest {
         assertThat(sent(server)).isEqualTo(AUTH_ACK);
     }
 
-    /** {@code last_stream_id}를 지정한 CLOSE(NO_ERROR)(규격 3.5절). */
     private static String closeNoErrorLast(long lastStreamId) {
         return closeWithLast(ErrorCode.NO_ERROR, lastStreamId);
     }
@@ -1419,8 +1377,6 @@ class EndpointTest {
         assertThat(sent(client)).isEqualTo(CLOSE_NO_ERROR);
     }
 
-    // ---- PING의 확인 대기(3.3절, 3.4절) ----
-
     @Test
     void pingWithoutAnAckClosesWithUnresponsiveAfterTheWait() {
         Endpoint server = establishedWith(ONE_SECOND);
@@ -1533,8 +1489,6 @@ class EndpointTest {
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
     }
 
-    // ---- 유휴 시 PING(3.4.1절) ----
-
     @Test
     void withoutAnIdleIntervalNoIdlePingIsSent() {
         Endpoint server = established();
@@ -1636,7 +1590,7 @@ class EndpointTest {
         Endpoint server = establishedWith(IDLE_ONE_SECOND);
         server.request(257, new byte[0]);
         Drive.drainMessages(server);
-        // 요청 번호까지 처리한다는 CLOSE라서 요청이 남고 연결은 종료 중으로 머문다(3.5절).
+
         Drive.receive(server, bytes(closeNoErrorLast(2)));
         Drive.drainMessages(server);
 
@@ -1644,8 +1598,6 @@ class EndpointTest {
 
         assertThat(sent(server)).hasSize(40 + 16);
     }
-
-    // ---- 확인 대기의 시작점: 전송 계층에 넘긴 때(3.3절) ----
 
     @Test
     void helloWaitStartsWhenTheFrameIsDrainedNotWhenItIsQueued() {
@@ -1676,8 +1628,6 @@ class EndpointTest {
 
         assertClosedUnresponsive(server);
     }
-
-    // ---- CLOSE 전용 코드와 EXCESSIVE_USE(2.5.2절, 3.5절, 4.4절) ----
 
     @Test
     void closeWithExcessiveUseSendsThatCodeAndClosesTheTransport() {
@@ -1763,7 +1713,6 @@ class EndpointTest {
         }
     }
 
-    /** 확장 영역이 {@code extHex}이고 payload가 없는 type 0x0101 프레임 hex. */
     private static String appFrame(long streamId, int status, String extHex) {
         return String.format(
                 "%08x0101%02x%02x%016x%04x0000%s",
@@ -1810,7 +1759,6 @@ class EndpointTest {
         client.request(257, new byte[0]);
         Drive.drainMessages(client);
 
-        // timeout의 길이가 4가 아니어도 응답에서는 값을 해석하지 않는다.
         Drive.receive(client, bytes(appFrame(1, 0, "00010003000001")));
 
         assertThat(kinds(client)).containsExactly(Event.Kind.RESULT);
@@ -1864,12 +1812,12 @@ class EndpointTest {
     @Test
     void malformedRequestExtensionsCloseWithProtocolError() {
         String[] malformed = {
-            unknownTlv(MAX_EXTENSIONS - 3), // 한도 8192 초과
-            "0004000000090008", // 항목이 자기 길이만큼 value를 갖지 못함
-            "000900000000", // 항목 뒤에 2바이트가 남음
-            "7777000161" + "7777000162", // 모르는 tag 중복
-            "00010004000000010001000400000001", // 정의된 tag 중복
-            "00" // 항목 헤더보다 짧음
+            unknownTlv(MAX_EXTENSIONS - 3),
+            "0004000000090008",
+            "000900000000",
+            "7777000161" + "7777000162",
+            "00010004000000010001000400000001",
+            "00"
         };
         for (String extensions : malformed) {
             Endpoint server = established();
@@ -1880,7 +1828,6 @@ class EndpointTest {
         }
     }
 
-    /** 요청 프레임 hex: 확장 영역은 {@code extHex}, payload 없음. */
     private static String requestFrame(int type, long streamId, String extHex) {
         return String.format(
                 "%08x%04x0000%016x%04x0000%s", 16 + extHex.length() / 2, type, streamId, extHex.length() / 2, extHex);
@@ -1934,12 +1881,7 @@ class EndpointTest {
 
     @Test
     void invalidDefinedExtensionValuesAreAnsweredInvalidArgumentAndNotDelivered() {
-        String[] invalid = {
-            "00010003000001", // timeout 길이 3
-            "000100050000000001", // timeout 길이 5
-            "00030000", // idempotency-key 길이 0
-            "00030041" + keyBytes(65) // idempotency-key 길이 65
-        };
+        String[] invalid = {"00010003000001", "000100050000000001", "00030000", "00030041" + keyBytes(65)};
         for (String extensions : invalid) {
             Endpoint server = established();
 
@@ -2037,7 +1979,7 @@ class EndpointTest {
 
     @Test
     void streamNumberAtOrBelowTheHighestPeerNumberClosesWithProtocolError() {
-        // 대기 중인 번호, 응답으로 끝난 번호, 건너뛴 번호, 거절한 번호는 모두 쓰인 것으로 센다(규격 4.2.1절).
+
         Endpoint pending = established();
         Drive.receive(pending, bytes(requestFrame(257, 1, "")));
         Drive.drainEvents(pending);
@@ -2270,7 +2212,6 @@ class EndpointTest {
         assertThatThrownBy(() -> client.request(257, new byte[MIN_MAX_FRAME_SIZE]))
                 .isInstanceOf(IllegalArgumentException.class);
 
-        // 프레임도 번호도 없다: 아무것도 나가지 않았고, 다음 요청이 첫 번호표와 첫 스트림 번호를 받는다.
         assertThat(Drive.drainMessages(client)).isEmpty();
         assertThat(client.request(257, new byte[0])).isZero();
         assertThat(sent(client)).isEqualTo("00000010010100000000000000000001" + "0000" + "0000");
@@ -2304,7 +2245,6 @@ class EndpointTest {
         assertThat(events.get(0).certainty()).contains(certainty);
     }
 
-    /** 규격 4.4.1절: 번호는 받았지만 한 바이트도 쓰기 전에 기한이 지나면 RESET 없이 프레임을 버린다. */
     @Test
     void deadlineBeforeAnyByteWrittenDropsTheNumberedFrameWithoutReset() {
         Endpoint client = establishedClient();
@@ -2315,12 +2255,11 @@ class EndpointTest {
 
         assertSingleResult(client, 1, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED);
         assertThat(client.requestState(ticket)).isNull();
-        // 첫 요청의 프레임만 사라지고 나머지는 그대로 나간다. 쓴 적 없는 번호 1은 건너뛴다.
+
         assertThat(sent(client)).isEqualTo("0000001001010000000000000000000300000000");
         assertThat(client.requestState(kept)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
     }
 
-    /** 규격 4.4.1절: 번호를 받지 못한 대기열 요청도 기한이 지나면 stream_id 없이 DEADLINE_EXCEEDED(처리 안 됨)로 끝난다. */
     @Test
     void deadlineOfAQueuedRequestWithoutNumberEndsItWithoutAStreamId() {
         Endpoint client = client();
@@ -2338,7 +2277,6 @@ class EndpointTest {
         assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
-    /** 규격 4.4.1절: 쓰기를 시작한 요청은 기한이 지나면 RESET(CANCEL)을 보내고 DEADLINE_EXCEEDED(결과 모름)로 끝난다. */
     @Test
     void deadlineAfterWritingStartedSendsResetCancelAndReportsUnknown() {
         Endpoint client = establishedClient();
@@ -2352,13 +2290,12 @@ class EndpointTest {
 
         assertThat(sent(client)).isEqualTo(RESET_CANCEL_1);
         assertSingleResult(client, 1, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
-        // 이미 끝난 요청의 응답은 조용히 버려지고, 기한은 다시 울리지 않는다.
+
         Drive.receive(client, bytes(appFrame(1, 0, "")));
         Drive.advance(client, 1000);
         assertOpenAndSilent(client);
     }
 
-    /** 요청 기한은 로컬 설정이다. 설정이 없으면 기한이 없고, 응답을 받아 끝난 요청의 기한은 울리지 않는다. */
     @Test
     void withoutDeadlineOrAfterResponseNothingExpires() {
         Endpoint client = establishedClient();
@@ -2374,7 +2311,6 @@ class EndpointTest {
         assertThat(Drive.drainEvents(client)).isEmpty();
     }
 
-    /** 규격 4.4절: 한 바이트도 쓰기 전의 취소는 프레임을 거두고 RESET 없이 CANCELLED(처리 안 됨)로 끝난다. */
     @Test
     void cancelBeforeAnyByteWrittenRemovesTheFrameWithoutReset() {
         Endpoint client = establishedClient();
@@ -2400,7 +2336,6 @@ class EndpointTest {
         assertSingleResult(client, 1, Status.CANCELLED, Certainty.NOT_PROCESSED);
     }
 
-    /** 규격 4.4절: 번호 없는 대기열 요청의 취소는 stream_id 없이 CANCELLED(처리 안 됨)다. 나중에 관문이 열려도 프레임은 나가지 않는다. */
     @Test
     void cancelOfAQueuedRequestWithoutNumberEndsItWithoutAStreamId() {
         Endpoint client = client();
@@ -2416,7 +2351,6 @@ class EndpointTest {
         assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
-    /** 규격 4.4절: 쓰기를 시작한 뒤의 취소는 RESET(CANCEL)을 보내고 CANCELLED(결과 모름)다. */
     @Test
     void cancelAfterWritingStartedByTicketSendsResetAndReportsUnknown() {
         Endpoint client = establishedClient();
@@ -2437,7 +2371,6 @@ class EndpointTest {
         assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
-    /** 대기열에서 기다리는 PING과 다른 요청은 기한이나 취소가 건드리지 않는다. */
     @Test
     void expiringOrCancellingAQueuedRequestLeavesOtherQueuedSendsAlone() {
         Endpoint client = client();
@@ -2473,7 +2406,6 @@ class EndpointTest {
         assertThat(Drive.drainEvents(client)).isEmpty();
     }
 
-    /** 규격 4.4.1절: 쓰기 전에 기한이 지난 요청이 마지막 대기 스트림이면 종료 중인 연결이 닫힌다. */
     @Test
     void deadlineOfTheLastPendingRequestWhileClosingClosesTheConnection() {
         Endpoint client = establishedClient();
@@ -2777,8 +2709,6 @@ class EndpointTest {
         assertThat(messages).hasSize(1);
         assertThat(hex(messages.get(0).bytes())).isEqualTo(CLOSE_NO_ERROR);
     }
-
-    // ---- CLOSE: 대기열 요청 즉시 종료, 끊기 전 REFUSED (규격 3.5절, 3.5.1절) ----
 
     @Test
     void closeSentEndsDeferredRequestsImmediatelyAsNotProcessed() {

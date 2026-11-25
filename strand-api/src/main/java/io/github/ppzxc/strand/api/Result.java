@@ -4,7 +4,6 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
-/** Non-blocking access to a retained result. */
 public interface Result<T> {
     boolean isDone();
 

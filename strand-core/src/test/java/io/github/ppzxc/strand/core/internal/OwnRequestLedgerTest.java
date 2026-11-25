@@ -9,11 +9,6 @@ import java.util.Random;
 import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 
-/**
- * 내 요청 장부(#217, #218)의 internal seam 테스트. 장부 interface 너머로 보이는 결과만 확인한다: 번호 없는 요청을 포함한 번호표·스트림 색인의
- * 동기화(독립 모델과 무작위 사건 순서 비교), 끝난 요청이 어떤 색인에도 남지 않음, 확정성 판정 표(번호 없음·쓰기 전·쓰기 시작 x 사건, 규격
- * 3.5절, 4.4절, 4.4.1절), 기한 만료 순서(번호 없는 요청 먼저), 번호를 줄 수 없음 답과 번호표·스트림 번호 소비, 넘긴 가장 큰 번호의 갱신 시점.
- */
 class OwnRequestLedgerTest {
 
     private static final int TYPE = 0x0100;
@@ -33,7 +28,6 @@ class OwnRequestLedgerTest {
         accept(streamId, ticket, null);
     }
 
-    /** 번호표와 스트림 번호는 장부가 정한다. 기대한 값과 같은지만 확인한다. */
     private void accept(long streamId, long ticket, Long deadlineAt) {
         assertThat(ledger.nextTicket()).isEqualTo(ticket);
         assertThat(ledger.open(TYPE, new byte[0], deadlineAt, MAX_FRAME))
@@ -41,7 +35,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.streamIdOf(ticket)).isEqualTo(streamId);
     }
 
-    /** 결과가 번호를 받은 요청의 것인지는 번호 없는 요청의 결과(스트림 번호 0)와 구별된다. */
     @Test
     void outcomeTellsNumberedFromQueuedRequests() {
         accept(1, 0);
@@ -59,9 +52,6 @@ class OwnRequestLedgerTest {
         assertThat(outcome.resetToSend).isEqualTo(reset);
     }
 
-    // ---- 색인 동기화 ----
-
-    /** 번호표로 찾은 요청과 스트림으로 찾은 요청이 같다. */
     @Test
     void ticketAndStreamLookupsFindTheSameRequest() {
         accept(1, 0);
@@ -71,7 +61,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.openCount()).isEqualTo(1);
     }
 
-    /** 끝난 요청은 어떤 색인에도 없다. */
     @Test
     void endedRequestIsInNoIndex() {
         accept(1, 0);
@@ -91,7 +80,6 @@ class OwnRequestLedgerTest {
         WRITTEN
     }
 
-    /** 장부와 독립된 모델의 요청 하나. 모델은 번호표 순서로만 줄 세운다. */
     private static final class Req {
         final long ticket;
         final Long deadlineAt;
@@ -104,7 +92,6 @@ class OwnRequestLedgerTest {
         }
     }
 
-    /** 장부 없이 규격 3.5절, 4.4절, 4.4.1절로 정한 기대값을 계산하는 모델. */
     private static final class Model {
         final TreeMap<Long, Req> byTicket = new TreeMap<>();
         long nextTicket;
@@ -150,7 +137,6 @@ class OwnRequestLedgerTest {
             return list;
         }
 
-        /** 번호를 줄 수 있는지. 닫는 중 -> 소진은 이 모델에 없음 -> 한도 순이다. */
         OwnRequestLedger.Admission admission() {
             if (closing) {
                 return OwnRequestLedger.Admission.CLOSING;
@@ -174,7 +160,6 @@ class OwnRequestLedgerTest {
         assertThat(actual.resetToSend).isEqualTo(certainty == Certainty.UNKNOWN && status != Status.UNAVAILABLE);
     }
 
-    /** 무작위 사건 순서에서 색인 동기화, 끝난 요청이 색인에 남지 않음, 결과의 순서와 확정성을 독립된 모델과 비교한다. */
     @Test
     void ledgerAgreesWithModelUnderRandomEventOrder() {
         for (long seed = 0; seed < 400; seed++) {
@@ -321,7 +306,7 @@ class OwnRequestLedgerTest {
                 .findFirst()
                 .orElse(null);
         if (r == null || r.phase == Phase.UNWRITTEN) {
-            // 대기 중이 아니거나 아직 넘기지 않은 요청이면 버린다(규격 4.3절).
+
             assertThat(actual).as(at).isNull();
             return;
         }
@@ -371,7 +356,6 @@ class OwnRequestLedgerTest {
         m.closing = true;
     }
 
-    /** 전송 계층 닫힘은 번호 받은 요청이 먼저(스트림 번호 순), 번호 없는 요청이 뒤(낸 순서)다. */
     private void transportClosed(OwnRequestLedger l, Model m, String at) {
         List<Req> expected = new ArrayList<>(m.numberedInStreamOrder());
         expected.addAll(m.queuedInTicketOrder());
@@ -409,9 +393,6 @@ class OwnRequestLedgerTest {
         }
     }
 
-    // ---- 번호 없는 요청: 확정성 판정 표의 번호 없음 행, 만료 순서, 번호표 발급 ----
-
-    /** 번호 없는 요청의 취소는 스트림 번호 없이 처리 안 됨이고 RESET이 없다. */
     @Test
     void cancelQueuedRequestIsNotProcessedWithoutStreamAndReset() {
         long ticket = ledger.queue(TYPE, new byte[0], null);
@@ -423,7 +404,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.cancelTicket(ticket)).isNull();
     }
 
-    /** 번호 없는 요청의 기한 만료는 처리 안 됨이다. */
     @Test
     void deadlineOfQueuedRequestIsNotProcessed() {
         ledger.queue(TYPE, new byte[0], 5L);
@@ -433,18 +413,16 @@ class OwnRequestLedgerTest {
         assertEnded(ended.get(0), 0, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED, false);
     }
 
-    /** 만료는 번호 없는 요청이 먼저(낸 순서) 번호 받은 요청이 뒤(스트림 번호 순)이고, 기한이 늦어도 그렇다. */
     @Test
     void expiryEndsQueuedBeforeNumberedWhateverTheDeadline() {
         accept(1, 0, 3L);
         accept(3, 1, 2L);
-        ledger.queue(TYPE, new byte[0], 9L); // 번호표 2
-        ledger.queue(TYPE, new byte[0], 8L); // 번호표 3
+        ledger.queue(TYPE, new byte[0], 9L);
+        ledger.queue(TYPE, new byte[0], 8L);
         List<OwnRequestLedger.Outcome> ended = expire(ledger, 10);
         assertThat(ended).extracting(o -> o.streamId).containsExactly(0L, 0L, 1L, 3L);
     }
 
-    /** 번호를 받아도 기한은 그대로이고 번호 받은 요청으로 끝난다. */
     @Test
     void deadlineSurvivesNumbering() {
         ledger.queue(TYPE, new byte[0], 5L);
@@ -455,7 +433,6 @@ class OwnRequestLedgerTest {
         assertThat(drain()).isEmpty();
     }
 
-    /** 번호 없는 요청은 번호표 순서대로 번호를 받고 상한 번호표 앞의 것만 받는다. */
     @Test
     void queuedRequestsGetNumbersInTicketOrderBelowTheLimit() {
         long a = ledger.queue(TYPE, new byte[0], null);
@@ -469,7 +446,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.stateOfTicket(c)).isEqualTo(OwnRequestLedger.RequestState.QUEUED_WITHOUT_NUMBER);
     }
 
-    /** 번호를 줄 수 없는 요청은 번호표만 쓰고 스트림 번호는 쓰지 않는다. */
     @Test
     void refusalConsumesATicketButNoStreamNumber() {
         ledger.setPeerMaxConcurrentStreams(1);
@@ -482,7 +458,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.streamIdOf(2)).isEqualTo(3L);
     }
 
-    /** 프레임이 상대의 max_frame_size를 넘으면 번호표도 스트림 번호도 쓰지 않는다. */
     @Test
     void oversizeConsumesNeitherTicketNorStreamNumber() {
         assertThat(ledger.open(TYPE, new byte[100], null, 64)).isEqualTo(OwnRequestLedger.Admission.OVERSIZE);
@@ -491,7 +466,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.streamIdOf(0)).isEqualTo(1L);
     }
 
-    /** 번호가 소진되면 요청을 받지 않는다. 한도보다 먼저 판정한다. */
     @Test
     void exhaustedNumbersRefuseBeforeTheConcurrencyLimit() {
         Outbox lastOutbox = new Outbox();
@@ -503,7 +477,6 @@ class OwnRequestLedgerTest {
         assertThat(last.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.EXHAUSTED);
     }
 
-    /** 닫는 중에는 새 요청을 받지 않는다. 소진이나 한도보다 먼저 판정한다. */
     @Test
     void closingRefusesNewRequestsFirst() {
         ledger.setPeerMaxConcurrentStreams(0);
@@ -511,7 +484,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.open(TYPE, new byte[0], null, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.CLOSING);
     }
 
-    /** 전송 계층이 닫힌 뒤의 번호표 발급. */
     @Test
     void issueTicketHandsOutTicketsInOrder() {
         assertThat(ledger.issueTicket()).isZero();
@@ -519,7 +491,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.nextTicket()).isEqualTo(2);
     }
 
-    /** 번호 없는 요청이 있어도 닫는 중 처리는 번호 받은 요청을 건드리지 않는다. */
     @Test
     void closingEndsOnlyQueuedRequests() {
         accept(1, 0);
@@ -532,16 +503,12 @@ class OwnRequestLedgerTest {
         assertThat(ledger.openQueued(Long.MAX_VALUE, MAX_FRAME)).isEqualTo(OwnRequestLedger.Admission.NONE);
     }
 
-    // ---- 확정성 판정 표: 상태 x 사건 ----
-
-    /** 쓰기 전 취소는 RESET 없이 처리 안 됨. */
     @Test
     void cancelBeforeWriteIsNotProcessedWithoutReset() {
         accept(1, 0);
         assertEnded(ledger.cancelStream(1, Status.CANCELLED), 1, Status.CANCELLED, Certainty.NOT_PROCESSED, false);
     }
 
-    /** 쓰기 시작 뒤 취소는 RESET을 보내고 결과 모름. */
     @Test
     void cancelAfterWriteStartedSendsResetAndIsUnknown() {
         accept(1, 0);
@@ -549,7 +516,6 @@ class OwnRequestLedgerTest {
         assertEnded(ledger.cancelStream(1, Status.CANCELLED), 1, Status.CANCELLED, Certainty.UNKNOWN, true);
     }
 
-    /** 번호표 취소도 같은 판정이다. */
     @Test
     void cancelByTicketJudgesTheSame() {
         accept(1, 0);
@@ -560,7 +526,6 @@ class OwnRequestLedgerTest {
         assertEnded(ledger.cancelTicket(2), 5, Status.CANCELLED, Certainty.NOT_PROCESSED, false);
     }
 
-    /** 기한 만료는 상태에 따라 처리 안 됨 또는 결과 모름. */
     @Test
     void deadlineJudgesByState() {
         accept(1, 0, 5L);
@@ -573,7 +538,6 @@ class OwnRequestLedgerTest {
         assertEnded(ended.get(1), 3, Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED, false);
     }
 
-    /** 기한 만료는 기한 순이 아니라 스트림 번호 순으로 끝낸다. */
     @Test
     void deadlineEndsInStreamOrderNotDeadlineOrder() {
         accept(1, 0, 9L);
@@ -583,7 +547,6 @@ class OwnRequestLedgerTest {
         assertThat(ended).extracting(o -> o.streamId).containsExactly(1L, 3L, 5L);
     }
 
-    /** 넘기지 않은 요청에 온 응답은 버리고 요청과 프레임을 그대로 둔다(규격 4.3절). */
     @Test
     void responseToUnhandedRequestIsDiscardedAndKeepsFrame() {
         accept(1, 0);
@@ -594,7 +557,6 @@ class OwnRequestLedgerTest {
         assertThat(drain()).hasSize(2);
     }
 
-    /** 응답 type이 요청과 다르면 로컬 INTERNAL이다. */
     @Test
     void responseTypeMismatchIsLocalInternal() {
         accept(1, 0);
@@ -607,7 +569,6 @@ class OwnRequestLedgerTest {
                 false);
     }
 
-    /** 예약된 status는 UNKNOWN으로 본다. */
     @Test
     void reservedStatusIsUnknown() {
         accept(1, 0);
@@ -615,7 +576,6 @@ class OwnRequestLedgerTest {
         assertEnded(ledger.onResponse(1, TYPE, 200, new byte[0]), 1, Status.UNKNOWN, Certainty.RESPONSE, false);
     }
 
-    /** REFUSED RESET은 쓰기 시작 뒤여도 처리 안 됨이다. */
     @Test
     void refusedResetIsNotProcessedEvenAfterWriteStarted() {
         accept(1, 0);
@@ -623,7 +583,6 @@ class OwnRequestLedgerTest {
         assertEnded(ledger.onReset(1, ErrorCode.REFUSED), 1, Status.UNAVAILABLE, Certainty.NOT_PROCESSED, false);
     }
 
-    /** 넘기지 않은 요청에 온 RESET은 버리고 프레임을 그대로 둔다. 넘긴 요청의 REFUSED가 아닌 RESET은 결과 모름이다. */
     @Test
     void resetToUnhandedRequestIsDiscardedAndHandedOffOneIsUnknown() {
         accept(1, 0);
@@ -636,7 +595,6 @@ class OwnRequestLedgerTest {
         assertEnded(ledger.onReset(5, ErrorCode.INTERNAL_ERROR), 5, Status.INTERNAL, Certainty.UNKNOWN, false);
     }
 
-    /** CLOSE last stream id 뒤의 요청은 쓰기 상태와 무관하게 처리 안 됨이고 프레임을 보내지 않는다. */
     @Test
     void requestsAfterCloseLastStreamIdAreNotProcessedAndFramesAreNotSent() {
         accept(1, 0);
@@ -652,7 +610,6 @@ class OwnRequestLedgerTest {
         assertThat(drain()).isEmpty();
     }
 
-    /** CLOSE last_stream_id 뒤의 쓰기를 시작한 요청도 처리 안 됨이고 RESET을 보내지 않는다. */
     @Test
     void writtenRequestAfterCloseLastStreamIdIsNotProcessedWithoutReset() {
         accept(1, 0);
@@ -666,7 +623,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.stateOfStream(1)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
     }
 
-    /** 쓰기 전 요청의 REFUSED RESET도 버린다. */
     @Test
     void refusedResetOfUnwrittenRequestIsDiscarded() {
         accept(1, 0);
@@ -674,7 +630,6 @@ class OwnRequestLedgerTest {
         assertThat(drain()).hasSize(1);
     }
 
-    /** 쓰기를 시작한 요청의 응답은 RESPONSE이고 프레임은 이미 나갔다. */
     @Test
     void responseToWrittenRequestIsResponse() {
         accept(1, 0);
@@ -683,7 +638,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.openCount()).isZero();
     }
 
-    /** 전송 계층이 닫히면 쓰기 전은 처리 안 됨 쓰기 시작 뒤는 결과 모름이고 모두 비운다. */
     @Test
     void transportClosedJudgesByStateAndClearsEverything() {
         accept(1, 0);
@@ -700,9 +654,6 @@ class OwnRequestLedgerTest {
         assertThat(expire(ledger, Long.MAX_VALUE)).isEmpty();
     }
 
-    // ---- 쓰기 대기열과 넘긴 번호 ----
-
-    /** 쓰기 전 마지막 요청 노드를 돌려준다. */
     @Test
     void lastUnwrittenRequestNodeIsReported() {
         assertThat(ledger.lastUnwrittenNode()).isNull();
@@ -716,7 +667,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.lastUnwrittenNode()).isNull();
     }
 
-    /** 넘긴 가장 큰 번호는 쓰기 시작 사건에서만 바뀐다. */
     @Test
     void highestWrittenNumberChangesOnlyOnWriteStarted() {
         assertThat(ledger.highestWrittenStreamId()).isZero();
@@ -731,10 +681,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.highestWrittenStreamId()).isEqualTo(3);
     }
 
-    /**
-     * 쓰기 전 요청의 프레임을 거두는 일을 두 번 해도 연결 리스트와 쓰기 대기열이 어긋나지 않는다. 장부의 사건은 요청 하나에 한 번만 거두므로
-     * interface로는 두 번 부를 수 없다. 방어 장치를 확인하려고 private 메서드를 직접 부른다.
-     */
     @Test
     void unwritingTwiceLeavesTheUnwrittenListIntact() throws Exception {
         accept(1, 0);
@@ -748,7 +694,6 @@ class OwnRequestLedgerTest {
         unwrite.invoke(ledger, middle);
         unwrite.invoke(ledger, middle);
 
-        // 가운데 요청의 프레임만 거뒀고, 쓰기 전 마지막 노드는 그대로이며, 나머지 둘은 계속 쓰기 전으로 이어져 있다.
         assertThat(ledger.lastUnwrittenNode()).isNotNull();
         assertThat(drain()).hasSize(2);
         assertThat(ledger.stateOfStream(1)).isEqualTo(OwnRequestLedger.RequestState.WRITING_STARTED);
@@ -756,7 +701,6 @@ class OwnRequestLedgerTest {
         assertThat(ledger.lastUnwrittenNode()).isNull();
     }
 
-    /** 진행 보고 방식의 순서를 따른다: 첫 바이트를 넘기면 쓰기 시작, 마지막 바이트를 넘기면 넘김을 장부에 알린다. */
     private void startWrite() {
         writeAll(outbox, ledger);
     }
@@ -765,7 +709,6 @@ class OwnRequestLedgerTest {
         return writeAll(outbox, ledger);
     }
 
-    /** 쓰기 대기열의 메시지를 앞에서부터 모두 전체 쓴 것으로 하고, 장부에 두 사건을 알린 뒤 쓴 순서대로 돌려준다. */
     private static List<OutboundMessage> writeAll(Outbox box, OwnRequestLedger l) {
         List<OutboundMessage> written = new ArrayList<>();
         for (Outbox.Node node = box.first(); node != null; node = box.first()) {

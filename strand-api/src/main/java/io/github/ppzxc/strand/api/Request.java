@@ -2,7 +2,6 @@ package io.github.ppzxc.strand.api;
 
 import java.util.Objects;
 
-/** An outgoing application request. */
 public final class Request {
     private final int type;
     private final byte[] payload;
@@ -36,11 +35,6 @@ public final class Request {
         return type;
     }
 
-    /**
-     * 본문의 길이(바이트). 본문을 복사하지 않으므로 전송 모듈이 용량을 예약하기 전에 크기만 알 때 쓴다.
-     *
-     * @return 본문 길이
-     */
     public int payloadLength() {
         return payload.length;
     }

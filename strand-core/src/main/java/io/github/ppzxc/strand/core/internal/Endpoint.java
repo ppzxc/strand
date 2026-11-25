@@ -20,23 +20,14 @@ import java.util.OptionalLong;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
-/**
- * 엔드포인트(서버 또는 클라이언트 역할). 입출력을 하지 않는 순수 상태 기계다. 받은 바이트는 {@link #receiveBounded}와 {@link
- * #receiveUnit}, 애플리케이션의 호출은 {@link #request}·{@link #ping}·{@link #close}, 시간은 {@link #advanceTo}로 넣는다. 그러면 보낼
- * 출력과 애플리케이션 이벤트가 쌓이고, 출력은 {@link #nextOutput}으로 보고 {@link #outputProgress}로 넘긴 만큼 알리고, 이벤트는 {@link
- * #drainEvents(int)}로 꺼낸다. 스레드·소켓·실제 시계에 접근하지 않는다. 인증 판단은 {@link Event.Kind#AUTHENTICATION_REQUIRED} 사건으로
- * 위임하고 {@link #completeAuthentication}으로 돌려받는다.
- */
 public final class Endpoint {
 
-    /** 프레임 헤더 크기(규격 2.1절). 전송 모듈이 바이트 수를 셀 때 쓰도록 {@code Frames}의 값을 그대로 노출한다. */
     public static final int FRAME_HEADER_SIZE = Frames.HEADER_SIZE;
 
     private static final byte[] NO_BYTES = new byte[0];
-    /** 서버는 짝수, 클라이언트는 홀수 번호를 쓰고 첫 번호는 각각 2와 1이다(규격 2.2.5절). */
+
     private static final int FIRST_SERVER_STREAM_ID = 2;
 
-    /** 인증 판단 식별자. 한 연결에 인증 판단은 하나뿐이라 값이 하나다. */
     static final long AUTHENTICATION_ID = 1;
 
     private static final int FIRST_CLIENT_STREAM_ID = 1;
@@ -52,66 +43,47 @@ public final class Endpoint {
     private static final int CLOSE_MIN_PAYLOAD_SIZE = Frames.CLOSE_FIXED_PAYLOAD_SIZE;
     private static final int IDEMPOTENCY_KEY_TAG = 0x0003;
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 64;
-    /** extensions_length의 한도(규격 2.4절). */
+
     private static final int MAX_EXTENSIONS_LENGTH = 8192;
 
     private final EndpointConfig config;
     private final Outbox outbox = new Outbox();
-    /** 애플리케이션에 낼 이벤트. 쌓기만 하고 고치지 않는다. 돌려보낸 요청의 거름은 꺼낼 때({@link #drainEvents(int)}) 한다. */
+
     private final List<Event> events = new ArrayList<>();
-    /**
-     * 이벤트를 마지막으로 꺼낸 때의 {@link #highestPeerStreamId}. 상대 요청 번호는 늘어나기만 하므로, 이보다 큰 번호의 대기 중인 요청이 아직
-     * 애플리케이션이 이벤트로 받지 않은 요청이다.
-     */
+
     private long drainedPeerStreamId;
-    /** 돌려보내서 {@code REQUEST_RECEIVED}를 애플리케이션에 내지 않을 요청의 번호. 상대가 먼저 RESET한 요청은 대기 중이 아니므로 여기에 오르지 않는다. */
+
     private final Set<Long> refusedRequests = new HashSet<>();
-    /**
-     * 내 요청(번호표를 받은 뒤 결과가 나올 때까지)의 장부. 번호를 받기 전(AUTH 관문 전에 미룬 요청)과 번호를 받은 뒤(쓰기 전, 쓰기 시작)를
-     * 모두 가진다. 출력 진행에서 프레임의 첫 바이트를 넘기면 쓰기 시작을, 마지막 바이트를 넘기면 넘김을 장부에 알린다(규격
-     * 1.3절, 3.5절 "연결이 끝날 때").
-     *
-     * <p>장부의 닫는 중({@code onClosing})과 연결 단계의 CLOSE 교환은 같은 사건이다. 연결이 계속 열려 있을 수 있는 두 곳({@link #close},
-     * {@link #handleClose})은 {@link #endQueuedRequests}로 장부에 알린다. 나머지(형태가 잘못된 CLOSE, 연결 오류, 너무 큰 AUTH)는 곧바로
-     * 전송 계층을 닫아 {@link ConnectionPhase#isActive()}가 새 요청을 먼저 막으므로 장부의 닫는 중이 필요 없다.
-     */
+
     private final OwnRequestLedger ledger;
-    /** 대기 중인 스트림 가운데 상대가 연 것(아직 응답하지 않은 요청)의 번호와 요청 type. 응답에 같은 type을 쓴다(규격 1.3절, 4.1절). */
+
     private final Map<Long, Integer> peerPendingStreams = new LinkedHashMap<>();
-    /**
-     * AUTH 관문을 통과하기 전이라 미뤄 둔 PING(규격 3.3절). 미룬 요청은 {@link #ledger}가 번호 없는 요청으로 가진다. PING은 미룬 때의 다음
-     * 번호표를 같이 적어 두어, 관문이 열릴 때 그 번호표 앞의 요청이 먼저 나가고 뒤의 요청이 나중에 나가게 한다.
-     */
+
     private final Deque<DeferredPing> deferredPings = new ArrayDeque<>();
 
-    /** 받은 바이트를 단위로 자르고 경계에 걸친 단위 하나를 모은다. 이 상태 기계는 프레임 하나와 경계 위반만 받는다. */
     private final UnitSlicer slicer;
 
     private final UnitSink unitSink = new UnitSink();
-    /** 입력 처리 중이다. 애플리케이션 콜백이 같은 엔드포인트에 다시 입력하는 것을 막는다. */
+
     private boolean receiving;
 
-    /**
-     * 연결의 단계: 수립과 관문(규격 3.3절), CLOSE 교환과 종료(규격 3.5절). 받아도 되는 프레임 타입, 송신을 미룰지, 새 요청을 열 수 있는지,
-     * 지금 전송 계층을 닫아야 하는지, 연결이 끝났는지, 닫은 로컬 원인은 여기에 묻는다.
-     */
     private final ConnectionPhase phase;
-    /** 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면 기본값이다(규격 3.2.1절). */
+
     private long peerMaxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
 
     private long now;
-    /** 지금까지 받은 가장 큰 경과 나노초. 역행을 막는 기준이다. */
+
     private long elapsedNanos;
-    /** ACK를 기다리는 HELLO, AUTH, PING의 확인 대기, 서버의 AUTH 대기 기한, 유휴 PING 일정(규격 3.3절, 3.4.1절). */
+
     private final LivenessTimers timers;
 
     private final boolean server;
-    /** 한 단위가 만들 수 있는 제어 프레임(HELLO 응답, AUTH, CLOSE 등)의 상한. */
+
     private static final int OUTPUT_CONTROL_RESERVE = 4;
 
     private boolean authenticationPending;
     private final OutputProgress output;
-    /** 지금까지 쓰인 상대 공간 번호 중 가장 큰 것(규격 2.2.5절). */
+
     private long highestPeerStreamId;
 
     private Endpoint(boolean server, EndpointConfig config) {
@@ -130,25 +102,10 @@ public final class Endpoint {
         this.phase = server ? ConnectionPhase.server() : ConnectionPhase.client();
     }
 
-    /**
-     * 서버 역할 엔드포인트를 만든다. 연결 서문을 받으면 HELLO를 보낸다. 받은 AUTH의 판단은 {@link Event.Kind#AUTHENTICATION_REQUIRED}
-     * 사건으로 애플리케이션에 맡기고 {@link #completeAuthentication}으로 돌려받는다.
-     *
-     * @param config 엔드포인트의 설정
-     * @return 연결 서문을 기다리는 엔드포인트
-     * @throws IllegalArgumentException 설정의 nextStreamId가 역할의 번호 공간에 속하지 않을 때
-     */
     public static Endpoint server(EndpointConfig config) {
         return new Endpoint(true, config);
     }
 
-    /**
-     * 클라이언트 역할 엔드포인트를 만든다. 만들자마자 연결 서문과 HELLO를 보낼 바이트로 쌓는다.
-     *
-     * @param config 엔드포인트의 설정
-     * @return 서버 HELLO를 기다리는 엔드포인트
-     * @throws IllegalArgumentException 설정의 nextStreamId가 역할의 번호 공간에 속하지 않을 때
-     */
     public static Endpoint client(EndpointConfig config) {
         Endpoint endpoint = new Endpoint(false, config);
         endpoint.send(Frames.preface());
@@ -156,14 +113,6 @@ public final class Endpoint {
         return endpoint;
     }
 
-    /**
-     * 상대에게서 받은 바이트를 최대 단위 수만큼, 그리고 한 단위가 만들 수 있는 사건·출력을 넣을 공간이 확보된 만큼만 처리한다. 프레임 경계와 무관하게
-     * 어느 위치에서 잘라도 된다. 입력을 처리하는 동안 애플리케이션 콜백에서 같은 엔드포인트에 다시 입력할 수 없다. 단위를 처리하기 전에 최악의 경우 필요한
-     * 공간을 확인하므로 상태가 절반만 바뀌지 않는다. 모자라면 그 단위 앞에서 멈추고 수거가 필요하다고 알린다. 호출자는 사건과 출력을 수거하고 돌려준
-     * 소비 위치부터 다시 입력한다.
-     *
-     * @throws IllegalStateException 수거할 것이 하나도 없는데도 공간이 한 단위를 처리하기에 모자랄 때, 입력을 처리하는 중에 다시 불렀을 때
-     */
     public ReceiveProgress receiveBounded(
             byte[] bytes, int offset, int length, int maximumUnits, CollectionSpace space) {
         Objects.requireNonNull(bytes, "bytes");
@@ -182,34 +131,14 @@ public final class Endpoint {
         }
     }
 
-    /**
-     * 한 단위가 최악의 경우 만들 수 있는 사건 수. 끝나는 내 요청마다 결과 하나에 종료 하나, 인증·받은 요청 사건 하나다. 전송 모듈이 수거 공간의 최소
-     * 크기를 셈할 때도 이 값을 쓴다.
-     *
-     * @param ownRequests 열린 내 요청과 미뤄 둔 내 요청의 수
-     * @return 최악의 사건 수
-     */
     public static long eventsNeeded(long ownRequests) {
         return ownRequests + 2;
     }
 
-    /**
-     * 한 단위가 최악의 경우 만들 수 있는 출력 수. 미뤄 둔 것을 내보내거나 돌려보내는 프레임마다 하나에 제어 프레임 몇 개({@value
-     * #OUTPUT_CONTROL_RESERVE})다. 전송 모듈이 수거 공간의 최소 크기를 셈할 때도 이 값을 쓴다.
-     *
-     * @param ownRequests 열린 내 요청과 미뤄 둔 내 요청의 수
-     * @param deferredPings 미뤄 둔 PING 수
-     * @param peerPendingRequests 응답을 기다리는 상대 요청 수
-     * @return 최악의 출력 수
-     */
     public static long outputsNeeded(long ownRequests, long deferredPings, long peerPendingRequests) {
         return ownRequests + deferredPings + peerPendingRequests + OUTPUT_CONTROL_RESERVE;
     }
 
-    /**
-     * 한 단위가 최악의 경우 만들 수 있는 사건·출력을 지금 쌓인 것에 더해도 한도 안인가. 사건은 끝나는 내 요청마다 결과 하나, 종료 하나,
-     * 인증·받은 요청 사건 하나이고, 출력은 미뤄 둔 것을 내보내거나 돌려보내는 프레임마다 하나에 제어 프레임 몇 개다. 넉넉하게 잡은 상한이라 일찍 멈출 수는 있어도 넘치지는 않는다.
-     */
     private boolean hasSpace(CollectionSpace space) {
         long ownRequests = (long) ledger.openCount() + ledger.queuedCount();
         long eventsNeeded = eventsNeeded(ownRequests);
@@ -223,11 +152,6 @@ public final class Endpoint {
         return false;
     }
 
-    /**
-     * 입력 처리에 들어간다. 이미 처리 중이면(애플리케이션 콜백이 다시 입력함) 상태를 건드리지 않고 던진다. 연결이 끝났으면 입력을 받지 않는다.
-     *
-     * @return 입력을 처리해도 되는가
-     */
     private boolean enterReceive() {
         if (receiving) {
             throw new IllegalStateException("입력을 처리하는 중에 같은 엔드포인트에 다시 입력할 수 없다");
@@ -239,24 +163,6 @@ public final class Endpoint {
         return true;
     }
 
-    /**
-     * 정확히 한 단위(서문 또는 프레임 하나)라고 주장하는 바이트를 넣는다. 크기가 한 단위와 같으면 같은 바이트를 스트림으로 넣었을 때와 같은 사건과
-     * 출력을 낸다. 다르면 연결 단계에 맞게 반응한다: 서문 단계와 첫 프레임 단계는 아무것도 보내지 않고 닫고, 그 뒤는 연결 오류이며, {@code
-     * type}이 CLOSE이면 CLOSE 없이 닫는다(규격 3.5절, 5.1절).
-     *
-     * <p>수거 공간 계약은 {@link #receiveBounded(byte[], int, int, int, CollectionSpace)}와 같다. 공간이 모자라면 아무것도 소비하지 않고
-     * 수거가 필요하다고 알리며, 호출자는 수거한 뒤 같은 단위를 다시 넣는다. 연결이 이미 끝났으면 아무것도 소비하지 않는다. 이 호출 안에서 읽고
-     * 끝내며 {@code bytes}를 붙잡지 않는다.
-     *
-     * @param bytes 단위를 담은 배열
-     * @param offset 단위의 시작 위치
-     * @param length 단위의 길이
-     * @param space 수거 전에 쌓아 둘 수 있는 사건·출력의 한도
-     * @return 소비한 바이트 수와 수거 필요 여부
-     * @throws IllegalArgumentException 범위가 유효하지 않을 때
-     * @throws IllegalStateException 스트림 입력으로 받아 두고 처리하지 못한 바이트가 남아 있을 때, 입력을 처리하는 중에 다시 불렀을 때, 수거할
-     *     것이 하나도 없는데도 공간이 모자랄 때
-     */
     public ReceiveProgress receiveUnit(byte[] bytes, int offset, int length, CollectionSpace space) {
         Objects.requireNonNull(bytes, "bytes");
         Objects.requireNonNull(space, "space");
@@ -266,14 +172,6 @@ public final class Endpoint {
         return receiveWholeUnit(bytes, offset, length, true, space);
     }
 
-    /**
-     * 바이트로 넘길 수 없는 입력(예: 텍스트 메시지)을 받았다고 알린다. 반응은 크기가 어긋난 단위 입력과 같다. 수거 공간 계약도 같다: {@code
-     * collectionRequired}가 참이면 아무것도 하지 않은 것이므로, 수거한 뒤 다시 부른다. 연결이 이미 끝났으면 아무것도 하지 않는다. 소비한 바이트는
-     * 늘 0이다.
-     *
-     * @param space 수거 전에 쌓아 둘 수 있는 사건·출력의 한도
-     * @return 수거 필요 여부
-     */
     public ReceiveProgress receiveUnsupportedInput(CollectionSpace space) {
         Objects.requireNonNull(space, "space");
         return receiveWholeUnit(NO_BYTES, 0, 0, false, space);
@@ -298,23 +196,14 @@ public final class Endpoint {
         }
     }
 
-    /** 전송 모듈이 연결을 어떻게 닫아야 하는지에 대한 core의 지시. Strand CLOSE 프레임과는 별개다. */
     public enum TransportClose {
-        /** 연결이 끝나지 않았다. 닫지 않는다. */
         NONE,
-        /** 연결이 끝났다. 남은 출력(Strand CLOSE 포함)을 처리한 뒤 닫는다. */
+
         AFTER_PENDING_OUTPUT,
-        /** 연결이 끝났고 보낼 것이 없거나 보낼 수 없다. 기다리지 않고 닫는다(EOF·쓰기 실패·abort 포함). */
+
         IMMEDIATE
     }
 
-    /**
-     * 전송 종료 지시. 연결이 끝나지 않았으면 {@link TransportClose#NONE}이다. 끝났으면 아직 처리하지 못한 출력이 남았는지에 따라 {@link
-     * TransportClose#AFTER_PENDING_OUTPUT} 또는 {@link TransportClose#IMMEDIATE}다. 연결이 끊긴 뒤의 출력은 전송할 수 없으므로 기다리지 않는다.
-     * 지시는 실제 통로 정리 완료가 아니다. 완료는 전송 모듈이 관찰한다.
-     *
-     * @return 지시
-     */
     public TransportClose transportClose() {
         if (!phase.isEnded()) {
             return TransportClose.NONE;
@@ -323,13 +212,6 @@ public final class Endpoint {
         return outputPending ? TransportClose.AFTER_PENDING_OUTPUT : TransportClose.IMMEDIATE;
     }
 
-    /**
-     * 연결을 시작한 때부터 흐른 나노초로 시계를 옮긴다. 같은 값은 허용하고 처리할 것이 없으면 아무 일도 하지 않는다. 시계는 밀리초 단위로 처리하므로
-     * 밀리초 미만은 버린다.
-     *
-     * @param elapsedNanos 연결을 시작한 때부터 흐른, 이전 값보다 작지 않은 나노초
-     * @throws IllegalArgumentException 음수이거나 이전에 준 값보다 작을 때. 상태를 바꾸지 않는다
-     */
     public void advanceTo(long elapsedNanos) {
         if (elapsedNanos < 0 || elapsedNanos < this.elapsedNanos) {
             throw new IllegalArgumentException("경과 나노초는 음수이거나 이전 값보다 작을 수 없다: " + elapsedNanos);
@@ -342,7 +224,6 @@ public final class Endpoint {
         }
     }
 
-    /** 가상 시계를 밀리초만큼 앞으로 보낸다. 확인 대기 시간이 지나도록 ACK가 없으면 연결 오류로 닫는다. */
     private void advanceMillis(long ms) {
         if (phase.isEnded()) {
             return;
@@ -361,54 +242,28 @@ public final class Endpoint {
         expireRequests();
         byte[] idlePing = phase.mayIdlePing() ? timers.idlePing(now) : null;
         if (idlePing != null) {
-            // 넘기지 못한 유휴 PING의 기한(규격 3.3절): 쓰기 대기열에 든 때부터 센다.
+
             timers.idlePingQueued(sendPing(idlePing), now);
         }
     }
 
-    /**
-     * {@link #nextDeadline()}를 경과 나노초로 돌려준다. 넘치면 {@link Long#MAX_VALUE}에서 멈춘다. 기한이 없으면 비어 있다.
-     *
-     * @return 시계를 옮겨야 하는 가장 이른 경과 나노초
-     */
     public OptionalLong nextDeadlineNanos() {
         OptionalLong millis = nextDeadline();
         return millis.isPresent() ? OptionalLong.of(Deadlines.millisToNanos(millis.getAsLong())) : millis;
     }
 
-    /**
-     * 상대가 HELLO로 알린 {@code max_frame_size}. 알리지 않았으면(상대 HELLO를 받기 전 포함) 기본값이다. 이 값은 엔드포인트가 보낼 프레임의 크기 검사에 쓰는 값과 같다. 전송 계층이 쓰기 대기열의 정상 흐름 제어 범위를 셈할
-     * 때 쓴다.
-     *
-     * @return 상대가 알린 최대 프레임 크기(바이트)
-     */
     public long peerMaxFrameSize() {
         return peerMaxFrameSize;
     }
 
-    /**
-     * 상대가 HELLO로 알린 {@code max_concurrent_streams}. 내가 낼 수 있는 동시 요청의 한도다. 알리기 전에는 기본값이다(규격 3.2.1절).
-     *
-     * @return 상대가 알린 동시 스트림 한도
-     */
     public long peerMaxConcurrentStreams() {
         return ledger.peerMaxConcurrentStreams();
     }
 
-    /**
-     * 내가 HELLO로 알린 {@code max_concurrent_streams}. 상대가 동시에 열 수 있는 요청의 한도다.
-     *
-     * @return 내가 알린 동시 스트림 한도
-     */
     public long ownMaxConcurrentStreams() {
         return config.maxConcurrentStreams();
     }
 
-    /**
-     * 시계를 다음으로 진행해야 하는 가장 이른 가상 시각(마지막 {@link #advanceTo}까지 흐른 시각부터 센 절대 시각)을 돌려준다. 대상은 요청 기한,
-     * 확인 대기(HELLO, AUTH, PING), 서버의 AUTH 대기, 유휴 PING이다. 이 시각까지 {@code advance}하면 그 기한이 처리된다. 기한은 정각이 지나야
-     * 처리되므로 기한 다음 밀리초를 돌려준다. 아무 기한도 없거나 연결이 끝났으면 비어 있다.
-     */
     public OptionalLong nextDeadline() {
         if (phase.isEnded()) {
             return OptionalLong.empty();
@@ -424,34 +279,10 @@ public final class Endpoint {
         return OptionalLong.of(Math.min(requests.getAsLong(), liveness.getAsLong()));
     }
 
-    /**
-     * 애플리케이션이 요청을 보내게 한다. AUTH 관문을 통과하기 전이면 그 뒤로 미룬다(규격 3.3절). CLOSE를 보냈거나 받은 뒤,
-     * 번호 소진(규격 2.2.5절), 상대가 알린 {@code max_concurrent_streams} 도달(규격 3.2.1절)이면 프레임을 보내지 않고 로컬에서
-     * 실패시킨다. 이때 스트림 번호 없는 {@link Event.Kind#RESULT} 이벤트(status {@code UNAVAILABLE})가 한 번 나온다. 한도에 닿은
-     * 요청은 대기시키지 않고 즉시 실패시키며 스트림 번호를 쓰지 않는다.
-     *
-     * @param type 애플리케이션 {@code type}(256 이상)
-     * @param payload 본문
-     * @return 요청 번호표(낸 순서, 0부터). 로컬에서 실패한 요청에도 번호표가 하나 쓰인다. 크기 검사로 던진 요청은 번호표를 쓰지 않는다. {@link #requestState(long)}가 이 번호표로 요청을 찾는다.
-     * @throws IllegalArgumentException 지금 보낼 수 있는 요청의 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런
-     *     프레임을 보내지 못하게 하고(MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림 번호도 쓰지 않는다.
-     *     AUTH 관문 전이라 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고, 보낼 때 넘으면 로컬 {@code UNAVAILABLE}로
-     *     실패시킨다.
-     */
     public long request(int type, byte[] payload) {
         return requestUntil(type, payload, null);
     }
 
-    /**
-     * 요청 확장 영역(규격 2.4절)이 있는 요청을 보낸다. 그 밖의 동작은 {@link #request(int, byte[])}, {@link #request(int, byte[], long)}와
-     * 같다. 확장 영역은 프레임 크기 검사에 포함된다.
-     *
-     * @param extensions 항목(tag 2바이트, length 2바이트, value)이 이어진 확장 영역. 없으면 빈 배열
-     * @param deadlineMs 지금부터 센 기한(밀리초). 0이면 기한이 없다
-     * @return 요청 번호표
-     * @throws IllegalArgumentException 확장 영역이 형식이나 알려진 항목의 값 규칙(규격 2.4절)을 어기거나 8192바이트를 넘을 때, 또는 {@code
-     *     deadlineMs}가 음수일 때. 아무 상태도 바꾸지 않고 번호표도 쓰지 않는다
-     */
     public long request(int type, byte[] extensions, byte[] payload, long deadlineMs) {
         if (deadlineMs < 0) {
             throw new IllegalArgumentException("deadlineMs는 음수일 수 없다: " + deadlineMs);
@@ -477,7 +308,7 @@ public final class Endpoint {
             failLocally(ticket);
             return ticket;
         }
-        // 크기 검사에 걸리면 던지고 번호표를 쓰지 않는다.
+
         long ticket = ledger.nextTicket();
         if (refuseLocally(ticket, ledger.open(type, extensions, payload, deadlineAt, peerMaxFrameSize))
                 == OwnRequestLedger.Admission.OVERSIZE) {
@@ -486,10 +317,6 @@ public final class Endpoint {
         return ticket;
     }
 
-    /**
-     * 장부가 번호를 주지 않은 요청(프레임 크기 초과는 제외)을 로컬에서 실패시킨다. 번호 소진이면 연결도 닫는다(규격 2.2.5절). 프레임이 너무 크면
-     * 아무것도 하지 않고 돌려준다.
-     */
     private OwnRequestLedger.Admission refuseLocally(long ticket, OwnRequestLedger.Admission admission) {
         switch (admission) {
             case CLOSING:
@@ -497,7 +324,6 @@ public final class Endpoint {
                 failLocally(ticket);
                 break;
             case EXHAUSTED:
-                // 프레임 없이 로컬에서 실패시키고 연결을 닫는다(규격 2.2.5절).
                 failLocally(ticket);
                 close(ErrorCode.NO_ERROR);
                 break;
@@ -507,18 +333,6 @@ public final class Endpoint {
         return admission;
     }
 
-    /**
-     * 요청 기한을 두고 요청을 보낸다(규격 4.4.1절). 기한은 로컬 설정이고, 기한이 지난 뒤 {@link #advanceTo}가 요청을 끝낸다. 쓰기 전(번호
-     * 유무 무관)이면 {@code RESET} 없이 프레임을 버리고 {@code DEADLINE_EXCEEDED}(처리 안 됨), 쓰기를 시작했으면 {@code RESET(CANCEL)}을
-     * 보내고 {@code DEADLINE_EXCEEDED}(결과 모름)를 넘긴다. 요청 확장 영역의 {@code timeout}은 받는 쪽에 주는 힌트일 뿐 이 기한이 아니다.
-     *
-     * <p>"지금"은 실제 시각이 아니라 마지막 {@link #advanceTo}까지 흐른 가상 시계다. 이 엔드포인트는 실제 시계를 읽지 않으므로, 호출자는 기한이
-     * 있는 요청을 보내기 직전에 {@code advance}로 시계를 맞춘다. {@code AUTH} 대기와 확인 대기의 기준 시각도 같은 가상 시계다.
-     *
-     * @param deadlineMs 지금부터 센 기한(밀리초, 1 이상)
-     * @throws IllegalArgumentException {@code deadlineMs}가 1보다 작을 때
-     * @see #request(int, byte[])
-     */
     public long request(int type, byte[] payload, long deadlineMs) {
         if (deadlineMs < 1) {
             throw new IllegalArgumentException("deadlineMs는 1 이상이어야 한다: " + deadlineMs);
@@ -526,26 +340,10 @@ public final class Endpoint {
         return requestUntil(type, payload, Deadlines.plus(now, deadlineMs));
     }
 
-    /**
-     * 번호표로 요청을 취소한다. 번호 없는 대기열 요청도 취소할 수 있다(규격 4.4절). 결과는 {@link #cancel(long)}과 같다. 끝난 요청이나 낸 적 없는
-     * 번호표면 아무것도 하지 않는다.
-     *
-     * @param ticket {@link #request}가 돌려준 번호표
-     */
     public void cancelRequest(long ticket) {
         endOwnRequest(ledger.cancelTicket(ticket));
     }
 
-    /**
-     * 애플리케이션이 상대의 요청에 응답하게 한다. 스트림이 끝나고 종료 중이었다면 닫는다. 대기 중이 아닌 스트림이면 아무것도 하지 않는다.
-     *
-     * @param streamId 상대가 연 스트림 번호
-     * @param status 규격 2.5.1절의 status 값(0~16)
-     * @param payload 본문
-     * @return 응답을 쌓았으면 true. 대기 중인 스트림이 아니어서(이미 응답했거나, 상대가 RESET했거나, 연결이 끝나서) 아무것도 하지 않았으면 false
-     * @throws IllegalArgumentException status가 0~16이 아닐 때(예약 값은 보내지 않는다), 또는 프레임이 상대가 알린 {@code max_frame_size}를 넘을 때. 규격은 그런 프레임을 보내지 못하게 하고
-     *     (MUST NOT, 3.2.1절) 로컬 처리를 정하지 않으므로, 아무것도 보내지 않고 스트림도 그대로 둔다. 호출자는 줄인 payload로 다시 응답할 수 있다.
-     */
     public boolean respond(long streamId, int status, byte[] payload) {
         if (!Status.isValid(status)) {
             throw new IllegalArgumentException("status는 0~16이어야 한다: " + status);
@@ -564,12 +362,6 @@ public final class Endpoint {
         return true;
     }
 
-    /**
-     * 애플리케이션이 받은 요청을 핸들러 시작 전에 거절하게 한다. {@code RESET(REFUSED)}를 보내고 스트림을 끝낸다(규격 4.5절). 대기 중이 아닌
-     * 스트림이면 아무것도 하지 않는다. 끝낸 스트림에는 응답할 수 없다.
-     *
-     * @param streamId 상대가 연 스트림 번호
-     */
     public void refuseRequest(long streamId) {
         if (peerPendingStreams.remove(streamId) == null) {
             return;
@@ -578,39 +370,27 @@ public final class Endpoint {
         conclude();
     }
 
-    /**
-     * 애플리케이션이 자기 요청을 취소하게 한다. RESET(CANCEL)을 보내고 로컬 {@code CANCELLED} 결과를 넘긴다(규격 4.4절). 대기 중이
-     * 아닌 스트림이면 아무것도 하지 않는다.
-     *
-     * @param streamId 내가 연 스트림 번호
-     */
     public void cancel(long streamId) {
         endOwnRequest(ledger.cancelStream(streamId, Status.CANCELLED));
     }
 
-    /** 기한이 지난 요청을 끝낸다(규격 4.4.1절). 순서는 장부가 정한다. 번호를 받은 요청이 끝났으면 종료 중인 연결을 닫을 수 있는지 본다. */
     private void expireRequests() {
         if (ledger.expire(now, this::applyOutcome)) {
             conclude();
         }
     }
 
-    /**
-     * 장부가 끝낸 내 요청 하나의 결과를 반영하고, 종료 중이고 마지막 스트림이었다면 닫는다(규격 3.5절). 번호를 받지 못한 요청의 결과는 스트림이
-     * 아니므로 닫는 판단을 하지 않는다. 대기 중이 아니라 장부가 null을 돌려줬으면 아무것도 하지 않는다.
-     */
     private void endOwnRequest(OwnRequestLedger.@Nullable Outcome outcome) {
         if (outcome == null) {
             return;
         }
         applyOutcome(outcome);
         if (outcome.numbered()) {
-            // 번호 없는 요청은 대기 중인 스트림이 아니라서 닫을 수 있게 되는 일이 없다.
+
             conclude();
         }
     }
 
-    /** 장부가 돌려준 결과를 반영한다: 쓰기를 시작한 요청이면 {@code RESET(CANCEL)}을 보내고 결과 이벤트를 낸다. */
     private void applyOutcome(OwnRequestLedger.Outcome outcome) {
         if (outcome.resetToSend) {
             send(Frames.reset(outcome.streamId, ErrorCode.CANCEL));
@@ -618,12 +398,6 @@ public final class Endpoint {
         events.add(Event.result(outcome.ticket, outcome.streamId, outcome.status, outcome.certainty, outcome.body));
     }
 
-    /**
-     * 애플리케이션이 PING을 보내게 한다. AUTH 관문을 통과하기 전이면 그 뒤로 미룬다(규격 3.3절).
-     *
-     * @param payload 정확히 8바이트
-     * @throws IllegalArgumentException payload가 8바이트가 아닐 때
-     */
     public void ping(byte[] payload) {
         if (payload.length != PING_PAYLOAD_SIZE) {
             throw new IllegalArgumentException("PING payload는 정확히 8바이트여야 한다: " + payload.length);
@@ -640,24 +414,10 @@ public final class Endpoint {
         }
     }
 
-    /**
-     * 애플리케이션이 연결을 닫게 한다. 이미 CLOSE를 보냈거나 받았다면 아무것도 하지 않는다(규격 3.5절).
-     *
-     * @param errorCode CLOSE에 쓸 수 있는 error_code({@link ErrorCode#isCloseCode})
-     * @throws IllegalArgumentException CLOSE에 쓸 수 없는 error_code일 때. 아무것도 보내지 않고 상태도 바꾸지 않는다
-     */
     public void close(int errorCode) {
         close(errorCode, "");
     }
 
-    /**
-     * 애플리케이션이 UTF-8 설명과 함께 연결을 닫게 한다. 프레임 상한에 맞춰 reason을 자른다.
-     *
-     * @param errorCode CLOSE에 쓸 수 있는 error_code({@link ErrorCode#isCloseCode})
-     * @param reason non-null UTF-8 close reason; 빈 문자열은 허용한다
-     * @throws NullPointerException reason이 {@code null}일 때
-     * @throws IllegalArgumentException CLOSE에 쓸 수 없는 error_code일 때. 아무것도 보내지 않고 상태도 바꾸지 않는다
-     */
     public void close(int errorCode, String reason) {
         Objects.requireNonNull(reason, "reason");
         if (!ErrorCode.isCloseCode(errorCode)) {
@@ -677,12 +437,10 @@ public final class Endpoint {
         conclude();
     }
 
-    /** 인증기가 자격 증명의 만료를 알린다. 재인증 없이 정상 CLOSE로 연결을 마친다(규격 3.3.1절). */
     public void credentialExpired() {
         closeForCredentialEnd(ErrorCode.NO_ERROR);
     }
 
-    /** 인증기가 자격 증명의 폐기를 알린다. 사유 없는 UNAUTHENTICATED CLOSE로 연결을 끝낸다(규격 3.3.1절). */
     public void credentialRevoked() {
         closeForCredentialEnd(ErrorCode.UNAUTHENTICATED);
     }
@@ -697,57 +455,34 @@ public final class Endpoint {
         close(errorCode);
     }
 
-    /**
-     * 전송 계층이 CLOSE 없이 끊겼음을 알리는 입력이다(통로가 닫힘). 대기 중인 요청을 로컬 UNAVAILABLE로 끝내고 닫는다.
-     * 이미 닫혔다면 아무것도 하지 않는다(규격 3.5절).
-     */
     public void disconnect() {
         phase.transportDisconnected();
         conclude();
         output.disconnect();
     }
 
-    /**
-     * 종료 중인 연결(CLOSE를 보냈거나 받음)에서 애플리케이션이 더 기다리지 않고 닫기로 했을 때 부른다. 받아들였지만 아직 애플리케이션에
-     * 넘기지 않은 상대의 요청을 {@code RESET(REFUSED)}로 돌려보낸 뒤 전송 계층을 닫는다(규격 3.5.1절). 종료 중이 아니거나 이미 닫혔으면
-     * 아무것도 하지 않는다.
-     */
     public void abortClosing() {
         if (phase.phase() != ConnectionPhase.Phase.CLOSING) {
             return;
         }
         refuseUnhandedRequests();
-        // 더 기다리지 않으므로 대기 중인 스트림이 없어진 것으로 본다.
+
         phase.pendingStreamsReachedZero();
         conclude();
     }
 
-    /**
-     * 아직 상대에게 다 내보내지 못한 출력의 바이트 합. 쓰기 대기열에 든 것과 쓰기를 시작해 남은 부분을 더한다. 전송 모듈이 읽기를 멈출지 판단할 때 쓴다.
-     *
-     * @return 남은 출력 바이트
-     */
     public long pendingOutputBytes() {
         return outbox.bytes() + output.writingRemaining();
     }
 
-    /** 현재 쓸 출력. 철회 또는 우선순위 변경 뒤에는 새 식별자가 발급된다. */
     public @Nullable EndpointOutput nextOutput() {
         return output.next();
     }
 
-    /** 선택한 출력에 전송된 바이트 수를 보고한다. */
     public void outputProgress(long id, int count) {
         output.progress(id, count, now);
     }
 
-    /**
-     * 최대 개수만큼 사건을 순서대로 수거한다. 돌려보낸 요청의 {@code REQUEST_RECEIVED}는 걸러 내므로 돌려준 개수가 한도보다 적을 수 있다.
-     *
-     * @param maximum 한 번에 꺼낼 사건 수의 상한
-     * @return 사건 목록. 없으면 빈 목록
-     * @throws IllegalArgumentException 한도가 음수일 때
-     */
     public List<Event> drainEvents(int maximum) {
         if (maximum < 0) {
             throw new IllegalArgumentException("사건 수거 한도는 음수일 수 없다");
@@ -771,7 +506,6 @@ public final class Endpoint {
         return Collections.unmodifiableList(drained);
     }
 
-    /** 길이가 어긋난 프레임: type이 CLOSE이면 받은 CLOSE로 보고 CLOSE 없이 닫고, 아니면 연결 오류다(규격 3.5절, 5.1절). */
     private void rejectBadLength(byte[] bytes, int off) {
         if (Frames.typeOf(bytes, off) == FrameType.CLOSE) {
             phase.connectionFailed();
@@ -781,20 +515,14 @@ public final class Endpoint {
         }
     }
 
-    /**
-     * 프레임 하나를 처리한다. 프레임은 {@code bytes}의 {@code off}부터 {@code size}바이트이고, 호출자의 배열을 그대로 읽는다. 이 호출이
-     * 돌아온 뒤에는 읽지 않으며 배열을 붙잡지도 않는다(애플리케이션으로 넘기는 바이트는 복사한다).
-     */
     private void handle(byte[] bytes, int off, int size) {
         dispatch(bytes, off, size);
-        // 프레임 하나를 처리한 뒤 종료 경로를 한 번 지난다. 응답·RESET·CLOSE·오류로 대기 중인 스트림이 0개가 됐는지, 닫을 때가 됐는지는
-        // 여기서 본다. 연결 오류를 내는 핸들러는 스스로 conclude하며, conclude는 멱등이라 여기서 한 번 더 불러도 안전하다.
+
         conclude();
     }
 
     private void dispatch(byte[] bytes, int off, int size) {
-        // 불변식: 끝난 연결에서는 불리지 않는다. 입력은 enterReceive가 끝난 연결에서 막고, 프레임 하나를 처리하는 동안 연결을 끝낼 수 있는 것은
-        // 애플리케이션 콜백(연결 인증)뿐인데 그 뒤로는 이 프레임에서 admit을 다시 부르지 않는다. 그래서 phase.admit은 던지지 않는다.
+
         timers.frameReceived(now);
         int type = Frames.typeOf(bytes, off);
         int extensionsLength = Frames.extensionsLengthOf(bytes, off);
@@ -814,7 +542,7 @@ public final class Endpoint {
         boolean ack = (Frames.flagsOf(bytes, off) & Flags.ACK) != 0;
         ConnectionPhase.Admission admission = phase.admit(type, ack);
         if (admission == ConnectionPhase.Admission.RESERVED) {
-            // 예약 제어 타입은 확장 영역 검사만 받고 무시한다(규격 2.2.2절, 2.4.3절). stream_id와 관문은 보지 않는다.
+
             if (extensionsLength != 0) {
                 connectionError();
             }
@@ -825,7 +553,7 @@ public final class Endpoint {
             return;
         }
         if (admission == ConnectionPhase.Admission.CONNECTION_ERROR) {
-            // 관문(규격 3.3절)이나 HELLO·AUTH의 횟수·방향을 어겼다.
+
             connectionError();
             return;
         }
@@ -842,11 +570,6 @@ public final class Endpoint {
         }
     }
 
-    /**
-     * 받은 RESET(규격 4.4절). {@code stream_id}가 0이거나 최상위 비트가 1이거나 payload가 4바이트가 아니면 연결 오류다. 대기 중인
-     * 스트림이면 끝내고, 내 요청이었다면 로컬 결과를 넘긴다. 대기 중이 아니면 조용히 버린다(규격 4.3절). flags는 모두 미정의라 보지
-     * 않는다(규격 2.3절).
-     */
     private void handleReset(long streamId, byte[] bytes, int payloadAt, int payloadSize) {
         if (isInvalidStreamId(streamId) || payloadSize != RESET_PAYLOAD_SIZE) {
             connectionError();
@@ -858,12 +581,11 @@ public final class Endpoint {
                 applyOutcome(outcome);
             }
         } else if (peerPendingStreams.remove(streamId) != null) {
-            // 애플리케이션에 넘겼거나 넘길 요청이다. 처리를 멈출 수 있게 알린다(규격 4.4절). 같은 요청의 REQUEST_RECEIVED가 이 사건보다 앞선다.
+
             events.add(Event.requestReset(streamId, Frames.readUnsignedInt(bytes, payloadAt)));
         }
     }
 
-    /** {@code stream_id}가 0이거나 최상위 비트가 1이다(규격 2.2.5절). 최상위 비트가 1이면 {@code long}으로 음수다. */
     private static boolean isInvalidStreamId(long streamId) {
         return !Frames.isValidStreamId(streamId);
     }
@@ -872,13 +594,8 @@ public final class Endpoint {
         return ledger.isOwnSpace(streamId);
     }
 
-    /**
-     * 애플리케이션 프레임. 확장 영역 형식 위반은 요청인지 응답인지, type을 아는지와 상관없이 연결 오류다(규격 2.4.1절). 내 번호 공간의
-     * 프레임은 응답이고 상대 공간의 프레임은 새 요청이다(규격 4.2절).
-     */
     private void handleApplication(byte[] bytes, int off, int size, int type, int extensionsLength, long streamId) {
-        // 연결 오류 집합은 검사 순서가 없다(규격 5.1절 3번). 확장 영역 형식, 상대 ACK 전의 프레임(3.3절), 잘못된 stream_id.
-        // 불변식: dispatch와 같이 끝난 연결에서는 불리지 않으므로 phase.admit은 던지지 않는다.
+
         Extensions extensionsResult = extensionsLength > MAX_EXTENSIONS_LENGTH
                 ? Extensions.MALFORMED
                 : scanExtensions(bytes, off, extensionsLength);
@@ -893,10 +610,6 @@ public final class Endpoint {
         }
     }
 
-    /**
-     * 상대의 새 요청(규격 5.1절 5번). (가) 거절, (나) 모르는 type, (다) 확장 값 오류 순서로 보고, 모두 지나면 애플리케이션에 넘긴다.
-     * 거절한 요청과 오류로 답한 요청은 대기 스트림에 넣지 않지만 번호는 쓰인 것으로 센다(규격 4.5절, 5.1절).
-     */
     private void handleRequest(
             int type,
             Extensions extensionsResult,
@@ -906,13 +619,13 @@ public final class Endpoint {
             int size,
             int extensionsLength) {
         if (streamId <= highestPeerStreamId) {
-            // 번호 역행: 재사용한 번호, 건너뛰고 나중에 온 번호, 대기 중인 스트림의 번호 모두 연결 오류다(규격 4.2.1절).
+
             connectionError();
             return;
         }
         highestPeerStreamId = streamId;
         if (phase.closeExchanged()) {
-            // CLOSE를 보냈거나 받은 뒤의 새 요청은 끝까지 읽고 조용히 버린다. 어떤 프레임도 보내지 않는다(규격 3.5절).
+
             return;
         }
         if (peerPendingStreams.size() + 1 > config.maxConcurrentStreams()) {
@@ -922,7 +635,7 @@ public final class Endpoint {
         } else if (extensionsResult == Extensions.INVALID_VALUE) {
             send(Frames.response(type, streamId, Status.INVALID_ARGUMENT));
         } else {
-            // 대기 중인 요청은 항상 REQUEST_RECEIVED 이벤트와 함께 생긴다. refuseUnhandedRequests가 이 짝에 기댄다.
+
             peerPendingStreams.put(streamId, type);
             int extensionsAt = off + Frames.HEADER_SIZE;
             events.add(Event.requestReceived(
@@ -933,22 +646,16 @@ public final class Endpoint {
         }
     }
 
-    /** 확장 영역 검사 결과. 형식 위반이 값 위반보다 우선한다. */
     private enum Extensions {
         MALFORMED,
         INVALID_VALUE,
         VALID
     }
 
-    /**
-     * 확장 영역을 한 번 훑어 검사한다. 형식(규격 2.4.1절)은 항목 길이의 합이 {@code extensions_length}와 같고 같은 tag가 없는 것이고, 값(규격
-     * 2.4.2절)은 timeout이 4바이트, idempotency-key가 1~64바이트인 것이다.
-     */
     private static Extensions scanExtensions(byte[] bytes, int off, int extensionsLength) {
         return scanExtensions(bytes, off, extensionsLength, Frames.HEADER_SIZE);
     }
 
-    /** {@code headerSize}는 {@code off}에서 확장 영역이 시작하는 곳까지의 거리다. 확장 영역만 든 배열은 0이다. */
     private static Extensions scanExtensions(byte[] bytes, int off, int extensionsLength, int headerSize) {
         Set<Integer> tags = new HashSet<>();
         boolean valuesValid = true;
@@ -972,13 +679,11 @@ public final class Endpoint {
         return valuesValid ? Extensions.VALID : Extensions.INVALID_VALUE;
     }
 
-    /** 애플리케이션 프레임의 본문(확장 영역 뒤)을 복사한다. 호출자의 배열은 이 호출이 돌아온 뒤 읽지 않는다. */
     private static byte[] bodyOf(byte[] bytes, int off, int size, int extensionsLength) {
         int from = off + Frames.HEADER_SIZE + extensionsLength;
         return Arrays.copyOfRange(bytes, from, off + size);
     }
 
-    /** 내 요청의 응답. 대기 중인 요청이면 결과를 애플리케이션에 넘긴다. 종료 중이고 마지막 요청이었다면 닫는다(규격 3.5절). */
     private void handleResponse(byte[] bytes, int off, int size, int extensionsLength, long streamId) {
         OwnRequestLedger.Outcome outcome = ledger.onResponse(
                 streamId,
@@ -986,7 +691,7 @@ public final class Endpoint {
                 Frames.statusOf(bytes, off),
                 bodyOf(bytes, off, size, extensionsLength));
         if (outcome == null) {
-            // 대기 중이 아닌 스트림의 프레임은 조용히 버린다(규격 4.3절).
+
             return;
         }
         applyOutcome(outcome);
@@ -994,7 +699,7 @@ public final class Endpoint {
 
     private void handleHello(boolean ack, byte[] bytes, int payloadAt, int payloadSize) {
         if (ack) {
-            // 합친 프레임(ACK이면서 payload가 있음)과 두 번째 ACK는 연결 오류다(규격 3.2.5절).
+
             if (payloadSize != 0) {
                 connectionError();
                 return;
@@ -1018,13 +723,11 @@ public final class Endpoint {
         }
         byte[] auth = Frames.auth(config.authMechanism(), config.authCredentials());
         if (exceedsPeerFrameSize(auth)) {
-            // 3.2.1절은 상대 max_frame_size를 넘는 프레임을 금지(MUST NOT)하며 AUTH도 예외가 아니다. 상대 HELLO는 유효하므로 ACK는 3.2.3절이
-            // 요구한 대로 보냈다. 그다음 닫는 처리만 규격에 정의가 없다(#196): AUTH도 CLOSE도 보내지 않고 전송 계층만 닫는다. 아무것도 보내지
-            // 않았으므로 대기 요청은 연결이 끝날 때 처리 안 됨으로 끝난다.
+
             phase.connectionFailed();
             return;
         }
-        // 클라이언트는 서버 HELLO에 ACK를 보낸 직후 AUTH를 한 번 보낸다. 서버 ACK를 기다리지 않는다(규격 3.3절 4번).
+
         sendAwaitingAck(auth, LivenessTimers.Kind.AUTH, null);
     }
 
@@ -1046,13 +749,8 @@ public final class Endpoint {
         return Arrays.copyOf(bytes, length);
     }
 
-    /**
-     * 받은 {@code AUTH}와 {@code AUTH(ACK)}(규격 3.3.1절). 서버는 첫 {@code AUTH}를 애플리케이션에 넘기고, 클라이언트는 첫
-     * {@code AUTH(ACK)}에서 {@code credential_lifetime}을 알린다. 방향 위반, 두 번째 {@code AUTH}·{@code AUTH(ACK)},
-     * 형태 위반은 연결 오류다.
-     */
     private void handleAuth(byte[] bytes, int payloadAt, int payloadSize) {
-        // 방향과 횟수는 연결 단계가 이미 걸렀다: 서버는 첫 AUTH만, 클라이언트는 첫 AUTH(ACK)만 여기에 온다.
+
         if (server) {
             handleServerAuth(bytes, payloadAt, payloadSize);
         } else {
@@ -1078,24 +776,16 @@ public final class Endpoint {
             connectionError();
             return;
         }
-        // 자격 증명은 애플리케이션으로 넘어가므로 복사한다.
+
         byte[] credentials = Arrays.copyOfRange(bytes, payloadAt + 1 + mechanismLength, payloadAt + payloadSize);
         authenticationPending = true;
         events.add(Event.authenticationRequired(mechanism, credentials));
     }
 
-    /** 인증 판단 식별자에 대한 결과를 입력한다. 통과여도 수명은 알리지 않는다. 늦거나 중복된 결과는 무시한다. */
     public void completeAuthentication(long id, AuthDecision decision) {
         completeAuthentication(id, decision, OptionalLong.empty());
     }
 
-    /**
-     * 인증 판단 식별자에 대한 결과를 입력한다. 늦거나 중복된 결과는 무시한다.
-     *
-     * @param credentialLifetime 통과일 때 {@code AUTH(ACK)}의 {@code credential_lifetime}으로 알릴 남은 수명(초, 부호 없는 32비트).
-     *     비어 있으면 알리지 않는다. 통과가 아니면 쓰지 않는다
-     * @throws IllegalArgumentException 수명이 부호 없는 32비트 범위를 벗어났을 때
-     */
     public void completeAuthentication(long id, AuthDecision decision, OptionalLong credentialLifetime) {
         Objects.requireNonNull(decision, "decision");
         Objects.requireNonNull(credentialLifetime, "credentialLifetime");
@@ -1112,13 +802,11 @@ public final class Endpoint {
 
     private void finishAuthentication(AuthDecision decision, OptionalLong credentialLifetime) {
         if (!phase.isActive()) {
-            // 콜백 안에서 CLOSE를 보냈거나 연결 오류로 CLOSE 교환으로 쳤거나 연결이 끝났다(isActive는 이 셋을 모두 거짓으로 답한다). 판정과 무관하게
-            // CLOSE·CLOSED 뒤 프레임을 쌓지 않는다(규격 3.5절). AUTH 단계에는 대기 중인 스트림이 없어 콜백 안의 close()가 conclude()로 곧바로
-            // 연결을 끝내므로 "닫는 중이지만 안 끝난" 상태는 여기서 도달할 수 없다(EndpointEndedConnectionTest가 고정한다).
+
             return;
         }
         if (decision != AuthDecision.PASS) {
-            // 거부와 모르는 메커니즘은 UNAUTHENTICATED, 일시 실패는 INTERNAL_ERROR. 이유는 비운다(규격 3.3.1절).
+
             connectionError(decision == AuthDecision.REJECT ? ErrorCode.UNAUTHENTICATED : ErrorCode.INTERNAL_ERROR);
             return;
         }
@@ -1138,7 +826,7 @@ public final class Endpoint {
                 connectionError();
                 return;
             }
-            // 모르는 identifier는 무시한다(규격 3.3.1절).
+
             if (Frames.readUnsignedShort(bytes, at) == Frames.AUTH_PARAM_CREDENTIAL_LIFETIME) {
                 lifetime = OptionalLong.of(Frames.readUnsignedInt(bytes, at + 2));
             }
@@ -1148,10 +836,6 @@ public final class Endpoint {
         openAuthGate();
     }
 
-    /**
-     * AUTH 관문을 연다. 미뤄 둔 요청과 PING을 미룬 순서대로 보낸다. 요청에 번호를 주다가 닫히면 남은 번호 없는 요청이 끝나고(CLOSE 뒤 PING은 보내지
-     * 않는다), 전송 계층이 닫히면 모두 끝나므로, 한 단계마다 장부와 연결 상태를 다시 본다.
-     */
     private void openAuthGate() {
         phase.authGatePassed();
         while (true) {
@@ -1160,7 +844,7 @@ public final class Endpoint {
             OwnRequestLedger.Admission admission =
                     ledger.openQueued(ping == null ? Long.MAX_VALUE : ping.beforeTicket, peerMaxFrameSize);
             if (admission != OwnRequestLedger.Admission.NONE) {
-                // 크기를 넘는 미룬 요청은 호출자가 돌아간 뒤에 보내므로 던지지 않고 로컬에서 실패시킨다.
+
                 if (refuseLocally(ticket, admission) == OwnRequestLedger.Admission.OVERSIZE) {
                     failLocally(ticket);
                 }
@@ -1175,10 +859,6 @@ public final class Endpoint {
         }
     }
 
-    /**
-     * HELLO payload를 한 번 훑는다(규격 3.2.3절, 3.2.5절). 6의 배수, identifier 중복 없음, max_frame_size 범위를 검증하고, 유효하면 상대가 알린
-     * {@code max_concurrent_streams}와 {@code max_frame_size}(없으면 각 기본값)를 돌려주고, 유효하지 않으면 null을 돌려준다.
-     */
     private static @Nullable PeerLimits peerLimitsOf(byte[] bytes, int payloadAt, int payloadSize) {
         if (payloadSize % HelloParams.HELLO_PARAM_SIZE != 0) {
             return null;
@@ -1211,24 +891,23 @@ public final class Endpoint {
             connectionError();
             return;
         }
-        // 8바이트만 복사한다. 확인 대기와 맞춰 보거나 ACK로 되돌려 보낼 때 쓴다.
+
         byte[] payload = Arrays.copyOfRange(bytes, payloadAt, payloadAt + PING_PAYLOAD_SIZE);
         if (ack) {
-            // 보낸 PING과 맞춰 보는 일은 로컬 몫이고, 맞지 않는 ACK는 무시한다(규격 3.4절).
+
             timers.ackReceived(LivenessTimers.Kind.PING, payload);
         } else {
             send(Frames.control(FrameType.PING, Flags.ACK, payload));
         }
     }
 
-    /** 받은 CLOSE(규격 3.5절). 형태가 잘못돼도 받은 CLOSE로 치고, 그때는 오류 CLOSE처럼 CLOSE 없이 닫는다. */
     private void handleClose(byte[] bytes, int off, int size, int extensionsLength, long streamId) {
         int payloadSize = size - Frames.HEADER_SIZE - extensionsLength;
         long lastStreamId = 0;
         boolean malformed = extensionsLength != 0 || streamId != 0 || payloadSize < CLOSE_MIN_PAYLOAD_SIZE;
         if (!malformed) {
             lastStreamId = Frames.readLong(bytes, off + Frames.HEADER_SIZE + CLOSE_ERROR_CODE_SIZE);
-            // 최상위 비트가 1이면 long으로 음수이고 보낸 번호보다 크다. 이 값은 쓰지 않는다.
+
             malformed = lastStreamId != 0
                     && (!isOwnSpace(lastStreamId)
                             || lastStreamId < 0
@@ -1246,24 +925,12 @@ public final class Endpoint {
         endQueuedRequests();
     }
 
-    /**
-     * CLOSE를 보내거나 받은 즉시, 번호를 받지 못하고 기다리던 요청(AUTH 관문 전에 미룬 요청)을 장부가 로컬 UNAVAILABLE(처리 안 됨)로 끝낸다(규격
-     * 3.5절). 이후 새 요청은 번호를 받지 못한다. 미룬 PING은 그대로 둔다.
-     */
     private void endQueuedRequests() {
         for (OwnRequestLedger.Outcome outcome : ledger.onClosing()) {
             applyOutcome(outcome);
         }
     }
 
-    /**
-     * 끊기 전에 돌려보낸다(규격 3.5.1절, SHOULD). 받아들였지만 아직 애플리케이션이 이벤트로 받지 않은 상대의 요청을 {@code
-     * RESET(REFUSED)}로 돌려보내고 스트림을 끝낸다. 오류 CLOSE보다 먼저 호출한다.
-     *
-     * <p>암묵 불변식: {@code drainedPeerStreamId}보다 큰 번호의 대기 스트림은 항상 아직 꺼내지 않은 REQUEST_RECEIVED 이벤트와 짝이다
-     * ({@link #handleRequest}가 둘을 함께 만들고, 이벤트는 {@link #drainEvents(int)}가 {@code drainedPeerStreamId}를 올릴 때만 사라진다).
-     * 그래서 여기서 돌려보낸 요청의 이벤트를 {@link #drainEvents(int)}가 가려낼 수 있다.
-     */
     private void refuseUnhandedRequests() {
         Iterator<Long> pending = peerPendingStreams.keySet().iterator();
         while (pending.hasNext()) {
@@ -1276,18 +943,10 @@ public final class Endpoint {
         }
     }
 
-    /**
-     * 연결 오류: CLOSE(PROTOCOL_ERROR)를 보내고 닫는다. 이미 CLOSE를 보냈거나 받았다면 보내지 않는다(규격 3.5절, 5.1절). 어느 쪽이든
-     * 이 호출 뒤에는 CLOSE 교환이 된 상태다.
-     */
     private void connectionError() {
         connectionError(ErrorCode.PROTOCOL_ERROR);
     }
 
-    /**
-     * 오류 {@code errorCode}의 CLOSE를 보내고 닫는다(연결 오류, 확인 대기 초과, 연결 인증의 거부·일시 실패·대기 초과). 이미 CLOSE를 보냈거나
-     * 받았다면 보내지 않는다(규격 3.5절).
-     */
     private void connectionError(int errorCode) {
         refuseUnhandedRequests();
         if (!phase.closeExchanged()) {
@@ -1298,18 +957,11 @@ public final class Endpoint {
         conclude();
     }
 
-    /** CLOSE를 보내지 않고 닫는다. 서문과 첫 프레임 검사(규격 3.1절, 3.2.4절)가 어긋났을 때다. */
     private void closeWithoutClose() {
         phase.connectionFailed();
         conclude();
     }
 
-    /**
-     * 종료 경로: 전송 계층을 닫는 유일한 곳이다. 대기 중인 스트림이 0개이면 그 사건을 단계에 알리고, 단계가 닫을 때라고 하면 닫아 연결을 끝낸다.
-     * 연결이 끝날 때 내 요청 장부와 생존 확인 타이머에 알리고, 결과를 받지 못한 요청마다 로컬
-     * UNAVAILABLE을 한 번씩 넘긴 뒤 상대가 연 스트림을 비우고 닫은 로컬 원인과 함께 closed를 낸다(규격 3.5절). 이후 받은 바이트와 시간은
-     * 처리하지 않는다.
-     */
     private void conclude() {
         if (phase.isEnded()) {
             return;
@@ -1339,20 +991,14 @@ public final class Endpoint {
         return sendAwaitingAck(Frames.control(FrameType.PING, 0, payload), LivenessTimers.Kind.PING, payload);
     }
 
-    /**
-     * 요청을 낸 순서(번호표, 0부터)로 요청의 상태를 본다. 번호 없는 대기열 요청도 번호표로 찾는다. 결과가 나와 끝났거나 스트림을 열기 전에
-     * 로컬에서 실패한 요청, 낸 적 없는 번호표는 null이다. 쓰기 전(번호 유무 무관)과 쓰기 시작 뒤를 가르는 기준이다.
-     */
     OwnRequestLedger.@Nullable RequestState requestState(long ticket) {
         return ledger.stateOfTicket(ticket);
     }
 
-    /** 번호를 받아 아직 끝나지 않은 내 스트림의 수. 요청 기록이 끝난 요청 뒤에 남지 않는지 보는 기준이다. */
     int openStreamCount() {
         return ledger.openCount();
     }
 
-    /** 프레임이 상대가 알린 {@code max_frame_size}를 넘는다(규격 3.2.1절). */
     private boolean exceedsPeerFrameSize(byte[] frame) {
         return frame.length > peerMaxFrameSize;
     }
@@ -1361,18 +1007,10 @@ public final class Endpoint {
         return new IllegalArgumentException(kind + " 프레임이 상대의 max_frame_size(" + peerMaxFrameSize + ")를 넘는다");
     }
 
-    /** 스트림을 열기 전에 요청이 로컬에서 실패했다. 스트림 번호 없는 UNAVAILABLE 결과를 넘긴다. */
     private void failLocally(long ticket) {
         events.add(Event.localUnavailable(ticket));
     }
 
-    /**
-     * 프레임을 쓰기 대기열에 넣는다. 순서 규칙은 {@link Outbox}가 정한다. 제어 프레임은 아직 쓰기를 시작한 적 없는 애플리케이션 프레임 앞에 두고
-     * (규격 3.6절), 애플리케이션 프레임끼리는 넣은 순서 그대로다. CLOSE는 쓰기 전 요청 가운데 마지막 것 바로 뒤에 둔다. 앞서 보내면 그 요청이 CLOSE
-     * 뒤에 온 새 요청이 되어 상대가 버리기 때문이다(규격 3.5절). 그래서 그 뒤에 넣은 다른 제어 프레임(PING, RESET 등)이 그 요청 앞에 있는 CLOSE
-     * 앞에 올 수 있다. 제어 프레임끼리의 순서는 3.6절이 정하지 않고, 3.2.2절과 3.5.1절이 정한 순서(HELLO 먼저, 돌려보내는 RESET이 오류 CLOSE보다
-     * 먼저)는 CLOSE를 보내는 때에 이미 대기열에 들어 있는 RESET과 HELLO가 CLOSE 앞에 남으므로 지켜진다.
-     */
     private Outbox.Node send(byte[] frame) {
         OutboundMessage message = OutboundMessage.of(frame);
         if (message.isApplication()) {
@@ -1387,16 +1025,14 @@ public final class Endpoint {
         return outbox.addControl(message);
     }
 
-    /** ACK를 기다리는 프레임을 쌓는다. 대기 시간은 프레임의 마지막 바이트를 넘긴 때 시작한다. */
     private long sendAwaitingAck(byte[] frame, LivenessTimers.Kind kind, byte @Nullable [] payload) {
         Outbox.Node node = send(frame);
         node.waitId = timers.await(kind, payload);
         return node.waitId;
     }
 
-    /** {@link UnitSlicer}가 자른 결과를 이 상태 기계의 동작으로 옮긴다. */
     private final class UnitSink implements UnitSlicer.Sink {
-        /** 지금 처리 중인 입력 호출이 준 수거 공간. */
+
         private @Nullable CollectionSpace space;
 
         @Override
@@ -1449,10 +1085,9 @@ public final class Endpoint {
         }
     }
 
-    /** AUTH 관문을 통과할 때까지 미룬 PING 하나. */
     private static final class DeferredPing {
         final byte[] payload;
-        /** 미룰 때의 다음 번호표. 이보다 작은 번호표의 미룬 요청이 이 PING보다 먼저 나간다. */
+
         final long beforeTicket;
 
         DeferredPing(byte[] payload, long beforeTicket) {
@@ -1461,7 +1096,6 @@ public final class Endpoint {
         }
     }
 
-    /** 상대 HELLO가 알린 한도. 없는 파라미터는 규격 기본값이다. */
     private static final class PeerLimits {
         final long maxConcurrentStreams;
         final long maxFrameSize;

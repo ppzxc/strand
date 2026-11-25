@@ -4,7 +4,6 @@ import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
-/** Retained local response admission decision. */
 public final class ResponseAcceptance {
     private final AcceptanceKind kind;
     private final @Nullable Resource resource;

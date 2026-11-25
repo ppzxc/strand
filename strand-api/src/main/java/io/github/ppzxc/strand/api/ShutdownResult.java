@@ -4,7 +4,6 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
 
-/** Shutdown outcome and snapshot of resources still outstanding at the deadline. */
 public final class ShutdownResult implements java.io.Serializable {
     private static final long serialVersionUID = 1L;
     private final ShutdownKind kind;

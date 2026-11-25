@@ -13,23 +13,15 @@ import java.util.Random;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
-/**
- * 바이트 스트림 입력은 어디서 어떻게 잘라 넣어도 같은 결과여야 한다(규격 1.2절, {@code Endpoint.receive}의 계약). 같은 입력 바이트를 통째로
- * 넣은 결과를 기준으로, 모든 분할 지점, 1바이트씩, 고정 시드의 무작위 조각, 조각마다 호출자 배열을 덮어쓰는 경우를 견준다.
- *
- * <p>통째로 넣은 결과 자체도 골든 마스터({@code stream-split-golden.txt})와 견준다. 분할끼리만 견주면 모든 경로에서 같게 틀린 구현을 놓친다.
- * 보는 것은 {@code receive}와 {@code drainMessages}, {@code drainEvents}뿐이다. 골든을 다시 만드는 방법은 {@link Golden}을 본다.
- */
 class EndpointStreamSplitTest {
 
     private static final String GOLDEN_RESOURCE = "stream-split-golden.txt";
     private static final int REQUEST_TYPE = 0x0100;
     private static final int RESERVED_TYPE = 0x0006;
     private static final int MAX_FRAME_SIZE = 1_048_576;
-    /** 이 크기 이하의 입력만 모든 분할 지점을 돈다. */
+
     private static final int EXHAUSTIVE_LIMIT = 2000;
 
-    /** 입력 하나와 그것을 받는 엔드포인트. */
     private static final class Case {
         final Supplier<Endpoint> endpoint;
         final byte[] stream;
@@ -44,7 +36,6 @@ class EndpointStreamSplitTest {
         return () -> Drive.server(config);
     }
 
-    /** 서버 쪽 시점에서 서문과 HELLO 교환, AUTH 통과까지의 입력. */
     private static byte[] establishing(EndpointConfig peer) {
         return join(
                 Frames.preface(),
@@ -78,7 +69,7 @@ class EndpointStreamSplitTest {
                         server(defaults), join(established, Frames.request(REQUEST_TYPE, 1, filled(40, 3)), new byte[] {
                             0, 0, 0, 5, 0x01, 0x00, 0, 0, 0, 0
                         })));
-        // CLOSE는 길이가 어긋나도 받은 CLOSE로 보고 CLOSE 없이 닫는다. type을 읽을 때까지 기다려야 도착 단위와 무관하다(3.5절).
+
         cases.put(
                 "bad-length-close",
                 new Case(
@@ -116,7 +107,7 @@ class EndpointStreamSplitTest {
                                 Frames.request(REQUEST_TYPE, 2, filled(50, 4)),
                                 Frames.control(FrameType.PING, 0, new byte[8]),
                                 Frames.request(REQUEST_TYPE, 4, filled(2000, 5)))));
-        // 128 KiB 이상 큰 프레임 뒤에 작은 프레임. 기본 최대 프레임 크기(64 KiB)로는 쌓은 버퍼를 놓는 분기에 닿지 못한다.
+
         cases.put(
                 "big-frame-then-small",
                 new Case(
@@ -145,7 +136,6 @@ class EndpointStreamSplitTest {
         return out.toByteArray();
     }
 
-    /** 이벤트와 송신 메시지를 문자열로 줄인다. */
     private static String observe(Endpoint endpoint) {
         StringBuilder out = new StringBuilder();
         for (Event event : Drive.drainEvents(endpoint)) {
@@ -203,7 +193,6 @@ class EndpointStreamSplitTest {
         return sizes;
     }
 
-    /** 입력이 크면 모든 지점을 돌 수 없으니, 헤더와 서문, 프레임 크기 경계 근처 지점만 고른다. */
     private static List<Integer> splitPoints(int length) {
         List<Integer> points = new ArrayList<>();
         if (length <= EXHAUSTIVE_LIMIT) {
