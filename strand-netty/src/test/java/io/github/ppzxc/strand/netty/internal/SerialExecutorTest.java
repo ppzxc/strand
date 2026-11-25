@@ -140,8 +140,7 @@ class SerialExecutorTest {
         SerialExecutor serial = new SerialExecutor(Runnable::run);
         AtomicInteger ran = new AtomicInteger();
 
-        assertThatThrownBy(() -> serial.execute(ran::incrementAndGet))
-                .isInstanceOf(RejectedExecutionException.class);
+        assertThatThrownBy(() -> serial.execute(ran::incrementAndGet)).isInstanceOf(RejectedExecutionException.class);
 
         assertThat(ran).hasValue(0);
         assertThat(serial.queuedTasks()).isZero();

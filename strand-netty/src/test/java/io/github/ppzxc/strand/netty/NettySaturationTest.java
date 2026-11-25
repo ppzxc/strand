@@ -87,7 +87,8 @@ class NettySaturationTest {
     @Test
     void aSaturatedExecutorCannotRunOneConnectionHandlerOnTheEventLoopAndAnotherConnectionStillProgresses()
             throws Exception {
-        AppFixture fixture = track(new AppFixture.Spec().connections(2).perConnection(2).plain());
+        AppFixture fixture =
+                track(new AppFixture.Spec().connections(2).perConnection(2).plain());
         AtomicBoolean runNextInline = new AtomicBoolean();
         AtomicReference<String> inlineThread = new AtomicReference<>();
         Executor saturated = task -> {
@@ -113,13 +114,17 @@ class NettySaturationTest {
         NettyStrandConnection second = AppFixture.get(client.connect(AppFixture.loopback(listener)));
 
         runNextInline.set(true);
-        RequestResult firstResult = fixture.result(first.request(Request.of(TYPE, bytes("first"))).result());
-        RequestResult secondResult = fixture.result(second.request(Request.of(TYPE, bytes("second"))).result());
+        RequestResult firstResult =
+                fixture.result(first.request(Request.of(TYPE, bytes("first"))).result());
+        RequestResult secondResult =
+                fixture.result(second.request(Request.of(TYPE, bytes("second"))).result());
 
         assertThat(inlineThread.get()).startsWith("nioEventLoopGroup");
         assertThat(firstResult.status()).isNotEqualTo(Status.OK);
         assertThat(secondResult.status()).isEqualTo(Status.OK);
-        assertThat(handlerThreads).hasSize(1).allSatisfy(name -> assertThat(name).startsWith("app-executor-"));
+        assertThat(handlerThreads)
+                .hasSize(1)
+                .allSatisfy(name -> assertThat(name).startsWith("app-executor-"));
     }
 
     @Test
