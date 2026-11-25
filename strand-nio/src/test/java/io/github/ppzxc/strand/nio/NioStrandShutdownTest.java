@@ -380,6 +380,43 @@ class NioStrandShutdownTest {
     }
 
     @Test
+    void aBlockedListenerShutdownCallbackDoesNotDelayAnotherListenersNotification() throws Exception {
+        AppFixture firstFixture = track(AppFixture.plain());
+        AppFixture secondFixture = track(AppFixture.plain());
+        NioStrandServer firstServer = server(firstFixture, Duration.ofMillis(50), Duration.ofMillis(100))
+                .handler(r -> {})
+                .build();
+        NioStrandServer secondServer = server(secondFixture, Duration.ofMillis(50), Duration.ofMillis(100))
+                .handler(r -> {})
+                .build();
+        Listener firstListener = listen(firstServer);
+        Listener secondListener = listen(secondServer);
+        CountDownLatch firstCallbackStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstCallback = new CountDownLatch(1);
+        CountDownLatch secondCallbackCompleted = new CountDownLatch(1);
+        firstListener.closed().thenRun(() -> {
+            firstCallbackStarted.countDown();
+            try {
+                releaseFirstCallback.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        secondListener.closed().thenRun(secondCallbackCompleted::countDown);
+        firstFixture.executor.swallowing = true;
+        secondFixture.executor.swallowing = true;
+
+        firstServer.shutdown();
+        try {
+            assertThat(firstCallbackStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            secondServer.shutdown();
+            assertThat(secondCallbackCompleted.await(5, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            releaseFirstCallback.countDown();
+        }
+    }
+
+    @Test
     void shutdownStagesCompleteOnTheAppExecutorWhenItRunsTasks() throws Exception {
         AppFixture fixture = track(AppFixture.plain());
         NioStrandServer server = server(fixture, Duration.ofSeconds(1), Duration.ofSeconds(5))
