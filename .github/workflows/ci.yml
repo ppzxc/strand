@@ -53,6 +53,8 @@ jobs:
         run: bats .github/scripts/test
       - name: Test SCA severity policy
         run: python3 .github/scripts/test/test_osv_policy.py
+      - name: Test OSV input staging
+        run: python3 .github/scripts/test/test_prepare_osv_inputs.py
       - name: Test required CI result gate
         run: python3 .github/scripts/test/test_ci_gate.py
       # 배포 테스트 하네스 (a): mavenLocal에 배포한 core를 외부 소비자 4개가 받아 쓰는지 확인한다.
@@ -71,16 +73,17 @@ jobs:
           done
       - name: Scan resolved dependencies
         run: |
+          python3 .github/scripts/prepare-osv-inputs.py "$GITHUB_WORKSPACE" "$RUNNER_TEMP/osv-inputs"
           {
             echo "target_sha=$GITHUB_SHA"
             echo "owner=build"
             echo "gate=SEC-015"
             echo "scanner=OSV-Scanner v2.7.1 sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde"
-            echo "command=osv-scanner scan source --recursive --no-ignore --all-packages --format json --verbosity error /src"
+            echo "command=osv-scanner scan source --recursive --no-ignore --all-packages --format json --verbosity error /src; input manifest=.github/scripts/osv_inputs.py"
           } > "$RUNNER_TEMP/osv-evidence.txt"
           docker pull ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde
           scan_status=0
-          docker run --rm -v "$GITHUB_WORKSPACE:/src" ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde scan source --recursive --no-ignore --all-packages --format json --verbosity error /src > "$RUNNER_TEMP/osv-report.json" 2> "$RUNNER_TEMP/osv-errors.log" || scan_status=$?
+          docker run --rm -v "$RUNNER_TEMP/osv-inputs:/src:ro" ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde scan source --recursive --no-ignore --all-packages --format json --verbosity error /src > "$RUNNER_TEMP/osv-report.json" 2> "$RUNNER_TEMP/osv-errors.log" || scan_status=$?
           echo "scanner_exit=$scan_status" >> "$RUNNER_TEMP/osv-evidence.txt"
           if [ "$scan_status" -gt 1 ] || [ -s "$RUNNER_TEMP/osv-errors.log" ]; then
             cat "$RUNNER_TEMP/osv-errors.log"

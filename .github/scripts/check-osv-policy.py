@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+from osv_inputs import REQUIRED_INPUTS
+
 
 def fixed_versions(vulnerability):
     versions = set()
@@ -53,26 +55,7 @@ def main(path):
         if not isinstance(results, list) or not results:
             raise ValueError("OSV report has no scan results")
         sources = {result.get("source", {}).get("path", "") for result in results}
-        required_sources = {
-            "strand-api/gradle.lockfile",
-            "strand-core/gradle.lockfile",
-            "strand-nio/gradle.lockfile",
-            "strand-netty/gradle.lockfile",
-            "strand-conformance/gradle.lockfile",
-            "strand-examples/gradle.lockfile",
-            "strand-integration-test/gradle.lockfile",
-            "strand-benchmark/gradle.lockfile",
-            "strand-load/gradle.lockfile",
-            "build-logic/gradle.lockfile",
-            "gradle/verification-metadata.xml",
-            "deploy-test/gradle-classpath/gradle.lockfile",
-            "deploy-test/gradle-modulepath/gradle.lockfile",
-            "deploy-test/gradle-classpath/gradle/verification-metadata.xml",
-            "deploy-test/gradle-modulepath/gradle/verification-metadata.xml",
-            "deploy-test/maven-classpath/target/bom.json",
-            "deploy-test/maven-modulepath/target/bom.json",
-        }
-        missing = sorted(source for source in required_sources if not any(source in path for path in sources))
+        missing = sorted(source for source in REQUIRED_INPUTS if not any(source in path for path in sources))
         if missing:
             raise ValueError(f"OSV report is missing required inputs: {', '.join(missing)}")
         if not any(package for result in results for package in result.get("packages", [])):
