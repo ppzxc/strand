@@ -11,10 +11,7 @@ final class ObservationMonitor {
     private ObservationMonitor() {}
 
     static void watch(
-            Observation observation,
-            ScheduledExecutorService scheduler,
-            AtomicBoolean completed,
-            Runnable onFailure) {
+            Observation observation, ScheduledExecutorService scheduler, AtomicBoolean completed, Runnable onFailure) {
         if (completed.get()) return;
         if (observation.isDone()) {
             if (observation.failureNow().isPresent() && completed.compareAndSet(false, true)) {
@@ -22,6 +19,7 @@ final class ObservationMonitor {
             }
             return;
         }
-        scheduler.schedule(() -> watch(observation, scheduler, completed, onFailure), POLL_MILLIS, TimeUnit.MILLISECONDS);
+        scheduler.schedule(
+                () -> watch(observation, scheduler, completed, onFailure), POLL_MILLIS, TimeUnit.MILLISECONDS);
     }
 }

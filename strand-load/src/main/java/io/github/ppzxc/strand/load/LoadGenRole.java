@@ -324,39 +324,40 @@ final class LoadGenRole {
             }
         }
         java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean();
-        io.github.ppzxc.strand.api.Observation observation = connection.request(echo).result().observe(result -> {
-            if (!completed.compareAndSet(false, true)) {
-                return;
-            }
-            long done = System.nanoTime();
-            if (tag == MEASURE && classify(result)) {
-                if (inMeasurementWindow(done, windowStart, windowEnd)) {
-                    respondedInWindow.incrementAndGet();
-                }
-                latency.recordValue(Math.max(0, (done - intended) / 1_000));
-            }
-            boolean failed = result.certainty() != Certainty.RESPONSE || result.status() != Status.OK;
-            outstanding.decrementAndGet();
-            if (!config.openLoop && !stopped.get()) {
+        io.github.ppzxc.strand.api.Observation observation = connection
+                .request(echo)
+                .result()
+                .observe(result -> {
+                    if (!completed.compareAndSet(false, true)) {
+                        return;
+                    }
+                    long done = System.nanoTime();
+                    if (tag == MEASURE && classify(result)) {
+                        if (inMeasurementWindow(done, windowStart, windowEnd)) {
+                            respondedInWindow.incrementAndGet();
+                        }
+                        latency.recordValue(Math.max(0, (done - intended) / 1_000));
+                    }
+                    boolean failed = result.certainty() != Certainty.RESPONSE || result.status() != Status.OK;
+                    outstanding.decrementAndGet();
+                    if (!config.openLoop && !stopped.get()) {
 
-                if (failed) {
-                    retry.schedule(
-                            () -> executor.execute(() -> send(connection, System.nanoTime())),
-                            10,
-                            TimeUnit.MILLISECONDS);
-                } else {
-                    executor.execute(() -> send(connection, System.nanoTime()));
-                }
-            }
-        });
+                        if (failed) {
+                            retry.schedule(
+                                    () -> executor.execute(() -> send(connection, System.nanoTime())),
+                                    10,
+                                    TimeUnit.MILLISECONDS);
+                        } else {
+                            executor.execute(() -> send(connection, System.nanoTime()));
+                        }
+                    }
+                });
         ObservationMonitor.watch(observation, retry, completed, () -> {
             observationFailures.incrementAndGet();
             outstanding.decrementAndGet();
             if (!config.openLoop && !stopped.get()) {
                 retry.schedule(
-                        () -> executor.execute(() -> send(connection, System.nanoTime())),
-                        10,
-                        TimeUnit.MILLISECONDS);
+                        () -> executor.execute(() -> send(connection, System.nanoTime())), 10, TimeUnit.MILLISECONDS);
             }
         });
     }

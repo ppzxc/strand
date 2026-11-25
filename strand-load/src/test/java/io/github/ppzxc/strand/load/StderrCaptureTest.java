@@ -27,12 +27,16 @@ class StderrCaptureTest {
     @Test
     void truncatesAnUnterminatedOversizedLineWhileDetectingLeakMarker() throws Exception {
         String input = "x".repeat(50_000) + "LEAK: oversized";
-        Orchestrator.StderrCapture capture = new Orchestrator.StderrCapture(
-                new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)));
+        Orchestrator.StderrCapture capture =
+                new Orchestrator.StderrCapture(new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)));
         capture.drain();
 
         assertThat(capture.leakCount()).isEqualTo(1);
-        assertThat(capture.leakLines()).singleElement().asString().contains("LEAK:").hasSizeLessThanOrEqualTo(2_048);
+        assertThat(capture.leakLines())
+                .singleElement()
+                .asString()
+                .contains("LEAK:")
+                .hasSizeLessThanOrEqualTo(2_048);
         assertThat(capture.text()).hasSizeLessThanOrEqualTo(16_384);
     }
 }

@@ -2,11 +2,11 @@ package io.github.ppzxc.strand.load;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ppzxc.strand.api.Certainty;
 import io.github.ppzxc.strand.api.Observation;
 import io.github.ppzxc.strand.api.ObservationBudget;
 import io.github.ppzxc.strand.api.RequestResult;
 import io.github.ppzxc.strand.api.ResultCompletion;
-import io.github.ppzxc.strand.api.Certainty;
 import io.github.ppzxc.strand.api.Status;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
