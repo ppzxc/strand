@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -57,5 +59,27 @@ class StageCompletionTest {
         Thread.sleep(TimeUnit.NANOSECONDS.toMillis(FALLBACK_NANOS) * 4);
 
         assertThat(completions).hasValue(1);
+    }
+
+    @Test
+    void aBlockedFallbackCallbackDoesNotBlockAnotherFallback() throws Exception {
+        Executor holding = task -> {};
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondCompleted = new CountDownLatch(1);
+
+        StageCompletion.complete(holding, () -> {
+            firstStarted.countDown();
+            try {
+                releaseFirst.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, FALLBACK_NANOS);
+        assertThat(firstStarted.await(5, TimeUnit.SECONDS)).isTrue();
+
+        StageCompletion.complete(holding, secondCompleted::countDown, FALLBACK_NANOS);
+        assertThat(secondCompleted.await(5, TimeUnit.SECONDS)).isTrue();
+        releaseFirst.countDown();
     }
 }
