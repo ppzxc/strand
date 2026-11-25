@@ -13,7 +13,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
-/** 연결 인증 관문(AUTH)과 채널 요구가 규격, 형식 문서, 스키마, 용어집에 같은 모습으로 들어 있는지 본다(#166). core를 실행하지 않는다. */
 class AuthSpecTest {
 
     private static final Path ROOT = RequirementIndex.repositoryRoot();
@@ -28,7 +27,6 @@ class AuthSpecTest {
         return String.join("\n", Files.readAllLines(file, StandardCharsets.UTF_8));
     }
 
-    /** 절 번호에서 그 절의 본문(제목 줄부터 다음 제목 줄 앞까지)으로. 하위 절의 본문은 포함하지 않는다. */
     private static Map<String, String> sections() throws IOException {
         Map<String, String> result = new LinkedHashMap<>();
         String current = null;
@@ -54,7 +52,6 @@ class AuthSpecTest {
         return text;
     }
 
-    /** 이 문자열이 본문에 나오는 절 번호들. */
     private static List<String> sectionsContaining(String needle) throws IOException {
         List<String> found = new java.util.ArrayList<>();
         for (Map.Entry<String, String> e : sections().entrySet()) {
@@ -64,8 +61,6 @@ class AuthSpecTest {
         }
         return found;
     }
-
-    // ---- 규격 ----
 
     @Test
     void authFrameTypeIsDefinedOnceAndTheReservedRangeMovesUp() throws IOException {
@@ -91,7 +86,7 @@ class AuthSpecTest {
                 .contains("INTERNAL_ERROR")
                 .contains("CLOSE(NO_ERROR)")
                 .contains("[^RFC4422]");
-        // 단일 왕복이 되는 메커니즘과 안 되는 메커니즘의 비규범 표
+
         assertThat(auth).contains("PLAIN", "EXTERNAL", "OAUTHBEARER", "SCRAM", "GSSAPI");
     }
 
@@ -108,7 +103,7 @@ class AuthSpecTest {
 
     @Test
     void closeSectionAndAuthSectionAgreeOnWhenUnauthenticatedIsSent() throws IOException {
-        // 3.5절은 UNAUTHENTICATED를 보내는 조건을 직접 정하지 않고 정의한 절을 가리킨다(#163 후속).
+
         String close = section("3.5");
         assertThat(close).contains("UNAUTHENTICATED").contains("3.3.1절").contains("자격 증명을 폐기했다면");
     }
@@ -144,7 +139,7 @@ class AuthSpecTest {
                 .contains("[^RFC8446]")
                 .contains("[^RFC9325]")
                 .contains("[^RFC7301]");
-        // 조건 없는 MUST: 신뢰할 수 있는 네트워크라는 예외를 두지 않는다.
+
         assertThat(channel).contains("(MUST)").doesNotContain("신뢰할 수 없는 네트워크");
     }
 
@@ -188,8 +183,6 @@ class AuthSpecTest {
         assertThat(count).isGreaterThanOrEqualTo(9);
     }
 
-    // ---- 용어집 ----
-
     @Test
     void glossaryPointsTheTwoTermsToSection13() throws IOException {
         String glossary = read(GLOSSARY);
@@ -201,8 +194,6 @@ class AuthSpecTest {
         }
     }
 
-    // ---- 벡터 형식 문서와 스키마 ----
-
     @Test
     void formatDocumentDefinesSetupAuthTheTimeoutAndTheAuthSendItem() throws IOException {
         String format = read(FORMAT);
@@ -212,7 +203,7 @@ class AuthSpecTest {
                 .contains("| `AUTH` |")
                 .contains("AUTH 왕복")
                 .contains("`auth`");
-        // ack_timeout_ms는 AUTH(ACK) 대기도 다룬다.
+
         Matcher row = Pattern.compile("^\\| `ack_timeout_ms` \\|.*$", Pattern.MULTILINE)
                 .matcher(format);
         assertThat(row.find()).isTrue();

@@ -18,7 +18,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** 서버 애플리케이션이 만료·폐기·과도한 사용으로 연결을 닫을 때 양쪽 종료 알림이 사유를 구별하는지 본다(#365). */
 class CredentialCloseTest {
     private static final long EXCESSIVE_USE = 5;
     private static final long UNAUTHENTICATED = 7;
@@ -67,7 +66,7 @@ class CredentialCloseTest {
         }
 
         void sendPending() throws Exception {
-            // 팩터리가 끝나기 전의 요청은 핸들러에 닿기 전에 거절되므로(규격 4.5절) 핸들러에 전달될 때까지 다시 보낸다.
+
             while (served.isEmpty()) {
                 RequestHandle handle = client.request(
                         Request.of(TYPE, "p".getBytes(StandardCharsets.UTF_8)), RequestOptions.noDeadline());
@@ -121,7 +120,7 @@ class CredentialCloseTest {
         Pair pair = new Pair(kind);
         pair.sendPending();
         pair.server.expireCredential();
-        // 대기 스트림이 남아 있으니 닫히지 않는다. 응답으로 스트림이 끝나면 닫힌다.
+
         assertThat(pair.client.closed().isDone()).isFalse();
         assertThat(pair.server.closed().isDone()).isFalse();
         pair.served.get(0).respond(0, new byte[0]);
@@ -188,7 +187,7 @@ class CredentialCloseTest {
         Pair pair = new Pair(kind);
         assertThatThrownBy(pair.client::expireCredential).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(pair.client::revokeCredential).isInstanceOf(IllegalStateException.class);
-        // 과도한 사용 닫기는 양쪽 연결에서 쓸 수 있다.
+
         pair.client.closeExcessiveUse();
         assertThat(pair.serverNotice().errorCode()).isEqualTo(EXCESSIVE_USE);
     }

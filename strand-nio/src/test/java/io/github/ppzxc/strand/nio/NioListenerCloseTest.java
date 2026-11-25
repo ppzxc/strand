@@ -20,7 +20,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** listener.close()/closed()는 리스닝·경합 수락 소켓만 정리하고 이미 등록된 준비·활성 연결을 유지한다(#320). */
 class NioListenerCloseTest {
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -61,7 +60,6 @@ class NioListenerCloseTest {
         listener.close();
         AppFixture.get(listener.closed());
 
-        // 리스닝 소켓이 실제로 풀렸으므로 같은 포트에 다시 바인딩할 수 있다.
         try (ServerSocketChannel again = ServerSocketChannel.open()) {
             again.setOption(java.net.StandardSocketOptions.SO_REUSEADDR, true);
             again.bind(new InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), port));
@@ -174,7 +172,6 @@ class NioListenerCloseTest {
 
         listener.close();
 
-        // 경합해 수락한 소켓의 등록이 끝나기 전에는 정리 완료가 아니다.
         assertThat(listener.closed().toCompletableFuture().isDone()).isFalse();
         finishAdmit.countDown();
         AppFixture.get(listener.closed());

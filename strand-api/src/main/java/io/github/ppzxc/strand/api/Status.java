@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.api;
 
-/** Strand wire status values. */
 public final class Status {
     public static final int OK = 0,
             CANCELLED = 1,

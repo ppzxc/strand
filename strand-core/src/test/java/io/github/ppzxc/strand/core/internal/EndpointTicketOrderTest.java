@@ -8,13 +8,6 @@ import java.util.List;
 import java.util.Random;
 import org.junit.jupiter.api.Test;
 
-/**
- * 번호표 취소와 기한 만료의 관측 가능한 순서와 결과를 골든 마스터로 고정한다(#202). 클라이언트가 AUTH 관문 전(번호 없는 대기열 요청)과
- * 후(번호를 받은 요청)에 걸쳐 요청(기한 유무 섞음), 번호표 취소, 번호로 취소, 응답, RESET, 시계 전진(여러 요청이 한 번에 만료되는 큰 걸음 포함),
- * 닫기, drain을 고정 시드로 무작위로 돌리고, 이벤트와 꺼낸 메시지의 SHA-256만 비교한다. 골든은 자료구조를 바꾸기 전 구현이 낸 값이다.
- *
- * <p>골든을 다시 만드는 방법은 {@link Golden}을 본다.
- */
 class EndpointTicketOrderTest {
 
     private static final String GOLDEN_RESOURCE = "ticket-order-golden.txt";
@@ -33,7 +26,6 @@ class EndpointTicketOrderTest {
         trace.append("open ").append(endpoint.openStreamCount()).append('\n');
     }
 
-    /** 꺼낸 요청 프레임의 스트림 번호를 {@code sentStreams}에 모은다. 상대가 응답하거나 RESET할 수 있는 번호다. */
     private static void append(StringBuilder trace, Endpoint endpoint, List<Long> tickets, List<Long> sentStreams) {
         states(trace, endpoint, tickets);
         for (Event event : Drive.drainEvents(endpoint)) {
@@ -67,9 +59,9 @@ class EndpointTicketOrderTest {
         Drive.receive(endpoint, Frames.hello(EndpointConfig.defaults()));
         Drive.receive(endpoint, Frames.control(FrameType.HELLO, Flags.ACK, new byte[0]));
         Drive.drainMessages(endpoint);
-        // 이 걸음에서 AUTH 관문을 통과한다. 그 전의 요청은 번호 없는 대기열에 있다.
+
         int authAtStep = random.nextInt(OPERATIONS);
-        // 이 걸음에서 시계를 크게 밀어 여럿을 만료시키고 곧바로 닫는다(만료 중 닫힘 경로).
+
         int expireAndCloseAtStep = random.nextInt(OPERATIONS * 3);
         StringBuilder trace = new StringBuilder();
         List<Long> tickets = new ArrayList<>();
@@ -113,11 +105,9 @@ class EndpointTicketOrderTest {
                     append(trace, endpoint, tickets, sentStreams);
                     break;
                 case 9:
-                    // 상대 CLOSE: last_stream_id보다 큰 번호의 내 요청이 로컬 UNAVAILABLE로 끝난다.
                     Drive.receive(endpoint, Frames.close(ErrorCode.NO_ERROR, streamOf(random, sentStreams)));
                     break;
                 case 10:
-                    // 상대의 max_frame_size를 넘는 요청. 관문 뒤면 던지고, 관문 전이면 미뤘다가 관문이 열릴 때 로컬로 실패한다.
                     try {
                         tickets.add(endpoint.request(REQUEST_TYPE, new byte[70000], 1 + random.nextInt(60)));
                     } catch (IllegalArgumentException expected) {

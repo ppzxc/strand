@@ -8,13 +8,6 @@ import java.util.List;
 import java.util.Random;
 import org.junit.jupiter.api.Test;
 
-/**
- * 쓰기 대기열의 순서와 내용을 골든 마스터로 고정한다(#200). 고정 시드로 만든 무작위 연산 열(요청, 취소, PING, 응답, 상대 요청과 RESET, 시계,
- * 닫기, 중간 drain)을 {@code Endpoint}의 공개 입출력으로만 돌리고, 꺼낸 메시지와 이벤트의 SHA-256만 비교한다. 골든은 자료구조를 바꾸기 전
- * 구현이 낸 값이라 이 테스트가 통과하면 바꾼 뒤에도 송신 순서가 바이트 단위로 같다.
- *
- * <p>골든을 다시 만드는 방법은 {@link Golden}을 본다.
- */
 class EndpointOutboxOrderTest {
 
     private static final String GOLDEN_RESOURCE = "outbox-order-golden.txt";
@@ -22,13 +15,11 @@ class EndpointOutboxOrderTest {
     private static final int OPERATIONS = 45;
     private static final int REQUEST_TYPE = 0x0100;
 
-    /** 시나리오가 도는 환경. 시드로 고른다. */
     private enum Variant {
-        /** 바이트 스트림, 규격 기본값. */
         STREAM,
-        /** 바이트 스트림, 짧은 확인 대기와 유휴 간격. drain이 시작한 확인 대기가 실제로 만료된다. */
+
         SHORT_TIMERS,
-        /** 바이트 스트림, 받은 바이트를 단위 입력으로 넣는다. */
+
         UNIT;
 
         EndpointConfig config() {
@@ -41,7 +32,6 @@ class EndpointOutboxOrderTest {
         }
     }
 
-    /** 상대가 보낸 바이트를 넣는다. 단위 입력이면 한 번에 한 단위로 넣는다. */
     private static void feed(Variant variant, Endpoint endpoint, byte[] bytes) {
         if (variant == Variant.UNIT) {
             endpoint.receiveUnit(bytes, 0, bytes.length, EndpointDriver.ROOMY);
@@ -51,7 +41,6 @@ class EndpointOutboxOrderTest {
         }
     }
 
-    /** 서버 쪽에서 서문, HELLO 교환, AUTH 통과까지 마친 엔드포인트. 상대가 알린 동시 스트림 수는 규격 기본값이다. */
     private static Endpoint established(Variant variant) {
         Endpoint server = Drive.server(variant.config());
         feed(variant, server, Frames.preface());
@@ -90,7 +79,7 @@ class EndpointOutboxOrderTest {
         Random random = new Random(seed);
         Variant variant = Variant.values()[(int) (seed % Variant.values().length)];
         Endpoint endpoint = established(variant);
-        // 이 걸음에서 NO_ERROR로 닫는다. 이후의 취소, 만료, RESET, PING이 CLOSE가 들어 있는 대기열에 들어간다.
+
         int closeAtStep = random.nextInt(OPERATIONS * 2);
         StringBuilder trace = new StringBuilder();
         List<Long> tickets = new ArrayList<>();
@@ -155,7 +144,7 @@ class EndpointOutboxOrderTest {
             default:
                 break;
         }
-        // 닫은 뒤에도 보내고 받는다. 닫힘 처리 뒤의 순서도 고정한다.
+
         endpoint.ping(new byte[8]);
         endpoint.request(REQUEST_TYPE, payload(random));
         feed(variant, endpoint, Frames.control(FrameType.PING, 0, new byte[8]));

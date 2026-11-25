@@ -25,7 +25,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** 받은 요청의 ended()가 상대 RESET(오류 코드 포함)을 구별한다(규격 4.4절). 응답 없는 핸들러가 붙든 요청을 상대가 취소한다. */
 class NettyStrandIncomingEndTest {
     private AppFixture fixture;
     private PeerLink peer;
@@ -41,7 +40,6 @@ class NettyStrandIncomingEndTest {
         }
     }
 
-    /** 실제 서버(핸들러 {@code handler})에 core 클라이언트 Endpoint를 실제 소켓으로 붙이고 인증이 끝나기를 기다린다. 이 Endpoint가 요청을 낸다. */
     private void startServerWithRawClient(RequestHandler handler) throws Exception {
         fixture = AppFixture.plain();
         NettyStrandServer server = fixture.serverBuilder()
@@ -69,7 +67,6 @@ class NettyStrandIncomingEndTest {
         return result.resultNow().kind();
     }
 
-    /** 상대가 RESET 프레임을 보낸 것처럼 소켓에 쓴다. 규격 2.2절 머리: 길이, type, flags, status, stream_id, 확장 길이, 예약, error_code. */
     private void sendReset(long streamId, long errorCode) throws Exception {
         ByteBuffer frame = ByteBuffer.allocate(24);
         frame.putInt(20).putShort((short) 4).put((byte) 0).put((byte) 0).putLong(streamId);

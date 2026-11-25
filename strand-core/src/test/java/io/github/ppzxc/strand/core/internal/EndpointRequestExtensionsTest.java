@@ -7,12 +7,11 @@ import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** 요청 확장 영역(규격 2.4절)을 보내고 받는 경로와, 받은 요청을 핸들러 시작 전에 거절하는 경로(#316)를 본다. */
 class EndpointRequestExtensionsTest {
 
     private static final int TYPE = 0x0100;
     private static final byte[] NO_BYTES = new byte[0];
-    /** tag 0x0002(알 수 없는 선택 항목), 길이 3, 값 aa bb cc. */
+
     private static final byte[] EXTENSIONS = EndpointTest.bytes("00020003aabbcc");
 
     private static Endpoint establishedClient() {
@@ -52,7 +51,7 @@ class EndpointRequestExtensionsTest {
         expectedTail[EXTENSIONS.length + 1] = 2;
         assertThat(java.util.Arrays.copyOfRange(frame, Frames.HEADER_SIZE, frame.length))
                 .isEqualTo(expectedTail);
-        // 길이 필드는 확장 영역을 포함한 전체 길이를 센다.
+
         assertThat(Frames.readUnsignedInt(frame, 0)).isEqualTo(frame.length - Frames.LENGTH_FIELD_SIZE);
     }
 
@@ -90,7 +89,7 @@ class EndpointRequestExtensionsTest {
 
         assertThatThrownBy(() -> client.request(TYPE, new byte[] {0, 2, 0}, NO_BYTES, 0))
                 .isInstanceOf(IllegalArgumentException.class);
-        // 번호표도 쓰이지 않았다.
+
         assertThat(client.request(TYPE, NO_BYTES, NO_BYTES, 0)).isZero();
     }
 
@@ -107,7 +106,7 @@ class EndpointRequestExtensionsTest {
     @Test
     void invalidKnownExtensionValueIsRejected() {
         Endpoint client = establishedClient();
-        // timeout(tag 1)은 4바이트여야 한다.
+
         byte[] badTimeout = EndpointTest.bytes("000100020001");
 
         assertThatThrownBy(() -> client.request(TYPE, badTimeout, NO_BYTES, 0))
@@ -148,7 +147,7 @@ class EndpointRequestExtensionsTest {
         List<OutboundMessage> sent = Drive.drainMessages(server);
         assertThat(sent).hasSize(1);
         assertThat(sent.get(0).bytes()).isEqualTo(Frames.reset(1, ErrorCode.REFUSED));
-        // 스트림이 끝났으므로 같은 스트림에 응답해도 아무 일이 없다.
+
         server.respond(1, 0, NO_BYTES);
         assertThat(Drive.drainMessages(server)).isEmpty();
     }

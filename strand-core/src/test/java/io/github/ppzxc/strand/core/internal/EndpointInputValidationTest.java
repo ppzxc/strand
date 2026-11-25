@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** 애플리케이션 입력 검증(닫기의 error_code, 응답의 status)과 받은 CLOSE의 예약 error_code 취급(규격 2.5.1절, 2.5.2절). */
 class EndpointInputValidationTest {
 
     private static final int REQUEST_TYPE = 257;
@@ -74,14 +73,14 @@ class EndpointInputValidationTest {
             assertThatThrownBy(() -> server.respond(1, status, new byte[0]))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(Drive.drainMessages(server)).as("status %d", status).isEmpty();
-            // 스트림은 그대로 대기 중이므로 유효한 status로 다시 응답할 수 있다.
+
             assertThat(server.respond(1, 0, new byte[0])).isTrue();
         }
     }
 
     @Test
     void peerCloseWithReservedErrorCodeIsReportedAsInternalError() {
-        // 부호 있는 int -1은 와이어에서 0xffffffff다.
+
         for (int code : new int[] {8, 255, -1}) {
             Endpoint server = openServer();
 

@@ -40,10 +40,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 소유 객체 전체 종료의 순서, 기한 초과 결과의 고정, 실제 자원 정리 관찰, 개별 closed의 완료 경계, 외부 EventLoopGroup 소유권을 앱 공개 API로 검증한다(#326). 기한 시각은
- * 소유 객체가 쓰는 시계(System.nanoTime)로 세므로 기다림은 실제 사건과 그 시각에만 의존한다.
- */
 class NettyStrandShutdownTest {
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -93,7 +89,6 @@ class NettyStrandShutdownTest {
         return connection;
     }
 
-    /** 앱 실행기가 작업을 받고도 실행하지 않는 상태를 흉내 낸다. 거절과 달리 예외 없이 삼킨다. */
     private static final class SwallowingExecutor implements Executor {
         private final Executor delegate;
         volatile boolean swallowing;
@@ -130,8 +125,6 @@ class NettyStrandShutdownTest {
         Future<Void> stopped = server.shutdown();
         AppFixture.get(stopped);
 
-        // 리스닝 중지·연결 CLOSE가 끝났고 실제 자원이 정리된 뒤에야 성공한다.
-        // listener.closed()는 앱 실행기를 거쳐 알리므로 종료 완료와 순서가 정해져 있지 않다. 기다려서 확인한다.
         AppFixture.get(listener.closed());
         assertThat(listener.closed().isDone()).isTrue();
         CloseNotice notice = serverFixture.result(serverSide.closed());
@@ -143,7 +136,6 @@ class NettyStrandShutdownTest {
         assertThat(server.shutdownResult().resultNow().remainingResources()).isEmpty();
         AppFixture.get(server.resourcesTerminated());
         assertThat(server.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
-        // 앱이 소유한 실행기와 EventLoopGroup은 종료하지 않고 계속 쓸 수 있다.
         assertThat(serverFixture.pool.isShutdown()).isFalse();
         assertThat(serverFixture.group.isShuttingDown()).isFalse();
         assertThat(serverFixture.group.next().submit(() -> "alive").get(15, TimeUnit.SECONDS))
@@ -213,7 +205,6 @@ class NettyStrandShutdownTest {
         closeables.add(accepted::close);
         AppFixture.get(server.shutdown());
 
-        // 닫기와 경합해 이미 수락된 채널이 전체 종료가 시작된 뒤 도착한다. 연결로 등록하지 않고 소켓을 정리한다.
         acceptor.channelRead(context, new StrandChannel(listening, accepted));
 
         assertThat(accepted.isOpen()).isFalse();
@@ -241,7 +232,6 @@ class NettyStrandShutdownTest {
         }
         Future<Listener> listening = server.listen(AppFixture.anyLoopback());
 
-        // 모든 EventLoop가 막혀 바인딩이 시작되지 못했다. 진행 중인 리스닝도 전체 종료가 정리한다.
         Future<Void> stopped = server.shutdown();
         AppFixture.get(stopped);
         AppFixture.get(server.resourcesTerminated());
@@ -312,7 +302,6 @@ class NettyStrandShutdownTest {
                 .hasCauseInstanceOf(ShutdownDeadlineExceededException.class);
         assertThatThrownBy(() -> AppFixture.get(attempt.result())).isInstanceOf(ExecutionException.class);
         AppFixture.get(attempt.transportReleased());
-        // 시도는 끝났지만 주소 해석 작업은 반환할 때까지 잔존 작업이다.
         assertThat(client.shutdownResult().resultNow().remainingResources())
                 .containsEntry(Resource.RESOLVE_TASKS, 1L)
                 .doesNotContainKey(Resource.TRANSPORTS);
@@ -349,7 +338,6 @@ class NettyStrandShutdownTest {
         assertThatThrownBy(() -> AppFixture.get(stopped))
                 .isInstanceOf(ExecutionException.class)
                 .hasCauseInstanceOf(ShutdownDeadlineExceededException.class);
-        // 연결은 끊겼지만 인증 함수가 반환하지 않아 작업 슬롯이 남는다.
         ShutdownResult result = server.shutdownResult().resultNow();
         assertThat(result.remainingResources()).containsEntry(Resource.AUTHENTICATION_TASKS, 1L);
         assertThat(result.remainingResources()).doesNotContainKey(Resource.TRANSPORTS);
@@ -376,7 +364,6 @@ class NettyStrandShutdownTest {
         Listener listener = listen(server);
         NettyStrandConnection client =
                 connect(clientFixture.clientBuilder().handler(r -> {}).build(), listener);
-        // 서버가 서버 쪽 요청을 응답 없이 쥐고 있다. CLOSE는 이 요청이 끝나길 기다리므로 grace 만료 때 abort로 끊긴다.
         NettyStrandConnection accepted = serverSide.get(15, TimeUnit.SECONDS);
         RequestHandle pending = accepted.request(Request.of(TYPE, bytes("never answered")));
         long start = System.nanoTime();
@@ -413,7 +400,6 @@ class NettyStrandShutdownTest {
 
         long first = System.nanoTime();
         Future<Void> stopped = server.shutdown();
-        // 기한의 4분의 3이 지난 시점의 반복 호출이 기한을 그만큼 미룬다면 확정이 첫 호출 기준 기한의 1.75배보다 늦다.
         Thread.sleep(deadline.toMillis() * 3 / 4);
         assertThat(server.shutdown()).isSameAs(stopped);
         awaitTrue(() -> server.shutdownResult().isDone());
@@ -456,7 +442,6 @@ class NettyStrandShutdownTest {
         assertThat(result.remainingResources()).containsEntry(Resource.HANDLER_TASKS, 1L);
         assertThat(((ShutdownDeadlineExceededException) stopped.cause()).remainingResources())
                 .isEqualTo(result.remainingResources());
-        // 기한 초과 뒤에도 실제 정리는 계속되고 잔존 작업이 풀려야 resourcesTerminated가 완료한다.
         assertThat(server.resourcesTerminated().isDone()).isFalse();
         releaseHandler.complete(null);
         AppFixture.get(server.resourcesTerminated());
@@ -533,7 +518,6 @@ class NettyStrandShutdownTest {
 
         Future<Void> stopped = server.shutdown();
 
-        // 공개 완료는 앱 실행기를 거치지 않으므로 실행기가 작업을 삼켜도 막히지 않는다.
         AppFixture.get(stopped);
         AppFixture.get(server.resourcesTerminated());
         AppFixture.get(listener.closed());
@@ -567,7 +551,6 @@ class NettyStrandShutdownTest {
         serverSide.abort();
         CloseNotice notice = serverFixture.result(serverSide.closed());
 
-        // 통로는 이미 닫혔고 핸들러 작업 슬롯은 핸들러가 반환할 때까지 남는다.
         assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
         assertThat(server.resourceUsage(Resource.HANDLER_TASKS).current()).isEqualTo(1);
         assertThat(server.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
@@ -703,7 +686,6 @@ class NettyStrandShutdownTest {
             });
         }
 
-        // 리스닝 채널의 EventLoop가 막혀 있어 닫기가 끝나지 못한 채 기한이 지난다.
         Future<Void> stopped = server.shutdown();
 
         assertThatThrownBy(() -> AppFixture.get(stopped))
@@ -737,14 +719,12 @@ class NettyStrandShutdownTest {
         assertThat(handling.await(15, TimeUnit.SECONDS)).isTrue();
         java.util.Set<Thread> before = supervisors();
         Future<Void> stopped = server.shutdown();
-        // 이 종료가 시작한 감독 스레드만 골라 중단한다(앞선 시험이 남긴 감독 스레드와 구별한다).
         java.util.Set<Thread> started = supervisors();
         started.removeAll(before);
         assertThat(started).hasSize(1);
         Thread supervisor = started.iterator().next();
 
         supervisor.interrupt();
-        // 중단은 기다림을 끝내지 않는다. 핸들러가 응답해 연결이 실제로 끝나는 사건으로 마무리한다.
         releaseHandler.complete(null);
 
         AppFixture.get(stopped);

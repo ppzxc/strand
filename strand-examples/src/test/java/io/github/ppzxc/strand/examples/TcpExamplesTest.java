@@ -9,10 +9,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 서버 예제와 TCP 클라이언트 예제(제품 공개 API)를 실제로 함께 돌려 요청 하나를 주고받는다. 포트는 운영체제가 정하는 임시 포트(0)이고, 기다림은 예제 안의 상한
- * 시간뿐이다.
- */
 class TcpExamplesTest {
 
     private ServerExample.Server server;

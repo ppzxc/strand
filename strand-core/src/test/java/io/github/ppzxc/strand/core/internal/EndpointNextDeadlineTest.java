@@ -6,10 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 
-/**
- * 다음 기한 조회. 시계를 진행해야 하는 가장 이른 가상 시각을 묻고(요청 기한, 확인 대기, AUTH 대기, 유휴 PING), 그 시각까지 {@code advance}하면 그
- * 기한이 처리된다. 기한은 정각이 지나야 처리되므로 조회 값은 기한 다음 밀리초다. 가상 시계는 0에서 시작한다.
- */
 class EndpointNextDeadlineTest {
 
     @Test
@@ -98,7 +94,6 @@ class EndpointNextDeadlineTest {
         return EndpointConfig.defaults().idleIntervalMs(0).ackTimeoutMs(FAR).authTimeoutMs(FAR);
     }
 
-    /** 서버: 상대 HELLO에 ACK를 보냈고 상대 ACK도 받았으며 AUTH도 통과했다. 보낼 것은 비웠다. */
     private static Endpoint open(EndpointConfig config) {
         Endpoint server = Drive.server(config);
         Drive.receive(server, bytes(PREFACE));
@@ -178,11 +173,10 @@ class EndpointNextDeadlineTest {
         Drive.receive(client, bytes(HELLO));
         Drive.drainMessages(client);
 
-        // 클라이언트 HELLO의 대기는 0에서 시작했다.
         assertThat(client.nextDeadline()).isEqualTo(OptionalLong.of(1001));
         Drive.receive(client, bytes(HELLO_ACK));
         Drive.drainMessages(client);
-        // AUTH의 대기는 AUTH를 넘긴 때(200)부터다.
+
         assertThat(client.nextDeadline()).isEqualTo(OptionalLong.of(1201));
     }
 
@@ -196,7 +190,6 @@ class EndpointNextDeadlineTest {
         Drive.receive(server, bytes(HELLO_ACK));
         Drive.drainMessages(server);
 
-        // AUTH 대기는 상대 HELLO를 받은 때(50)부터 센다.
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(751));
         Drive.advance(server, 700);
         assertThat(Drive.drainEvents(server)).isEmpty();
@@ -222,7 +215,6 @@ class EndpointNextDeadlineTest {
         Drive.advance(server, 3000);
         Drive.drainMessages(server);
 
-        // 보낸 PING의 확인 대기는 FAR라 기한은 멀다. 유휴 PING은 ACK 전에는 다시 일정에 없다.
         assertThat(server.nextDeadline().getAsLong()).isGreaterThan(3000 + 3000);
     }
 

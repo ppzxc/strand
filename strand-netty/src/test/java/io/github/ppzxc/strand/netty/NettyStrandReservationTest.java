@@ -29,7 +29,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 접수 전 예약과 부분 실패 반환, 실행기 거절, 느린 사용자 코드에서도 결과 보존이 계속되는지 본다(#316). */
 class NettyStrandReservationTest {
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -94,7 +93,6 @@ class NettyStrandReservationTest {
         assertThat(handle.result().isDone()).isFalse();
         release.countDown();
 
-        // 준비 전에 온 요청은 거절되지 않고 활성화된 핸들러가 처리한다(규격 4.5절).
         assertThat(clientFixture.result(handle.result()).status()).isEqualTo(Status.OK);
     }
 
@@ -118,7 +116,6 @@ class NettyStrandReservationTest {
         release.countDown();
         RequestResult result = clientFixture.result(handle.result());
 
-        // 앱에 넘기지 않은 요청은 준비가 실패해도 거절되어 처리 안 됨으로 끝난다(규격 4.5절).
         assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(result.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
     }
@@ -142,7 +139,6 @@ class NettyStrandReservationTest {
         RequestResult refused = clientFixture.result(
                 connection.request(Request.of(TYPE, bytes("c"))).result());
 
-        // 수신 부족은 핸들러 시작 전 REFUSED이고 RESET(REFUSED)를 받은 요청은 처리 안 됨이다.
         assertThat(refused.status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(refused.certainty()).isEqualTo(Certainty.NOT_PROCESSED);
         assertThat(started.get()).isEqualTo(2);
@@ -281,11 +277,9 @@ class NettyStrandReservationTest {
 
         assertThat(tooBig.kind()).isEqualTo(AcceptanceKind.RESOURCE_EXHAUSTED);
         assertThat(tooBig.resource()).hasValue(Resource.RESPONSE_BYTES);
-        // 자원 부족은 응답 권한을 소비하지 않았으므로 살아 있는 요청에서 다시 응답할 수 있고, 최초 유효 응답만 접수한다.
         assertThat(retried.kind()).isEqualTo(AcceptanceKind.ACCEPTED);
         assertThat(again.kind()).isEqualTo(AcceptanceKind.ALREADY_RESPONDED);
         assertThat(clientFixture.result(handle.result()).payload()).isEqualTo(bytes("1234"));
-        // 응답 바이트는 응답 프레임이 실제로 다 쓰였다고 보고된 뒤 돌아온다(#318 #307). 상대가 응답을 받은 시점과 순서 보장이 없으므로 반환을 기다린다.
         long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
         while (app.resourceUsage(Resource.RESPONSE_BYTES).current() != 0 && System.nanoTime() < limit) {
             Thread.sleep(5);
@@ -325,7 +319,6 @@ class NettyStrandReservationTest {
         RequestHandle first = connection.request(Request.of(TYPE, bytes("first")));
         IncomingRequest cancelled = seen.poll(15, TimeUnit.SECONDS);
         first.cancel();
-        // RESET은 뒤따르는 요청보다 먼저 처리되므로 두 번째 요청이 핸들러에 닿았을 때 첫 요청은 이미 끝나 있다.
         connection.request(Request.of(TYPE, bytes("second")));
         assertThat(seen.poll(15, TimeUnit.SECONDS)).isNotNull();
 
@@ -369,7 +362,6 @@ class NettyStrandReservationTest {
         assertThat(second.isDone()).isTrue();
         assertThat(second.failureNow()).get().isInstanceOf(ResourceExhaustedException.class);
         handle.cancel();
-        // 관찰 한도가 차 있어도 결과는 확정되어 조회된다(결과 보존은 관찰 실행을 기다리지 않는다).
         awaitTrue(() -> handle.result().isDone());
         assertThat(handle.result().resultNow().status()).isEqualTo(Status.CANCELLED);
         assertThat(first.isDone()).isFalse();
@@ -407,7 +399,6 @@ class NettyStrandReservationTest {
                 })
                 .build()
                 .connect(AppFixture.loopback(listener)));
-        // 서버가 요청을 내 클라이언트 핸들러를 붙잡아 둔다(직렬 실행 칸이 막힌다).
         accepted.get(15, TimeUnit.SECONDS).request(Request.of(TYPE, bytes("hold")));
         assertThat(handlerEntered.await(15, TimeUnit.SECONDS)).isTrue();
         AtomicInteger observed = new AtomicInteger();
@@ -416,7 +407,6 @@ class NettyStrandReservationTest {
 
         awaitTrue(() -> handle.result().isDone());
 
-        // 결과는 이미 보존되어 조회되지만 기본 관찰은 같은 연결의 핸들러 뒤에서 기다린다.
         assertThat(handle.result().resultNow().status()).isEqualTo(Status.OK);
         assertThat(observed.get()).isZero();
         release.countDown();
@@ -434,7 +424,6 @@ class NettyStrandReservationTest {
         NettyStrandClient client = clientFixture.clientBuilder().build();
 
         NettyStrandConnection connection = AppFixture.get(client.connect(AppFixture.loopback(listener)));
-        // 연결이 준비된 뒤에는 어떤 작업도 받지 않는다. 결과는 보존되고 관찰만 거절된다.
         clientFixture.executor.rejecting = true;
         RequestHandle handle = connection.request(Request.of(TYPE, bytes("x")));
         awaitTrue(() -> handle.result().isDone());
@@ -458,7 +447,6 @@ class NettyStrandReservationTest {
                 .onConnectionFailure(failures::add)
                 .build();
         Listener listener = listen(app);
-        // 인증 작업만 거절한다. 실패 알림은 받는다.
         server.executor.rejectTaskNumber(2);
 
         CompletableFuture<NettyStrandConnection> stage =
@@ -479,7 +467,6 @@ class NettyStrandReservationTest {
         BlockingQueue<PreparationFailure> failures = new LinkedBlockingQueue<>();
         NettyStrandServer app = server.serverBuilder()
                 .authenticate(c -> {
-                    // 인증 작업이 도는 중에 다음 작업(팩터리)만 거절하도록 건다. 작업 번호에 기대지 않는다.
                     server.executor.rejectNextTask();
                     return AuthenticationResult.accepted("p");
                 })
@@ -488,8 +475,6 @@ class NettyStrandReservationTest {
                 .build();
         Listener listener = listen(app);
 
-        // 인증 작업과 팩터리는 같은 직렬 실행기 위에서 돈다. 인증 작업이 아직 끝나지 않았으면 팩터리는 새 작업으로 실행기에 제출되지 않고 같은 drain에
-        // 얹히므로 거절 대상이 아니다(그때는 연결이 정상 준비된다). 거절이 팩터리 제출에 닿은 시도가 나올 때까지 연결을 다시 시도한다.
         PreparationFailure failure = null;
         for (int attempt = 0; attempt < 50 && failure == null; attempt++) {
             AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
@@ -592,7 +577,6 @@ class NettyStrandReservationTest {
         assertThat(((ResourceExhaustedException) failure.cause()).resource()).isEqualTo(Resource.PREPARING_CONNECTIONS);
         hold.countDown();
         AppFixture.get(first).abort();
-        // 준비가 끝나면 준비 슬롯은 돌아오고 전체 연결 슬롯은 연결이 끝날 때까지 남는다.
         awaitTrue(() -> app.resourceUsage(Resource.PREPARING_CONNECTIONS).current() == 0);
     }
 
@@ -616,7 +600,6 @@ class NettyStrandReservationTest {
         assertThat(failure).isNotNull();
         assertThat(failure.stage()).isEqualTo(PreparationStage.CONNECTION);
         assertThat(((ResourceExhaustedException) failure.cause()).resource()).isEqualTo(Resource.FRAME_ASSEMBLY_BYTES);
-        // 부분 실패는 확보분을 모두 돌려준다: 첫 연결 몫만 남는다.
         assertThat(app.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isEqualTo(1);
         assertThat(app.resourceUsage(Resource.PREPARING_CONNECTIONS).current()).isIn(0L, 1L);
         first.abort();
@@ -687,7 +670,6 @@ class NettyStrandReservationTest {
 
         listener.close();
 
-        // 닫기는 EventLoop에서 이어지므로, 새 연결이 실패할 때까지 시도한다. 실패 전에 맺어진 연결은 정리한다.
         awaitTrue(() -> {
             CompletableFuture<NettyStrandConnection> attempt =
                     AppFixture.cf(client.connect(AppFixture.loopback(listener)));
@@ -736,7 +718,6 @@ class NettyStrandReservationTest {
         server.result(accepted.get(15, TimeUnit.SECONDS).closed());
         release.countDown();
 
-        // 직렬 칸에서 기다리던 핸들러는 연결이 끝난 뒤 시작하지 않는다.
         awaitTrue(() -> app.resourceUsage(Resource.HANDLER_TASKS).current() == 0);
         assertThat(started.get()).isEqualTo(1);
     }

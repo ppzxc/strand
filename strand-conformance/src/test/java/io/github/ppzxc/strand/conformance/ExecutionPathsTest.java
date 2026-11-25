@@ -9,7 +9,6 @@ import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** 실행 경로 목록: 경로는 한 곳에서 이름으로 고르고, 보고서에 찍히는 이름은 벡터 형식 문서의 값 그대로다. */
 class ExecutionPathsTest {
 
     @Test

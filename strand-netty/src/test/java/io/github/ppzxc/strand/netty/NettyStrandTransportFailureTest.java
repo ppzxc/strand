@@ -19,7 +19,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 전송이 준비 중에 끊기는 경우와 접수 예약의 반환. 실패는 준비 실패로 관찰되고 예약은 모두 돌아온다(#322). */
 class NettyStrandTransportFailureTest {
     private AppFixture fixture;
 
@@ -30,14 +29,12 @@ class NettyStrandTransportFailureTest {
         }
     }
 
-    /** 맺은 연결에서 첫 바이트를 받은 뒤 RST로 끊는 상대. */
     private static Thread resettingPeer(ServerSocket server) {
         Thread thread = new Thread(() -> {
             try (Socket socket = server.accept()) {
                 socket.getInputStream().read();
                 socket.setSoLinger(true, 0);
             } catch (IOException ignored) {
-                // 시험 상대가 끝났다.
             }
         });
         thread.setDaemon(true);

@@ -14,14 +14,12 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
 
-/** 벡터 디렉터리를 읽어 벡터마다 동적 테스트를 만든다. */
 final class VectorSuite {
 
     private VectorSuite() {}
 
     static final String VECTORS_DIR_PROPERTY = "strand.conformance.vectors.dir";
 
-    /** 빌드가 {@value #VECTORS_DIR_PROPERTY} 시스템 프로퍼티로 넘긴 벡터 디렉터리. 다른 디렉터리의 벡터를 돌릴 때도 같은 프로퍼티를 쓴다. */
     static Path defaultDirectory() {
         String dir = System.getProperty(VECTORS_DIR_PROPERTY);
         if (dir == null) {
@@ -35,7 +33,7 @@ final class VectorSuite {
         assertThat(files).as("벡터 파일이 하나도 없다: %s", directory.toAbsolutePath()).isNotEmpty();
         List<DynamicTest> tests = new ArrayList<>();
         for (Path file : files) {
-            // 테스트 이름은 `파일명/id`(벡터 형식 문서 3절).
+
             String name = fileKey(file);
             for (ConformanceVector vector : VectorLoader.load(file)) {
                 String id = name + "/" + vector.id();
@@ -53,13 +51,11 @@ final class VectorSuite {
         return tests.stream();
     }
 
-    /** 테스트 이름과 벡터 키에 쓰는 이름: 파일명에서 `.json`을 뺀 것(벡터 형식 문서 3절). */
     static String fileKey(Path file) {
         String fileName = file.getFileName().toString();
         return fileName.substring(0, fileName.length() - ".json".length());
     }
 
-    /** 디렉터리의 벡터 파일(`*.json`)을 이름순으로. */
     static List<Path> jsonFiles(Path directory) {
         try (Stream<Path> children = Files.list(directory)) {
             List<Path> files = children.filter(p -> p.getFileName().toString().endsWith(".json"))

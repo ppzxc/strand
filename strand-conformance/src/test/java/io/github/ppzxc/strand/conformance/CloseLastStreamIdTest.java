@@ -16,12 +16,10 @@ import java.util.Set;
 import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
-/** CLOSE의 {@code last_stream_id}와 CLOSE 뒤 새 요청 폐기를 벡터가 빠짐없이 다루는지 본다(#162). */
 class CloseLastStreamIdTest {
 
     private static final Path SPEC = RequirementIndex.specificationFile();
 
-    /** 받는 CLOSE의 payload가 12바이트 미만인 것이 벡터의 목적인 벡터. */
     private static final Set<String> SHORT_CLOSE_VECTORS = new TreeSet<>(Arrays.asList(
             "close-races/close-payload-three-bytes-closes-silently",
             "close-races/close-payload-empty-closes-silently",
@@ -44,7 +42,6 @@ class CloseLastStreamIdTest {
         return new ArrayList<>();
     }
 
-    /** hex에서 완전한 프레임만 풀어, CLOSE 프레임마다 payload 바이트 수를 돌려준다. */
     private static List<Long> closeFrames(String hex) {
         List<Long> result = new ArrayList<>();
         int pos = 0;
@@ -123,16 +120,12 @@ class CloseLastStreamIdTest {
     }
 
     private static final List<String> NEW_VECTORS = Arrays.asList(
-            // 엇갈린 요청
             "close-races/close-last-stream-id-ends-crossed-request-as-not-processed",
             "close-races/error-close-last-stream-id-ends-crossed-request-as-not-processed",
-            // 잘못된 값
             "close-races/close-last-stream-id-in-own-number-space-is-malformed",
             "close-races/close-last-stream-id-above-highest-sent-is-malformed",
             "close-races/close-payload-eleven-bytes-closes-silently",
-            // 처음 CLOSE만 사용
             "close-races/first-close-last-stream-id-is-the-only-one-used",
-            // CLOSE 뒤 새 요청 폐기
             "backpressure/request-after-close-received-is-dropped-silently",
             "backpressure/request-after-close-sent-is-dropped-silently",
             "backpressure/request-after-close-with-regressed-number-closes-silently");

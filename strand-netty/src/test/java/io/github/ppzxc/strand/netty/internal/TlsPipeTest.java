@@ -13,11 +13,9 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 import org.junit.jupiter.api.Test;
 
-/** TLS 구동의 평문 소비 보고, 암호문 공간 예약, 핸드셰이크 규칙, 버퍼 반환. 두 구동을 메모리 연결로 이어 실제 JDK 엔진으로 확인한다. */
 class TlsPipeTest {
     private static final byte[] HELLO = "hello strand".getBytes(StandardCharsets.UTF_8);
 
-    /** 한쪽 구동이 쓴 암호문을 모으는 선. {@code budget}만큼만 받아 주어 쓰기 막힘을 흉내 낸다. */
     private static final class Wire implements TlsPipe.Sink {
         private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         int budget = Integer.MAX_VALUE;
@@ -115,7 +113,6 @@ class TlsPipeTest {
         int first = client.writePlain(HELLO, 0, HELLO.length);
         int whileBlocked = client.writePlain(HELLO, 0, HELLO.length);
 
-        // 평문은 소비했지만 암호문은 일부만 나갔다. 데이터 암호문 공간이 비기 전에는 다음 wrap을 하지 않는다.
         assertThat(first).isEqualTo(HELLO.length);
         assertThat(client.pendingOutput()).isTrue();
         assertThat(whileBlocked).isZero();
@@ -236,7 +233,6 @@ class TlsPipeTest {
     void readingStopsOnceMoreThanOnePacketOfAnUnfinishedRecordIsHeld() throws Exception {
         pipes();
         assertThat(client.canAcceptRead()).isTrue();
-        // 18000바이트 핸드셰이크 레코드를 선언하고 그 앞부분만 준다. 레코드가 끝나지 않아 풀 수 없고 그대로 쌓인다.
         byte[] first = new byte[sizes.packetBufferSize()];
         first[0] = 22;
         first[1] = 3;
@@ -257,7 +253,6 @@ class TlsPipeTest {
         client.pump();
         toClient.budget = 0;
 
-        // 서버는 ClientHello를 받고 응답 여러 레코드를 wrap해야 하지만, 채널이 첫 레코드를 받아 주지 않아 제어용 암호문 공간이 찬 채로 멈춘다.
         deliver(toServer, server);
         server.pump();
 

@@ -6,7 +6,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Experimental ByteBuf-only outbound path, not a production channel. */
 public final class ProgressChannel extends BoundaryChannel {
     private int zeroWrites;
 

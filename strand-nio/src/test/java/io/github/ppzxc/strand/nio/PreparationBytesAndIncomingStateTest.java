@@ -9,7 +9,6 @@ import io.github.ppzxc.strand.nio.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.nio.internal.OwnerBudgets;
 import org.junit.jupiter.api.Test;
 
-/** 예약 반환의 멱등성: 반복해 돌려줘도 한 번만 효과가 있다. */
 class PreparationBytesAndIncomingStateTest {
 
     @Test
@@ -54,7 +53,7 @@ class PreparationBytesAndIncomingStateTest {
                     1,
                     10,
                     new ResultCompletion<>(fixture.executor, new ObservationBudget(1), new ObservationBudget(1)));
-            // 핸들러만 끝났을 때는 요청이 아직 끝나지 않았다.
+
             state.handlerSettled();
             assertThat(state.claimBytesReturn()).isFalse();
 

@@ -16,9 +16,9 @@ class TlsBoundaryTest {
     @Test
     void ciphertextSocketProgressCanStopAfterPlaintextConsumption() throws Exception {
         int[] observed = TlsProbe.pressure();
-        assertThat(observed[0]).isPositive(); // plaintext consumed
-        assertThat(observed[1]).isPositive(); // partial ciphertext write
-        assertThat(observed[2]).isEqualTo(1); // zero ciphertext write
+        assertThat(observed[0]).isPositive();
+        assertThat(observed[1]).isPositive();
+        assertThat(observed[2]).isEqualTo(1);
     }
 
     @Test

@@ -7,7 +7,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
-/** 단계 종류 정의의 내부 불변식: 형태·실행·지원 여부·타이밍 성질이 한 정의에서 나온다. */
 class StepKindTest {
 
     private static JsonObject json(String text) {

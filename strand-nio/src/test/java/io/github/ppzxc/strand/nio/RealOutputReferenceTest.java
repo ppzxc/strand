@@ -10,10 +10,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/**
- * 실제 TCP와 TLS에서 부분 쓰기 뒤 취소된 요청의 바이트 예약이 본문을 가진 프레임이 다 나갈 때까지 유지되고(요청 수만 결과 확정 때 돌아온다) 한 번만 돌아오는지
- * 본다. TLS에서는 평문 전체 소비가 기준이다.
- */
 class RealOutputReferenceTest {
     private static final byte[] BIG = new byte[900 * 1024];
 

@@ -25,12 +25,8 @@ import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
-/**
- * 제품 엔진이 연 통로를 테스트가 감쌀 수 있는 테스트 전용 지점({@link PassageWrapping})을 확인한다. 지점은 {@code internal}에만 있고 공개 API에는 나타나지 않는다.
- */
 class PassageWrappingTest {
 
-    /** 쓴 바이트를 세는 통로. 감싼 통로 위에서도 연결이 그대로 도는지 보려고 모든 호출을 그대로 넘긴다. */
     private static final class CountingPassage implements Passage {
         private final Passage delegate;
         final AtomicLong written = new AtomicLong();
@@ -62,7 +58,6 @@ class PassageWrappingTest {
         }
     }
 
-    /** 서버와 클라이언트를 각자의 감싸개(null이면 없음)로 만들어 요청 하나를 주고받는다. */
     private static RequestResult echoOnce(
             AppFixture fixture,
             PassageWrapping.@Nullable Wrapper serverWrapper,
@@ -122,7 +117,6 @@ class PassageWrappingTest {
         }
     }
 
-    /** 감싸개는 주입한 builder의 연결에만 적용된다. 같은 프로세스의 다른 서버·클라이언트는 감싸개가 있어도 영향이 없다. */
     @Test
     void aWrapperOnlyAffectsConnectionsOfTheBuildersItWasInjectedInto() throws Exception {
         List<PassageWrapping.Side> sides = new CopyOnWriteArrayList<>();
@@ -130,7 +124,7 @@ class PassageWrappingTest {
         PassageWrapping.Wrapper wrapper = counting(sides, wrapped);
         try (AppFixture observed = AppFixture.plain();
                 AppFixture other = AppFixture.plain()) {
-            // 서버에만 주입한다. 클라이언트와, 감싸개가 없는 다른 서버·클라이언트 한 쌍은 감싸지 않는다.
+
             echoOnce(observed, wrapper, null);
             assertThat(sides).containsExactly(PassageWrapping.Side.SERVER);
 
@@ -155,7 +149,7 @@ class PassageWrappingTest {
                     .handler(request -> request.respond(Status.OK, request.payload()))
                     .build();
             try {
-                // 감싸개를 가진 서버가 떠 있는 동안 다른 쌍을 돌린다.
+
                 assertThat(echoOnce(other, null, null).status()).isEqualTo(Status.OK);
                 assertThat(sides).isEmpty();
             } finally {
@@ -176,7 +170,6 @@ class PassageWrappingTest {
         }
     }
 
-    /** 통로를 감싸는 지점은 공개 패키지의 public 타입·메서드 어디에도 드러나지 않는다. */
     @Test
     void thePassageWrappingSeamAppearsNowhereInThePublicApi() throws Exception {
         List<String> exposing = publicPackageClassNames().stream()
@@ -200,7 +193,6 @@ class PassageWrappingTest {
         }
     }
 
-    /** 공개 패키지({@code io.github.ppzxc.strand.nio})의 클래스 이름. 컴파일 결과가 디렉터리든 jar든 읽는다. */
     private static List<String> publicPackageClassNames() throws Exception {
         String folder = "io/github/ppzxc/strand/nio";
         Path location = Paths.get(NioStrandServer.class

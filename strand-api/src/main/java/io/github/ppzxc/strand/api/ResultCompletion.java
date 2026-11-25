@@ -9,7 +9,6 @@ import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 
-/** Transport-side completion of a retained result. */
 public final class ResultCompletion<T> implements Result<T> {
     private final Executor defaultExecutor;
     private final ObservationBudget connectionBudget;
@@ -24,12 +23,6 @@ public final class ResultCompletion<T> implements Result<T> {
         this(defaultExecutor, connectionBudget, ownerBudget, null);
     }
 
-    /**
-     * 일반 관찰 한도와 별도로 자리 하나({@code dedicated})를 이 결과에 둔다. 관찰은 이 자리를 먼저 쓰므로 일반 한도가 모두 차 있어도 한 건은 등록된다.
-     * 자리가 쓰이는 동안 오는 관찰은 일반 한도를 쓴다. 연결의 기본 종료 알림 자리가 이렇게 확보된다.
-     *
-     * @param dedicated 별도 자리. 없으면 일반 한도만 쓴다
-     */
     public ResultCompletion(
             Executor defaultExecutor,
             ObservationBudget connectionBudget,
@@ -41,7 +34,6 @@ public final class ResultCompletion<T> implements Result<T> {
         this.dedicated = dedicated;
     }
 
-    /** 관찰 자리를 예약한다. 예약했으면 돌려줄 때 부를 동작을, 모자라면 null을 돌려준다. */
     private @Nullable Runnable reserve() {
         ObservationBudget slot = dedicated;
         if (slot != null && slot.acquire()) {
@@ -58,6 +50,7 @@ public final class ResultCompletion<T> implements Result<T> {
         return null;
     }
 
+    @SuppressWarnings("EmptyCatch")
     public boolean complete(T result) {
         Objects.requireNonNull(result);
         List<Consumer<T>> pending;
@@ -72,7 +65,7 @@ public final class ResultCompletion<T> implements Result<T> {
             try {
                 listener.accept(result);
             } catch (Throwable ignored) {
-                // a failing listener must not change the retained result or skip later listeners
+
             }
         }
         return true;
@@ -136,18 +129,12 @@ public final class ResultCompletion<T> implements Result<T> {
         return observation;
     }
 
-    /** 결과 확정 경로에서 직접 실행되는 등록의 취소 손잡이. */
     public interface Listening {
-        /** 아직 실행되지 않았다면 등록을 제거하고 예약을 한 번 돌려준다. 이미 실행되었거나 반복해도 효과가 없다. */
+
         void cancel();
     }
 
-    /**
-     * 전송 모듈 내부용 등록이다. 앱 실행기를 거치지 않고 결과를 확정하는 스레드에서(이미 확정되었으면 호출 스레드에서) {@code listener}를 바로 실행한다. 관찰과 같은 연결·소유 객체
-     * 한도를 등록 시 예약하고 {@code listener}가 끝나면 돌려준다. 예외는 결과를 바꾸지 않는다.
-     *
-     * @throws ResourceExhaustedException 관찰 한도가 차서 등록하지 못한 경우
-     */
+    @SuppressWarnings("EmptyCatch")
     public Listening listen(Consumer<? super T> listener) {
         Objects.requireNonNull(listener);
         Runnable release = reserve();
@@ -156,7 +143,7 @@ public final class ResultCompletion<T> implements Result<T> {
             try {
                 listener.accept(result);
             } catch (Throwable ignored) {
-                // a failing listener must not change the retained result
+
             } finally {
                 release.run();
             }

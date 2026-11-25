@@ -6,7 +6,6 @@ import java.io.IOException;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-/** {@link InMemoryPassage}가 {@link PassageContract}를 지킨다. 실제 시간 모드와 수동 시간 모드 둘 다 시험한다. */
 class InMemoryPassageContractTest {
 
     private static final long BLOCKED_AFTER_BYTES = 4096;

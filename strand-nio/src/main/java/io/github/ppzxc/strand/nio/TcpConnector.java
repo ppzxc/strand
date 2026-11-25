@@ -23,12 +23,8 @@ import java.util.function.LongSupplier;
 import javax.net.ssl.SSLContext;
 import org.jspecify.annotations.Nullable;
 
-/**
- * 클라이언트 연결 스레드가 서버 주소로 TCP 연결을 맺고 채널 보안 설정에 맞는 통로를 여는 동작. 주소 해석은 앱용 실행기의 작업으로 하고 기다림에 준비 기한을
- * 적용하며, 해석된 주소는 하나씩 순서대로 시도한다. 모든 시도는 처음 정한 준비 기한을 공유한다. 취소는 진행 중인 해석 대기와 TCP 연결을 끊는다.
- */
 final class TcpConnector implements ConnectionParams.PassageOpener {
-    /** 호스트 이름을 주소 목록으로 해석한다. 블로킹할 수 있다. */
+
     @FunctionalInterface
     interface Resolver {
         InetAddress[] resolve(String host) throws UnknownHostException;
@@ -69,7 +65,7 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
         try {
             return open(deadline, resolvedBytes);
         } finally {
-            // 해석한 주소 목록은 열기가 끝나면 버리므로 그 바이트를 돌려준다.
+
             preparationBytes.release(resolvedBytes[0]);
         }
     }
@@ -108,7 +104,6 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
         return PassageFactory.open(channel, tlsContext, target.getHostString(), target.getPort());
     }
 
-    /** 해석하지 않은 주소는 해석 작업 슬롯을 예약해 앱용 실행기에서 해석한다. 해석한 주소는 보관 바이트를 예약한 뒤 보관한다. */
     private List<InetSocketAddress> targets(long deadline, long[] resolvedBytes) throws IOException {
         List<InetSocketAddress> targets = new ArrayList<>();
         if (!address.isUnresolved()) {
@@ -129,8 +124,7 @@ final class TcpConnector implements ConnectionParams.PassageOpener {
                 } catch (Throwable t) {
                     failure = t;
                 }
-                // 해석 작업이 실제로 반환할 때까지 슬롯을 유지한다. 기한·취소가 기다림을 끝내도 반환하지 않는다.
-                // 반환 결과를 알리기 전에 돌려놓는다. 알린 뒤에 돌려주면 그 사이에 시도가 끝났다고 보는 쪽이 슬롯이 아직 쓰이는 것을 본다.
+
                 budgets.owner().release(Resource.RESOLVE_TASKS, 1);
                 if (failure != null) {
                     resolved.completeExceptionally(failure);

@@ -4,7 +4,6 @@ import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
-/** Retained request status, certainty and application-owned payload. */
 public final class RequestResult {
     private final int status;
     private final Certainty certainty;

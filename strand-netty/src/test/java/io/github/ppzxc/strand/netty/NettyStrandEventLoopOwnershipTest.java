@@ -12,7 +12,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** Netty 사용자의 EventLoop 환경: 앱이 소유한 EventLoopGroup·실행기를 종료하지 않고, listen·connect의 Future는 EventLoop에서 완료된다(#322). */
 class NettyStrandEventLoopOwnershipTest {
     private AppFixture fixture;
 
@@ -74,7 +73,6 @@ class NettyStrandEventLoopOwnershipTest {
         assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
         assertThat(fixture.group.isShuttingDown()).isFalse();
         assertThat(fixture.pool.isShutdown()).isFalse();
-        // 앱의 EventLoop는 여전히 일을 받는다.
         assertThat(fixture.group.submit(() -> "alive").get(15, TimeUnit.SECONDS))
                 .isEqualTo("alive");
     }

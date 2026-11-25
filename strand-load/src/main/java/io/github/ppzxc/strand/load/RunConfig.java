@@ -8,9 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** {@code run} 명령의 설정. 실행 전에 모두 검증해 잘못된 설정으로 긴 실행을 헛돌리지 않는다. */
 final class RunConfig {
-    /** 설정 오류. 종료 상태 2로 끝난다. */
+
     static final class Invalid extends Exception {
         private static final long serialVersionUID = 1L;
 
@@ -28,25 +27,25 @@ final class RunConfig {
     final Duration warmup;
     final Duration measure;
     final boolean openLoop;
-    /** 개방형 도착률(요청/초, 전체 연결 합). 절대값이면 rateFraction은 0이다. */
+
     final double rate;
-    /** {@code --rate 50%}처럼 포화 처리량의 비율로 준 경우 0~1. 아니면 0이다. */
+
     final double rateFraction;
 
     final int repetitions;
-    /** 이미 잰 포화 처리량(요청/초). 0이면 없다. 행렬 실행이 같은 셀의 폐쇄형 결과를 개방형에 넘길 때 쓴다. */
+
     final double saturation;
-    /** 켠 상태가 주 비교다. {@code --plaintext}는 하네스 한정 대조군이며 제품 설정으로 노출되지 않는다. */
+
     final boolean tls;
-    /** 자식 프로세스 전용: 진행자가 만든 키 저장소 경로. */
+
     final String keystore;
-    /** 쓰기 정체 시나리오({@code stall} 명령)용: 서버가 상대에게 계속 요청을 밀어 넣는다. */
+
     final boolean stall;
-    /** soak 실행: 일정 부하로 오래 돌리며 자원 추이를 표본으로 남긴다. */
+
     final boolean soak;
-    /** netty 전송 바인딩: {@code tcp} 또는 {@code websocket}(ADR 0007, netty만 지원). */
+
     final String binding;
-    /** 부하 생성기의 클라이언트 전송. 기본 nio로 고정하고, 클라이언트 전송 비교나 WebSocket에서만 netty를 쓴다. */
+
     final String loadgenTransport;
 
     final Duration sampleInterval;
@@ -54,16 +53,16 @@ final class RunConfig {
     final Duration idlePing;
     final Duration ackTimeout;
     final Duration maxWait;
-    /** JFR 기록을 켠다. 기록은 {@link #profileDir}에 프로세스별로 남는다. */
+
     final boolean jfr;
-    /** async-profiler 네이티브 라이브러리 경로. null이면 쓰지 않는다(선택 사항). */
+
     final String asyncProfiler;
 
     final String profileDir;
 
-    final Duration serverDelay; // 하네스 자체 시험용: 서버가 응답을 이만큼 미룬다.
-    final String output; // null이면 표준 출력
-    final Duration chaosKillServerAfter; // null이면 사용하지 않는다(하네스 자체 시험용)
+    final Duration serverDelay;
+    final String output;
+    final Duration chaosKillServerAfter;
 
     private RunConfig(Map<String, String> options) throws Invalid {
         this.transport = options.getOrDefault("--transport", "nio");
@@ -86,7 +85,7 @@ final class RunConfig {
                     "--binding websocket은 서버와 부하 생성기 모두 netty여야 한다(--transport netty --loadgen-transport netty, ADR 0007)");
         }
         this.sampleInterval = duration(options, "--sample-interval", Duration.ofSeconds(10), false);
-        // 쓰기 정체는 버퍼가 빨리 차도록 큰 본문과 넉넉한 미완료 수를 기본으로 한다.
+
         this.bodyBytes = positiveInt(options, "--body-bytes", stall ? 65_536 : 64);
         this.inflight = positiveInt(options, "--inflight", stall ? 32 : 8);
         this.idlePing = duration(options, "--idle-ping", Duration.ofSeconds(30), true);
@@ -167,7 +166,6 @@ final class RunConfig {
         this.chaosKillServerAfter = chaos == null ? null : parseDuration("--chaos-kill-server-after", chaos, false);
     }
 
-    /** {@code --이름 값} 쌍을 검증한다. 모르는 옵션이나 값 없는 옵션은 거절한다. */
     static RunConfig parse(List<String> args) throws Invalid {
         Set<String> known = Set.of(
                 "--transport",
@@ -239,7 +237,6 @@ final class RunConfig {
         return raw == null ? fallback : parseDuration(name, raw, zeroAllowed);
     }
 
-    /** {@code 500ms}, {@code 30s}, {@code 2m} 형식만 받는다. */
     static Duration parseDuration(String name, String raw, boolean zeroAllowed) throws Invalid {
         long multiplierMillis;
         String number;
@@ -266,9 +263,6 @@ final class RunConfig {
         }
     }
 
-    /**
-     * 연결별 요청 한도. 결과 알림이 한도 반환보다 먼저 올 수 있어, 다음 요청이 일시적으로 한도를 넘어 거절되지 않도록 미완료 창의 두 배를 한도로 둔다. 한도는 계산만 하며 실제 미완료 수는 창이 정한다.
-     */
     int requestLimit() {
         return 2 * effectiveInflight();
     }
@@ -277,12 +271,6 @@ final class RunConfig {
         return openLoop ? Math.max(inflight, 1024) : inflight;
     }
 
-    /**
-     * 자식 프로세스에 넘기는 인자. 도착률 비율은 진행자가 포화 처리량으로 풀어 절대값으로 넘긴다.
-     *
-     * @param resolvedRate 개방형이면 요청/초, 폐쇄형이면 무시
-     * @param closedOverride true면 설정과 무관하게 폐쇄형으로 돌린다(포화 처리량 측정용)
-     */
     List<String> childArgs(double resolvedRate, boolean closedOverride, String keystorePath) {
         List<String> args = new ArrayList<>(Arrays.asList(
                 "--transport",

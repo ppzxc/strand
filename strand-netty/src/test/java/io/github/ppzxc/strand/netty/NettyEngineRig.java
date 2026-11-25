@@ -34,18 +34,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntFunction;
 import java.util.function.UnaryOperator;
 
-/**
- * 연결 엔진 하나(클라이언트 또는 서버)를 수동 시계와 시험이 쓰기를 쥐는 실제 채널에 꽂고, 맞은편 실제 소켓에서 core {@link Endpoint}를 {@link PeerLink}로 굴린다.
- * nio 쪽 {@code EngineRig}에 대응하는 netty 시험대다. 채널의 쓰기 용량으로 쓰기 막힘(0)·부분·전체를, 삼킴({@link TestChannel#mute})으로 상대에 닿지 않는 쓰기를,
- * 입력 주입({@link #inject})으로 상대 없이 엔진 입력을 만든다. 엔진의 한 걸음은 입력 처리 → 시계 → 명령 처리 순서이고 시계는 수동이라, 시계를 올린 뒤 {@link #tick}이 빈
- * 입력으로 걸음을 한 번 돌려 엔진이 올라간 시계를 보게 한다.
- */
 final class NettyEngineRig implements AutoCloseable {
     static final int TYPE = AppFixture.TYPE;
     private static final int SMALL_BUFFER = 4096;
     private static final long HOUR_MS = TimeUnit.HOURS.toMillis(1);
 
-    /** 쓰기 용량·삼킴·실패를 시험이 정하고, 받아 준 합과 한 바이트도 못 받아 준(멈춤) 횟수를 센다. */
     static final class TestChannel extends StrandChannel {
         private final AtomicLong capacity = new AtomicLong(Long.MAX_VALUE);
         private final AtomicLong written = new AtomicLong();
@@ -83,12 +76,10 @@ final class NettyEngineRig implements AutoCloseable {
             failing = true;
         }
 
-        /** 쓰기가 성공한 것처럼 돌아오되 상대에게 닿지 않는다. 삼킨 바이트는 {@link #swallowedBytes}로 꺼낸다. */
         void mute() {
             muted = true;
         }
 
-        /** 다음 쓰기부터 예상 못한 런타임 예외를 낸다(입출력 오류가 아니다). */
         void failWritesUnexpectedly(RuntimeException error) {
             unexpected = error;
         }
@@ -135,7 +126,6 @@ final class NettyEngineRig implements AutoCloseable {
         }
     }
 
-    /** 시험이 정하는 조정. 기본은 확인 대기 1시간, 유휴 PING 끔에 가까운 느슨한 값이다. */
     static final class Tuning {
         UnaryOperator<EndpointConfig> config = c -> c;
         UnaryOperator<EndpointConfig> peerConfig = c -> c;
@@ -143,19 +133,16 @@ final class NettyEngineRig implements AutoCloseable {
         long writeQueueBytes = 64L << 20;
         long perConnection = 8;
 
-        /** 연결별 한도 규모. 키우면 제어 출력 공간이 커져 쓰기 대기열 상한이 읽기를 먼저 멈춘다. */
         Tuning perConnection(long value) {
             this.perConnection = value;
             return this;
         }
 
-        /** 두 끝의 엔드포인트 설정을 고친다. */
         Tuning config(UnaryOperator<EndpointConfig> value) {
             this.config = value;
             return this;
         }
 
-        /** 상대(코어 엔드포인트)의 설정만 더 고친다. */
         Tuning peerConfig(UnaryOperator<EndpointConfig> value) {
             this.peerConfig = value;
             return this;
@@ -210,7 +197,6 @@ final class NettyEngineRig implements AutoCloseable {
             clientListener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
             target = new InetSocketAddress(InetAddress.getLoopbackAddress(), clientListener.getLocalPort());
             channel = new TestChannel();
-            // 엔진이 읽기를 멈추면 상대가 밀어 넣는 것이 소켓 버퍼에 다 들어가 버리지 않게 받는 버퍼를 작게 한다.
             channel.config().setOption(io.netty.channel.ChannelOption.SO_RCVBUF, SMALL_BUFFER);
         } else {
             serverListener = ServerSocketChannel.open();
@@ -276,7 +262,6 @@ final class NettyEngineRig implements AutoCloseable {
         }
     }
 
-    /** 엔진이 클라이언트이고 상대(코어 서버)가 요청에 응답하는 연결. 준비가 끝난 상태로 돌려준다. */
     static NettyEngineRig client(Tuning tuning) throws Exception {
         NettyEngineRig rig = new NettyEngineRig(ConnectionParams.Role.CLIENT, null, tuning);
         rig.startOrClose();
@@ -287,7 +272,6 @@ final class NettyEngineRig implements AutoCloseable {
         return client(new Tuning());
     }
 
-    /** 엔진이 서버이고 상대(코어 클라이언트)가 요청을 보내는 연결. 준비가 끝난 상태로 돌려준다. */
     static NettyEngineRig server(RequestHandler handler, Tuning tuning) throws Exception {
         NettyEngineRig rig = new NettyEngineRig(ConnectionParams.Role.SERVER, handler, tuning);
         rig.startOrClose();
@@ -303,25 +287,19 @@ final class NettyEngineRig implements AutoCloseable {
         }
     }
 
-    // ---------------------------------------------------------------- 시계와 입력
-
-    /** 수동 시계를 올리고 엔진이 올라간 시계를 보도록 걸음을 한 번 돌린다. */
     void tick(long ms) throws Exception {
         clock.addAndGet(Duration.ofMillis(ms).toNanos());
         step();
     }
 
-    /** 빈 입력으로 엔진의 걸음을 한 번 돌리고 끝나기를 기다린다. */
     void step() throws Exception {
         inject(new byte[0]);
     }
 
-    /** 받은 바이트를 엔진 입력에 직접 넣는다(상대 소켓을 거치지 않는다). 이벤트 루프에서 끝나기를 기다린다. */
     void inject(byte[] bytes) throws Exception {
         onLoop(() -> channel.pipeline().fireChannelRead(Unpooled.wrappedBuffer(bytes)));
     }
 
-    /** 이벤트 루프의 한 작업 안에서 앞 동작을 하고 바이트를 엔진 입력에 넣는다. 앞 동작이 낸 시계·명령은 같은 걸음에서 입력 뒤에 처리된다. */
     void inSameStep(Runnable before, byte[] input) throws Exception {
         onLoop(() -> {
             before.run();
@@ -329,7 +307,6 @@ final class NettyEngineRig implements AutoCloseable {
         });
     }
 
-    /** 이벤트 루프에서 작업을 실행하고 끝나기를 기다린다. */
     void onLoop(Runnable task) throws Exception {
         CompletableFuture<Void> done = new CompletableFuture<>();
         loop.execute(() -> {
@@ -343,25 +320,18 @@ final class NettyEngineRig implements AutoCloseable {
         done.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
-    /** 이벤트 루프가 지금까지 맡은 작업을 다 돌 때까지 기다린다. */
     void settleLoop() throws Exception {
         onLoop(() -> {});
     }
 
-    /** 엔진이 쓰기를 {@code count}번째 막힐 때까지 기다린다. */
     void awaitStalls(long count) throws Exception {
         NettyRig.awaitTrue(() -> channel.stalls() >= count);
     }
 
-    /** 상대 소켓을 닫아 엔진이 끊김(끝)을 읽게 한다. */
     void peerHangsUp() {
         peer.disconnect();
     }
 
-    /**
-     * 상대 소켓으로 프레임 {@code count}개를 끝없이 밀어 넣는다(상대 엔드포인트를 거치지 않는다). 엔진이 읽기를 멈추면 소켓 버퍼가 차서 쓰는 스레드가 막힌다. 다 넘기면 완료되는
-     * 미래를 돌려주고, 지금까지 소켓에 넘긴 프레임 수는 {@link #flooded}다.
-     */
     CompletableFuture<Void> flood(int count, IntFunction<byte[]> frameOf) {
         CompletableFuture<Void> done = new CompletableFuture<>();
         Thread thread = new Thread(
@@ -389,7 +359,6 @@ final class NettyEngineRig implements AutoCloseable {
         return done;
     }
 
-    /** {@link #flood}가 지금까지 소켓에 넘긴 프레임 수. */
     int flooded() {
         return flooded.get();
     }
@@ -398,22 +367,17 @@ final class NettyEngineRig implements AutoCloseable {
         return connection.closed().isDone();
     }
 
-    // ---------------------------------------------------------------- 상대 관찰
-
-    /** 상대가 받은 요청의 스트림 번호(받은 순서). 무시하기로 한 스트림은 뺀다. */
     List<Long> peerRequestStreams() {
         List<Long> streams = new ArrayList<>(peer.requestStreams());
         streams.removeAll(ignoredStreams);
         return streams;
     }
 
-    /** 상대가 요청을 {@code count}개 받을 때까지 기다리고 그 스트림 번호들을 돌려준다. */
     List<Long> awaitPeerRequests(int count) throws Exception {
         NettyRig.awaitTrue(() -> peerRequestStreams().size() >= count);
         return peerRequestStreams();
     }
 
-    /** 상대가 요청에 응답한다(소켓으로). */
     void peerRespond(long streamId, int status, byte[] body) {
         peer.run(endpoint -> endpoint.respond(streamId, status, body));
     }
@@ -434,7 +398,6 @@ final class NettyEngineRig implements AutoCloseable {
                 serverListener.close();
             }
         } catch (IOException ignored) {
-            // 정리 중의 오류는 할 수 있는 일이 없다.
         }
         fixture.close();
     }
@@ -445,7 +408,6 @@ final class NettyEngineRig implements AutoCloseable {
                 socket.close();
             }
         } catch (IOException ignored) {
-            // 정리 중의 오류는 할 수 있는 일이 없다.
         }
     }
 }

@@ -20,13 +20,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 상대가 예약 {@code error_code}(8 이상)로 CLOSE를 보내면 실제 nio 연결의 종료 알림 원인이 {@code INTERNAL_ERROR}다(규격 2.5.2절). 상대는 핸드셰이크를
- * 마친 core 클라이언트 엔드포인트가 실제 소켓으로 말하고, 예약 코드는 core가 보내지 못하게 막으므로 CLOSE 바이트의 {@code error_code}만 바꿔 보낸다.
- */
 class ReservedCloseCodeTest {
     private static final int RESERVED_ERROR_CODE = 99;
-    /** CLOSE 프레임에서 error_code가 시작하는 위치: 길이 4바이트와 헤더 나머지 16바이트 뒤(규격 2.1절, 3.5절). */
+
     private static final int ERROR_CODE_OFFSET = 20;
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -69,7 +65,6 @@ class ReservedCloseCodeTest {
         assertThat(notice.sender()).contains(CloseNotice.Sender.PEER);
     }
 
-    /** 클라이언트 엔드포인트와 소켓 사이로 바이트를 옮겨 AUTH(ACK)를 받을 때까지 핸드셰이크한다. */
     private static void handshake(Endpoint client, Socket socket) throws IOException {
         byte[] buffer = new byte[8192];
         for (int round = 0; round < 100; round++) {
@@ -84,7 +79,7 @@ class ReservedCloseCodeTest {
                 }
                 TestMessages.deliver(client, Arrays.copyOf(buffer, read));
             } catch (SocketTimeoutException idle) {
-                // 읽을 것이 없다. 아래에서 확인한다.
+
             }
             for (Event event : TestMessages.drainEvents(client)) {
                 if (event.kind() == Event.Kind.AUTHENTICATED) {

@@ -16,10 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * {@code matrix} 명령. 핵심 행렬(연결 {1,100} × 본문 {64B,1KiB} × {nio,netty} × TLS 켬, 8셀)을 한 명령으로 돌린다. 셀마다 처리량은 폐쇄형 포화로, 지연은 같은 셀 포화 처리량의 50%·80% 개방형으로
- * 잰다. {@code --extended}는 연결 1,000, 본문 64KiB, 평문 대조군을 더한 확장 행렬이다.
- */
 final class Matrix {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final List<Integer> CORE_CONNECTIONS = List.of(1, 100);
@@ -27,7 +23,7 @@ final class Matrix {
     private static final List<Integer> EXTENDED_CONNECTIONS = List.of(1, 100, 1000);
     private static final List<Integer> EXTENDED_BODIES = List.of(64, 1024, 65_536);
     private static final List<String> TRANSPORTS = List.of("nio", "netty");
-    /** 바인딩 비교용 셀 이름: 서버·부하 생성기 모두 netty이고 TCP 또는 WebSocket이다(ADR 0007). */
+
     private static final List<String> BINDING_TRANSPORTS = List.of("netty-tcp", "netty-ws");
 
     private final List<Integer> connections;
@@ -58,7 +54,7 @@ final class Matrix {
         this.repetitions = options.getOrDefault("--repetitions", "3");
         this.output = options.get("--output");
         this.out = out;
-        // 값 검증은 셀마다 RunConfig가 한다. 실행 전에 한 번 미리 확인한다.
+
         RunConfig.parse(List.of("--warmup", warmup, "--measure", measure, "--repetitions", repetitions));
     }
 
@@ -121,7 +117,7 @@ final class Matrix {
                 for (String t : transports) {
                     cells.add(new Cell(t, true, c, b));
                     if (extended) {
-                        // 평문은 하네스 한정 대조군이다. 확장 행렬에서만 더한다.
+
                         cells.add(new Cell(t, false, c, b));
                     }
                 }
@@ -205,7 +201,7 @@ final class Matrix {
                 "--repetitions",
                 repetitions));
         if (cell.transport().startsWith("netty-")) {
-            // 바인딩 비교는 클라이언트도 netty로 맞춘다. 같은 조건에서 TCP와 WebSocket만 다르다.
+
             base.addAll(List.of(
                     "--loadgen-transport",
                     "netty",
@@ -249,7 +245,6 @@ final class Matrix {
         return json;
     }
 
-    /** 실행 결과에서 셀마다 반복되는 환경 메타데이터(JDK·OS 등)는 빼고 설정·반복별 결과·요약만 남긴다. */
     private static JsonObject scenario(JsonObject result) {
         JsonObject json = new JsonObject();
         json.add("config", result.getAsJsonObject("metadata").getAsJsonObject("config"));

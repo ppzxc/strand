@@ -31,11 +31,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Netty 전송의 앱 공개 API 사용 예제. 한 프로세스에서 서버와 클라이언트를 만들어 보안·연결 인증·핸들러 팩터리 준비 뒤 양방향 요청, 취소, 요청 기한, 연결 종료, 전체 종료를 순서대로
- * 실행하고 관찰한 결과를 돌려준다. 필수 한도·시간 설정을 모두 표시한다({@link AppExampleSupport}). 사용법: {@code NettyAppExample} (평문 TCP. 보안은 {@link
- * NettySecurity#tls}로 바꾼다)
- */
 public final class NettyAppExample {
     private NettyAppExample() {}
 
@@ -49,28 +44,19 @@ public final class NettyAppExample {
         return text.getBytes(StandardCharsets.UTF_8);
     }
 
-    /**
-     * @param serverSecurity 서버 쪽 채널 보안(TLS 또는 외부에서 보호된 채널)
-     * @param clientSecurity 클라이언트 쪽 채널 보안
-     */
     static AppExampleSupport.Outcome run(NettySecurity serverSecurity, NettySecurity clientSecurity) throws Exception {
         return run(serverSecurity, clientSecurity, Transport.tcp());
     }
 
-    /**
-     * @param serverSecurity 서버 쪽 채널 보안(TLS 또는 외부에서 보호된 채널)
-     * @param clientSecurity 클라이언트 쪽 채널 보안
-     * @param transport 전송 방식: {@link Transport#tcp()} 또는 {@link Transport#webSocket(String)}
-     */
     static AppExampleSupport.Outcome run(
             NettySecurity serverSecurity, NettySecurity clientSecurity, Transport transport) throws Exception {
         AppExampleSupport.Outcome outcome = new AppExampleSupport.Outcome();
-        // 앱이 소유하는 실행기: 인증·팩터리·핸들러·알림이 여기서 돈다. 끝나면 앱이 종료한다.
+
         ExecutorService appExecutor = AppExampleSupport.newAppExecutor("strand-netty-app-example");
-        // Netty에서는 앱이 EventLoopGroup도 소유한다. 라이브러리는 앱이 준 그룹과 실행기를 종료하지 않는다.
+
         EventLoopGroup appEventLoops = new NioEventLoopGroup(2);
         try {
-            // 1) 필수 설정: 한도와 시간. 진행 공간은 전송 모듈이 알려 주는 최소 필요량이다.
+
             MinimumProgressSpace space = NettyMinimumProgress.of(
                     clientSecurity,
                     AppExampleSupport.MAX_FRAME_SIZE,
@@ -78,7 +64,6 @@ public final class NettyAppExample {
                     AppExampleSupport.REQUESTS_PER_CONNECTION);
             ResourceLimits limits = AppExampleSupport.limits(space);
 
-            // 2) 서버: 보안 → 연결 인증 → 팩터리 준비. 팩터리는 연결별 업무 상태를 만들고 종료 알림에서 정리한다.
             CompletableFuture<Void> stateReleased = new CompletableFuture<>();
             CompletableFuture<Void> reversed = new CompletableFuture<>();
             CompletableFuture<Void> holding = new CompletableFuture<>();
@@ -105,12 +90,12 @@ public final class NettyAppExample {
                         return PreparedHandler.of(
                                 request -> {
                                     if (request.type() == AppExampleSupport.HOLD_TYPE) {
-                                        // 응답하지 않는다: 상대가 취소하거나 기한이 지나면 받은 요청의 종료를 알린다.
+
                                         request.ended().observe(end -> holding.complete(null));
                                         return;
                                     }
                                     if (request.type() == AppExampleSupport.GATED_TYPE) {
-                                        // 게이트가 열릴 때까지 응답을 미룬다: 클라이언트가 변환 Future를 취소한 뒤에 결과가 확정된다.
+
                                         gate.thenRunAsync(
                                                 () -> request.respond(Status.OK, bytes("gated")), appExecutor);
                                         return;
@@ -121,12 +106,12 @@ public final class NettyAppExample {
                                                             + new String(request.payload(), StandardCharsets.UTF_8)))
                                             .observe(acceptance -> {
                                                 if (acceptance.kind() == AcceptanceKind.RESOURCE_EXHAUSTED) {
-                                                    // 앱이 정한 유한한 재시도 정책을 적용한다. 응답 권한은 소비되지 않았다.
+
                                                     System.err.println("응답 자원 부족: " + acceptance.resource());
                                                 }
                                             });
                                     if (request.type() == AppExampleSupport.REVERSE_TYPE) {
-                                        // 같은 연결에서 서버도 요청을 개시한다(양방향).
+
                                         request.connection()
                                                 .request(Request.of(AppExampleSupport.ECHO_TYPE, bytes("from-server")))
                                                 .result()
@@ -138,7 +123,6 @@ public final class NettyAppExample {
                                                 });
                                     }
                                 },
-                                // 활성화되지 못한 결과 전용 정리. 활성화 뒤 정리는 위 종료 알림이 한다.
                                 () -> stateReleased.complete(null));
                     })
                     .onConnectionFailure(failure -> System.err.println("준비 실패: " + failure))
@@ -148,7 +132,6 @@ public final class NettyAppExample {
             InetSocketAddress address = new InetSocketAddress(
                     InetAddress.getLoopbackAddress(), ((InetSocketAddress) listener.localAddress()).getPort());
 
-            // 3) 클라이언트: 같은 필수 설정에 자격 증명과 역방향 요청 핸들러를 더한다.
             NettyStrandClient client = NettyStrandClient.builder()
                     .eventLoopGroup(appEventLoops)
                     .executor(appExecutor)
@@ -164,13 +147,10 @@ public final class NettyAppExample {
                     .handler(request -> request.respond(Status.OK, bytes("ack")))
                     .build();
 
-            // 4) 취소 가능한 연결 시도. 성공은 보안·HELLO·연결 인증·서버 팩터리 준비 뒤다.
             NettyConnectAttempt attempt = client.connectAttempt(address, transport);
             NettyStrandConnection connection = attempt.result().get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
             attempt.transportReleased().get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
 
-            // 5) 요청·응답. 호출부터 시작하는 기한을 줄 수 있다.
-            // 서버 핸들러가 준비되기 전에 온 첫 요청은 거절될 수 있어, 거절이면 유한하게 다시 보낸다.
             RequestResult echoed = AppExampleSupport.requestAfterRefusal(() -> connection
                     .request(
                             Request.of(AppExampleSupport.ECHO_TYPE, bytes("hello")),
@@ -182,7 +162,6 @@ public final class NettyAppExample {
             outcome.echoStatus = echoed.status();
             outcome.echoBody = new String(echoed.payload(), StandardCharsets.UTF_8);
 
-            // 6) 서버가 같은 연결로 클라이언트에 요청을 낸다. 응답은 서버 쪽 관찰이 기록한다.
             connection
                     .request(Request.of(AppExampleSupport.REVERSE_TYPE, bytes("reverse")))
                     .result()
@@ -191,8 +170,6 @@ public final class NettyAppExample {
                     .get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
             reversed.get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
 
-            // 6-1) Netty 변환: 변환 Future를 취소해도 실제 요청은 취소되지 않고 결과는 그대로 확정된다.
-            // 서버가 게이트를 열기 전에는 결과가 확정되지 않으므로 취소는 항상 확정 전에 일어난다.
             RequestHandle converted = connection.request(Request.of(AppExampleSupport.GATED_TYPE, bytes("converted")));
             Future<RequestResult> conversion = NettyResults.toFuture(converted.result());
             conversion.cancel(false);
@@ -204,7 +181,6 @@ public final class NettyAppExample {
                     .get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
             outcome.conversionCancelKeptRequest = conversion.isCancelled() && kept.status() == Status.OK;
 
-            // 7) 요청 취소. 서버가 응답하지 않는 요청을 실제로 취소한다.
             RequestHandle held = connection.request(Request.of(AppExampleSupport.HOLD_TYPE, bytes("hold")));
             held.cancel();
             outcome.cancelledStatus = held.result()
@@ -213,7 +189,6 @@ public final class NettyAppExample {
                     .get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS)
                     .status();
 
-            // 8) 요청 기한. 서버가 응답하지 않으므로 기한이 지나 결과가 확정된다.
             outcome.deadlineStatus = connection
                     .request(
                             Request.of(AppExampleSupport.HOLD_TYPE, bytes("hold")),
@@ -225,7 +200,6 @@ public final class NettyAppExample {
                     .status();
             holding.get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
 
-            // 9) 연결 종료: close()는 CLOSE 절차, 필요하면 abort()로 즉시 끊는다. closed()는 결과 보존과 실제 통로 종료 뒤 완료한다.
             connection.close();
             outcome.closeKind = connection
                     .closed()
@@ -235,7 +209,6 @@ public final class NettyAppExample {
                     .kind()
                     .name();
 
-            // 10) 리스닝 정리와 전체 종료. 외부 실행 자원(appExecutor)은 앱이 종료한다.
             listener.close();
             listener.closed().get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);
             client.shutdown().get(AppExampleSupport.WAIT_SECONDS, TimeUnit.SECONDS);

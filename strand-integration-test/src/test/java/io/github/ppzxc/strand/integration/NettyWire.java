@@ -35,13 +35,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 
-/**
- * strand-netty 제품 공개 API를 중립 모양으로 감싼다. 설정 값은 {@code TestNio}와 같다. 종료 마무리 기한도 같다: 양쪽이 동시에 CLOSE를 보내면 한쪽이 상대의 끊김을 보지 못하고
- * 마무리 기한까지 기다리는 경우가 있어 기본값 대신 짧게 둔다.
- */
 final class NettyWire implements Wire {
 
-    /** 시험 전체가 함께 쓰는 이벤트 루프. 데몬 스레드라 종료를 막지 않는다. */
     private static final EventLoopGroup GROUP =
             new NioEventLoopGroup(4, new DefaultThreadFactory("integration-netty", true));
 

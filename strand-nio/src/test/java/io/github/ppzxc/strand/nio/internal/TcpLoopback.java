@@ -7,7 +7,6 @@ import java.net.StandardSocketOptions;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 
-/** 루프백으로 맺은 TCP 연결 한 쌍. 소켓 버퍼를 작게 줄여 부분 쓰기와 백프레셔를 만들 수 있다. */
 final class TcpLoopback {
 
     final SocketChannel client;
@@ -22,11 +21,6 @@ final class TcpLoopback {
         return open(0);
     }
 
-    /**
-     * 연결 한 쌍을 맺는다.
-     *
-     * @param bufferBytes 양쪽 소켓의 송신·수신 버퍼 크기 요청(0이면 기본값). 맺기 전에 정해야 수신 창에 반영된다
-     */
     static TcpLoopback open(int bufferBytes) throws IOException {
         try (ServerSocketChannel server = ServerSocketChannel.open()) {
             if (bufferBytes > 0) {

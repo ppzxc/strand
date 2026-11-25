@@ -20,7 +20,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 라이브러리가 복사·보관하는 준비 데이터(주소 이름·해석 결과·자격 증명)의 바이트를 보관 전에 예약하고 참조가 끝날 때 돌려주는지 본다(#325). */
 class NettyPreparationBytesTest {
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -107,7 +106,6 @@ class NettyPreparationBytesTest {
 
     @Test
     void resolvedAddressesAreReservedAsPreparationBytesBeforeTheyAreKept() throws Exception {
-        // 주소 이름("h") 1바이트는 들어가지만 해석된 IPv4 주소 4바이트까지는 들어가지 않는다.
         AppFixture fixture = track(new AppFixture.Spec().preparationBytes(4, 4).plain());
         NettyStrandClient client = fixture.clientBuilder()
                 .resolver(host -> new InetAddress[] {InetAddress.getLoopbackAddress()})
@@ -144,7 +142,6 @@ class NettyPreparationBytesTest {
         NettyStrandConnection connection =
                 AppFixture.get(client.connect(InetSocketAddress.createUnresolved("name", port)));
 
-        // 이름(4) + 방식 이름(5) + 비밀(6)은 연결이 끝날 때까지, 해석 주소 목록(4 또는 16)은 연결이 맺어지면 돌려준다.
         awaitTrue(() -> client.resourceUsage(Resource.PREPARATION_BYTES).current() == 4 + 5 + secret.length);
         connection.abort();
         awaitTrue(() -> client.resourceUsage(Resource.PREPARATION_BYTES).current() == 0);

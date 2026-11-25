@@ -14,11 +14,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
-/**
- * 다른 스레드의 취소 명령이 실제 쓰기와 경합해도 와이어와 결과 확정성이 어긋나지 않는지 검증한다(#315). 허용되는 결과는 둘뿐이다: 프레임이
- * 와이어에 전혀 없고 처리 안 됨이거나, 프레임이 온전히 나간 뒤 RESET이 오고 결과 모름이다. 프레임 일부만 있거나 RESET만 있거나 RESET이
- * 프레임보다 앞서는 일은 없어야 한다.
- */
 class CoreWithdrawalRaceTest {
     private static final int ITERATIONS = 60;
     private static final int FRAME_PAYLOAD = 256 * 1024;
@@ -33,10 +28,6 @@ class CoreWithdrawalRaceTest {
         while (System.nanoTime() < end) {}
     }
 
-    /**
-     * 요청과 취소를 세 가지 순서로 넣는다. 0: 요청과 쓰기 뒤에 지연을 두고 취소. 1: 요청과 취소가 쓰기 시도 전에 함께 밀려 있다가 처리됨.
-     * 2: 요청 직후 바로 취소가 이어짐. 어느 경우에도 전송 모듈은 명령 처리 뒤 곧바로 쓰기를 시도한다.
-     */
     private static void issueAndCancel(
             int iteration,
             java.util.function.Consumer<Runnable> command,
@@ -59,7 +50,6 @@ class CoreWithdrawalRaceTest {
                 enqueuePump.run();
                 break;
             case 3:
-                // 프레임이 온전히 나간 뒤의 취소는 결정적으로 전달 뒤 RESET이다.
                 command.accept(() -> ticket.set(endpoint.request(OpenEndpoint.REQUEST_TYPE, payload)));
                 awaitIdle(pending);
                 command.accept(() -> endpoint.cancelRequest(ticket.get()));

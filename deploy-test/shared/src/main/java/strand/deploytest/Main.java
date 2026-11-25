@@ -5,13 +5,10 @@ import java.io.File;
 import java.net.URISyntaxException;
 import java.util.jar.JarFile;
 
-/** 배포된 core, nio, netty를 받아 쓰는 외부 소비자. 실행 중인 세 모듈의 버전이 기대 버전과 같은지 확인한다. */
 public final class Main {
 
-    /** nio는 공개 API가 모두 internal 패키지라 컴파일 의존 없이 이름으로만 찾는다. */
     private static final String NIO_PROBE_CLASS = "io.github.ppzxc.strand.nio.internal.TcpPassage";
 
-    /** netty는 nio와 같은 이유로 이름으로만 찾는다. Netty 타입을 함께 읽어, Netty가 경로에 없으면 실패한다. */
     private static final String NETTY_PROBE_CLASS = "io.github.ppzxc.strand.netty.NettyStrandClient";
 
     private static final String NETTY_TYPE = "io.netty.channel.EventLoopGroup";
@@ -48,10 +45,9 @@ public final class Main {
         return jarVersion(NETTY_PROBE_CLASS, "netty");
     }
 
-    /** 탐침 클래스를 담은 jar 매니페스트의 Implementation-Version. 찾지 못하면 사유 문자열을 돌려줘 불일치로 실패시킨다. */
     private static String jarVersion(String probeClass, String name) {
         try {
-            Class<?> probe = Class.forName(probeClass, false, Main.class.getClassLoader()); // 초기화 없이 위치만 찾는다
+            Class<?> probe = Class.forName(probeClass, false, Main.class.getClassLoader());
             File jar = new File(probe.getProtectionDomain().getCodeSource().getLocation().toURI());
             try (JarFile jarFile = new JarFile(jar)) {
                 if (jarFile.getManifest() == null) {

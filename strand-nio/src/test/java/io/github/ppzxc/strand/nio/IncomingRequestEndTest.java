@@ -16,10 +16,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 받은 요청의 {@code ended()}가 응답 접수, 상대 RESET(오류 코드 포함), 연결 끝남을 구별하고(#302 결정, 규격 4.4절), 실행 대기 중에 끝난 요청의 핸들러는
- * 시작하지 않는지 본다.
- */
 class IncomingRequestEndTest {
     private static final long WAIT_MS = TimeUnit.SECONDS.toMillis(AppFixture.WAIT_SECONDS);
 
@@ -65,7 +61,6 @@ class IncomingRequestEndTest {
         return result.resultNow().kind();
     }
 
-    /** 상대가 RESET 프레임을 보낸 것처럼 엔진의 입력에 넣는다. 규격 2.2절 머리: 길이, type, flags, status, stream_id, 확장 길이, 예약. */
     private void injectReset(long streamId, long errorCode) {
         ByteBuffer frame = ByteBuffer.allocate(24);
         frame.putInt(20).putShort((short) 4).put((byte) 0).put((byte) 0).putLong(streamId);
@@ -94,7 +89,7 @@ class IncomingRequestEndTest {
         assertThat(end.isConnectionEnd()).isFalse();
         assertThat(end.errorCode()).isEqualTo(OptionalLong.of(0x1234));
         assertThat(rig.used(Resource.INCOMING_REQUESTS)).isZero();
-        // 받은 요청 바이트는 요청 종료와 핸들러 작업의 본문 참조 해제가 모두 끝난 뒤 돌아온다(#318, #307).
+
         awaitUsedZero(Resource.INCOMING_BYTES);
     }
 

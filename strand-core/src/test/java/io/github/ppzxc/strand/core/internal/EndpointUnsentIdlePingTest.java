@@ -7,11 +7,6 @@ import java.util.List;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 
-/**
- * 넘기지 못한 유휴 PING(규격 3.3절). 유휴 PING을 보내기로 한 때부터 확인 대기 시간이 지나도록 전송 계층에 넘기지 못했고 그동안 출력이 진행하지
- * 않았으면 확인 대기 초과와 같게 닫는다. 진행 보고 방식에서 쓰기 완료 보고를 하지 않는 것으로 쓰기가 막힌 연결을 만든다. 가상 시계는 0에서 시작하고,
- * 유휴 간격 500, 확인 대기 1000이다.
- */
 class EndpointUnsentIdlePingTest {
 
     private static final EndpointConfig CONFIG =
@@ -66,12 +61,12 @@ class EndpointUnsentIdlePingTest {
     @Test
     void anyOutputProgressCountsTheDeadlineAgain() {
         Endpoint server = blockedWithIdlePingQueued();
-        Drive.advance(server, 900); // 1400: 기한 직전
+        Drive.advance(server, 900);
         EndpointOutput head = server.nextOutput();
         server.outputProgress(head.id(), 1);
 
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(2401));
-        Drive.advance(server, 1000); // 2400
+        Drive.advance(server, 1000);
         assertThat(Drive.drainEvents(server)).isEmpty();
         Drive.advance(server, 1);
 
@@ -93,9 +88,9 @@ class EndpointUnsentIdlePingTest {
     @Test
     void theAckWaitOfAHandedOffIdlePingStartsAtHandOff() {
         Endpoint server = blockedWithIdlePingQueued();
-        Drive.advance(server, 900); // 1400
+        Drive.advance(server, 900);
         EndpointOutput ping = server.nextOutput();
-        server.outputProgress(ping.id(), ping.bytes().length); // 넘김: 대기 시작 1400
+        server.outputProgress(ping.id(), ping.bytes().length);
 
         assertThat(server.nextDeadline()).isEqualTo(OptionalLong.of(2401));
         Drive.advance(server, 1000);
@@ -174,7 +169,6 @@ class EndpointUnsentIdlePingTest {
         }
     }
 
-    /** 진행 보고 방식. 출력을 하나도 진행하지 않은 채 가상 시각 500에 유휴 PING이 쓰기 대기열에 들어갔다. */
     private static Endpoint blockedWithIdlePingQueued() {
         Endpoint server = Drive.server(CONFIG);
         open(server);
@@ -183,7 +177,6 @@ class EndpointUnsentIdlePingTest {
         return server;
     }
 
-    /** 위와 같고, 상대 요청이 응답을 기다려서 닫는 중에도 연결이 끝나지 않는다. */
     private static Endpoint blockedWithIdlePingQueuedAndAPeerRequestPending() {
         Endpoint server = Drive.server(CONFIG);
         open(server);
@@ -194,7 +187,6 @@ class EndpointUnsentIdlePingTest {
         return server;
     }
 
-    /** 남은 출력을 모두 진행 보고로 비우며 프레임 종류를 모은다. */
     private static List<Integer> sentFrameTypes(Endpoint endpoint) {
         List<Integer> types = new ArrayList<>();
         EndpointOutput output;

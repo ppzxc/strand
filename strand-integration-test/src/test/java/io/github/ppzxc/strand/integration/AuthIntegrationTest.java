@@ -18,11 +18,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 
-/**
- * 규격 3.3절, 3.3.1절의 AUTH 관문을 실제 TCP 위에서 확인한다. 프레임의 바이트 형식은 컨포먼스 벡터가 맡는다. 여기서는 한쪽을 날것의 소켓으로 두고
- * {@code AUTH(ACK)}(서버 쪽이면 {@code AUTH})를 보내는 시점을 정해, 그 시점 전에는 애플리케이션 프레임이 상대에게 닿지 않고 그 뒤에야 닿는지만 본다.
- * 통합 테스트는 {@code ANONYMOUS}로 수립한다. 제품 API의 연결은 AUTH 관문을 통과해야 앱에 보이므로, 관문을 통과하기 전의 "앱이 낸 요청"은 만들 수 없고 대신 연결이 앱에 보이는 시점이 관문 통과 뒤인지를 본다.
- */
 class AuthIntegrationTest {
 
     private static final int HEADER_BYTES = 20;
@@ -30,15 +25,11 @@ class AuthIntegrationTest {
     private static final int HELLO = 1;
     private static final int AUTH = 5;
     private static final int ACK = 1;
-    /** 이 시간 안에 아무것도 오지 않으면 닿지 않은 것으로 본다. */
+
     private static final int SILENCE_MS = 300;
 
     private static final byte[] PREFACE = {(byte) 0xc0, (byte) 0xde, 0x53, 0x54, 0x52, 0x30, 0, 0};
 
-    /**
-     * 클라이언트는 {@code AUTH(ACK)}를 받기 전에는 아무것도 보내지 않고 연결도 앱에 내주지 않는다. 날것의 서버가 클라이언트의 HELLO·ACK·AUTH까지 읽은 뒤
-     * {@value #SILENCE_MS}ms 동안 아무것도 오지 않고 연결이 준비되지 않은 것을 확인하고, {@code AUTH(ACK)}를 보내면 그제서야 연결이 앱에 보이고 낸 요청이 온다.
-     */
     @TransportTest
     @DisplayName("클라이언트의 요청은 AUTH(ACK)를 받은 뒤에야 서버에 도달한다 (규격 3.3)")
     void clientRequestReachesTheServerOnlyAfterAuthAck(Transport transport) throws Exception {
@@ -77,11 +68,6 @@ class AuthIntegrationTest {
         }
     }
 
-    /**
-     * 서버는 자기가 먼저 내는 요청을 {@code AUTH(ACK)}를 보낸 뒤에야 보낸다. 날것의 클라이언트가 HELLO 교환을 마치고 AUTH를 보내기 전에는
-     * {@value #SILENCE_MS}ms 동안 아무것도 오지 않고 서버 쪽 연결도 앱에 보이지 않으며, {@code ANONYMOUS} AUTH를 보내면 연결이 앱에 보이고 서버가 낸 요청이
-     * {@code AUTH(ACK)}에 이어 온다.
-     */
     @TransportTest
     @DisplayName("서버가 먼저 내는 요청은 AUTH를 통과시킨 뒤에야 클라이언트에 도달한다 (규격 3.3)")
     void serverInitiatedRequestReachesTheClientOnlyAfterAuth(Transport transport) throws Exception {
@@ -117,7 +103,6 @@ class AuthIntegrationTest {
         }
     }
 
-    /** 실제 클라이언트와 서버가 AUTH까지 마쳐 수립하고, 클라이언트가 {@code AUTH(ACK)}를 받은 것을 알린다. */
     @TransportTest
     @DisplayName("ANONYMOUS로 수립한 연결에서 클라이언트가 AUTH 통과를 알게 되고 요청이 오간다 (규격 3.3.1)")
     void anonymousEstablishmentCompletesBetweenRealEndpoints(Transport transport) throws Exception {
@@ -168,7 +153,6 @@ class AuthIntegrationTest {
         return bytes;
     }
 
-    /** 길이 필드로 프레임 하나를 읽는다. */
     private static byte[] readFrame(DataInputStream in) throws IOException {
         byte[] length = readBytes(in, 4);
         byte[] rest = readBytes(in, ByteBuffer.wrap(length).getInt());

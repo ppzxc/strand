@@ -7,12 +7,8 @@ import io.github.ppzxc.strand.api.ResourceUsage;
 import java.util.EnumMap;
 import java.util.Map;
 
-/**
- * 연결 하나의 예약 한도. 예약은 연결 범위에서 먼저 하고 소유 객체 범위에서 이어 하며, 뒤쪽이 모자라면 앞쪽 몫을 돌려준다(부분 실패는 확보분을
- * 반환하고 기다리지 않는다).
- */
 public final class ConnectionBudgets {
-    /** 연결 범위와 소유 객체 범위가 함께 세는 종류. 관찰({@link Resource#OBSERVATIONS})은 {@link ObservationBudget}이 센다. */
+
     static final Resource[] SHARED = {
         Resource.OUTGOING_REQUESTS,
         Resource.OUTGOING_BYTES,

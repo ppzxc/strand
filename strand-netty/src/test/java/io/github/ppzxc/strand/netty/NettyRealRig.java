@@ -31,13 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
-/**
- * 실제 TCP(또는 TLS) 연결 위에서 요청 개시자의 쓰기 진행을 결정적으로 막는 시험대. 클라이언트와 서버 사이에 중계기를 두고, 중계기가 클라이언트의 쓰기를 읽지 않으면
- * 클라이언트 소켓 버퍼가 차서 실제 쓰기가 0이나 부분 진행에서 멈춘다. 클라이언트 채널의 {@code writeAttempt}가 받아 준 양(TLS에서는 암호문)을 기록한다. 서버는
- * 실제 {@link NettyStrandServer}이고 받은 요청을 {@link #received}에 쌓는다.
- */
 final class NettyRealRig implements AutoCloseable {
-    /** {@code writeAttempt}가 받아 준 바이트와 받아 주지 못한(일부라도 남긴) 횟수를 기록하는 채널. */
     static final class RecordingChannel extends StrandChannel {
         final AtomicLong consumed = new AtomicLong();
         final AtomicLong stalls = new AtomicLong();
@@ -54,7 +48,6 @@ final class NettyRealRig implements AutoCloseable {
         }
     }
 
-    /** 클라이언트가 보낸 방향만 멈출 수 있는 중계기. */
     static final class PausableRelay implements AutoCloseable {
         private final ServerSocket listener = new ServerSocket();
         private final int targetPort;
@@ -98,7 +91,6 @@ final class NettyRealRig implements AutoCloseable {
                     pump(server, client, false);
                 }
             } catch (IOException e) {
-                // 닫는 중이다.
             }
         }
 
@@ -120,7 +112,6 @@ final class NettyRealRig implements AutoCloseable {
                                 out.write(buffer, 0, count);
                             }
                         } catch (IOException | InterruptedException e) {
-                            // 어느 쪽이 끊겼다.
                         } finally {
                             closeQuietly(from);
                             closeQuietly(to);
@@ -131,21 +122,18 @@ final class NettyRealRig implements AutoCloseable {
             thread.start();
         }
 
-        /** 연결을 끊는다. 클라이언트는 끊김을 본다. */
         void killConnections() {
             synchronized (sockets) {
                 sockets.forEach(PausableRelay::closeQuietly);
             }
         }
 
-        /** 연결을 RST로 끊는다(정상 종료의 FIN이 아니다). 클라이언트는 입출력 오류로 끊김을 본다. */
         void resetConnections() {
             synchronized (sockets) {
                 for (Socket socket : sockets) {
                     try {
                         socket.setSoLinger(true, 0);
                     } catch (IOException ignored) {
-                        // 이미 닫힌 소켓이다.
                     }
                     closeQuietly(socket);
                 }
@@ -156,7 +144,6 @@ final class NettyRealRig implements AutoCloseable {
             try {
                 socket.close();
             } catch (IOException ignored) {
-                // 닫는 중의 오류는 할 수 있는 일이 없다.
             }
         }
 
@@ -167,7 +154,6 @@ final class NettyRealRig implements AutoCloseable {
             try {
                 listener.close();
             } catch (IOException ignored) {
-                // 닫는 중의 오류는 할 수 있는 일이 없다.
             }
         }
     }
@@ -184,7 +170,6 @@ final class NettyRealRig implements AutoCloseable {
         try {
             start(tls);
         } catch (Exception | Error e) {
-            // 준비에 실패하면 시험이 rig를 받지 못하므로 여기서 정리한다.
             close();
             throw e;
         }
@@ -249,10 +234,6 @@ final class NettyRealRig implements AutoCloseable {
         awaitServerHandler();
     }
 
-    /**
-     * 클라이언트 준비는 AUTH(ACK)에서 끝나므로, 서버가 핸들러를 활성화하기 전에 온 요청은 REFUSED(처리 안 됨)로 거절될 수 있다. 시험이 요청을 내기 전에 서버가
-     * 요청을 받기 시작했음을 응답이 오가는 요청 하나로 확인한다.
-     */
     private void awaitServerHandler() throws Exception {
         for (int attempt = 0; attempt < 100; attempt++) {
             RequestHandle probe = connection.request(Request.of(AppFixture.TYPE, new byte[0]));
@@ -272,7 +253,6 @@ final class NettyRealRig implements AutoCloseable {
         throw new AssertionError("서버가 핸들러를 활성화하지 않았다");
     }
 
-    /** 쓰기 보고가 {@code count}번째 멈춤까지 오기를 기다린다(부분 진행 뒤 소켓이 더 받지 못함). */
     void awaitStalls(long count) throws Exception {
         awaitTrue(() -> recording.stalls.get() >= count);
     }
@@ -298,7 +278,6 @@ final class NettyRealRig implements AutoCloseable {
                 listener.close();
             }
         } catch (Exception ignored) {
-            // 정리 중의 오류는 할 수 있는 일이 없다.
         }
         if (fixture != null) {
             fixture.close();

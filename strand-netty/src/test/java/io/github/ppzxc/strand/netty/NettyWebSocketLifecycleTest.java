@@ -23,7 +23,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** WebSocket 연결도 TCP와 같은 수명주기를 따른다: 인증, 준비 기한(업그레이드 포함), 연결 시도 취소, 서버 종료, 한 서버의 TCP·WebSocket listener. */
 class NettyWebSocketLifecycleTest {
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 
@@ -52,7 +51,6 @@ class NettyWebSocketLifecycleTest {
         return result;
     }
 
-    /** 연결을 받고 아무 응답도 하지 않는 서버. 받은 소켓을 닫을 때까지 쥔다. */
     private ServerSocket silentServer() throws IOException {
         ServerSocket server = new ServerSocket(0, 4, InetAddress.getLoopbackAddress());
         closeables.add(server);
@@ -64,7 +62,6 @@ class NettyWebSocketLifecycleTest {
                             closeables.add(socket);
                         }
                     } catch (IOException e) {
-                        // 시험이 끝났다.
                     }
                 },
                 "silent-server");
@@ -118,7 +115,6 @@ class NettyWebSocketLifecycleTest {
         try (Socket socket = new Socket(
                 InetAddress.getLoopbackAddress(), AppFixture.loopback(listener).getPort())) {
             socket.setSoTimeout((int) TimeUnit.SECONDS.toMillis(AppFixture.WAIT_SECONDS));
-            // 업그레이드 요청을 끝내지 않는다.
             socket.getOutputStream().write("GET /s HTTP/1.1\r\nHost: x\r\n".getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
 
@@ -157,7 +153,6 @@ class NettyWebSocketLifecycleTest {
                 .connectAttempt(
                         new InetSocketAddress(InetAddress.getLoopbackAddress(), silent.getLocalPort()),
                         Transport.webSocket("/s"));
-        // 업그레이드 요청이 나가 서버가 받을 때까지 기다린다.
         Thread.sleep(300);
 
         assertThat(attempt.cancel()).isTrue();

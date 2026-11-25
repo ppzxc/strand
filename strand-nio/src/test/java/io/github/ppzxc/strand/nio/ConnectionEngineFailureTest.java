@@ -19,7 +19,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 통로가 예기치 못한 오류를 내도 연결이 끝나고, 결과가 보존되며, 예약이 돌아오는지 본다. 통로를 직접 꽂아 구동기를 시험한다. */
 class ConnectionEngineFailureTest {
 
     private AppFixture fixture;
@@ -31,7 +30,6 @@ class ConnectionEngineFailureTest {
         }
     }
 
-    /** 읽을 것이 없고 쓰기는 지원하지 않는 통로. 구동기가 서문을 쓰려 하면 예상 못한 예외가 난다. */
     private static final class BrokenWritePassage implements Passage {
         @Override
         public Inbound await(long timeoutMs, boolean waitForRead, boolean waitForWrite) {

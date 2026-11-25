@@ -10,10 +10,6 @@ import io.github.ppzxc.strand.api.Status;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 채널이 예기치 못한 오류를 내도 연결이 끝나고, 결과가 보존되며, 예약이 돌아오는지 본다. nio의 {@code ConnectionEngineFailureTest}에 대응한다(채널을 직접 꽂아 엔진을
- * 시험한다).
- */
 class NettyEngineFailureTest {
     private NettyEngineRig rig;
 

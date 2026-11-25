@@ -42,7 +42,7 @@ class StrandVersionTest {
 
     @Test
     void returnsNullWhenClassesAreNotPackagedInJar() {
-        // 이 테스트는 클래스 디렉터리에서 실행되므로 매니페스트가 보이지 않는다.
+
         assertThat(StrandVersion.get()).isNull();
     }
 
@@ -109,9 +109,6 @@ class StrandVersionTest {
         return new CodeSource(location, (Certificate[]) null);
     }
 
-    /**
-     * 매니페스트가 보이는 경우는 jar로만 만들 수 있다. 같은 클래스를 임시 jar에 담아 부모 없는 클래스 로더로 읽는다.
-     */
     private Path jarWithManifest(String implementationVersion) throws IOException {
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");

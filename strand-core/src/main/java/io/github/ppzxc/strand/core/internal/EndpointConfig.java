@@ -6,43 +6,40 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
-/** 엔드포인트의 설정: 보내는 HELLO의 파라미터(규격 3.2.1절)와 확인 대기 시간. 값을 바꾼 복사본을 돌려주는 불변 객체다. */
 public final class EndpointConfig {
 
-    /** 규격이 허용하는 가장 작은 {@code max_frame_size}(규격 3.2.1절). 이 하한의 유일한 정의다. */
     public static final long MAX_FRAME_SIZE_LOWER_LIMIT = 16_384L;
 
-    /** 받을 수 있는 프레임 최대 크기의 규격 기본값(규격 3.2.1절). */
     public static final long DEFAULT_MAX_FRAME_SIZE = HelloParams.DEFAULT_MAX_FRAME_SIZE;
 
     private static final long MAX_U32 = 0xFFFF_FFFFL;
-    /** 시각 계산(현재 + 기한)이 넘치지 않도록 막는 시간 값의 상한. */
+
     private static final long MAX_TIMEOUT_MS = Long.MAX_VALUE / 2;
 
     public static final long DEFAULT_ACK_TIMEOUT_MS = 5000L;
     private static final long DEFAULT_AUTH_TIMEOUT_MS = 10000L;
-    /** 유휴 PING 간격의 기본값(30초). 0이면 끈다. */
+
     public static final long DEFAULT_IDLE_INTERVAL_MS = 30_000L;
-    /** 인증이 필요 없는 연결의 메커니즘(규격 3.3.1절). */
+
     public static final String ANONYMOUS = "ANONYMOUS";
 
     private final long maxFrameSize;
     private final long maxConcurrentStreams;
     private final long capabilities;
     private final long ackTimeoutMs;
-    /** 이 시간 동안 받은 프레임이 없으면 PING을 보낸다(규격 3.4.1절). 0이면 유휴 PING을 보내지 않는다. */
+
     private final long idleIntervalMs;
-    /** 서버가 상대 HELLO에 ACK를 보낸 때부터 {@code AUTH}를 기다리는 시간(규격 3.3절 AUTH 대기). */
+
     private final long authTimeoutMs;
-    /** 구현이 아는 애플리케이션 {@code type}. null이면 모든 type을 안다(규격 4.1절). */
+
     private final @Nullable Set<Integer> knownTypes;
-    /** 다음에 쓸 스트림 번호. null이면 역할의 첫 번호다(규격 2.2.5절). */
+
     private final @Nullable Long nextStreamId;
-    /** 클라이언트가 {@code AUTH}로 보낼 메커니즘(규격 3.3.1절). */
+
     private final String authMechanism;
-    /** 클라이언트가 {@code AUTH}로 보낼 자격 증명. */
+
     private final byte[] authCredentials;
-    /** 적합성·호스트 인증 환경이 서버 AUTH(ACK)에 알릴 자격 증명 수명(초). */
+
     private final OptionalLong credentialLifetimeSeconds;
 
     private EndpointConfig(ConfigDraft draft) {
@@ -59,7 +56,6 @@ public final class EndpointConfig {
         this.credentialLifetimeSeconds = draft.credentialLifetimeSeconds;
     }
 
-    /** 설정 값의 모음. 복사본을 만들 때 한 필드만 고치는 데 쓴다. 필드를 더해도 생성자 인자 나열은 늘지 않는다. */
     private static final class ConfigDraft {
         long maxFrameSize = HelloParams.DEFAULT_MAX_FRAME_SIZE;
         long maxConcurrentStreams = HelloParams.DEFAULT_MAX_CONCURRENT_STREAMS;
@@ -96,22 +92,10 @@ public final class EndpointConfig {
         return draft;
     }
 
-    /**
-     * 규격 기본값의 설정.
-     *
-     * @return 기본 설정
-     */
     public static EndpointConfig defaults() {
         return new EndpointConfig(new ConfigDraft());
     }
 
-    /**
-     * 받을 수 있는 프레임의 최대 크기를 바꾼 복사본.
-     *
-     * @param value 바이트 수
-     * @return 새 설정
-     * @throws IllegalArgumentException {@value #MAX_FRAME_SIZE_LOWER_LIMIT} 미만이거나 1048576 초과일 때
-     */
     public EndpointConfig maxFrameSize(long value) {
         ConfigDraft draft = draft();
         if (value < MAX_FRAME_SIZE_LOWER_LIMIT || value > HelloParams.MAX_FRAME_SIZE_UPPER_LIMIT) {
@@ -122,13 +106,6 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
-    /**
-     * 상대가 동시에 열 수 있는 스트림 수를 바꾼 복사본.
-     *
-     * @param value 스트림 수
-     * @return 새 설정
-     * @throws IllegalArgumentException 0 미만이거나 4294967295 초과일 때
-     */
     public EndpointConfig maxConcurrentStreams(long value) {
         ConfigDraft draft = draft();
         if (!isUnsigned32(value)) {
@@ -138,25 +115,12 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
-    /**
-     * 기능 비트셋을 바꾼 복사본.
-     *
-     * @param value 비트셋
-     * @return 새 설정
-     */
     public EndpointConfig capabilities(long value) {
         ConfigDraft draft = draft();
         draft.capabilities = value;
         return new EndpointConfig(draft);
     }
 
-    /**
-     * HELLO나 PING을 보내고 ACK를 기다리는 시간(확인 대기, 규격 3.3절)을 바꾼 복사본. 규격은 값을 정하지 않는다.
-     *
-     * @param value 밀리초
-     * @return 새 설정
-     * @throws IllegalArgumentException 0 이하이거나 Long.MAX_VALUE/2 초과일 때
-     */
     public EndpointConfig ackTimeoutMs(long value) {
         ConfigDraft draft = draft();
         if (!isPositiveTimeoutMs(value)) {
@@ -166,14 +130,6 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
-    /**
-     * 유휴 간격(규격 3.4.1절)을 바꾼 복사본. 이 시간 동안 상대에게서 받은 프레임이 없으면 PING을 보낸다. 정하지 않으면 30초이고, 0이면 유휴 PING을
-     * 보내지 않는다. 규격은 값을 정하지 않는다.
-     *
-     * @param value 밀리초. 0이면 유휴 PING을 끈다
-     * @return 새 설정
-     * @throws IllegalArgumentException 음수이거나 Long.MAX_VALUE/2 초과일 때
-     */
     public EndpointConfig idleIntervalMs(long value) {
         ConfigDraft draft = draft();
         if (!isValidIdleIntervalMs(value)) {
@@ -183,14 +139,6 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
-    /**
-     * 서버가 상대 HELLO에 ACK를 보낸 때부터 {@code AUTH}를 기다리는 시간(AUTH 대기, 규격 3.3절)을 바꾼 복사본. 규격은 값을 정하지
-     * 않는다. 정하지 않으면 10초다.
-     *
-     * @param value 밀리초
-     * @return 새 설정
-     * @throws IllegalArgumentException 0 이하이거나 Long.MAX_VALUE/2 초과일 때
-     */
     public EndpointConfig authTimeoutMs(long value) {
         ConfigDraft draft = draft();
         if (!isPositiveTimeoutMs(value)) {
@@ -200,27 +148,12 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
-    /**
-     * 구현이 아는 애플리케이션 type 목록을 정한 복사본. 정하지 않으면 모든 type을 안다. 모르는 type의 새 요청에는
-     * {@code UNIMPLEMENTED}로 답한다(규격 4.1절).
-     *
-     * @param types 아는 type들
-     * @return 새 설정
-     */
     public EndpointConfig knownTypes(Set<Integer> types) {
         ConfigDraft draft = draft();
         draft.knownTypes = new HashSet<>(types);
         return new EndpointConfig(draft);
     }
 
-    /**
-     * 내 번호 공간에서 다음에 쓸 스트림 번호를 정한 복사본. 번호가 소진되는 경우를 만들어 볼 때 쓴다. 정하지 않으면 클라이언트는 1,
-     * 서버는 2에서 시작한다(규격 2.2.5절).
-     *
-     * @param value 다음 스트림 번호. 역할의 번호 공간(클라이언트는 홀수, 서버는 짝수)에 속해야 한다
-     * @return 새 설정
-     * @throws IllegalArgumentException 1 미만일 때
-     */
     public EndpointConfig nextStreamId(long value) {
         ConfigDraft draft = draft();
         if (value < 1) {
@@ -230,15 +163,6 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
-    /**
-     * 클라이언트가 {@code AUTH}로 보낼 메커니즘과 자격 증명을 정한 복사본. 정하지 않으면 {@code ANONYMOUS}와 빈 자격 증명이다(규격
-     * 3.3.1절).
-     *
-     * @param mechanism 메커니즘 이름. 대문자·숫자·하이픈·밑줄 1~20자
-     * @param credentials 메커니즘이 정한 불투명 자격 증명
-     * @return 새 설정
-     * @throws IllegalArgumentException 메커니즘이 문법을 어길 때
-     */
     public EndpointConfig auth(String mechanism, byte[] credentials) {
         if (!isValidAuthMechanism(mechanism)) {
             throw new IllegalArgumentException("AUTH 메커니즘이 문법(대문자·숫자·하이픈·밑줄 1~20자)을 어긴다: " + mechanism);
@@ -249,22 +173,18 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
-    /** 확인 대기 시간(밀리초)이 {@link #ackTimeoutMs(long)}이 받는 범위인지. */
     public static boolean isPositiveTimeoutMs(long value) {
         return value > 0 && value <= MAX_TIMEOUT_MS;
     }
 
-    /** 유휴 간격(밀리초)이 {@link #idleIntervalMs(long)}이 받는 범위인지. */
     public static boolean isValidIdleIntervalMs(long value) {
         return value >= 0 && value <= MAX_TIMEOUT_MS;
     }
 
-    /** 값이 부호 없는 32비트 정수 범위(0 이상 4294967295 이하)인지. */
     public static boolean isUnsigned32(long value) {
         return value >= 0 && value <= MAX_U32;
     }
 
-    /** 서버 {@code AUTH(ACK)}에 알릴 자격 증명 수명을 정한 복사본. 생략하면 수명 항목을 싣지 않는다. */
     public EndpointConfig credentialLifetimeSeconds(long value) {
         if (!isUnsigned32(value)) {
             throw new IllegalArgumentException("credentialLifetimeSeconds는 부호 없는 32비트 정수여야 한다: " + value);
@@ -274,12 +194,10 @@ public final class EndpointConfig {
         return new EndpointConfig(draft);
     }
 
-    /** AUTH 메커니즘 이름의 최대 길이(규격 3.3.1절). */
     static final int MAX_AUTH_MECHANISM_LENGTH = 20;
 
     private static final Pattern AUTH_MECHANISM_GRAMMAR = Pattern.compile("[A-Z0-9_-]+");
 
-    /** AUTH 메커니즘 이름이 문법(대문자·숫자·하이픈·밑줄 1~20자)을 따르는가. */
     static boolean isValidAuthMechanism(String mechanism) {
         return mechanism.length() >= 1
                 && mechanism.length() <= MAX_AUTH_MECHANISM_LENGTH

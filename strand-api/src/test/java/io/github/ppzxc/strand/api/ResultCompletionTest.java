@@ -201,7 +201,7 @@ class ResultCompletionTest {
 
         assertFalse(first.isDone());
         assertTrue(second.failureNow().get() instanceof ResourceExhaustedException);
-        // 별도 자리를 쓴 관찰은 일반 한도의 현재량을 늘리지 않는다.
+
         assertEquals(1, connection.usage().current());
         assertEquals(1, dedicated.usage().current());
         result.complete("done");

@@ -9,7 +9,6 @@ import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** 단위 입력과 바이트로 넘길 수 없는 입력 신호: 연결 단계별 경계 위반 반응과 스트림 입력과의 동등성(이슈 #367). */
 class EndpointUnitInputTest {
 
     private static final int REQUEST_TYPE = 257;
@@ -58,8 +57,6 @@ class EndpointUnitInputTest {
         return Arrays.copyOf(frame, frame.length + extra);
     }
 
-    // ---- 크기가 맞는 단위 ----
-
     @Test
     void aWholePrefaceUnitIsAnsweredWithHello() {
         Endpoint server = server();
@@ -101,8 +98,6 @@ class EndpointUnitInputTest {
         assertThat(kinds(server)).containsExactly(Event.Kind.REQUEST_RECEIVED);
     }
 
-    // ---- 서문 단계 ----
-
     @Test
     void aPrefaceUnitOfTheWrongSizeClosesSilently() {
         byte[] preface = Frames.preface();
@@ -115,8 +110,6 @@ class EndpointUnitInputTest {
             assertThat(Drive.drainMessages(server)).isEmpty();
         }
     }
-
-    // ---- 첫 프레임 단계 ----
 
     @Test
     void aFirstFrameUnitTooShortToReadItsHeaderClosesSilently() {
@@ -158,8 +151,6 @@ class EndpointUnitInputTest {
         assertThat(Drive.drainMessages(server)).isEmpty();
     }
 
-    // ---- 그 뒤 ----
-
     @Test
     void aLaterUnitOfTheWrongSizeIsAProtocolErrorAndTheFrameIsNotApplied() {
         byte[] request = Frames.request(REQUEST_TYPE, 1, new byte[] {1});
@@ -185,8 +176,6 @@ class EndpointUnitInputTest {
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
         assertThat(sentClose(server)).isFalse();
     }
-
-    // ---- 바이트로 넘길 수 없는 입력 ----
 
     @Test
     void unsupportedInputInThePrefaceAndFirstFramePhasesClosesSilently() {
@@ -252,8 +241,6 @@ class EndpointUnitInputTest {
         assertThat(Drive.drainMessages(client)).isEmpty();
     }
 
-    // ---- 수거 공간 계약 ----
-
     @Test
     void stopsWithoutConsumingWhenCollectionIsNeededAndResumesWithTheSameUnit() {
         Endpoint server = established();
@@ -286,8 +273,6 @@ class EndpointUnitInputTest {
         assertThat(server.receiveUnsupportedInput(space).collectionRequired()).isFalse();
         assertThat(kinds(server)).containsExactly(Event.Kind.CLOSED);
     }
-
-    // ---- 호출 규약 ----
 
     @Test
     void anEndedConnectionConsumesNothing() {

@@ -13,12 +13,8 @@ import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/**
- * 서버 프로세스 역할. 선택한 전송의 서버를 띄우고 {@code READY <포트>} 한 줄을 표준 출력에 낸 뒤, 표준 입력이 닫히면 정리하고 끝난다. 받은 요청은 같은 본문으로 그대로 응답한다. 두 전송에
- * 같은 한도·시간 설정을 준다.
- */
 final class ServerRole {
-    /** netty 서버가 쓰는 이벤트 루프 스레드 수. 독립 실행(자체 이벤트 루프)만 잰다. */
+
     static final int NETTY_EVENT_LOOPS = 2;
 
     private static final java.util.concurrent.ScheduledExecutorService DELAYS =
@@ -30,7 +26,6 @@ final class ServerRole {
 
     private ServerRole() {}
 
-    /** 상대가 읽지 않는 연결로 요청을 계속 밀어 넣는다. 하나가 끝나면 다음을 보내 미완료 수를 유지한다. 연결이 끝나면 결과가 실패로 돌아와 멈춘다. */
     private static void push(io.github.ppzxc.strand.nio.NioStrandConnection connection, int bodyBytes) {
         connection
                 .request(io.github.ppzxc.strand.api.Request.of(LoadSupport.ECHO_TYPE, new byte[bodyBytes]))
@@ -53,7 +48,6 @@ final class ServerRole {
                 });
     }
 
-    /** 서버 쪽 연결 종료를 {@code CLOSED <json>} 한 줄로 알린다. */
     private static void announceClosed(PrintStream out, io.github.ppzxc.strand.api.CloseNotice notice) {
         com.google.gson.JsonObject json = new com.google.gson.JsonObject();
         json.addProperty("kind", notice.kind().name());
@@ -68,7 +62,6 @@ final class ServerRole {
         out.flush();
     }
 
-    /** 하네스 자체 시험용 지연. 0이면 바로 응답한다. */
     private static void respondAfterDelay(RunConfig config, Runnable respond) {
         if (config.serverDelay.isZero()) {
             respond.run();
@@ -77,9 +70,8 @@ final class ServerRole {
         }
     }
 
-    /** 전송별 서버. 두 전송의 공개 진입점이 서로 다른 타입이라 얇게 감싼다. */
     private interface Backend {
-        /** 리스닝을 시작하고 실제 포트를 돌려준다. */
+
         int listen() throws Exception;
 
         void shutdown() throws Exception;
@@ -102,9 +94,6 @@ final class ServerRole {
         return 0;
     }
 
-    /**
-     * 하네스가 표준 입력을 닫거나 죽으면 서버도 끝난다. 고아 서버가 남지 않게 한다. 입력 줄 {@code SAMPLE}에는 자원 표본 한 줄({@code SAMPLE <json>})로 답한다.
-     */
     private static void serveControl(PrintStream out) throws IOException {
         java.io.BufferedReader reader = new java.io.BufferedReader(
                 new java.io.InputStreamReader(System.in, java.nio.charset.StandardCharsets.UTF_8));

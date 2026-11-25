@@ -20,10 +20,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 팩터리가 끝나지 않은 준비 중의 입력을 와이어 수준 상대로 확인한다(규격 3.3~3.5절). AUTH 관문을 통과한 뒤의 PING은 확인(ACK)되고, 요청은
- * 활성화까지 보관되며, 두 번째 AUTH는 연결 오류이고, CLOSE는 준비를 실패시킨다(#319).
- */
 class NioPreparationInputTest {
     private static final int HELLO = 0x0001;
     private static final int PING = 0x0002;
@@ -74,7 +70,6 @@ class NioPreparationInputTest {
         return out.toByteArray();
     }
 
-    /** 서문과 HELLO를 교환하고 AUTH를 보내 서버의 AUTH(ACK)까지 받는 원시 클라이언트. */
     private static final class RawPeer implements AutoCloseable {
         private final Socket socket;
         private final DataInputStream in;
@@ -107,7 +102,6 @@ class NioPreparationInputTest {
             readUntil(AUTH, ACK);
         }
 
-        /** 원하는 type·flags의 프레임이 올 때까지 읽는다. 연결이 끝나면 null. */
         byte[] readUntil(int type, int flags) throws IOException {
             while (true) {
                 byte[] frame = readFrame();
@@ -184,7 +178,7 @@ class NioPreparationInputTest {
 
             assertThat(ack).isNotNull();
             assertThat(java.util.Arrays.copyOfRange(ack, 20, 28)).containsExactly(pingPayload);
-            // 준비 전에 온 요청은 거절하지 않고 활성화까지 보관한다. PING과 요청은 준비를 끝내지 않는다.
+
             assertThat(blocked.handled.await(300, TimeUnit.MILLISECONDS)).isFalse();
             assertThat(blocked.failures.poll(300, TimeUnit.MILLISECONDS)).isNull();
             assertThat(blocked.server
@@ -215,7 +209,7 @@ class NioPreparationInputTest {
             assertThat(failure.stage()).isEqualTo(PreparationStage.HANDLER_FACTORY);
             awaitTrue(() ->
                     blocked.server.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
-            // 팩터리 작업은 반환하지 않았으므로 슬롯을 유지한다.
+
             assertThat(blocked.server.resourceUsage(Resource.FACTORY_TASKS).current())
                     .isEqualTo(1);
             blocked.releaseFactory.countDown();

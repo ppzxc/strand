@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.api;
 
-/** Snapshot of a configured resource limit and its reservation statistics. */
 public final class ResourceUsage {
     private final long limit;
     private final long current;
@@ -21,10 +20,6 @@ public final class ResourceUsage {
         this.rejections = rejections;
     }
 
-    /**
-     * Creates a snapshot of one resource kind. A limit of 0 is valid only for the TLS progress kinds, because a plain
-     * connection needs none of them; every other kind needs a positive limit.
-     */
     public static ResourceUsage of(Resource resource, long limit, long current, long highWater, long rejections) {
         return new ResourceUsage(resource.isTlsProgress() ? 0 : 1, limit, current, highWater, rejections);
     }

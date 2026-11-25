@@ -72,36 +72,13 @@ import java.util.logging.Logger;
 import javax.net.ssl.SSLEngine;
 import org.jspecify.annotations.Nullable;
 
-/**
- * 연결 하나를 돌리는 Netty 이벤트 루프와 앱 호출의 경계. 채널이 고정된 EventLoop 하나만 {@link Endpoint}를 부르고, 다른 스레드의 호출은 예약을 먼저
- * 확보한 뒤 명령으로 큐에 넣고 그 EventLoop를 깨운다. 명령 큐는 예약 한도(송신 요청, 받은 요청의 응답)와 연결·인증·팩터리 결과 하나씩이 세므로 유한하다.
- *
- * <p>core는 유한 단위로만 구동한다. 입력은 {@code receiveBounded}로 한 번에 최대 {@value #MAX_UNITS_PER_STEP}단위씩 처리하고, 사건은 제어 출력·결과
- * 사건 공간({@link ProgressSpace}에서 정한 {@link CollectionSpace})만큼만 수거한다. 수거 공간이 모자라 멈추면 쓰기를 진행해 출력을 비우고 소비 위치부터
- * 다시 입력한다. 출력은 {@code nextOutput}으로 고르고 채널의 실제 쓰기량(TCP) 또는 평문 소비량(TLS)을 {@code outputProgress}로 보고한다.
- * 확인·시도·보고는 이벤트 루프 작업 하나 안에서 이어지므로 같은 연결의 다른 core 명령이 끼지 않는다. 쓰기 0은 보고하지 않는다.
- *
- * <p>읽기는 {@code autoRead}로 조절한다. 처리하지 못한 입력이 남았거나 core 출력이 쓰기 대기열 상한을 넘으면 읽기를 멈추고, 풀리면 다시 켠다. 쓰기가
- * 막히면 쓰기 가능 알림 대신 짧은 주기로 다시 시도한다(#315의 검증 범위).
- *
- * <p>사용자 코드(인증·팩터리·핸들러·알림·기본 관찰)는 연결의 {@code SerialExecutor}에서만 돌려 이벤트 루프와 분리하고 같은 연결의 호출을
- * 직렬화한다. 결과 보존은 그 실행을 기다리지 않는다.
- *
- * <p><b>정리와 closed.</b> 통로 정리는 {@code close()} Future가 아니라 채널의 {@code closeFuture}가 끝난 뒤 이 연결이 가진 내부 버퍼와 남은 결과를
- * 모두 정리하고 이벤트 루프의 후속 작업까지 지난 시점이다. 그때 예약을 돌려주고 {@code closed}를 완료한다.
- */
 final class ConnectionEngine {
-    /** 한 번에 처리하는 입력 단위의 상한. 넘으면 시계와 명령 처리를 먼저 한다. */
     static final int MAX_UNITS_PER_STEP = 64;
-    /** TCP에서 한 번에 읽는 조각의 크기. TLS는 엔진이 알린 암호문 패킷 크기를 쓴다. */
     static final int TCP_READ_CHUNK_BYTES = 16 * 1024;
-    /** 쓰기가 막혔을 때 다시 시도하는 주기(#315 검증에서 쓴 값). */
     private static final long WRITE_RETRY_NANOS = 1_000_000L;
 
-    /** 연결 생성 때 별도로 확보하는 기본 종료 알림의 자리 수(결정 #307: 한 건). */
     private static final long DEFAULT_CLOSE_NOTICE_SLOTS = 1;
 
-    /** 핸들러 예외 같은 로컬 진단의 기록처. 상대에게 보내는 것이 아니다. */
     private static final Logger LOGGER = Logger.getLogger("io.github.ppzxc.strand.netty");
 
     private static final long NANOS_PER_MILLI = 1_000_000L;
@@ -122,18 +99,14 @@ final class ConnectionEngine {
     private volatile boolean stopped;
     private volatile @Nullable RequestHandler activeHandler;
 
-    /** 핸들러 준비(팩터리 완료 또는 핸들러 등록)가 끝났는가. 끝나기 전에 온 요청은 애플리케이션에 넘기기 전에 거절한다(규격 4.5절). */
     private volatile boolean handlerPrepared;
 
-    // 이벤트 루프에서만 읽고 쓰는 상태.
     private @Nullable Loop active;
     private PreparationStage stage;
     private boolean preparing = true;
     private static final long EARLY_REQUEST_OVERHEAD = 64;
 
-    /** 핸들러 준비 전에 도착해 활성화를 기다리는 요청. 활성화되면 도착 순서대로 넘기고, 준비가 실패하면 연결과 함께 끝난다. 전송 스레드에서만 쓴다. */
     private final ArrayDeque<Event> earlyRequests = new ArrayDeque<>();
-    /** 보관한 요청을 준비 실패 때 돌려보내려고 잡아 둔 엔드포인트. 전송 스레드에서만 쓴다. */
     private @Nullable Endpoint loopEndpoint;
 
     private boolean preparingSlotHeld = true;
@@ -144,10 +117,6 @@ final class ConnectionEngine {
     private final Map<Long, IncomingRequest> incoming = new HashMap<>();
     private CloseNotice finalNotice = CloseNotice.disconnected(null);
     private @Nullable Throwable connectFailure;
-    /**
-     * 결과나 응답을 접수한 뒤에도 본문을 가진 출력이 아직 남아 있어 돌려주지 못한 바이트 예약. 스트림 번호별로 그 애플리케이션 프레임 출력이 다 나가거나(또는
-     * 연결이 끊겨 출력이 사라지면) 돌려준다. 이벤트 루프에서만 읽고 쓴다.
-     */
     private final Map<Long, HeldBytes> heldBytes = new HashMap<>();
 
     ConnectionEngine(NettyStrandConnection facade, ConnectionParams params, StrandChannel channel) {
@@ -160,7 +129,6 @@ final class ConnectionEngine {
         this.collectionSpace = CollectionSpace.of(
                 ProgressSpace.eventSlots(usageLimit(Resource.RESULT_EVENT_BYTES), params.maxFrameSize),
                 ProgressSpace.outputSlots(usageLimit(Resource.CONTROL_OUTPUT_BYTES)));
-        // 기본 종료 알림 한 건의 자리를 연결을 만들 때 일반 관찰 한도와 별도로 확보한다. 일반 관찰이 포화여도 종료 알림은 등록된다.
         this.closed = new ResultCompletion<>(
                 params.executor,
                 params.budgets.observationBudget(),
@@ -169,9 +137,7 @@ final class ConnectionEngine {
         installChannel(channel);
     }
 
-    /** 채널에 읽기 조각 설정과 연결 핸들러를 달고, 채널이 정리되면 연결 정리를 시작하게 한다. */
     private void installChannel(StrandChannel installed) {
-        // 읽기 조각은 TLS 암호문 패킷 하나(받는 암호문 공간이 그 두 배) 또는 TCP 기본 조각이다. 한 번의 읽기 루프에서 한 조각만 받는다.
         int chunk = p.tls == null ? TCP_READ_CHUNK_BYTES : p.tls.sizes.packetBufferSize();
         installed.config().setAllocator(p.allocator);
         installed.config().setRecvByteBufAllocator(new FixedRecvByteBufAllocator(chunk));
@@ -187,12 +153,6 @@ final class ConnectionEngine {
         return p.budgets.usage(resource).limit();
     }
 
-    // ---------------------------------------------------------------- 시작
-
-    /**
-     * 클라이언트: 준비 기한 타이머를 시작하고, 필요하면 주소를 앱 실행기에서 해석한 뒤 주소를 하나씩 순서대로 연결한다. 모든 시도가 처음 정한 준비 기한을
-     * 공유한다.
-     */
     void startClient(InetSocketAddress target) {
         if (p.attempt != null) {
             p.attempt.bind(this);
@@ -214,7 +174,6 @@ final class ConnectionEngine {
         }
     }
 
-    /** 앱용 실행기에서 이름을 해석한다. 슬롯은 해석이 실제로 반환할 때까지 유지하고, 늦게 반환해도 이미 끝난 시도로는 연결하지 않는다. */
     private void resolveThenConnect(InetSocketAddress target) {
         InetAddress[] addresses = null;
         Throwable failure = null;
@@ -245,12 +204,10 @@ final class ConnectionEngine {
         runOnLoop(() -> connectTo(targets, reserve));
     }
 
-    /** 시도가 이미 취소·기한·종료로 끝났는가. 끝난 시도는 새 소켓을 열지 않는다. */
     private boolean attemptEnded() {
         return connectFailure != null || tornDown.get();
     }
 
-    /** 이벤트 루프: 해석한 주소의 바이트를 보관하기 전에 예약하고, 첫 주소부터 연결한다. */
     private void connectTo(List<InetSocketAddress> targets, long bytes) {
         if (attemptEnded()) {
             return;
@@ -267,7 +224,6 @@ final class ConnectionEngine {
         connectNext();
     }
 
-    /** 이벤트 루프: 다음 주소 하나에 연결한다. 남은 준비 기한이 없으면 기한 초과로 끝낸다. */
     private void connectNext() {
         InetSocketAddress target = pendingTargets.remove();
         long remaining = p.preparationDeadlineAtNanos - p.nanoClock.getAsLong();
@@ -297,11 +253,9 @@ final class ConnectionEngine {
         });
     }
 
-    /** 이벤트 루프: 한 주소의 연결이 실패했다. 남은 주소가 있고 시도가 끝나지 않았으면 새 채널로 다음 주소를 연결하고, 아니면 이 실패로 끝낸다. */
-    @SuppressWarnings("FutureReturnValueIgnored") // 실패한 채널의 정리 완료는 관찰할 것이 없다.
+    @SuppressWarnings("FutureReturnValueIgnored")
     private void connectFailed(StrandChannel failed, Throwable cause) {
         if (attemptEnded()) {
-            // 취소·기한이 먼저 끝냈다.
             return;
         }
         if (pendingTargets.isEmpty()) {
@@ -310,14 +264,12 @@ final class ConnectionEngine {
         }
         StrandChannel next = new StrandChannel();
         next.config().setTcpNoDelay(true);
-        // 교체를 먼저 한다. 실패한 채널의 정리가 연결 정리로 번지지 않는다.
         channel = next;
         installChannel(next);
         failed.close();
         connectNext();
     }
 
-    /** 서버: 수락한 채널을 등록한다. 준비 기한은 수락부터 센다. */
     void startServer() {
         armPreparationTimer();
         ChannelFuture registration;
@@ -334,7 +286,6 @@ final class ConnectionEngine {
         });
     }
 
-    /** 채널이 활성화되기 전의 실패(주소 해석·등록·연결). 원인을 남기고 채널을 정리한다. */
     private void setupFailed(Throwable cause) {
         Runnable fail = () -> {
             if (connectFailure == null) {
@@ -344,14 +295,12 @@ final class ConnectionEngine {
             closeChannel();
         };
         if (loop.inEventLoop()) {
-            // 채널 정리(closeFuture)보다 원인을 먼저 남겨야 준비 실패가 실제 원인을 담는다.
             fail.run();
         } else {
             runOnLoop(fail);
         }
     }
 
-    /** 이벤트 루프에서 실행한다. 루프가 이미 끝났으면 호출 스레드에서 바로 실행한다(정리만 하는 작업이다). */
     private void runOnLoop(Runnable task) {
         try {
             loop.execute(task);
@@ -360,8 +309,7 @@ final class ConnectionEngine {
         }
     }
 
-    /** 채널이 연결되기 전에도 준비 기한이 지나면 연결 시도를 끝낸다. 활성화 뒤에는 연결 루프가 기한을 본다. */
-    @SuppressWarnings("FutureReturnValueIgnored") // 타이머는 취소하지 않는다. 시각이 지난 뒤 상태를 다시 확인한다.
+    @SuppressWarnings({"FutureReturnValueIgnored", "EmptyCatch"})
     private void armPreparationTimer() {
         long remaining = Math.max(0, p.preparationDeadlineAtNanos - p.nanoClock.getAsLong());
         try {
@@ -375,22 +323,18 @@ final class ConnectionEngine {
                     remaining / NANOS_PER_MILLI + 1,
                     TimeUnit.MILLISECONDS);
         } catch (RuntimeException e) {
-            // EventLoop가 이미 끝났다. 채널 정리가 결과를 확정한다.
         }
     }
 
-    @SuppressWarnings("FutureReturnValueIgnored") // 정리 완료는 closeFuture 리스너가 관찰한다.
+    @SuppressWarnings("FutureReturnValueIgnored")
     private void closeChannel() {
         if (channel.isRegistered()) {
             channel.close();
         } else {
-            // 등록한 적 없는 채널은 closeFuture가 끝나지 않는다. 같은 정리 경로를 직접 지난다.
             channel.unsafe().closeForcibly();
             onChannelClosed();
         }
     }
-
-    // ---------------------------------------------------------------- 채널 이벤트 (이벤트 루프)
 
     private final class Handler extends ChannelInboundHandlerAdapter {
         @Override
@@ -411,7 +355,6 @@ final class ConnectionEngine {
 
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-            // 주소를 하나씩 시도하며 교체한 채널의 오류는 이 연결의 것이 아니다.
             if (ctx.channel().equals(channel)) {
                 onException(cause);
             }
@@ -422,7 +365,6 @@ final class ConnectionEngine {
         if (stopped || active != null) {
             return;
         }
-        // 연결이 맺어졌으므로 해석한 주소 목록은 더 쓰지 않는다.
         pendingTargets.clear();
         releaseResolvedBytes();
         try {
@@ -460,7 +402,6 @@ final class ConnectionEngine {
         closeChannel();
     }
 
-    /** 채널이 정리됐다(어떤 경로로든). 남은 결과와 예약을 정리하고, 이벤트 루프의 후속 작업을 거쳐 closed를 완료한다. */
     private void onChannelClosed() {
         if (!tornDown.compareAndSet(false, true)) {
             return;
@@ -486,12 +427,10 @@ final class ConnectionEngine {
         }
     }
 
+    @SuppressWarnings("EmptyCatch")
     private void complete() {
-        // 채널 정리(closeFuture)는 소켓이 실제로 풀리기 전에 끝날 수 있다. closed 완료는 실제 해제 뒤여야 하므로 JDK가 소켓을 놓을 때까지
-        // 타이머로 선택 주기를 지나간다(선택기를 직접 부르지 않는다).
         if (channel.socketHeld() && !loop.isShuttingDown()) {
             try {
-                // 이벤트 루프가 끝나면 Netty가 예약 작업을 취소한다. 그때는 기다릴 선택 주기가 없으니 바로 끝낸다.
                 loop.schedule(this::complete, WRITE_RETRY_NANOS, TimeUnit.NANOSECONDS)
                         .addListener(timer -> {
                             if (timer.isCancelled()) {
@@ -500,7 +439,6 @@ final class ConnectionEngine {
                         });
                 return;
             } catch (RejectedExecutionException e) {
-                // 이벤트 루프가 끝났다. 선택기가 닫히면 등록된 채널은 모두 풀린다.
             }
         }
         finishClosed();
@@ -520,13 +458,6 @@ final class ConnectionEngine {
                 .forEach(request -> finishIncoming(request.state(), RequestEnd.connectionEnd()));
     }
 
-    // ---------------------------------------------------------------- 연결 슬롯 예약
-
-    /**
-     * 연결을 받기 전에 준비·전체 연결 슬롯과 필수 진행 공간을 예약한다. 모자라면 확보한 것을 모두 돌려주고 모자란 종류를 알린다. 기다리지 않는다.
-     *
-     * @return 모두 예약했으면 null, 아니면 모자란 종류
-     */
     static @Nullable Resource admit(ConnectionBudgets budgets, ProgressSpace space) {
         OwnerBudgets owner = budgets.owner();
         if (!owner.tryReserve(Resource.PREPARING_CONNECTIONS, 1)) {
@@ -578,14 +509,12 @@ final class ConnectionEngine {
         return null;
     }
 
-    /** {@link #admit}로 예약했지만 연결을 시작하지 못했을 때 예약을 모두 돌려준다. */
     static void cancelAdmission(ConnectionBudgets budgets, ProgressSpace space) {
         releaseProgress(budgets, space, progressKinds().length);
         budgets.owner().release(Resource.TOTAL_CONNECTIONS, 1);
         budgets.owner().release(Resource.PREPARING_CONNECTIONS, 1);
     }
 
-    /** 진행 공간 예약 가운데 앞의 {@code count}종류를 돌려준다. 예약 도중 모자라 되돌릴 때와 연결이 끝날 때 쓴다. */
     private static void releaseProgress(ConnectionBudgets budgets, ProgressSpace space, int count) {
         Resource[] kinds = progressKinds();
         long[] amounts = progressAmounts(space);
@@ -612,14 +541,12 @@ final class ConnectionEngine {
         }
     }
 
-    /** 스트림의 애플리케이션 프레임 출력이 사라질 때까지 바이트 예약을 유지한다. 0바이트는 유지할 것이 없다. */
     private void holdBytes(long streamId, Resource resource, long amount) {
         if (amount > 0) {
             heldBytes.put(streamId, new HeldBytes(resource, amount));
         }
     }
 
-    /** 스트림의 출력이 모두 사라졌다. 그 출력 때문에 유지하던 바이트 예약을 돌려준다. */
     private void returnHeldBytes(long streamId) {
         HeldBytes held = heldBytes.remove(streamId);
         if (held != null) {
@@ -627,7 +554,6 @@ final class ConnectionEngine {
         }
     }
 
-    /** 출력이 모두 사라졌다(연결이 끊겼거나 마무리됐다). 남은 출력 때문에 유지하던 바이트 예약을 모두 돌려준다. */
     private void returnAllHeldBytes() {
         for (HeldBytes held : heldBytes.values()) {
             p.budgets.release(held.resource, held.amount);
@@ -652,8 +578,6 @@ final class ConnectionEngine {
             p.budgets.owner().release(Resource.PREPARING_CONNECTIONS, 1);
         }
     }
-
-    // ---------------------------------------------------------------- 앱 스레드에서 부르는 경계
 
     ResourceUsage usage(Resource resource) {
         return p.budgets.usage(resource);
@@ -694,10 +618,6 @@ final class ConnectionEngine {
         wake();
     }
 
-    /**
-     * 전체 종료가 이 연결에 CLOSE를 시작시킨다. 아직 확정되지 않은 연결 시도는 먼저 취소한다. 채널이 활성화되기 전에 낸 명령은 연결 루프가 만들어질 때 처리되고, 활성화되지 못하는
-     * 시도는 취소가 끝낸다.
-     */
     void shutdownClose() {
         if (p.attempt != null) {
             p.attempt.cancel();
@@ -705,7 +625,6 @@ final class ConnectionEngine {
         close();
     }
 
-    /** 전체 종료의 grace가 끝나 이 연결을 즉시 끊는다. 아직 확정되지 않은 연결 시도는 먼저 취소한다. */
     void shutdownAbort() {
         if (p.attempt != null) {
             p.attempt.cancel();
@@ -713,10 +632,6 @@ final class ConnectionEngine {
         abort();
     }
 
-    /**
-     * 연결 시도 취소를 EventLoop에 넘긴다. 성공과 취소 가운데 이기는 쪽은 EventLoop가 처리하는 순서가 정한다. 채널이 활성화되기 전(주소 해석·연결 중)이면 곧바로 채널을
-     * 정리하고, 활성화된 뒤에는 연결 루프의 명령으로 준비를 취소로 확정한다.
-     */
     void cancelAttempt() {
         runOnLoop(() -> {
             if (!preparing) {
@@ -743,7 +658,6 @@ final class ConnectionEngine {
             rejected.finishLocally(Status.UNAVAILABLE, Certainty.NOT_PROCESSED, null);
             return new Handle(rejected);
         }
-        // 본문을 복사하기 전에 연결·소유 객체 범위의 예약을 확보한다. 모자라면 복사하지 않고 처리 안 됨으로 끝낸다.
         Resource exhausted = reserveOutgoing(bytes);
         if (exhausted != null) {
             OutgoingEntry rejected = new OutgoingEntry(result, request.type(), EMPTY, EMPTY, bytes, deadlineAt);
@@ -767,7 +681,6 @@ final class ConnectionEngine {
         return Saturating.add(p.nanoClock.getAsLong(), nanos);
     }
 
-    /** 송신 요청 수와 바이트를 연결·소유 객체 범위에 함께 예약한다. 하나라도 모자라면 확보한 것을 돌려준다. */
     private @Nullable Resource reserveOutgoing(long bytes) {
         if (!p.budgets.tryReserve(Resource.OUTGOING_REQUESTS, 1)) {
             return Resource.OUTGOING_REQUESTS;
@@ -788,20 +701,17 @@ final class ConnectionEngine {
         IncomingState state = request.state();
         ResultCompletion<ResponseAcceptance> result = new ResultCompletion<>(
                 p.executor, p.budgets.observationBudget(), p.budgets.owner().observationBudget());
-        // 재시도마다 끝났는지·이미 응답했는지를 자원 부족보다 먼저 판정한다.
         ResponseAcceptance ended = endedAcceptance(state);
         if (ended != null) {
             result.complete(ended);
             return result;
         }
-        // 응답 접수 명령은 요청마다 하나만 기다린다. 본문이 비어 예약이 0이어도 명령 대기가 예약 없이 늘지 않게 한다.
         if (!state.responding.compareAndSet(false, true)) {
             result.complete(ResponseAcceptance.resourceExhausted(Resource.RESPONSE_BYTES));
             return result;
         }
         if (!p.budgets.tryReserve(Resource.RESPONSE_BYTES, body.length)) {
             state.responding.set(false);
-            // 부족을 알리는 사이 요청이 끝났다면 끝남이 우선이다.
             ResponseAcceptance nowEnded = endedAcceptance(state);
             result.complete(
                     nowEnded != null ? nowEnded : ResponseAcceptance.resourceExhausted(Resource.RESPONSE_BYTES));
@@ -811,7 +721,6 @@ final class ConnectionEngine {
         return result;
     }
 
-    /** 요청이 이미 끝났으면 그에 맞는 접수 결과를, 아직 살아 있으면 null을 돌려준다. */
     private static @Nullable ResponseAcceptance endedAcceptance(IncomingState state) {
         if (!state.ended.isDone()) {
             return null;
@@ -844,12 +753,9 @@ final class ConnectionEngine {
         }
     }
 
-    // ---------------------------------------------------------------- 명령
-
     private interface Command {
         void execute(Loop loop);
 
-        /** 전송 스레드가 끝난 뒤 들어왔거나 끝나기 전에 처리되지 못한 명령. */
         void abandon();
     }
 
@@ -883,11 +789,9 @@ final class ConnectionEngine {
             if (entry.deadlineAtNanos != NO_DEADLINE) {
                 long remaining = entry.deadlineAtNanos - p.nanoClock.getAsLong();
                 if (remaining <= 0) {
-                    // 호출 시점부터 센 기한이 core 등록 전 대기에서 이미 지났다. 요청을 만들지 않는다(처리 안 됨).
                     entry.finish(Status.DEADLINE_EXCEEDED, Certainty.NOT_PROCESSED, EMPTY);
                     return;
                 }
-                // 올림이 아니라 항상 1밀리초를 더해 기한이 앞서 지나지 않게 한다.
                 remainingMs = remaining / NANOS_PER_MILLI + 1;
             }
             try {
@@ -896,7 +800,6 @@ final class ConnectionEngine {
                 entry.ticket = ticket;
                 pending.put(ticket, entry);
             } catch (IllegalArgumentException e) {
-                // 협상한 프레임 크기를 넘는 요청. 아무것도 보내지 않았다.
                 entry.finishLocally(0, null, Resource.PEER_FRAME_SIZE);
             }
         }
@@ -916,7 +819,6 @@ final class ConnectionEngine {
 
         @Override
         public void execute(Loop loop) {
-            // 끝난 요청이나 번호표를 받지 못한 요청(로컬에서 이미 끝남)의 취소는 core가 무시한다.
             loop.endpoint.cancelRequest(entry.ticket);
         }
 
@@ -943,30 +845,24 @@ final class ConnectionEngine {
             boolean accepted = false;
             try {
                 if (state.responded) {
-                    // 응답을 접수한 요청은 그 응답 때문에 끝난 것이다. 뒤따르는 응답은 이미 응답한 것으로 알린다.
                     acceptance = ResponseAcceptance.alreadyResponded();
                 } else if (loop.endpoint.respond(state.streamId, status, body)) {
                     state.responded = true;
                     accepted = true;
                     acceptance = ResponseAcceptance.accepted();
                 } else {
-                    // 상대가 RESET했거나 연결이 끝난 스트림이다. 응답은 접수하지 않았다.
                     acceptance = ResponseAcceptance.requestEnded();
                     returnIncoming(state);
                 }
             } catch (IllegalArgumentException e) {
-                // status는 IncomingRequest.respond가 먼저 검증하므로 여기서 남는 원인은 프레임 크기뿐이다.
                 assert status >= 0 && status <= 16 : "검증을 지난 status여야 한다: " + status;
-                // 협상한 프레임 크기를 넘는 응답. 본문을 보관하지 않고 응답 권한도 소비하지 않는다.
                 acceptance = ResponseAcceptance.resourceExhausted(Resource.PEER_FRAME_SIZE);
             }
             if (accepted) {
-                // 응답 프레임이 core 출력으로 쌓였다. 본문 참조는 그 프레임이 다 나가거나 연결이 끝날 때까지 남으므로 예약도 그때 돌려준다.
                 holdBytes(state.streamId, Resource.RESPONSE_BYTES, body.length);
             } else {
                 p.budgets.release(Resource.RESPONSE_BYTES, body.length);
             }
-            // 요청 종료와 대기 표시 해제를 결과보다 먼저 보존해, 결과를 본 앱이 곧바로 다시 응답하면 이미 응답한 것으로 판정된다.
             state.responding.set(false);
             if (accepted) {
                 finishIncoming(state, RequestEnd.responseAccepted());
@@ -1057,7 +953,6 @@ final class ConnectionEngine {
                 return;
             }
             if (!preparing || loop.closedSeen) {
-                // 활성화되지 못한 결과다. 폐기가 기존 팩터리 예약을 이어받아 끝날 때 돌려준다.
                 dispose(handler);
                 return;
             }
@@ -1076,10 +971,6 @@ final class ConnectionEngine {
         }
     }
 
-    /**
-     * 활성화되지 못한 결과의 폐기를 앱용 실행기에 넘긴다. 폐기는 이 연결의 직렬 실행을 거치지 않는다: 같은 연결의 반환하지 않는 사용자 작업 뒤에서 폐기가 막히지
-     * 않고, 연결이 이미 끝났어도 실행된다.
-     */
     private void dispose(PreparedHandler handler) {
         try {
             p.appExecutor.execute(() -> {
@@ -1090,7 +981,6 @@ final class ConnectionEngine {
                 }
             });
         } catch (RuntimeException | Error e) {
-            // 폐기 실행이 거절됐다. 폐기 동작을 EventLoop에서 대신 실행하지 않고 앱이 조회·회수하도록 보존한다. 예약은 앱이 인수할 때까지 유지한다.
             UnreleasedHandlers registry = Objects.requireNonNull(p.unreleased);
             registry.add(new UnreleasedHandler(
                     handler, registry, () -> p.budgets.owner().release(Resource.FACTORY_TASKS, 1)));
@@ -1113,7 +1003,6 @@ final class ConnectionEngine {
         }
     }
 
-    /** 이벤트 루프를 깨워 명령을 처리하게 한다. 이미 깨우는 작업이 대기 중이면 합친다(이벤트 루프 작업 큐도 유한하게 유지한다). */
     private void wake() {
         if (!wakeQueued.compareAndSet(false, true)) {
             return;
@@ -1127,15 +1016,11 @@ final class ConnectionEngine {
                 }
             });
         } catch (RuntimeException e) {
-            // EventLoop가 끝났다. 처리할 수 없는 명령은 내려놓는다.
             wakeQueued.set(false);
             abandonRemaining();
         }
     }
 
-    // ---------------------------------------------------------------- 준비
-
-    /** 준비 결과를 실패로 확정한다. 처음 한 번만 알리고 준비 슬롯을 돌려준다. 이미 확정됐으면 아무 일도 하지 않는다. */
     private void failPreparation(PreparationStage at, Throwable cause) {
         if (preparing) {
             preparing = false;
@@ -1152,7 +1037,6 @@ final class ConnectionEngine {
             preparing = false;
             confirmAttempt();
             releasePreparingSlot();
-            // 성공한 시도는 채널을 연결에 넘겼으므로 시도가 정리할 것이 없다.
             completeReleased();
             notifyReady(loop);
         }
@@ -1164,9 +1048,6 @@ final class ConnectionEngine {
         }
     }
 
-    /**
-     * 시도가 소유한 채널 정리 완료를 알린다. 알림은 앱용 실행기를 거치며, 거절되면 실행기 없이 확정한다(Netty Future의 리스너는 어차피 EventLoop에서 실행된다).
-     */
     private void completeReleased() {
         io.netty.util.concurrent.Promise<Void> released = p.released;
         if (released == null || releasedNotified) {
@@ -1180,23 +1061,18 @@ final class ConnectionEngine {
         }
     }
 
-    /**
-     * 준비 성공 알림은 앱용 실행기에서 한다. 같은 연결의 인증·팩터리가 반환하지 않아도 알릴 수 있도록 연결별 직렬 실행을 거치지 않는다. 실행기가 거절하면
-     * 알림을 대신할 스레드를 만들지 않고, 앱이 받을 수 없는 연결이므로 끊고 시도를 거절 원인으로 실패시킨다. 서버는 성공을 알릴 앱 관찰자가 없어 거절돼도 연결을 유지한다.
-     */
     private void notifyReady(Loop loop) {
         try {
             p.appExecutor.execute(() -> p.observer.ready(facade));
         } catch (RuntimeException | Error e) {
             if (p.role == ConnectionParams.Role.CLIENT) {
-                // 같은 처리 단계 안에서 즉시 끊는다. 남은 수집 사건과 입력은 처리하지 않아 실패로 확정된 연결에서 핸들러가 실행되지 않는다.
                 loop.abandon();
                 p.observer.rejected(new PreparationFailure(p.remoteAddress, stage, e));
             }
         }
     }
 
-    /** 준비 실패 알림도 앱용 실행기에서 한다. 거절되면 원래 실패에 거절을 덧붙여 확정한다(Netty Future의 리스너는 EventLoop에서 실행된다). */
+    @SuppressWarnings("EmptyCatch")
     private void notifyFailed(PreparationFailure failure) {
         try {
             p.appExecutor.execute(() -> p.observer.failed(failure));
@@ -1204,7 +1080,6 @@ final class ConnectionEngine {
             try {
                 failure.cause().addSuppressed(e);
             } catch (IllegalArgumentException sameAsCause) {
-                // 거절 예외가 원인과 같은 객체면 덧붙일 것이 없다.
             }
             p.observer.rejected(failure);
         }
@@ -1225,7 +1100,6 @@ final class ConnectionEngine {
         return (long) event.body().length + event.extensions().length + EARLY_REQUEST_OVERHEAD;
     }
 
-    /** 준비 중에 도착한 요청을 활성화까지 보관한다. 준비 바이트 예약을 얻지 못하면 false이고, 그때는 앱에 넘기기 전에 거절한다(규격 4.5절). */
     private boolean holdEarlyRequest(Event event) {
         if (!preparing || !p.budgets.tryReserve(Resource.PREPARATION_BYTES, earlyCost(event))) {
             return false;
@@ -1234,7 +1108,6 @@ final class ConnectionEngine {
         return true;
     }
 
-    /** 준비가 실패해 활성화되지 못한 보관 요청을 버린다. {@code refuse}이면 앱에 넘기지 않은 요청이므로 {@code RESET(REFUSED)}로 돌려보낸다(규격 4.5절). */
     private void dropEarlyRequests(boolean refuse) {
         Endpoint endpoint = loopEndpoint;
         Event early;
@@ -1292,14 +1165,11 @@ final class ConnectionEngine {
         submit(new AuthenticationCompleteCommand(id, result, failure));
     }
 
-    // ---------------------------------------------------------------- 받은 요청과 알림 (전송 스레드)
-
     private void onRequestReceived(Loop loop, Event event) {
         long streamId = event.streamId();
         byte[] body = event.body();
         byte[] wireExtensions = event.extensions();
         if (!handlerPrepared) {
-            // 준비 전 요청은 애플리케이션에 넘기기 전에만 거절할 수 있다(규격 4.5절). 준비 중이면 활성화까지 보관하고, 보관하지 못할 때만 거절한다.
             if (!holdEarlyRequest(event)) {
                 loop.endpoint.refuseRequest(streamId);
             }
@@ -1307,13 +1177,11 @@ final class ConnectionEngine {
         }
         RequestHandler handler = activeHandler;
         if (handler == null) {
-            // 핸들러를 등록하지 않은 쪽이 받은 요청은 구현하지 않은 것으로 답한다.
             loop.endpoint.respond(streamId, Status.UNIMPLEMENTED, EMPTY);
             return;
         }
         long bytes = (long) body.length + wireExtensions.length;
         if (!reserveIncoming(bytes)) {
-            // 수신 부족은 핸들러 시작 전 REFUSED다.
             loop.endpoint.refuseRequest(streamId);
             return;
         }
@@ -1326,7 +1194,6 @@ final class ConnectionEngine {
         try {
             p.executor.execute(() -> runHandler(request, handler));
         } catch (RuntimeException | Error e) {
-            // 실행 거절은 핸들러 시작 전 REFUSED다. 작업이 본문을 쥐지 않았으므로 바이트도 함께 돌아온다.
             incoming.remove(streamId);
             state.handlerSettled();
             returnIncoming(state);
@@ -1335,10 +1202,6 @@ final class ConnectionEngine {
         }
     }
 
-    /**
-     * 상대가 받은 요청을 RESET했다. 요청이 끝났음을 오류 코드와 함께 보존해 핸들러가 처리를 멈출 수 있게 하고(규격 4.4절), 실행 대기 중이던 핸들러는
-     * 시작하지 않는다. 이미 응답을 접수했거나 끝난 요청이면 core가 이 사건을 내지 않는다.
-     */
     private void onRequestReset(Event event) {
         if (earlyRequests.removeIf(early -> {
             boolean same = early.streamId() == event.streamId();
@@ -1356,7 +1219,6 @@ final class ConnectionEngine {
         }
     }
 
-    /** 받는 요청 수·바이트·핸들러 작업 슬롯을 예약한다. 하나라도 모자라면 확보한 것을 돌려주고 false. */
     private boolean reserveIncoming(long bytes) {
         if (!p.budgets.tryReserve(Resource.INCOMING_REQUESTS, 1)) {
             return false;
@@ -1373,7 +1235,6 @@ final class ConnectionEngine {
         return true;
     }
 
-    /** 요청이 끝났다: 요청 수 예약을 돌려주고, 핸들러 작업도 참조를 놓았으면 바이트 예약도 돌려준다. */
     private void returnIncoming(IncomingState state) {
         if (state.claimCountReturn()) {
             p.budgets.release(Resource.INCOMING_REQUESTS, 1);
@@ -1393,7 +1254,6 @@ final class ConnectionEngine {
         state.ended.complete(end);
     }
 
-    /** 앱용 실행기에서 도는 핸들러 호출. 실행 대기 중 끝난 요청은 시작하지 않는다. */
     private void runHandler(IncomingRequest request, RequestHandler handler) {
         try {
             if (request.ended().isDone() || stopped) {
@@ -1401,7 +1261,6 @@ final class ConnectionEngine {
             }
             handler.handle(request);
         } catch (Throwable t) {
-            // 아직 살아 있고 응답 전이면 빈 INTERNAL 응답을 시도한다. 예외 메시지는 상대에게 보내지 않고 연결은 유지한다. 원인은 로컬 진단에만 남긴다.
             diagnoseHandlerFailure(request, t);
             request.respond(Status.INTERNAL, EMPTY);
         } finally {
@@ -1411,7 +1270,7 @@ final class ConnectionEngine {
         }
     }
 
-    /** 핸들러 예외를 로컬 진단으로 남긴다. 상대에게는 보내지 않는다. 진단 실패가 요청 처리를 바꾸지 않는다. */
+    @SuppressWarnings("EmptyCatch")
     private void diagnoseHandlerFailure(IncomingRequest request, Throwable failure) {
         try {
             LOGGER.log(
@@ -1419,75 +1278,43 @@ final class ConnectionEngine {
                     "받은 요청 핸들러가 예외를 던졌다(type=" + request.type() + ", 상대=" + p.remoteAddress + ")",
                     failure);
         } catch (RuntimeException ignored) {
-            // 로그 처리기 오류가 빈 INTERNAL 응답과 슬롯 반환을 막지 않는다.
         }
     }
 
-    // ---------------------------------------------------------------- 연결 루프 (이벤트 루프)
-
-    /** 전송 방식마다 다른 쓰기. core 출력을 소켓(또는 TLS)에 쓰고 진행을 core에 보고한다. */
     private interface Outbound {
-        /**
-         * 출력을 소켓(또는 TLS)이 받아 주는 만큼 쓰고 진행을 보고한다. 0은 보고하지 않는다.
-         *
-         * @return 한 바이트라도 소비했거나 쓸 출력이 없으면 true, 소켓(또는 TLS)이 받아 주지 않아 막혔으면 false
-         */
         boolean write() throws IOException;
 
-        /** 소켓(또는 TLS)에 아직 쓰지 못했거나 곧 쓸 것이 남아 있는가. */
         boolean pending();
 
-        /** 쓰던 출력이 아직 끝나지 않았는가. */
         boolean writingNow();
 
-        /** 지금 쓰는 출력이 이 스트림의 애플리케이션 프레임인가. */
         boolean isWriting(long streamId);
 
-        /**
-         * CLOSE로 끝난 연결에서 남은 출력을 모두 보낸 뒤에 할 일(전송 방식이 요구하는 종료 메시지)을 한다.
-         *
-         * @param reason 연결이 끝난 원인
-         * @return 모두 내보냈으면 true, 소켓이 받아 주지 않아 남았으면 false
-         */
         boolean finishClose(CloseReason reason) throws IOException;
 
-        /** 쓰던 출력의 참조를 놓는다. 여러 번 불러도 된다. */
         void release();
     }
 
-    /** 전송 방식마다 다른 읽기. 읽은 평문 바이트를 core 입력으로 바꿔 넣는다. */
     private interface Inbound {
-        /** 읽은 평문 바이트(TCP 소켓에서 읽은 것 또는 TLS가 푼 것)를 받아 둔다. */
         void offer(byte[] plain);
 
-        /**
-         * 받아 둔 입력을 유한 단위로 core에 넣는다. 수거 공간이 모자라 멈추면 사건을 수거하고 쓰기를 진행한 뒤 같은 위치부터 다시 넣는다.
-         */
         void process() throws IOException;
 
-        /** 아직 처리하지 않은 바이트가 쌓여 있는가. */
         boolean hasBufferedBytes();
 
-        /** 처리하지 못한 입력(바이트, 또는 core가 받지 못한 메시지)이 남아 읽기를 멈춰야 하는가. */
         boolean hasPendingInput();
 
-        /** 보안 협상을 마친 직후의 준비 단계. 전송 방식이 업그레이드를 요구하면 {@link PreparationStage#UPGRADE}다. */
         PreparationStage stageAfterSecurity();
 
-        /** 전송 방식의 업그레이드를 마쳤는가. 업그레이드가 없는 전송 방식은 늘 true다. */
         boolean upgraded();
 
-        /** 입력 쪽이 쥔 내부 버퍼를 놓는다. 여러 번 불러도 된다. */
         void release();
     }
 
-    /** 이벤트 루프 안에서만 쓰는 상태와 구동 순서. */
     private final class Loop {
         final Endpoint endpoint;
         final @Nullable TlsPipe tls;
-        /** 읽기 쪽: 전송 방식에 맞는 구현 하나를 만들 때 고른다. */
         final Inbound inbound;
-        /** 쓰기 쪽: 전송 방식에 맞는 구현 하나를 만들 때 고른다. */
         final Outbound outbound;
 
         final long origin;
@@ -1505,7 +1332,6 @@ final class ConnectionEngine {
         private @Nullable Throwable endCause;
         private @Nullable ScheduledFuture<?> timer;
         private long timerAtNanos;
-        /** 연결이 끝난 원인. 끝나기 전에는 null. */
         private @Nullable CloseReason closeReason;
 
         Loop() throws IOException {
@@ -1517,7 +1343,6 @@ final class ConnectionEngine {
             if (security == null) {
                 this.tls = null;
             } else {
-                // WebSocket은 ALPN을 쓰지 않는다(규격 3.7절). TCP는 ALPN 식별자를 협상해야 한다.
                 boolean alpn = !p.transport.isWebSocket();
                 SSLEngine engine;
                 if (p.role == ConnectionParams.Role.CLIENT) {
@@ -1552,7 +1377,6 @@ final class ConnectionEngine {
             }
             InetSocketAddress target = (InetSocketAddress) p.remoteAddress;
             try {
-                // Host 헤더는 연결 주소에서 만든다.
                 URI uri = new URI(
                         p.tls != null ? "wss" : "ws", null, target.getHostString(), target.getPort(), path, null, null);
                 return WireFactory.client(uri, maxMessage);
@@ -1561,7 +1385,6 @@ final class ConnectionEngine {
             }
         }
 
-        /** 받은 조각을 입력 대기열에 올리고 한 번 구동한다. 대기열은 한 번의 읽기 조각(TLS는 그 복호 결과)만큼만 쌓인다. */
         void accept(byte[] bytes) {
             try {
                 if (tls != null) {
@@ -1584,7 +1407,6 @@ final class ConnectionEngine {
             }
         }
 
-        /** 한 번의 구동: 입력 처리, 시계 진행, 명령, 사건, 쓰기, 마무리. 이벤트 루프 작업 하나 안에서 끝난다. */
         void drive() {
             if (stopped) {
                 return;
@@ -1643,7 +1465,6 @@ final class ConnectionEngine {
             }
         }
 
-        /** 읽기를 켜고 끈다: 처리하지 못한 입력이 남았거나 core 출력이 상한을 넘으면 멈춘다. */
         private void updateRead() {
             boolean want = !transportGone
                     && !inbound.hasPendingInput()
@@ -1655,7 +1476,6 @@ final class ConnectionEngine {
             }
         }
 
-        /** 남은 출력이 상한을 넘으면 읽기를 멈춘다(상대가 읽지 않으면서 계속 보내는 경우 core 출력이 끝없이 늘지 않게 한다). */
         private boolean backlogged() {
             return endpoint.pendingOutputBytes()
                     > WriteQueueLimit.of(
@@ -1665,7 +1485,6 @@ final class ConnectionEngine {
                             p.writeQueueBytes);
         }
 
-        /** 다음에 깨어나야 하는 시각까지 남은 나노초. 기한이 없으면 {@link Long#MAX_VALUE}. */
         private long waitLimitNanos() {
             long limitNanos = Long.MAX_VALUE;
             OptionalLong next = endpoint.nextDeadlineNanos();
@@ -1694,7 +1513,6 @@ final class ConnectionEngine {
             long at = p.nanoClock.getAsLong() + delayNanos;
             ScheduledFuture<?> current = timer;
             if (current != null && !current.isDone() && timerAtNanos - at <= 0) {
-                // 이미 더 이르거나 같은 시각에 깨어나는 타이머가 있다. 그때 다시 계산한다.
                 return;
             }
             cancelTimer();
@@ -1702,7 +1520,6 @@ final class ConnectionEngine {
             try {
                 timer = loop.schedule(this::onTimer, delayNanos / NANOS_PER_MILLI + 1, TimeUnit.MILLISECONDS);
             } catch (RuntimeException e) {
-                // EventLoop가 끝나는 중이다. 채널 정리가 결과를 확정한다.
                 timer = null;
             }
         }
@@ -1720,12 +1537,10 @@ final class ConnectionEngine {
             drive();
         }
 
-        /** 출력을 쓴다. 전송 방식에 맞는 {@link Outbound}가 한다. */
         private boolean writeOutputs() throws IOException {
             return outbound.write();
         }
 
-        /** 바이트 스트림(TCP)의 읽기: 바이트를 유한 단위로 core에 넣고 소비한 만큼 위치를 옮긴다. */
         private final class StreamInbound implements Inbound {
             private final ArrayDeque<byte[]> inputQueue = new ArrayDeque<>();
             private byte[] input = EMPTY;
@@ -1775,7 +1590,6 @@ final class ConnectionEngine {
                     inputPos += progress.consumed();
                     collectEvents();
                     if (closedSeen) {
-                        // 연결이 끝난 뒤의 입력은 core가 받지 않는다. 남겨 두면 읽기가 꺼진 채 상대의 TCP 종료를 보지 못한다.
                         inputPos = input.length;
                         inputQueue.clear();
                         return;
@@ -1784,7 +1598,6 @@ final class ConnectionEngine {
                         boolean progressed = writeOutputs();
                         collectEvents();
                         if (!progressed) {
-                            // 출력이 막혀 수거할 수 없다. 쓰기가 풀리면 같은 위치에서 재개한다.
                             return;
                         }
                     } else if (progress.consumed() == 0) {
@@ -1794,14 +1607,9 @@ final class ConnectionEngine {
             }
         }
 
-        /**
-         * 메시지 통로(WebSocket)의 읽기. 읽은 평문을 통로에 넣어 업그레이드와 프레임 변환을 맡기고, 바이너리 메시지는 core에 단위 입력으로, 바이트로 넘길 수 없는 입력은
-         * "받았다" 신호로 넣는다. 수거 공간이 모자라면 사건을 수거하고 쓰기를 진행한 뒤 같은 입력을 다시 넣는다.
-         */
         private final class MessageInbound implements Inbound {
             private final MessageWire messages;
             private final ArrayDeque<byte[]> inputQueue = new ArrayDeque<>();
-            /** 통로가 넘긴 입력 가운데 core가 아직 받지 못한 하나(수거 공간이 모자라 같은 입력을 다시 넣어야 한다). */
             private @Nullable WireMessage pendingMessage;
 
             private MessageInbound(MessageWire messages) {
@@ -1853,7 +1661,6 @@ final class ConnectionEngine {
                         try {
                             messages.feed(chunk);
                             if (stage == PreparationStage.UPGRADE && messages.established()) {
-                                // 같은 읽기에서 이어진 입력이 준비 결과를 정하기 전에 단계를 옮긴다.
                                 stage = PreparationStage.HELLO;
                             }
                         } catch (WireUpgradeException e) {
@@ -1865,12 +1672,10 @@ final class ConnectionEngine {
                     }
                     pendingMessage = null;
                     if (message.kind() == WireMessage.Kind.PEER_CLOSED) {
-                        // 상대가 통로를 닫았다. 바이트 스트림이 끊긴 것과 같다.
                         transportFailed(new EOFException("상대가 WebSocket Close를 보냈다"));
                         return;
                     }
                     if (closedSeen) {
-                        // 연결이 끝난 뒤의 입력은 core가 받지 않는다. 통로는 상대의 Close를 볼 때까지 계속 읽는다.
                         continue;
                     }
                     ReceiveProgress progress = message.kind() == WireMessage.Kind.BINARY
@@ -1882,7 +1687,6 @@ final class ConnectionEngine {
                         boolean progressed = writeOutputs();
                         collectEvents();
                         if (!progressed) {
-                            // 출력이 막혀 수거할 수 없다. 쓰기가 풀리면 같은 입력부터 재개한다.
                             return;
                         }
                     }
@@ -1890,7 +1694,6 @@ final class ConnectionEngine {
             }
         }
 
-        /** 바이트 스트림(TCP)의 쓰기: core 출력 하나를 바이트 단위로 쓰고, 쓴 만큼 진행을 보고한다. */
         private final class StreamOutbound implements Outbound {
             private @Nullable EndpointOutput writing;
             private byte[] writingBytes = EMPTY;
@@ -1904,7 +1707,6 @@ final class ConnectionEngine {
                     EndpointOutput output = endpoint.nextOutput();
                     if (output == null) {
                         release();
-                        // 더 쓸 출력이 없다. 시작하지 못한 채 사라진 출력이 쥐고 있던 바이트 예약도 돌려준다.
                         returnAllHeldBytes();
                         return true;
                     }
@@ -1914,7 +1716,6 @@ final class ConnectionEngine {
                         writingBytes = output.readOnlyBytes();
                         writingOffset = 0;
                         if (tls == null) {
-                            // 출력마다 직접 버퍼 하나. 전체 전달·철회·채널 정리에서 정확히 한 번 반환한다.
                             ByteBuf buffer = p.allocator.directBuffer(writingBytes.length);
                             buffer.writeBytes(writingBytes);
                             writingBuffer = buffer;
@@ -1930,7 +1731,6 @@ final class ConnectionEngine {
                             release();
                         }
                     }
-                    // TCP는 남기고 못 쓴 것이 막힘이다. TLS는 레코드 하나씩 소비하므로 0일 때(암호문 공간이 차거나 핸드셰이크 전)만 막힘이다.
                     if (count == 0 || (tls == null && count < remaining)) {
                         return progressed;
                     }
@@ -1967,7 +1767,6 @@ final class ConnectionEngine {
                 return true;
             }
 
-            /** 쓰던 출력의 참조(core 출력 본문과 채널 쓰기용 복사본)를 놓고, 그 출력 때문에 유지하던 바이트 예약을 돌려준다. */
             @Override
             public void release() {
                 EndpointOutput released = writing;
@@ -1984,13 +1783,8 @@ final class ConnectionEngine {
             }
         }
 
-        /**
-         * 메시지 통로(WebSocket)의 쓰기. 통로가 내보낼 바이트(업그레이드 요청·응답, 프레임)를 먼저 소켓(또는 TLS)에 비우고, 다 비우면 core 출력 하나를 메시지 하나로
-         * 통로에 넘긴다. 메시지는 통로가 받는 순간 전체를 넘긴 것이므로 전체 길이를 진행으로 보고한다. 업그레이드를 마치기 전에는 core 출력을 가져가지 않는다.
-         */
         private final class MessageOutbound implements Outbound {
             private final MessageWire messages;
-            /** 통로가 내보내려고 내준 바이트 가운데 소켓(또는 TLS)이 아직 다 받지 않은 것. */
             private byte @Nullable [] pendingBytes;
 
             private int pendingOffset;
@@ -2011,7 +1805,6 @@ final class ConnectionEngine {
                     }
                     EndpointOutput output = endpoint.nextOutput();
                     if (output == null) {
-                        // 더 쓸 출력이 없다. 시작하지 못한 채 사라진 출력이 쥐고 있던 바이트 예약도 돌려준다.
                         returnAllHeldBytes();
                         return true;
                     }
@@ -2023,11 +1816,6 @@ final class ConnectionEngine {
                 }
             }
 
-            /**
-             * 통로가 내보내려는 바이트를 소켓(또는 TLS)이 받아 주는 만큼 쓴다.
-             *
-             * @return 모두 썼으면 true, 받아 주지 않아 남았으면 false
-             */
             private boolean flush() throws IOException {
                 for (; ; ) {
                     byte[] bytes = pendingBytes;
@@ -2047,7 +1835,6 @@ final class ConnectionEngine {
                     if (pendingOffset == bytes.length) {
                         pendingBytes = null;
                     } else if (count == 0 || tls == null) {
-                        // TCP는 남기고 못 쓴 것이 막힘이다. TLS는 레코드 하나씩 소비하므로 0일 때만 막힘이다.
                         return false;
                     }
                 }
@@ -2073,7 +1860,6 @@ final class ConnectionEngine {
             @Override
             public boolean finishClose(CloseReason reason) throws IOException {
                 if (messages.established()) {
-                    // 남은 출력(CLOSE 포함)을 모두 보낸 뒤에 원인에 대응하는 WebSocket Close를 보낸다.
                     int status = WebSocketStatus.of(reason);
                     if (status != WebSocketStatus.NONE) {
                         messages.sendClose(status);
@@ -2099,10 +1885,6 @@ final class ConnectionEngine {
             }
         }
 
-        /**
-         * 준비 성공 알림이 거절돼 끊는다. 이 처리 단계의 남은 사건과 입력은 처리하지 않는다. 결과와 종료 사건만 이어서 처리하며, 종료 사건은 이미 확정한
-         * 준비 결과(거절 원인)를 바꾸지 못한다({@code preparing}이 이미 거짓이다).
-         */
         void abandon() {
             abandoned = true;
             endpoint.disconnect();
@@ -2140,7 +1922,6 @@ final class ConnectionEngine {
         private void onResult(Event event) {
             OutgoingEntry entry = pending.remove(event.ticket().getAsLong());
             if (entry != null) {
-                // 결과가 확정돼도 그 요청 프레임을 쓰던 참조가 남아 있으면 본문 바이트 예약은 그 참조가 사라질 때까지 유지한다.
                 entry.finish(
                         event.status(),
                         map(event.certainty().get()),
@@ -2149,7 +1930,6 @@ final class ConnectionEngine {
             }
         }
 
-        /** 지금 쓰는 출력(core 출력 본문과 채널 쓰기용 복사본을 쥔다)이 이 스트림의 애플리케이션 프레임인가. 쓰기 전 프레임은 core가 철회하지만 복사본은 다음 쓰기 걸음까지 남는다. */
         private boolean isBeingWritten(long streamId) {
             return streamId > 0 && outbound.isWriting(streamId);
         }
@@ -2165,7 +1945,6 @@ final class ConnectionEngine {
             stage = PreparationStage.AUTHENTICATION;
             CredentialVerifier verifier = Objects.requireNonNull(p.verifier);
             long id = event.authenticationId();
-            // 자격 증명 복사본(방식 이름과 비밀)은 보관하기 전에 바이트를 예약한다. 사용자 함수가 반환하면 돌려준다.
             long retained = (long) event.authenticationMechanism().get().length() + event.body().length;
             if (!p.budgets.tryReserve(Resource.PREPARATION_BYTES, retained)) {
                 rejectAuthentication(id, new ResourceExhaustedException(Resource.PREPARATION_BYTES));
@@ -2209,10 +1988,6 @@ final class ConnectionEngine {
             }
         }
 
-        /**
-         * 준비 중 CLOSE가 연결 인증의 결과인가. 인증 실패는 {@code CLOSE(UNAUTHENTICATED)}, 일시적 실패는 {@code CLOSE(INTERNAL_ERROR)}다(규격
-         * 3.3.1절). 클라이언트는 AUTH(ACK)를 받기 전에 상대가 보낸 INTERNAL_ERROR를 인증 단계의 실패로 본다.
-         */
         private boolean isAuthenticationEnd(CloseReason reason) {
             if (reason.errorCode() == ErrorCode.UNAUTHENTICATED) {
                 return true;
@@ -2241,7 +2016,6 @@ final class ConnectionEngine {
             return peerSent(reason) ? CloseNotice.Sender.PEER : CloseNotice.Sender.LOCAL;
         }
 
-        /** 채널이 끊겼다. 연결이 아직 끝나지 않았다면 CLOSE 없이 끊긴 것으로 core에 알린다. */
         void transportFailed(Throwable cause) {
             transportGone = true;
             if (closedSeen) {
@@ -2258,7 +2032,6 @@ final class ConnectionEngine {
             if (!preparing) {
                 return;
             }
-            // 단계가 SECURITY인 것은 TLS 연결뿐이다.
             if (stage == PreparationStage.SECURITY
                     && Objects.requireNonNull(tls).handshakeComplete()) {
                 stage = inbound.stageAfterSecurity();
@@ -2266,7 +2039,6 @@ final class ConnectionEngine {
             if (stage == PreparationStage.UPGRADE && inbound.upgraded()) {
                 stage = PreparationStage.HELLO;
             }
-            // 준비 중에는 CLOSED를 내지 않았다(CLOSED는 준비 결과를 먼저 확정한다).
             if (p.nanoClock.getAsLong() - p.preparationDeadlineAtNanos >= 0) {
                 PreparationDeadlineExceededException deadline = new PreparationDeadlineExceededException();
                 endCause = deadline;
@@ -2275,7 +2047,6 @@ final class ConnectionEngine {
             }
         }
 
-        /** CLOSE로 끝난 연결의 마무리: 남은 쓰기를 비우고 보내는 쪽만 닫은 뒤 상대가 끊을 때까지(또는 상한까지) 읽는다. */
         private void finishClosing() throws IOException {
             if (!closedSeen || finished) {
                 return;
@@ -2308,13 +2079,11 @@ final class ConnectionEngine {
             channel.shutdownOutputNow();
         }
 
-        /** 채널이 정리됐다. 연결이 아직 끝나지 않았다면 끊김으로 core에 알려 남은 결과를 확정하고, 내부 버퍼를 모두 반환한다. */
         void channelClosed() {
             transportGone = true;
             cancelTimer();
             try {
                 if (!closedSeen) {
-                    // 끊김은 늘 transportFailed·abort를 거쳐 core에 알리므로, 여기까지 CLOSED가 없었다면 상대가 끊은 것이다.
                     ioFailure = new EOFException("채널이 닫혔다");
                     endpoint.disconnect();
                 }
@@ -2329,7 +2098,6 @@ final class ConnectionEngine {
             }
         }
 
-        /** 오류로 멈출 때 연결을 끊어 core가 내는 결과로 요청을 끝낸다. */
         void abort(Throwable original) {
             endCause = original;
             try {
@@ -2342,8 +2110,6 @@ final class ConnectionEngine {
         }
     }
 
-    // ---------------------------------------------------------------- 보조
-
     private static Certainty map(io.github.ppzxc.strand.core.internal.Certainty certainty) {
         switch (certainty) {
             case RESPONSE:
@@ -2355,20 +2121,17 @@ final class ConnectionEngine {
         }
     }
 
-    /** 내가 낸 요청 하나. */
     private final class OutgoingEntry {
         static final long NO_TICKET = -1L;
         static final long NO_STREAM = 0L;
 
         final ResultCompletion<RequestResult> result;
         final int type;
-        /** core가 가져간 뒤에는 비운다(내부 참조를 놓는다). 이벤트 루프에서만 쓴다. */
         byte[] extensions;
 
         byte[] payload;
         final long bytes;
         final long deadlineAtNanos;
-        /** 전송 스레드에서만 읽고 쓴다. */
         long ticket = NO_TICKET;
 
         boolean reserved;
@@ -2388,16 +2151,10 @@ final class ConnectionEngine {
             this.deadlineAtNanos = deadlineAtNanos;
         }
 
-        /** 결과를 확정하고 예약을 돌려준다. 결과는 한 번만 확정된다({@code ResultCompletion}이 두 번째를 무시한다). */
         void finish(int status, Certainty certainty, byte[] body) {
             finish(status, certainty, body, NO_STREAM);
         }
 
-        /**
-         * 결과를 확정한다. 요청 수 예약은 돌려주고, 바이트 예약은 {@code heldStreamId}가 있으면 그 스트림의 출력이 사라질 때까지 유지한다.
-         *
-         * @param heldStreamId 이 요청의 프레임을 쓰는 참조가 남아 있을 때 그 스트림 번호, 아니면 {@link #NO_STREAM}
-         */
         void finish(int status, Certainty certainty, byte[] body, long heldStreamId) {
             releaseBody();
             if (heldStreamId != NO_STREAM && reserved) {
@@ -2410,7 +2167,6 @@ final class ConnectionEngine {
             result.complete(new RequestResult(status, certainty, body));
         }
 
-        /** core를 거치지 않은 로컬 결과. {@code exhausted}가 있으면 RESOURCE_EXHAUSTED(처리 안 됨), 아니면 주어진 status와 확정성이다. */
         void finishLocally(int status, @Nullable Certainty certainty, @Nullable Resource exhausted) {
             releaseBody();
             returnReservation();
@@ -2420,7 +2176,6 @@ final class ConnectionEngine {
                             : new RequestResult(status, Objects.requireNonNull(certainty), EMPTY));
         }
 
-        /** core가 본문을 가져갔다. 이 객체가 쥔 본문 참조를 놓는다. */
         void releaseBody() {
             extensions = EMPTY;
             payload = EMPTY;

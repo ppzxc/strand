@@ -72,6 +72,14 @@ TLS 평문 소비와 암호문 정리의 구별은 core 구동 수준에서 #315
 `strand-examples`는 release 11이라 JDK 8 JVM에서는 실행하지 않는다.
 
 
+## 예제와 외부 소비자 하네스 사용법
+
+`strand-examples`의 `ServerExample`과 `TcpClientExample`은 TCP 요청 하나를 주고받는 동기식 공개 API 사용 예다. 클라이언트는 `[host] [port]`(기본 `localhost:9000`)를 받고, 서버는 `[port]`(기본 `9000`)를 받는다. 두 예제는 연결 인증 뒤 `type=256` 요청을 주고받고, 결과 확정성에 따라 재시도 안전성을 출력한다. 인증 자격 증명은 예시 값이므로 실제 배포에서 보호된 채널과 앱이 발급한 토큰으로 바꿔야 한다.
+
+`NioAppExample`과 `NettyAppExample`은 한 프로세스에서 loopback 서버와 클라이언트를 함께 띄워 앱 실행기, 보안·연결 인증, 핸들러 준비, 양방향 요청, 취소, 요청 기한, 연결 종료와 전체 종료를 보여 준다. 예제는 전송 모듈 공개 API만 사용하며, 드라이브 루프와 Endpoint 직접 호출은 시험에서 금지한다. 기본 `main`은 평문 loopback TCP로 실행하고, 시험은 TLS도 실행한다. Netty 예제는 `Transport.tcp()`와 `Transport.webSocket(path)`를 모두 보인다. 숫자 한도와 시간은 예시용 앱 설정이지 제품 기본값이 아니다. 최대 프레임 65,536바이트, 연결 최대 4개, 연결당 요청 8개, 본문 바이트 1MiB, 연결 인증·준비 바이트 64KiB, 요청 기한 300ms, 각 예제 대기 상한 15초를 둔다. 진행 공간은 전송 모듈이 보안 방식과 프레임·요청 한도에서 구한 최소 필요량을 사용한다. 취소와 기한 예제는 서버가 응답하지 않는 요청으로 결과를 확정하며, Netty 변환 취소는 원 요청의 결과를 취소하지 않는 경계를 확인한다.
+
+배포 소비자 검증은 `deploy-test/run.sh <기대 버전> [저장소 URL]`로 실행한다. 저장소 URL 기본값은 `mavenLocal`이고, 다른 URL은 Portal 스테이징·Central 검증에 쓸 수 있다. 스크립트는 Gradle·Maven의 classpath·modulepath 소비자 네 개를 실행하며 JDK 25를 요구한다. 각 소비자는 실행 중인 core의 `StrandVersion.get()`과 nio·netty jar 매니페스트의 `Implementation-Version`을 기대 버전과 비교하고, Netty 소비자는 Netty 타입도 읽어 경로 누락을 확인한다. 원격 저장소 검증에는 `STRAND_REPO_TOKEN`을 환경 변수로 주며, 토큰은 명령 인자나 파일에 넣지 않는다. `STRAND_CONSUMERS`와 `STRAND_EXPECTED_VERSION`, `STRAND_EXPECTED_NIO_VERSION`, `STRAND_EXPECTED_NETTY_VERSION`은 하네스 자체 시험용 선택·불일치 옵션이며 `deploy-test/self-check.sh <기대 버전>`이 이를 포함한 실패 경로를 확인한다.
+
 ## 이 검증에서 찾아 고친 것
 
 1. **Netty 연결 `closed()`가 소켓의 실제 해제보다 빨랐다(#326 이월).** `closeFuture`가 끝나도 JDK는 다음 선택 주기에 가서야 소켓을 놓는다. 그래서 `closed()`를 관찰한 직후 소켓이 남을 수 있었고, `ResourceReleaseTest`가 NIO와 달리 Netty에서 실패했다.

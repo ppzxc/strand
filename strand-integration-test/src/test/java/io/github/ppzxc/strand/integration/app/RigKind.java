@@ -2,7 +2,6 @@ package io.github.ppzxc.strand.integration.app;
 
 import java.util.stream.Stream;
 
-/** 시나리오를 돌리는 조합: 전송(NIO·Netty) × 보안(TCP·TLS). */
 final class RigKind {
     private final boolean netty;
     private final boolean tls;

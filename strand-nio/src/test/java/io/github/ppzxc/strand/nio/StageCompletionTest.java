@@ -9,7 +9,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
-/** 앱 실행기 경로와 기한 경로가 겹쳐도 완료 작업이 정확히 한 번만 실행되는지 본다(#344). */
 class StageCompletionTest {
     private static final long FALLBACK_NANOS = TimeUnit.MILLISECONDS.toNanos(50);
 

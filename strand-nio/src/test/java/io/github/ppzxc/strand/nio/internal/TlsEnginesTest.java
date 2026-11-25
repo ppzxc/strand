@@ -7,7 +7,6 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 import org.junit.jupiter.api.Test;
 
-/** 규격 3.7절: ALPN을 지원하지 않는 런타임에서는 TLS를 만들 수 없고, 협상 결과가 없으면 협상하지 않은 것이다. */
 class TlsEnginesTest {
 
     @Test
@@ -48,7 +47,7 @@ class TlsEnginesTest {
     @Test
     void theNegotiatedProtocolOfAnEngineWithoutALegibleGetterIsNull() throws Exception {
         SSLEngine engine = TlsEngines.client(TestTls.client(), "localhost", 1);
-        // 다른 메서드를 getter로 쓰면 호출이 실패하거나 문자열이 아니다. 실패하면 협상하지 않은 것으로 본다.
+
         java.lang.reflect.Method notAGetter = Object.class.getMethod("toString");
 
         assertThat(TlsEngines.negotiatedProtocol(engine, new TlsEngines.Alpn(null, notAGetter)))
@@ -108,7 +107,6 @@ class TlsEnginesTest {
                 .hasMessageContaining("TLS 1.2");
     }
 
-    /** 지원 프로토콜을 TLS 1.1 이하로만 알리는 엔진. */
     private static SSLEngine restricted(SSLEngine real) {
         return new javax.net.ssl.SSLEngine() {
             @Override

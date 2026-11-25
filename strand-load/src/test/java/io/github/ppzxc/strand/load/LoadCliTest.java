@@ -14,7 +14,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/** 하네스 CLI가 유일한 seam이다. 결과 JSON과 종료 상태만 검증하고 내부 구조는 보지 않는다. */
 class LoadCliTest {
     @TempDir
     Path dir;
@@ -25,7 +24,6 @@ class LoadCliTest {
         String err;
     }
 
-    /** TLS와 무관한 시험은 빠르게 평문 대조군으로 돈다. TLS 시험은 {@link #runTls}를 쓴다. */
     private Outcome run(String... args) {
         java.util.List<String> all = new java.util.ArrayList<>(java.util.Arrays.asList(args));
         if (!all.contains("--tls-on")) {
@@ -96,7 +94,7 @@ class LoadCliTest {
         assertThat(metadata.has("gitSha")).isTrue();
         JsonObject config = metadata.getAsJsonObject("config");
         assertThat(config.get("transport").getAsString()).isEqualTo(transport);
-        // 부하 생성기 코드 경로는 서버 전송과 무관하게 고정이다.
+
         assertThat(config.get("loadgenTransport").getAsString()).isEqualTo("nio");
         assertThat(config.get("connections").getAsInt()).isEqualTo(1);
         assertThat(config.get("bodyBytes").getAsInt()).isEqualTo(64);
@@ -222,7 +220,7 @@ class LoadCliTest {
         assertThat(measurement.get("errors").getAsLong()).isZero();
         assertThat(measurement.get("responses").getAsLong())
                 .isEqualTo(measurement.get("requests").getAsLong());
-        // 50 req/s를 2초 재면 약 100건이다.
+
         assertThat(measurement.get("requests").getAsLong()).isBetween(80L, 120L);
     }
 
@@ -230,7 +228,6 @@ class LoadCliTest {
     void openLoopP99ReflectsInjectedServerDelay() throws Exception {
         JsonObject delayed = openRun("--server-delay", "100ms");
 
-        // 서버에 넣은 100ms 지연이 예정 시각 기준 지연의 p99에 그대로 드러나야 한다(coordinated omission 방지).
         assertThat(latencyMicros(firstRun(delayed), "p99")).isGreaterThanOrEqualTo(95_000);
         assertThat(firstRun(delayed)
                         .getAsJsonObject("measurement")
@@ -286,7 +283,7 @@ class LoadCliTest {
 
     @Test
     void generatorThatCannotKeepTheScheduleIsFlagged() throws Exception {
-        // 도달할 수 없는 도착률을 주면 부하 생성기가 병목이 되고 결과에 표시된다.
+
         JsonObject json = openRun("--rate", "50000000");
 
         assertThat(firstRun(json)
@@ -330,7 +327,7 @@ class LoadCliTest {
         assertThat(measurement.get("errors").getAsLong()).isZero();
         assertThat(measurement.get("responses").getAsLong())
                 .isEqualTo(measurement.get("requests").getAsLong());
-        // 두 전송 모두 같은 TLS 1.3과 같은 암호 스위트로 협상되어야 한다.
+
         JsonObject negotiated = measurement.getAsJsonObject("negotiatedTls");
         assertThat(negotiated.get("protocol").getAsString()).isEqualTo("TLSv1.3");
         assertThat(negotiated.get("cipherSuite").getAsString()).isEqualTo("TLS_AES_128_GCM_SHA256");
@@ -559,7 +556,7 @@ class LoadCliTest {
         assertThat(json.get("kind").getAsString()).isEqualTo("write-stall");
         JsonObject stall = json.getAsJsonObject("stall");
         assertThat(stall.get("detected").getAsBoolean()).isTrue();
-        // 새 타이머 없이 기존 PING·확인 대기 설정(여기서는 0.5s + 1s)으로 끊겨야 한다.
+
         assertThat(stall.get("detectionMillis").getAsLong()).isBetween(1L, 30_000L);
         JsonObject close = stall.getAsJsonObject("close");
         assertThat(close.get("kind").getAsString()).isNotBlank();
@@ -573,7 +570,7 @@ class LoadCliTest {
 
     @Test
     void stallScenarioFailsWhenTheStalledPeerIsNeverDetected() {
-        // 유휴 PING을 꺼 두면 읽기 멈춤만으로는 끊기지 않는다(ADR 0004의 한계). 감지하지 못하면 실패로 끝난다.
+
         Outcome outcome = run("stall", "--idle-ping", "0s", "--ack-timeout", "1s", "--max-wait", "4s");
 
         assertThat(outcome.exit).isEqualTo(1);

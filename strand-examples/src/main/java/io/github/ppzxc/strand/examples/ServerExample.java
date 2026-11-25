@@ -13,10 +13,6 @@ import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/**
- * 제품 공개 API({@link NioStrandServer})로 TCP 서버를 연다. 연결 인증은 예제의 토큰만 통과시키고, 받은 요청에는 핸들러가 {@code echo:} 뒤에 본문을 붙여 {@code OK}로
- * 응답한다. 클라이언트 예제({@link TcpClientExample})의 상대로 쓴다. 사용법: {@code ServerExample [port]}
- */
 public final class ServerExample {
 
     private ServerExample() {}
@@ -27,13 +23,8 @@ public final class ServerExample {
         Thread.currentThread().join();
     }
 
-    /**
-     * 서버를 열고 연결을 받기 시작한다.
-     *
-     * @param port 받을 포트. 0이면 운영체제가 빈 포트를 고른다
-     */
     static Server start(int port) throws Exception {
-        // 앱이 소유하는 실행기: 연결 인증과 핸들러가 여기서 돌아 전송 스레드를 막지 않는다. 서버를 닫을 때 앱이 종료한다.
+
         ExecutorService executor = AppExampleSupport.newAppExecutor("strand-server-example");
         NioSecurity security = NioSecurity.externallySecured();
         MinimumProgressSpace space = NioMinimumProgress.of(
@@ -70,7 +61,6 @@ public final class ServerExample {
         }
     }
 
-    /** 열려 있는 서버. 닫으면 받는 것을 멈추고 이어진 연결을 모두 끊는다. */
     static final class Server implements AutoCloseable {
         private final NioStrandServer server;
         private final Listener listener;
@@ -94,7 +84,7 @@ public final class ServerExample {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (Exception e) {
-                // 닫는 중의 오류는 할 수 있는 일이 없다. 연결은 종료 기한이 지나면 끊긴다.
+
             } finally {
                 executor.shutdownNow();
             }

@@ -3,7 +3,6 @@ package io.github.ppzxc.strand.nio.internal;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 
-/** {@link TcpPassage}가 {@link PassageContract}를 지킨다. */
 class TcpPassageContractTest extends PassageContract {
 
     private static final int SMALL_SOCKET_BUFFER = 4096;
@@ -37,7 +36,6 @@ class TcpPassageContractTest extends PassageContract {
         }
     }
 
-    /** 상대가 읽어 소켓 버퍼를 비운다. */
     @Override
     protected byte[] unblockWrites(Passage blocked) throws IOException {
         return peer.await(10).data();

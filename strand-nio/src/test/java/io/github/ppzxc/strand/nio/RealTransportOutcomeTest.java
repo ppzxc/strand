@@ -17,15 +17,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/**
- * 실제 TCP와 TLS 위에서 요청 프레임의 쓰기가 0·부분·전체 진행인 때의 취소·만료·끊김이 규격의 status와 결과 확정성으로 끝나고, 상대 서버가 같은 요청을
- * 프레임을 마친 뒤의 RESET으로 보는지 본다. 쓰기 진행은 클라이언트 통로가 보고한 값으로 관찰하고, 중계기가 읽지 않아 소켓이 차는 것으로 멈춘다.
- */
 class RealTransportOutcomeTest {
     private static final byte[] BIG = new byte[900 * 1024];
     private static final byte[] SMALL = new byte[] {1, 2, 3};
     private static final Duration SHORT_DEADLINE = Duration.ofMillis(300);
-    /** 부분 진행에서 멈춘 뒤에 만료되도록, 멈춤을 관찰하는 시간보다 넉넉한 기한. */
+
     private static final Duration LONG_DEADLINE = Duration.ofSeconds(3);
 
     private static final long CANCEL_CODE = 4;
@@ -58,10 +54,9 @@ class RealTransportOutcomeTest {
         assertThat(result.certainty()).isEqualTo(certainty);
     }
 
-    /** 큰 요청이 부분 진행에서 멈춘 상태를 만든다: 중계기를 멈추고 큰 요청을 낸 뒤 소켓이 더 받지 못할 때까지 기다린다. */
     private RequestHandle blockWithAPartiallyWrittenRequest(Duration deadline) throws Exception {
         rig.relay.pause();
-        // 연결 준비 중의 쓰기가 아니라 이 요청의 쓰기만 세도록 기준을 잡는다.
+
         long consumedBefore = rig.recording.consumed.get();
         long stallsBefore = rig.recording.stalls.get();
         RequestHandle big = deadline == null ? send(BIG) : send(BIG, deadline);
@@ -76,10 +71,6 @@ class RealTransportOutcomeTest {
         return request;
     }
 
-    /**
-     * 서버가 요청 프레임 전체를 받은 뒤(받은 요청 바이트 예약의 최고량이 본문 크기 이상) RESET으로 끝난다. RESET이 핸들러 시작보다 먼저 처리되면 핸들러는
-     * 시작하지 않으므로, 핸들러가 요청을 받았다면 그 {@code ended()}가 취소 코드의 상대 RESET인지, 아니면 받은 요청 예약이 돌아왔는지로 확인한다.
-     */
     private void assertServerGotTheWholeFrameThenTheCancelReset() throws Exception {
         RealRig.awaitTrue(
                 () -> rig.server.resourceUsage(Resource.INCOMING_BYTES).highWater() >= BIG.length);

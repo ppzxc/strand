@@ -9,14 +9,9 @@ import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 
-/**
- * PING {@code pings}개를 서버 {@code Endpoint}가 받고 ACK를 쌓는 비용(#423). PING 수가 늘면 시간도 선형으로만 늘어야 한다. 호출이 끝나면 PING
- * 수만큼 ACK 출력이 쌓였는지 확인한다. 유휴 PING을 먼저 보내는 경로는 재지 않는다(README).
- */
 @State(Scope.Benchmark)
 public class ReceivePingBenchmark {
 
-    /** 받는 PING 수. */
     @Param({"1000", "10000", "100000"})
     public int pings;
 

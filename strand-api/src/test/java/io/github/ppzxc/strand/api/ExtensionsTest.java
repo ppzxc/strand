@@ -46,7 +46,7 @@ class ExtensionsTest {
         assertThrows(IllegalArgumentException.class, () -> Extensions.fromWire(new byte[] {0, 9, 0}));
         assertThrows(IllegalArgumentException.class, () -> Extensions.fromWire(new byte[] {0, 9, 0, 2, 1}));
         assertThrows(IllegalArgumentException.class, () -> Extensions.fromWire(new byte[] {0, 9, 0, 0, 0, 9, 0, 0}));
-        // timeout은 4바이트여야 한다.
+
         assertThrows(IllegalArgumentException.class, () -> Extensions.fromWire(new byte[] {0, 1, 0, 1, 1}));
     }
 }

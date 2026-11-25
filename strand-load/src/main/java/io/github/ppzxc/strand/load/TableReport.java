@@ -4,7 +4,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.Locale;
 
-/** 행렬 결과 JSON에서 Markdown 표를 만든다. 표는 항상 JSON에서 만들어져 원본과 어긋나지 않는다. */
 final class TableReport {
     private TableReport() {}
 

@@ -10,10 +10,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
-/**
- * 끝난 연결(전송 계층이 닫힌 연결)에서 각 공개 메서드가 하는 일. 끝난 연결은 입력과 시간을 무시하고, 요청만 로컬 {@code UNAVAILABLE}로
- * 실패하며 번호표를 쓴다. 끝나는 길(끊김, 오류 CLOSE, {@code NO_ERROR} CLOSE)과 끝난 시점(AUTH 관문 전, 열림)이 달라도 같다.
- */
 class EndpointEndedConnectionTest {
 
     private static final String HELLO = "0000001000010000000000000000000000000000";
@@ -71,7 +67,6 @@ class EndpointEndedConnectionTest {
         return endpoint;
     }
 
-    /** 끝난 클라이언트 연결들. 끝난 길과 끝난 시점이 서로 다르다. */
     private static Map<String, Endpoint> endedClients() {
         Map<String, Endpoint> ended = new LinkedHashMap<>();
         Endpoint beforeHello = Endpoint.client(EndpointConfig.defaults());
@@ -97,7 +92,6 @@ class EndpointEndedConnectionTest {
         return ended;
     }
 
-    /** 끝난 서버 연결들. AUTH 기한과 확인 대기가 걸려 있던 연결도 있다. */
     private static Map<String, Endpoint> endedServers() {
         Map<String, Endpoint> ended = new LinkedHashMap<>();
         EndpointConfig timed = EndpointConfig.defaults().ackTimeoutMs(1000).authTimeoutMs(1000);
@@ -299,7 +293,6 @@ class EndpointEndedConnectionTest {
         }
     }
 
-    /** 인증 콜백 안에서 {@code onCallback}이 연결을 끝내도록 한 서버로 AUTH를 받게 하고, 그 서버를 돌려준다. */
     private static Endpoint serverEndedInsideAuthCallback(AuthAction onCallback) {
         AtomicReference<Endpoint> self = new AtomicReference<>();
         Endpoint server = Drive.server(EndpointConfig.defaults(), (mechanism, credentials) -> {
@@ -347,7 +340,7 @@ class EndpointEndedConnectionTest {
 
     @Test
     void closingInsideTheAuthCallbackEndsTheConnectionSoNoAuthAckFollowsTheClose() {
-        // AUTH 단계에는 대기 중인 스트림이 없어, 콜백 안의 CLOSE는 곧바로 연결을 끝낸다. "닫는 중이지만 안 끝난" 상태는 생기지 않는다.
+
         for (int code : new int[] {ErrorCode.NO_ERROR, ErrorCode.PROTOCOL_ERROR}) {
             AtomicReference<Endpoint> self = new AtomicReference<>();
             Endpoint server = Drive.server(EndpointConfig.defaults(), (mechanism, credentials) -> {
@@ -363,7 +356,7 @@ class EndpointEndedConnectionTest {
 
             Drive.receive(server, bytes(AUTH_ANONYMOUS));
 
-            assertThat(Drive.drainMessages(server)).as("code " + code).hasSize(1); // CLOSE 하나뿐, AUTH ACK 없음
+            assertThat(Drive.drainMessages(server)).as("code " + code).hasSize(1);
             assertThat(Drive.drainEvents(server)).extracting(Event::kind).containsExactly(Event.Kind.CLOSED);
         }
     }
@@ -380,7 +373,7 @@ class EndpointEndedConnectionTest {
 
         assertThat(client.openStreamCount()).isZero();
         assertThat(client.requestState(written)).isNull();
-        // 클라이언트가 처음 연 스트림은 1번이다(규격 2.2.5절). 장부가 비워졌으므로 취소해도 아무것도 나가지 않는다.
+
         client.cancel(1);
         client.cancelRequest(written);
         assertSilent(client);
@@ -408,18 +401,16 @@ class EndpointEndedConnectionTest {
         Drive.receive(server, Frames.request(257, 3, new byte[0]));
         Drive.drainEvents(server);
         Drive.receive(server, Frames.request(257, 5, new byte[0]));
-        // 끝나기 전에는 대기 스트림이 있어 응답이 나간다.
+
         server.respond(1, 0, new byte[] {1});
         assertThat(Drive.drainMessages(server)).hasSize(1);
         server.disconnect();
         assertThat(Drive.drainMessages(server)).isEmpty();
-        // 끊김은 돌려보내지 않으므로 꺼내지 않은 요청 5의 이벤트가 그대로 남고, 뒤에 CLOSED가 온다.
+
         assertThat(Drive.drainEvents(server))
                 .extracting(Event::kind)
                 .containsExactly(Event.Kind.REQUEST_RECEIVED, Event.Kind.CLOSED);
 
-        // 대기 스트림 표는 private이라 respond의 무반응으로 비워졌음을 본다. 표를 비우지 않으면 응답 프레임이 나가 실패한다.
-        // 3은 꺼낸 요청, 5는 꺼내지 않은 요청이다.
         server.respond(3, 0, new byte[0]);
         server.respond(5, 0, new byte[0]);
         assertSilent(server);
