@@ -24,3 +24,5 @@ Incomplete acceptance criteria:
 - No source suppression currently needs an exception. `PolicyException` is public in `strand-api` so all Java modules can use the same CLASS-retained declaration.
 - Independent approval and minimum exception scope are represented by `approvedBy`, declaration-only annotation targets, and per-rule pairing. GitHub designated-reviewer enforcement and reapproval history were not exercised locally; keep #481 open until protected-branch evidence confirms them.
 - Severity downgrades and broad scope exclusions need reviewed build changes. Controlled tests guard the fixed PMD priority, source inventory, and ArchUnit rule inventory; GitHub approval enforcement was not exercised locally.
+
+GitHub read-only branch protection lookup for `main` returned HTTP 404. The repository does not currently enforce protected-branch review, so independent approval, designated reviewer, and reapproval acceptance remain unmet. Repository settings were not changed.
