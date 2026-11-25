@@ -52,7 +52,6 @@ No additional verification contract was added: existing Gradle check, TestKit, P
 |---|---|
 | `./gradlew :build-logic:test --tests '*JavaStyleCheckTest' --console=plain` | PASS. Includes standalone root `check` fixture without a nested included build, exact baseline match, removal/new-finding separation, and duplicate same-location findings. Before the fix, the new test failed to compile; after removing the hard included-build dependency, fixture tests initially exposed the missing PMD baseline input, which is now supplied. |
 | `./gradlew checkJavaComments checkPolicyExceptions --console=plain` | PASS. Custom PMD checks reran; no task output or cache entry is declared. |
-| `./gradlew clean check --console=plain` | To be recorded against the implementation commit below. |
+| `./gradlew clean check --console=plain` | PASS on `08e0ebba71e8c2576dcac048eba2e62b872216c7` (2026-11-25); `BUILD SUCCESSFUL` in 2m 41s, 99 actionable tasks (61 executed, 23 from cache, 15 up-to-date). |
 | `deploy-test/run.sh 0.2.0` | Four consumer builds passed per issues #480/#483/#484. |
 | Weekly `.github/workflows/ci.yml` | Scheduled; this workspace cannot claim a hosted workflow run. |
-
