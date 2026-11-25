@@ -6,6 +6,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class ObservationMonitor {
+    private static final long POLL_MILLIS = 10;
+
     private ObservationMonitor() {}
 
     static void watch(
@@ -20,6 +22,6 @@ final class ObservationMonitor {
             }
             return;
         }
-        scheduler.schedule(() -> watch(observation, scheduler, completed, onFailure), 1, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> watch(observation, scheduler, completed, onFailure), POLL_MILLIS, TimeUnit.MILLISECONDS);
     }
 }

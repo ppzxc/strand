@@ -120,7 +120,9 @@ final class Orchestrator {
             leaks.addProperty("applicable", config.transport.equals("netty"));
 
             JsonObject load = new JsonObject();
-            for (String key : new String[] {"requests", "responses", "errors", "unknown", "throughputPerSecond"}) {
+            for (String key : new String[] {
+                "requests", "responses", "errors", "unknown", "observationFailures", "throughputPerSecond"
+            }) {
                 load.add(key, measurement.get(key));
             }
             load.add("latencyMicros", measurement.get("latencyMicros"));
