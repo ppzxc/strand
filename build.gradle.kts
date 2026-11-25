@@ -3,6 +3,7 @@ import org.gradle.api.tasks.Input
 
 plugins {
   base
+  id("strand.java-comments")
 }
 
 // build-logic의 TestKit 기능 테스트(호환성 검사, 의존성 0 검사)를 루트 check에 묶는다. JDK 25에서만 돌고 런타임 매트릭스에는 넣지 않는다.
