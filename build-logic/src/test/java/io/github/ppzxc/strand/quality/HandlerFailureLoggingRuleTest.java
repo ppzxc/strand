@@ -11,27 +11,34 @@ import org.junit.jupiter.api.Test;
 class HandlerFailureLoggingRuleTest {
   @Test
   void approvedSanitizedHandlerLogPasses() {
-    assertEquals(0, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \")\", sanitizedFailure(failure));")));
+    String source = handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \")\", sanitizedFailure(failure));");
+    assertEquals(0, violations(source, "LOG-001"));
+    assertEquals(0, violations(source, "LOG-002"));
   }
 
   @Test
   void addressAndOriginalThrowableInHandlerLogFail() {
-    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \", remote=\" + p.remoteAddress + \")\", failure);")));
+    String source = handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \", remote=\" + p.remoteAddress + \")\", failure);");
+    assertEquals(1, violations(source, "LOG-001"));
+    assertEquals(1, violations(source, "LOG-002"));
   }
 
   @Test
   void requestPayloadInHandlerLogFails() {
-    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \", payload=\" + request.payload() + \")\", sanitizedFailure(failure));")));
+    String source = handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \", payload=\" + request.payload() + \")\", sanitizedFailure(failure));");
+    assertEquals(1, violations(source, "LOG-001"));
   }
 
   @Test
   void exceptionMessageAppendedToOtherwiseApprovedLogFails() {
-    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \")\" + \" \" + failure.getMessage(), sanitizedFailure(failure));")));
+    String source = handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \")\" + \" \" + failure.getMessage(), sanitizedFailure(failure));");
+    assertEquals(1, violations(source, "LOG-001"));
   }
 
   @Test
   void requestSerializationAppendedToOtherwiseApprovedLogFails() {
-    assertEquals(1, violations(handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \")\" + \" \" + request.toString(), sanitizedFailure(failure));")));
+    String source = handler("LOGGER.log(Level.WARNING, \"받은 요청 핸들러가 예외를 던졌다(type=\" + request.type() + \")\" + \" \" + request.toString(), sanitizedFailure(failure));");
+    assertEquals(1, violations(source, "LOG-001"));
   }
 
   private static String handler(String loggingCall) {
@@ -42,8 +49,8 @@ class HandlerFailureLoggingRuleTest {
         + "}\n";
   }
 
-  private static int violations(String source) {
-    return report(source).getViolations().size();
+  private static long violations(String source, String ruleName) {
+    return report(source).getViolations().stream().filter(violation -> violation.getRule().getName().equals(ruleName)).count();
   }
 
   private static Report report(String source) {

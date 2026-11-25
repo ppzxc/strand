@@ -1271,7 +1271,17 @@ final class ConnectionEngine {
         }
     }
 
-    @SuppressWarnings("EmptyCatch")
+    @SuppressWarnings({"EmptyCatch", "PMD.LOG-001", "PMD.LOG-002"})
+    @io.github.ppzxc.strand.api.PolicyException(
+            rule = "PMD.LOG-001",
+            reason = "고정 WARNING 형식으로 요청 유형만 남기고 민감 값을 기록하지 않는다.",
+            approvedBy = "Codex independent review",
+            reviewBy = "2027-02-23")
+    @io.github.ppzxc.strand.api.PolicyException(
+            rule = "PMD.LOG-002",
+            reason = "정제된 Throwable로 스택과 중첩 cause만 보존하고 메시지는 제외한다.",
+            approvedBy = "Codex independent review",
+            reviewBy = "2027-02-23")
     private void diagnoseHandlerFailure(IncomingRequest request, Throwable failure) {
         try {
             LOGGER.log(

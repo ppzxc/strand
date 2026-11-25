@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ruleset name="Strand handler logging" xmlns="http://pmd.sourceforge.net/ruleset/2.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
   <description>Checks handler failure logs for sensitive values.</description>
-  <rule name="HandlerFailureLogging" language="java" class="io.github.ppzxc.strand.quality.HandlerFailureLoggingRule" message="Handler failure logs must use the approved sanitized format.">
-    <description>Checks handler failure logs for sensitive values.</description>
+  <rule name="LOG-001" language="java" class="io.github.ppzxc.strand.quality.HandlerFailureFormatRule" message="Handler failure log format must not expose sensitive data.">
+    <description>Checks the fixed warning message and request type.</description>
+    <priority>1</priority>
+  </rule>
+  <rule name="LOG-002" language="java" class="io.github.ppzxc.strand.quality.HandlerFailureThrowableRule" message="Handler failure logs must use the sanitized throwable.">
+    <description>Checks the sanitized throwable preserves stack and cause without messages.</description>
     <priority>1</priority>
   </rule>
 </ruleset>

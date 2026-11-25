@@ -4,7 +4,7 @@ strand-api/src/main/java/io/github/ppzxc/strand/api/ResultCompletion.java:163
 strand-api/src/main/java/io/github/ppzxc/strand/api/ResultCompletion.java:54
 strand-api/src/main/java/io/github/ppzxc/strand/api/ShutdownResult.java:12
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:1077
-strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:1275
+strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:1285
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:258
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:314
 strand-netty/src/main/java/io/github/ppzxc/strand/netty/ConnectionEngine.java:331
