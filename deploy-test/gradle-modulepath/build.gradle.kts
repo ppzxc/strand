@@ -7,6 +7,7 @@ plugins {
 val strandVersion = providers.gradleProperty("strandVersion").get()
 
 apply(from = "../shared/repositories.gradle.kts")
+apply(from = "../shared/dependency-allowlist.gradle.kts")
 
 java {
   toolchain { languageVersion = JavaLanguageVersion.of(25) }
