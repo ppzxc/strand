@@ -72,4 +72,31 @@ class JavaCommentScannerTest {
       .contains("금지된 Java 주석 1개")
       .contains("src/Sample.java:1: line comment")
   }
+
+  @Test
+  fun `checkJavaComments ignores generated and third party sources`() {
+    val fixture = BuildFixture(
+      Files.createTempDirectory("java-comments").toFile(),
+      "java",
+      usesCompatExtension = false,
+      gitRepository = false,
+    )
+    fixture.writeAtRepoRoot(
+      "build.gradle.kts",
+      """
+      plugins {
+        id("java")
+        id("strand.java-comments")
+      }
+      """.trimIndent() + "\n",
+    )
+    fixture.writeAtRepoRoot("generated/Sample.java", "class Sample { // generated\n}\n")
+    fixture.writeAtRepoRoot("vendor/Sample.java", "class Sample { // vendor\n}\n")
+    fixture.writeAtRepoRoot("third-party/Sample.java", "class Sample { // external\n}\n")
+    fixture.writeAtRepoRoot("third_party/Sample.java", "class Sample { // external\n}\n")
+
+    val result = fixture.run("checkJavaComments")
+
+    assertThat(result.output).contains("BUILD SUCCESSFUL")
+  }
 }

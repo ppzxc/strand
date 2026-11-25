@@ -1,7 +1,15 @@
 import CheckJavaComments
 val repositoryJavaSources = fileTree(rootDir) {
   include("**/*.java")
-  exclude("**/build/**", "**/.gradle/**", ".git/**")
+  exclude(
+    "**/build/**",
+    "**/.gradle/**",
+    ".git/**",
+    "**/generated/**",
+    "**/vendor/**",
+    "**/third-party/**",
+    "**/third_party/**",
+  )
 }
 
 val checkJavaComments = tasks.register<CheckJavaComments>("checkJavaComments") {
