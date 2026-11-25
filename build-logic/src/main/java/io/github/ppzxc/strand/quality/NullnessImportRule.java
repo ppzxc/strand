@@ -7,30 +7,29 @@ import net.sourceforge.pmd.reporting.RuleContext;
 
 /** Requires JSpecify for nullness annotations. */
 public final class NullnessImportRule extends AbstractJavaRule {
-  private static final Set<String> NULLNESS_ANNOTATIONS =
-      Set.of(
-          "CheckForNull",
-          "NonNull",
-          "Nonnull",
-          "NonNullApi",
-          "NonNullFields",
-          "NotNull",
-          "NullMarked",
-          "NullUnmarked",
-          "Nullable",
-          "ParametersAreNonnullByDefault",
-          "UnknownNullability");
+    private static final Set<String> NULLNESS_ANNOTATIONS = Set.of(
+            "CheckForNull",
+            "NonNull",
+            "Nonnull",
+            "NonNullApi",
+            "NonNullFields",
+            "NotNull",
+            "NullMarked",
+            "NullUnmarked",
+            "Nullable",
+            "ParametersAreNonnullByDefault",
+            "UnknownNullability");
 
-  @Override
-  public Object visit(ASTImportDeclaration declaration, Object data) {
-    String importedName = declaration.getImportedName();
-    String simpleName = declaration.getImportedSimpleName();
-    boolean jspecify = importedName.startsWith("org.jspecify.annotations.");
-    boolean knownNullnessType = simpleName != null && NULLNESS_ANNOTATIONS.contains(simpleName);
+    @Override
+    public Object visit(ASTImportDeclaration declaration, Object data) {
+        String importedName = declaration.getImportedName();
+        String simpleName = declaration.getImportedSimpleName();
+        boolean jspecify = importedName.startsWith("org.jspecify.annotations.");
+        boolean knownNullnessType = simpleName != null && NULLNESS_ANNOTATIONS.contains(simpleName);
 
-    if (!jspecify && knownNullnessType) {
-      ((RuleContext) data).addViolation(declaration);
+        if (!jspecify && knownNullnessType) {
+            ((RuleContext) data).addViolation(declaration);
+        }
+        return super.visit(declaration, data);
     }
-    return super.visit(declaration, data);
-  }
 }
