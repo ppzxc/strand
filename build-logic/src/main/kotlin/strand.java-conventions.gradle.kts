@@ -31,6 +31,8 @@ dependencies {
   testImplementation(platform(catalog.library("junit-bom")))
   testImplementation(catalog.library("junit-jupiter"))
   testImplementation(catalog.library("assertj-core"))
+  testImplementation(catalog.library("instancio-core"))
+  testImplementation(catalog.library("instancio-junit"))
   testRuntimeOnly(catalog.library("junit-platform-launcher"))
 }
 
