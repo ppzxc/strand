@@ -313,11 +313,12 @@ class NioSaturationTest {
                 })
                 .build();
         Listener listener = listen(app);
-        NioStrandConnection connection = AppFixture.get(
-                clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
+        NioStrandConnection connection =
+                AppFixture.get(clientFixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
         server.executor.callerRuns = true;
 
-        RequestResult result = clientFixture.result(connection.request(Request.of(TYPE, bytes("x"))).result());
+        RequestResult result = clientFixture.result(
+                connection.request(Request.of(TYPE, bytes("x"))).result());
 
         assertThat(handled).hasValue(0);
         assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);

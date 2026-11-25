@@ -3,8 +3,8 @@ package io.github.ppzxc.strand.nio;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -67,14 +67,17 @@ class StageCompletionTest {
         CountDownLatch releaseFirst = new CountDownLatch(1);
         CountDownLatch secondCompleted = new CountDownLatch(1);
 
-        StageCompletion.complete(holding, () -> {
-            firstStarted.countDown();
-            try {
-                releaseFirst.await();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }, FALLBACK_NANOS);
+        StageCompletion.complete(
+                holding,
+                () -> {
+                    firstStarted.countDown();
+                    try {
+                        releaseFirst.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                },
+                FALLBACK_NANOS);
         assertThat(firstStarted.await(5, TimeUnit.SECONDS)).isTrue();
 
         StageCompletion.complete(holding, secondCompleted::countDown, FALLBACK_NANOS);

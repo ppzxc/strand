@@ -170,8 +170,7 @@ abstract class CommonSettings<B extends CommonSettings<B>> {
             Thread caller = Thread.currentThread();
             appExecutor.execute(() -> {
                 if (Thread.currentThread() == caller) {
-                    throw new java.util.concurrent.RejectedExecutionException(
-                            "실행기가 호출 스레드에서 작업을 실행했다");
+                    throw new java.util.concurrent.RejectedExecutionException("실행기가 호출 스레드에서 작업을 실행했다");
                 }
                 task.run();
             });
