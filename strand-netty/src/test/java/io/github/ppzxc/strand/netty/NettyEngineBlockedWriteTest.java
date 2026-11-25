@@ -15,11 +15,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 채널 쓰기가 막혀도(상대가 읽지 않아 쓰기 용량이 0) 엔진이 읽기, 시계, 명령 처리를 계속 도는지 본다. nio의 {@code EngineBlockedWriteTest}에 대응한다. 수동 시계와
- * 용량을 시험이 정하는 채널을 쓰고, 쓰기 막힘은 용량 0으로 만든다. 연결이 끝난 것은 종료 알림 확정으로 보고, 종료 알림이 나온 뒤의 마무리 상한은 100밀리초로 줄여 시계를
- * 몇 번 올려 가르는 방식으로 때를 잰다.
- */
 class NettyEngineBlockedWriteTest {
     private static final long ACK_TIMEOUT_MS = 1000;
     private static final long IDLE_INTERVAL_MS = 3000;
@@ -47,7 +42,6 @@ class NettyEngineBlockedWriteTest {
         return rig.connection.request(Request.of(NettyEngineRig.TYPE, BODY));
     }
 
-    /** 확인 대기 초과가 정확히 기한(+1ms)에 판정되는지 본다: 판정 전에는 마무리 상한이 시작되지 않아 일찍 끝나지 않고, 판정 뒤 상한이 차야 끝난다. */
     private void assertEndsAsUnresponsiveRightAfterTheAckWait() throws Exception {
         rig.tick(IDLE_INTERVAL_MS);
         rig.tick(ACK_TIMEOUT_MS);
@@ -63,7 +57,6 @@ class NettyEngineBlockedWriteTest {
     @Test
     void aPeerThatDoesNotReadEndsTheConnectionWhenTheAckWaitRunsOut() throws Exception {
         rig = NettyEngineRig.client(tuning());
-        // 요청의 앞 10바이트만 나가고 막힌다. 쓰기를 시작한 요청이다.
         rig.channel.capacity(10);
         RequestHandle handle = send();
         rig.awaitStalls(1);
@@ -79,7 +72,6 @@ class NettyEngineBlockedWriteTest {
         rig = NettyEngineRig.client(tuning());
         rig.channel.capacity(0);
 
-        // 유휴 PING이 제때 나가야(꺼내져 확인 대기가 돌아야) 그 확인 대기가 PING 시점부터 센다.
         assertEndsAsUnresponsiveRightAfterTheAckWait();
     }
 
@@ -122,7 +114,6 @@ class NettyEngineBlockedWriteTest {
         rig.tick(ACK_TIMEOUT_MS - 400);
 
         rig.channel.addCapacity(PLENTY);
-        // 상대가 요청을 받아 확인했다. 풀린 뒤 시간이 다시 몰려 흐르지 않으니 연결이 그대로다.
         long stream = rig.awaitPeerRequests(1).get(0);
         rig.tick(ACK_TIMEOUT_MS - 400);
 
@@ -140,7 +131,6 @@ class NettyEngineBlockedWriteTest {
 
         rig.peer.run(endpoint -> endpoint.request(NettyEngineRig.TYPE, new byte[] {1}));
 
-        // 쓰기가 막혀 응답은 못 내지만 상대의 요청은 읽혀 핸들러에 닿는다.
         assertThat(received.poll(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS)).isNotNull();
     }
 
@@ -149,7 +139,6 @@ class NettyEngineBlockedWriteTest {
         rig = NettyEngineRig.client(tuning());
         rig.channel.capacity(0);
 
-        // 요청과 종료 시작은 명령으로 처리되고, 막힌 쓰기와 상관없이 abort가 연결을 끝낸다.
         RequestHandle pending = send();
         rig.awaitStalls(1);
         rig.connection.close();
@@ -169,12 +158,10 @@ class NettyEngineBlockedWriteTest {
         RequestHandle handle = send();
         rig.awaitStalls(1);
 
-        // 쓰기 가능이 오는데 다음 쓰기가 입출력 오류로 끝난다.
         rig.channel.failWrites();
         rig.channel.addCapacity(PLENTY);
 
         assertThat(rig.fixture.result(handle.result()).status()).isEqualTo(Status.UNAVAILABLE);
-        // 요청 프레임을 끝까지 쓰지 못했으므로 상대는 처리하지 않았다.
         assertThat(handle.result().resultNow().certainty()).isEqualTo(Certainty.NOT_PROCESSED);
         assertThat(rig.fixture.result(rig.connection.closed()).kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
     }

@@ -16,10 +16,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/**
- * 내부 ByteBuf 소유권: 전송 모듈이 만든 직접 버퍼(출력·암호문·읽기 조각)는 전체 전달·정리에서 정확히 한 번 반환되고 앱에는 byte[]만 보인다. 반환은
- * closed가 완료된 시점에 끝나 있어야 한다. 중복 해제는 Netty가 해제 시점에 예외로 드러낸다.
- */
 class NettyStrandBufferOwnershipTest {
 
     private final List<AutoCloseable> closeables = new ArrayList<>();

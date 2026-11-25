@@ -28,7 +28,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** 실제 TCP와 TLS 위에서 앱 공개 API로 보안·인증·핸들러 준비 뒤 양방향 요청·응답과 연결 종료를 검증한다(#316). */
 class NettyStrandUsageTest {
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -54,10 +53,6 @@ class NettyStrandUsageTest {
         return credentials -> AuthenticationResult.accepted(principal);
     }
 
-    /**
-     * 서버의 AUTH(ACK)는 팩터리 실행 전에 나가므로, connect 직후의 첫 요청은 서버 핸들러가 준비되기 전이면 REFUSED(UNAVAILABLE, 처리 안 됨)로 돌아올 수 있다(규격 4.5절). 같은 연결이면
-     * 기다렸다가 다시 보낸다.
-     */
     private static RequestResult requestWhenReady(AppFixture fixture, NettyStrandConnection connection, byte[] payload)
             throws Exception {
         long limit = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(AppFixture.WAIT_SECONDS);
@@ -99,7 +94,6 @@ class NettyStrandUsageTest {
                 .handlerFactory(connection -> {
                     serverSide.complete(connection);
                     return PreparedHandler.of(request -> {
-                        // 서버가 받은 요청에 응답하고, 같은 연결로 클라이언트에 역방향 요청도 낸다.
                         request.respond(
                                 Status.OK, bytes("echo:" + new String(request.payload(), StandardCharsets.UTF_8)));
                         request.connection().request(Request.of(TYPE, bytes("reverse")));
@@ -154,7 +148,6 @@ class NettyStrandUsageTest {
 
         NettyStrandConnection connection = connect(client, listener);
 
-        // 서버의 AUTH(ACK)는 팩터리 실행 전에 나가므로 팩터리 완료는 기다려 확인한다. 클라이언트 쪽은 connect 성공 때 이미 준비돼 요청을 곧바로 쓸 수 있다.
         long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
         while (factoryPeer.get() == null && System.nanoTime() < limit) {
             Thread.sleep(10);
@@ -190,7 +183,6 @@ class NettyStrandUsageTest {
         assertThat(request.connection()).isNotNull();
         assertThat(request.ended().isDone()).isFalse();
         assertThatThrownBy(() -> request.ended().resultNow()).isInstanceOf(IllegalStateException.class);
-        // 핸들러가 응답 없이 반환했고, 이후 다른 스레드가 응답한다.
         CompletableFuture<ResponseAcceptance> later = CompletableFuture.supplyAsync(() -> {
             try {
                 return fixture.result(request.respond(Status.OK, bytes("late")));
@@ -317,7 +309,6 @@ class NettyStrandUsageTest {
         assertThat(notice.sender()).hasValue(CloseNotice.Sender.LOCAL);
         assertThat(peerNotice.kind()).isEqualTo(CloseNotice.Kind.CLOSE);
         assertThat(peerNotice.sender()).hasValue(CloseNotice.Sender.PEER);
-        // closed가 완료된 시점에 연결이 쥔 슬롯과 진행 공간은 이미 돌아와 있다.
         assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
         assertThat(client.resourceUsage(Resource.TLS_CIPHERTEXT_BYTES).current())
                 .isZero();
@@ -325,7 +316,6 @@ class NettyStrandUsageTest {
                 .isZero();
         assertThat(connection.resourceUsage(Resource.FRAME_ASSEMBLY_BYTES).current())
                 .isZero();
-        // close 뒤 abort는 무해하고, 앱이 준 실행기는 종료하지 않는다.
         connection.abort();
         assertThat(fixture.pool.isShutdown()).isFalse();
         assertThat(fixture.result(connection.closed())).isSameAs(notice);
@@ -353,11 +343,9 @@ class NettyStrandUsageTest {
         CloseNotice notice = fixture.result(connection.closed());
         assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
         assertThat(fixture.result(peer.closed()).kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
-        // 응답이 없던 요청은 끊김으로 한 번 확정되고 보존된다.
         RequestResult result = fixture.result(pendingRequest.result());
         assertThat(result.status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(result.certainty()).isIn(Certainty.UNKNOWN, Certainty.NOT_PROCESSED);
-        // 종료된 연결에 낸 요청은 UNAVAILABLE이고 처리 안 됨이다.
         RequestResult afterEnd = fixture.result(
                 connection.request(Request.of(TYPE, bytes("late"))).result());
         assertThat(afterEnd.status()).isEqualTo(Status.UNAVAILABLE);
@@ -408,7 +396,6 @@ class NettyStrandUsageTest {
         RequestResult result = fixture.result(handle.result());
         assertThat(result.status()).isEqualTo(Status.CANCELLED);
         assertThat(fixture.result(handle.result())).isSameAs(result);
-        // 끝난 요청의 취소는 아무 일도 하지 않는다.
         handle.cancel();
         assertThat(fixture.result(handle.result())).isSameAs(result);
     }

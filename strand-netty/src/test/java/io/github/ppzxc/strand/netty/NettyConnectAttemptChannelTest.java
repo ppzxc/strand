@@ -16,7 +16,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** 취소한 연결 시도가 실제 채널·TLS 버퍼를 한 번 반환하고 앱이 소유한 EventLoopGroup·실행기를 건드리지 않는지 TCP와 JDK TLS에서 본다(#325). */
 class NettyConnectAttemptChannelTest {
 
     private final List<AutoCloseable> closeables = new ArrayList<>();
@@ -69,7 +68,6 @@ class NettyConnectAttemptChannelTest {
         AppFixture.cf(attempt.result()).handle((connection, failure) -> failure).get(15, TimeUnit.SECONDS);
         AppFixture.get(attempt.transportReleased());
 
-        // 일반 Future 완료가 아니라 실제 채널 정리가 끝난 시점에 TLS 버퍼와 진행 공간 예약이 돌아와 있다.
         assertThat(allocator.metric().usedDirectMemory()).isZero();
         assertThat(allocator.metric().usedHeapMemory()).isZero();
         assertThat(client.resourceUsage(Resource.TLS_CIPHERTEXT_BYTES).current())
@@ -77,7 +75,6 @@ class NettyConnectAttemptChannelTest {
         assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
         hold.countDown();
         awaitTrue(() -> server.resourceUsage(Resource.AUTHENTICATION_TASKS).current() == 0);
-        // 외부 EventLoopGroup과 실행기는 취소로 종료되지 않고 같은 클라이언트가 다시 연결할 수 있다.
         assertThat(fixture.group.isShuttingDown()).isFalse();
         assertThat(fixture.pool.isShutdown()).isFalse();
         NettyStrandConnection again = AppFixture.get(client.connect(AppFixture.loopback(listener)));

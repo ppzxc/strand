@@ -35,10 +35,6 @@ import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 연결별·전체 한도를 함께 강제하고, 부분 접수 실패의 예약 반환·자기 포화로 연결을 끝내지 않음·포화 중 취소와 종료의 진행·핸들러 예외 처리·한도 집계를
- * 앱 공개 API로 본다(#324).
- */
 class NettySaturationTest {
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 
@@ -86,8 +82,6 @@ class NettySaturationTest {
         }
     }
 
-    // --- 연결별·전체 한도를 함께 강제하고 부분 실패는 확보분을 돌려준다 ---
-
     @Test
     void thePerConnectionRequestCountIsEnforcedAndCountedWhileTheOwnerHasRoomToSpare() throws Exception {
         AppFixture fixture = track(new AppFixture.Spec().perConnection(2).plain());
@@ -109,7 +103,6 @@ class NettySaturationTest {
         assertThat(perConnection.current()).isEqualTo(2);
         assertThat(perConnection.highWater()).isEqualTo(2);
         assertThat(perConnection.rejections()).isEqualTo(1);
-        // 연결 범위에서 거절돼 소유 객체 범위의 예약과 거절 집계는 건드리지 않았다.
         assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isEqualTo(2);
         assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).rejections())
                 .isZero();
@@ -157,7 +150,6 @@ class NettySaturationTest {
         assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isEqualTo(2);
         assertThat(client.resourceUsage(Resource.OUTGOING_REQUESTS).rejections())
                 .isEqualTo(1);
-        // 연결 몫은 소유 객체 거절 때 돌려받아 그 연결에는 요청 하나만 남아 있다.
         assertThat(first.resourceUsage(Resource.OUTGOING_REQUESTS).current()).isEqualTo(1);
     }
 
@@ -189,12 +181,9 @@ class NettySaturationTest {
         assertThat(accepted.resourceUsage(Resource.HANDLER_TASKS).rejections()).isEqualTo(1);
         assertThat(accepted.resourceUsage(Resource.HANDLER_TASKS).highWater()).isEqualTo(1);
         assertThat(app.resourceUsage(Resource.HANDLER_TASKS).rejections()).isZero();
-        // 거절된 요청이 먼저 잡은 수·바이트 예약은 돌아왔고 첫 요청의 몫만 남는다.
         assertThat(app.resourceUsage(Resource.INCOMING_REQUESTS).current()).isEqualTo(1);
         assertThat(app.resourceUsage(Resource.INCOMING_BYTES).current()).isEqualTo(bytes("first").length);
     }
-
-    // --- 자기 포화만으로 연결을 끝내지 않는다 ---
 
     @Test
     void refusingManyRequestsForSelfSaturationNeverEndsTheConnectionAndLaterRequestsStillWork() throws Exception {
@@ -227,7 +216,6 @@ class NettySaturationTest {
         }
         assertThat(connection.closed().isDone()).isFalse();
         hold.countDown();
-        // 점유하던 요청이 끝나면 같은 연결에서 요청이 다시 처리된다.
         IncomingRequest held = seen.poll(1, TimeUnit.SECONDS);
         assertThat(held).isNull();
         occupying.cancel();
@@ -239,8 +227,6 @@ class NettySaturationTest {
         assertThat(app.resourceUsage(Resource.INCOMING_REQUESTS).rejections()).isEqualTo(5);
         assertThat(connection.closed().isDone()).isFalse();
     }
-
-    // --- 응답 부족과 재시도 ---
 
     @Test
     void aRetryAfterAResourceShortageIsJudgedAsEndedBeforeAnyShortage() throws Exception {
@@ -261,7 +247,6 @@ class NettySaturationTest {
 
         assertThat(shortage.kind()).isEqualTo(AcceptanceKind.RESOURCE_EXHAUSTED);
         assertThat(shortage.resource()).hasValue(Resource.RESPONSE_BYTES);
-        // 다시 시도했을 때는 요청이 끝나 있으므로 부족이 아니라 끝남으로 판정한다.
         assertThat(retried.kind()).isEqualTo(AcceptanceKind.REQUEST_ENDED);
         assertThat(app.resourceUsage(Resource.RESPONSE_BYTES).current()).isZero();
         assertThat(app.resourceUsage(Resource.RESPONSE_BYTES).rejections()).isEqualTo(1);
@@ -280,7 +265,6 @@ class NettySaturationTest {
             Result<ResponseAcceptance> first = request.respond(Status.OK, new byte[0]);
             Result<ResponseAcceptance> second = request.respond(Status.OK, new byte[0]);
 
-            // 이벤트 루프가 멈춘 동안 첫 응답만 접수 대기를 점유하고, 두 번째는 기다리지 않고 부족으로 끝난다.
             assertThat(first.isDone()).isFalse();
             assertThat(second.isDone()).isTrue();
             assertThat(second.resultNow().kind()).isEqualTo(AcceptanceKind.RESOURCE_EXHAUSTED);
@@ -294,8 +278,6 @@ class NettySaturationTest {
             rig.close();
         }
     }
-
-    // --- 핸들러 예외 ---
 
     private static final class CapturingHandler extends Handler {
         final List<LogRecord> records = new CopyOnWriteArrayList<>();
@@ -345,7 +327,6 @@ class NettySaturationTest {
             assertThat(failed.status()).isEqualTo(Status.INTERNAL);
             assertThat(failed.certainty()).isEqualTo(Certainty.RESPONSE);
             assertThat(failed.payload()).isEmpty();
-            // 이미 응답한 요청은 예외가 나도 추가로 응답하지 않는다.
             assertThat(alreadyAnswered.status()).isEqualTo(Status.OK);
             assertThat(alreadyAnswered.payload()).isEqualTo(bytes("answered"));
             assertThat(fine.status()).isEqualTo(Status.OK);
@@ -361,8 +342,6 @@ class NettySaturationTest {
         }
     }
 
-    // --- 포화 중에도 취소·종료·결과 보존이 진행된다 ---
-
     @Test
     void cancelAndCloseProgressWhileRequestCountAndObservationLimitsAreFullAndTheDefaultCloseNoticeStillFits()
             throws Exception {
@@ -376,7 +355,6 @@ class NettySaturationTest {
         RequestHandle second = connection.request(Request.of(TYPE, bytes("b")));
         CountDownLatch release = new CountDownLatch(1);
         Observation occupying = first.result().observe(fixture.pool, result -> await(release));
-        // 관찰 한도가 차 있으므로 결과는 관찰 없이 조회한다.
         RequestResult countFull =
                 connection.request(Request.of(TYPE, bytes("c"))).result().resultNow();
         Observation general = second.result().observe(result -> {});
@@ -386,7 +364,6 @@ class NettySaturationTest {
 
         assertThat(countFull.resource()).hasValue(Resource.OUTGOING_REQUESTS);
         assertThat(general.failureNow()).get().isInstanceOf(ResourceExhaustedException.class);
-        // 일반 관찰이 포화여도 기본 종료 알림 한 건은 별도 자리로 등록된다. 그 자리가 쓰이는 동안 오는 다른 관찰은 일반 한도를 쓰므로 거절된다.
         assertThat(closeNotice.isDone()).isFalse();
         assertThat(secondCloseObserver.failureNow()).get().isInstanceOf(ResourceExhaustedException.class);
         assertThat(connection.resourceUsage(Resource.OBSERVATIONS).current()).isEqualTo(1);
@@ -432,7 +409,6 @@ class NettySaturationTest {
         connection.abort();
         Object notice = clientFixture.result(connection.closed());
 
-        // 핸들러가 반환하지 않아 슬롯을 점유해도 결과 확정·종료 알림은 진행된다.
         assertThat(notice).isNotNull();
         assertThat(pending.result().isDone()).isTrue();
         assertThat(app.resourceUsage(Resource.HANDLER_TASKS).current()).isEqualTo(1);
@@ -440,8 +416,6 @@ class NettySaturationTest {
         awaitTrue(() -> app.resourceUsage(Resource.HANDLER_TASKS).current() == 0);
         awaitTrue(() -> app.resourceUsage(Resource.INCOMING_BYTES).current() == 0);
     }
-
-    // --- 관찰 슬롯은 실행기가 작업을 실행할 때까지 유지된다 ---
 
     private static final class HeldExecutor implements Executor {
         private final Queue<Runnable> held = new ArrayDeque<>();

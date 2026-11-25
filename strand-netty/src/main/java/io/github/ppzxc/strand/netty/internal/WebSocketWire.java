@@ -39,16 +39,7 @@ import java.util.ArrayDeque;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
-/**
- * Netty의 HTTP·WebSocket 코덱으로 만든 {@link MessageWire}. 연결 채널과 별개의 {@link EmbeddedChannel}에 코덱 파이프라인을 얹어 평문 바이트를
- * 메시지로, 메시지를 평문 바이트로 바꾼다. 소켓·TLS·쓰기 진행 보고는 연결 엔진의 기존 경로를 그대로 쓰므로 이 클래스는 입출력 바이트와 메시지만 오간다.
- *
- * <p>업그레이드 단계(서버: 경로·업그레이드 요청·하위 프로토콜 검사, 클라이언트: 요청·응답 검사)는 HTTP 코덱 파이프라인이 하고, 마친 뒤의 프레임 변환은 Netty의 WebSocket 13
- * 코덱이 한다. 프레임은 조각을 {@code maxMessageBytes}까지 모아 한 메시지로 넘기며 한도를 넘는 프레임·누적은 버퍼링 전에 코덱이 거절한다. 나가는 프레임은 별도 인코더로
- * 만들어 Netty가 프로토콜 위반 때 자체로 쓰는 Close(상태 코드 1009 등)가 연결에 섞이지 않게 한다. Close의 상태 코드와 사유(항상 비움)는 엔진이 정한다.
- */
 public final class WebSocketWire implements MessageWire {
-    /** 하위 프로토콜 식별자(규격 1.2.1절). 고정이며 설정으로 열지 않는다. */
     public static final String SUBPROTOCOL = "strand";
 
     private static final int MAX_HTTP_BYTES = 16 * 1024;
@@ -70,12 +61,6 @@ public final class WebSocketWire implements MessageWire {
         this.encoder = new EmbeddedChannel(new WebSocket13FrameEncoder(client));
     }
 
-    /**
-     * 서버 쪽 통로. 정확히 {@code path}인 업그레이드 요청만 받는다.
-     *
-     * @param path 요청 경로
-     * @param maxMessageBytes 한 메시지의 최대 바이트 수(core의 {@code max_frame_size})
-     */
     public static WebSocketWire server(String path, int maxMessageBytes) {
         WebSocketWire[] self = new WebSocketWire[1];
         EmbeddedChannel channel = new EmbeddedChannel(
@@ -86,12 +71,6 @@ public final class WebSocketWire implements MessageWire {
         return self[0];
     }
 
-    /**
-     * 클라이언트 쪽 통로. {@link #start}가 업그레이드 요청을 낸다.
-     *
-     * @param uri {@code ws://host:port/path} 또는 {@code wss://...}. Host 헤더가 여기서 만들어진다
-     * @param maxMessageBytes 한 메시지의 최대 바이트 수(core의 {@code max_frame_size})
-     */
     public static WebSocketWire client(URI uri, int maxMessageBytes) {
         WebSocketWire[] self = new WebSocketWire[1];
         WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
@@ -105,12 +84,6 @@ public final class WebSocketWire implements MessageWire {
         return self[0];
     }
 
-    /**
-     * 업그레이드를 이미 마친 통로. HTTP 단계 없이 프레임 변환만 한다. 적합성 검증처럼 핸드셰이크 없이 메시지 통로만 시험할 때 쓴다.
-     *
-     * @param client 클라이언트 쪽이면 true(나가는 프레임을 마스킹하고 들어오는 프레임은 마스킹을 기대하지 않는다)
-     * @param maxMessageBytes 한 메시지의 최대 바이트 수
-     */
     public static WebSocketWire established(boolean client, int maxMessageBytes) {
         EmbeddedChannel channel = new EmbeddedChannel(
                 frameDecoder(client, maxMessageBytes), new WebSocketFrameAggregator(maxMessageBytes));
@@ -130,7 +103,7 @@ public final class WebSocketWire implements MessageWire {
     }
 
     @Override
-    @SuppressWarnings("FutureReturnValueIgnored") // EmbeddedChannel의 쓰기는 호출 안에서 끝난다. 실패는 예외나 upgradeFailure로 드러난다.
+    @SuppressWarnings("FutureReturnValueIgnored")
     public void start() throws IOException {
         WebSocketClientHandshaker handshaker = clientHandshaker;
         if (handshaker == null) {
@@ -193,7 +166,6 @@ public final class WebSocketWire implements MessageWire {
         }
         ByteBuf out = Unpooled.buffer();
         try {
-            // 업그레이드를 마친 뒤 handshake 채널이 스스로 쓰는 것(Netty가 프로토콜 위반에 내는 Close 등)은 연결에 보내지 않는다.
             drain(handshake, out, !established || pendingHandshakeResponse);
             pendingHandshakeResponse = false;
             drain(encoder, out, true);
@@ -206,7 +178,6 @@ public final class WebSocketWire implements MessageWire {
         }
     }
 
-    /** 업그레이드를 마친 순간에 handshake 채널에 쌓인 응답(서버의 101)이 아직 나가지 않았는가. */
     private boolean pendingHandshakeResponse;
 
     private static void drain(EmbeddedChannel channel, ByteBuf into, boolean keep) {
@@ -245,7 +216,6 @@ public final class WebSocketWire implements MessageWire {
             return;
         }
         closeSent = true;
-        // 사유 문자열은 늘 비운다. 상태 코드가 없는 Close는 상대가 코드를 보내지 않았을 때의 답이다.
         encoder.writeOutbound(status < 0 ? new CloseWebSocketFrame() : new CloseWebSocketFrame(status, ""));
     }
 
@@ -265,7 +235,6 @@ public final class WebSocketWire implements MessageWire {
         encoder.finishAndReleaseAll();
     }
 
-    /** 코덱이 푼 프레임을 메시지로 옮긴다. 조각은 파이프라인의 집계기가 이미 한 프레임으로 모았다. */
     private void collectFrames() {
         Object next = handshake.readInbound();
         while (next != null) {
@@ -273,21 +242,17 @@ public final class WebSocketWire implements MessageWire {
                 if (next instanceof BinaryWebSocketFrame) {
                     messages.add(WireMessage.binary(ByteBufUtil.getBytes(((BinaryWebSocketFrame) next).content())));
                 } else if (next instanceof PingWebSocketFrame) {
-                    // 이 계층의 Ping에 답은 하되 생존 확인(규격 3.4절)에는 쓰지 않는다. 엔진은 이 프레임을 보지 못한다.
                     if (!closeSent) {
                         encoder.writeOutbound(new PongWebSocketFrame(
                                 ((PingWebSocketFrame) next).content().retainedSlice()));
                     }
                 } else if (next instanceof PongWebSocketFrame) {
-                    // 생존 확인으로 쓰지 않는다.
                 } else if (next instanceof CloseWebSocketFrame) {
                     CloseWebSocketFrame close = (CloseWebSocketFrame) next;
-                    // 상대가 먼저 닫으면 상대의 코드를 그대로 돌려준다. 앱에는 노출하지 않는다.
                     sendClose(close.statusCode());
                     messages.add(WireMessage.peerClosed());
                     broken = true;
                 } else {
-                    // 텍스트 메시지 등 바이트로 넘길 수 없는 입력.
                     messages.add(WireMessage.unsupported());
                     broken = true;
                 }
@@ -305,8 +270,6 @@ public final class WebSocketWire implements MessageWire {
         established = true;
         pendingHandshakeResponse = true;
     }
-
-    // ---------------------------------------------------------------- 업그레이드 핸들러
 
     private static final class ServerUpgrade extends ChannelInboundHandlerAdapter {
         private final Supplier<WebSocketWire> wire;
@@ -369,7 +332,7 @@ public final class WebSocketWire implements MessageWire {
             return false;
         }
 
-        @SuppressWarnings("FutureReturnValueIgnored") // EmbeddedChannel의 쓰기는 호출 안에서 끝난다.
+        @SuppressWarnings("FutureReturnValueIgnored")
         private void upgrade(ChannelHandlerContext ctx, WebSocketWire self, FullHttpRequest request) {
             String host = request.headers().get(HttpHeaderNames.HOST, "localhost");
             WebSocketServerHandshaker handshaker = new WebSocketServerHandshakerFactory(
@@ -391,7 +354,7 @@ public final class WebSocketWire implements MessageWire {
             self.upgraded();
         }
 
-        @SuppressWarnings("FutureReturnValueIgnored") // EmbeddedChannel의 쓰기는 호출 안에서 끝난다.
+        @SuppressWarnings("FutureReturnValueIgnored")
         private static void reject(
                 ChannelHandlerContext ctx, WebSocketWire self, HttpResponseStatus status, String reason) {
             FullHttpResponse response =

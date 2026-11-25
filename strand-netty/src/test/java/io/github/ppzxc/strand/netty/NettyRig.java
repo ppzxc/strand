@@ -33,16 +33,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
-/**
- * 연결 엔진 하나(클라이언트)를 수동 시계와 쓰기량을 제한하는 실제 채널에 꽂고, 맞은편 실제 소켓에서 core {@link Endpoint}를 {@link PeerLink}로 굴린다. 채널의 쓰기
- * 한도로 쓰기 0·부분·전체를 결정적으로 만들고, 이벤트 루프를 막는 문(gate)으로 앱 호출이 core 등록 전 대기에 머무는 틈을 만든다. 엔진의 한 걸음은 입력 처리 → 시계 →
- * 명령 처리 순서이므로 {@link #inSameStep}으로 입력과 명령을 같은 걸음에 겹친다.
- */
 final class NettyRig implements AutoCloseable {
     static final int TYPE = AppFixture.TYPE;
     private static final long HOUR_MS = TimeUnit.HOURS.toMillis(1);
 
-    /** {@code writeAttempt}가 받아 주는 바이트를 한도로 제한하고, 받아 준 합과 한 바이트도 받아 주지 못한(멈춤) 횟수를 센다. */
     static final class LimitedChannel extends StrandChannel {
         private final AtomicLong capacity = new AtomicLong(Long.MAX_VALUE);
         private final AtomicLong written = new AtomicLong();
@@ -61,7 +55,6 @@ final class NettyRig implements AutoCloseable {
             return stalls.get();
         }
 
-        /** 서버 쪽: 수락한 소켓을 감싼다. */
         LimitedChannel(java.nio.channels.SocketChannel accepted) {
             super(null, accepted);
         }
@@ -166,7 +159,6 @@ final class NettyRig implements AutoCloseable {
         connection = new NettyStrandConnection(params, channel);
     }
 
-    /** 시작하지 않은 엔진. 상대 소켓은 연결을 받지 않는다(수락 대기열에만 쌓인다). */
     static NettyRig idle() throws Exception {
         NettyRig rig = new NettyRig();
         try {
@@ -178,27 +170,21 @@ final class NettyRig implements AutoCloseable {
         return rig;
     }
 
-    /** 엔진이 클라이언트이고 상대(코어 서버)가 요청에 응답하는 연결. 준비가 끝난 상태로 돌려준다. */
     static NettyRig client() throws Exception {
         NettyRig rig = new NettyRig();
         try {
             rig.start();
         } catch (Exception | Error e) {
-            // 준비에 실패하면 시험이 rig를 받지 못하므로 여기서 정리한다.
             rig.close();
             throw e;
         }
         return rig;
     }
 
-    // ---------------------------------------------------------------- 시계, 문, 같은 걸음
-
-    /** 수동 시계를 올린다. 엔진은 다음 걸음(깨어남 타이머나 호출)에서 이를 본다. */
     void advance(Duration duration) {
         clock.addAndGet(duration.toNanos());
     }
 
-    /** 이벤트 루프를 막아, 그동안의 앱 호출이 core 등록 전 대기에 머물게 한다. */
     void closeGate() throws InterruptedException {
         gateEntered = new CountDownLatch(1);
         gateRelease = new CountDownLatch(1);
@@ -225,10 +211,6 @@ final class NettyRig implements AutoCloseable {
         }
     }
 
-    /**
-     * 이벤트 루프의 한 작업 안에서 앞 동작을 하고 받은 바이트를 엔진 입력에 넣는다. 엔진의 걸음은 입력 → 시계 → 명령 순서이므로, 앞 동작이 낸 명령과 시계는 이
-     * 입력과 같은 걸음에서 입력 뒤에 처리된다.
-     */
     void inSameStep(Runnable before, byte[] input) throws Exception {
         CompletableFuture<Void> done = new CompletableFuture<>();
         loop.execute(() -> {
@@ -243,7 +225,6 @@ final class NettyRig implements AutoCloseable {
         done.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
-    /** 이벤트 루프에서 작업을 실행하고 끝나기를 기다린다. */
     void onLoop(Runnable task) throws Exception {
         CompletableFuture<Void> done = new CompletableFuture<>();
         loop.execute(() -> {
@@ -257,12 +238,9 @@ final class NettyRig implements AutoCloseable {
         done.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
-    /** 이벤트 루프가 지금까지 맡은 작업을 다 돌 때까지 기다린다. */
     void settleLoop() throws Exception {
         onLoop(() -> {});
     }
-
-    // ---------------------------------------------------------------- 쓰기 통로
 
     long written() {
         return channel.written.get();
@@ -280,9 +258,6 @@ final class NettyRig implements AutoCloseable {
         channel.failing = true;
     }
 
-    // ---------------------------------------------------------------- 상대 관찰
-
-    /** 상대가 받은 요청의 스트림 번호(받은 순서). 동기화용 표지 요청은 뺀다. */
     List<Long> peerRequestStreams() {
         List<Long> streams = new ArrayList<>(peer.requestStreams());
         streams.removeAll(sentinelStreams);
@@ -309,20 +284,14 @@ final class NettyRig implements AutoCloseable {
         return kinds;
     }
 
-    /** 상대가 요청에 응답한다(소켓으로). */
     void peerRespond(long streamId, int status, byte[] body) {
         peer.run(endpoint -> endpoint.respond(streamId, status, body));
     }
 
-    /** 상대의 응답을 소켓에 쓰지 않고 바이트로 받는다. */
     byte[] detachedResponse(long streamId, int status, byte[] body) {
         return peer.runDetached(endpoint -> endpoint.respond(streamId, status, body));
     }
 
-    /**
-     * 엔진이 지금까지 받은 것을 다 처리했고 쓸 것을 다 썼음을 알려 주는 동기화 지점. 표지 요청을 하나 내고 상대가 받아 응답하게 한 뒤, 그 결과가 끝나기를 기다린다.
-     * 엔진은 명령과 출력을 차례로 처리하므로, 이 표지에 앞서 낸 취소·RESET이 있었다면 상대가 이미 받았다. 표지 스트림은 관찰 목록에서 뺀다.
-     */
     void settle() throws Exception {
         int before = peer.requestStreams().size();
         RequestHandle sentinel = connection.request(Request.of(TYPE, new byte[0]));
@@ -361,7 +330,6 @@ final class NettyRig implements AutoCloseable {
                 listener.close();
             }
         } catch (IOException ignored) {
-            // 정리 중의 오류는 할 수 있는 일이 없다.
         }
         fixture.close();
     }

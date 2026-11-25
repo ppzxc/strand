@@ -14,10 +14,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 실제 TCP 위에서 상대가 사라지는 경우의 요청 결과와 종료 알림을 본다. nio의 {@code EngineTcpTest}에 대응한다(상대의 끝냄·재설정, 쓰기 막힘 중 즉시 끊기). 클라이언트 엔진과
- * 서버 사이의 중계기로 상대를 끊거나 읽지 못하게 한다.
- */
 class NettyEngineTcpTest {
     private static final byte[] SMALL = new byte[10];
 
@@ -65,7 +61,6 @@ class NettyEngineTcpTest {
         assertThat(pending.result().resultNow().certainty()).isEqualTo(Certainty.UNKNOWN);
     }
 
-    /** 상대가 살아 있지만 읽지 않아 쓰기가 막혀 있어도 즉시 끊기는 끝나고, 스스로 끊은 연결의 알림에는 입출력 예외가 실리지 않는다. */
     @Test
     void immediateCloseEndsEvenWhileAWriteIsBlockedByAPeerThatDoesNotRead() throws Exception {
         rig = new NettyRealRig(false);
@@ -74,7 +69,6 @@ class NettyEngineTcpTest {
         for (int i = 0; i < 6; i++) {
             handles.add(rig.connection.request(Request.of(AppFixture.TYPE, new byte[60_000])));
         }
-        // 클라이언트의 쓰기가 소켓 버퍼가 차서 실제로 막힌 뒤에 끊는다.
         rig.awaitStalls(1);
 
         rig.connection.abort();

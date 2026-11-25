@@ -16,7 +16,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-/** 동시에 큰 본문을 주고받아도 부분 쓰기·부분 소비로 모두 전달되고 예약이 정확히 돌아온다(TCP 쓰기량, TLS 평문 소비량 보고). */
 class NettyStrandLargeBodyTest {
 
     private final List<AutoCloseable> closeables = new ArrayList<>();

@@ -29,6 +29,12 @@ NettyStrandConnection connection =
 
 같은 포트에서 두 전송을 함께 받는 포트 공유는 지원하지 않는다. 코드는 `strand-examples`의 `NettyWebSocketExample`을 본다.
 
+## 이벤트 루프와 실행기
+
+`eventLoopGroup`과 `executor`는 앱이 만들고 소유한다. 클라이언트, 서버, 리스너와 연결을 닫아도 이 모듈은 두 자원을 종료하지 않는다. 연결 채널 하나는 그룹의 EventLoop 하나에 고정되며, core의 연결 상태와 프로토콜 처리는 그 EventLoop에서만 실행된다. 다른 스레드에서 들어온 연결 명령은 해당 EventLoop에 예약한다.
+
+`executor`는 인증, 핸들러 팩터리, 핸들러 호출, 알림과 기본 관찰을 실행한다. 이 실행기는 작업을 호출자 스레드에서 바로 실행하면 안 된다. 앱은 연결을 반환하는 작업과 Netty Future 리스너를 짧게 유지하고, 오래 걸리는 업무는 앱 실행기로 넘긴다. `listen`과 `connect`의 Future는 관련 EventLoop에서 완료되며, `NettyResults.toFuture`로 만든 요청 Future와 그 Future에 등록한 리스너도 연결 EventLoop를 따른다. Future 완료는 리스너 실행 성공을 보장하지 않는다.
+
 ## WebSocket 규칙
 
 - **경로**: `Transport.webSocket(path)`의 경로(생략하면 `/`)와 정확히 일치하는 요청만 업그레이드한다. 경로가 다르거나 WebSocket 업그레이드가 아닌 HTTP 요청은 HTTP 404로 거절하고 연결을 닫는다. 질의 문자열은 경로에 들지 않는다.

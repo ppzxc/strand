@@ -11,7 +11,6 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Locale;
 
-/** 시험이 제품 코덱과 독립적으로 RFC 6455를 직접 읽고 쓰는 도구: 업그레이드 문자열과 프레임 하나의 인코딩·디코딩. */
 final class RawWebSocket {
     static final int CONTINUATION = 0x0;
     static final int TEXT = 0x1;
@@ -25,7 +24,6 @@ final class RawWebSocket {
 
     private RawWebSocket() {}
 
-    /** 읽은 프레임 하나. */
     static final class Frame {
         final int opcode;
         final boolean fin;
@@ -37,12 +35,10 @@ final class RawWebSocket {
             this.payload = payload;
         }
 
-        /** Close 프레임의 상태 코드. 없으면 -1. */
         int closeStatus() {
             return payload.length >= 2 ? ((payload[0] & 0xff) << 8) | (payload[1] & 0xff) : -1;
         }
 
-        /** Close 프레임의 사유 문자열. */
         String closeReason() {
             return payload.length > 2 ? new String(payload, 2, payload.length - 2, StandardCharsets.UTF_8) : "";
         }
@@ -75,7 +71,6 @@ final class RawWebSocket {
         }
     }
 
-    /** 빈 줄까지(포함) 헤더를 한 바이트씩 읽는다. 뒤따르는 프레임 바이트를 건드리지 않는다. */
     static String readHeaders(InputStream in) throws IOException {
         StringBuilder text = new StringBuilder();
         while (!text.toString().endsWith("\r\n\r\n")) {
@@ -88,7 +83,6 @@ final class RawWebSocket {
         return text.toString();
     }
 
-    /** 헤더 이름(소문자 비교)의 값. 없으면 null. */
     static String header(String headers, String name) {
         for (String line : headers.split("\r\n", -1)) {
             int colon = line.indexOf(':');
@@ -100,7 +94,6 @@ final class RawWebSocket {
         return null;
     }
 
-    /** 프레임 하나를 인코딩한다. {@code mask}는 클라이언트가 보낼 때 true다. */
     static byte[] encode(int opcode, boolean fin, byte[] payload, boolean mask) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         out.write((fin ? 0x80 : 0) | opcode);
@@ -130,7 +123,6 @@ final class RawWebSocket {
         return out.toByteArray();
     }
 
-    /** 길이 필드만 거짓으로 적은 프레임 머리(페이로드는 쓰지 않는다). 한도를 넘는 길이가 버퍼링 전에 거절되는지 보려고 쓴다. */
     static byte[] headerClaiming(int opcode, boolean fin, long claimedLength, boolean mask) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         out.write((fin ? 0x80 : 0) | opcode);
@@ -154,7 +146,6 @@ final class RawWebSocket {
         out.flush();
     }
 
-    /** 프레임 하나를 읽는다(마스킹된 프레임도 푼다). 끊기면 {@link EOFException}. */
     static Frame read(InputStream in) throws IOException {
         int first = in.read();
         if (first < 0) {

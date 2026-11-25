@@ -22,7 +22,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 연결 시도의 취소·기한·순차 주소·알림 거절을 Netty 앱 공개 API로 본다(#325). */
 class NettyConnectAttemptTest {
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -107,7 +106,6 @@ class NettyConnectAttemptTest {
         assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
         assertThat(client.resourceUsage(Resource.PREPARING_CONNECTIONS).current())
                 .isZero();
-        // 서버가 끊김을 보고 연결을 정리한 뒤에도 반환하지 않은 사용자 작업은 슬롯을 유지하고, 늦게 반환해도 팩터리를 시작하지 않는다.
         awaitTrue(() -> server.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
         assertThat(server.resourceUsage(Resource.AUTHENTICATION_TASKS).current())
                 .isEqualTo(1);
@@ -136,7 +134,6 @@ class NettyConnectAttemptTest {
                                 .result())
                         .status())
                 .isEqualTo(Status.OK);
-        // 성공한 시도는 채널을 연결에 넘겼으므로 시도가 정리할 것이 남지 않는다.
         AppFixture.get(attempt.transportReleased());
         assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isEqualTo(1);
         connection.abort();
@@ -151,7 +148,6 @@ class NettyConnectAttemptTest {
         NettyStrandClient client = clientFixture.clientBuilder().build();
         NettyConnectAttempt attempt = client.connectAttempt(AppFixture.loopback(listener));
 
-        // 관찰 Future의 취소는 시도를 멈추지 못한다. 취소를 받아들이지 않으므로 성공한 연결이 주인 없이 남지도 않는다.
         assertThat(attempt.result().cancel(true)).isFalse();
         assertThat(attempt.transportReleased().cancel(true)).isFalse();
 
@@ -170,7 +166,6 @@ class NettyConnectAttemptTest {
         Listener listener = listen(app);
         int port = ((InetSocketAddress) listener.localAddress()).getPort();
         List<String> tried = new CopyOnWriteArrayList<>();
-        // 127.0.0.2에는 아무도 듣지 않으므로 거부되고 다음 주소로 넘어간다.
         NettyStrandClient client = clientFixture
                 .clientBuilder()
                 .resolver(host -> {
@@ -182,7 +177,6 @@ class NettyConnectAttemptTest {
         NettyStrandConnection connection =
                 AppFixture.get(client.connect(InetSocketAddress.createUnresolved("some-host", port)));
 
-        // 127.0.0.2는 거부됐으므로 연결이 성공했다면 다음 주소로 맺은 것이다.
         assertThat(tried).containsExactly("some-host");
         assertThat(clientFixture
                         .result(connection
@@ -233,7 +227,6 @@ class NettyConnectAttemptTest {
             assertThat(failure.stage()).isEqualTo(PreparationStage.CONNECTION);
             assertThat(failure.cause()).isInstanceOf(PreparationDeadlineExceededException.class);
             awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
-            // 반환하지 않은 해석 작업은 슬롯을 유지한다.
             assertThat(client.resourceUsage(Resource.RESOLVE_TASKS).current()).isEqualTo(1);
             hold.countDown();
             awaitTrue(() -> client.resourceUsage(Resource.RESOLVE_TASKS).current() == 0);
@@ -241,7 +234,6 @@ class NettyConnectAttemptTest {
                 watcher.accept().close();
                 throw new AssertionError("늦은 해석 결과로 소켓을 열었다");
             } catch (SocketTimeoutException expected) {
-                // 늦은 완료로 연결하지 않는다.
             }
         }
     }
@@ -319,7 +311,6 @@ class NettyConnectAttemptTest {
         PreparationFailure failure = failureOf(client.connectAttempt(AppFixture.loopback(listener)));
 
         assertThat(rootCauses(failure.cause())).anyMatch(t -> t instanceof RejectedExecutionException);
-        // 실행기가 거절한 알림을 대신할 스레드를 만들지 않는다.
         assertThat(Thread.getAllStackTraces().keySet())
                 .noneMatch(thread -> thread.getName().equals("strand-netty-notify"));
         awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
@@ -435,13 +426,10 @@ class NettyConnectAttemptTest {
         assertThat(entered.await(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
 
         assertThat(attempt.cancel()).isTrue();
-        // 첫 취소가 EventLoop에서 시도를 확정하는 시점은 두 번째 호출과 경합한다. 확정 전이면 true, 후면 false라서
-        // 반환값은 단정하지 않는다. 확정 전 반복 취소의 접수는 ConnectAttemptStateTest가 결정적으로 검증한다.
         attempt.cancel();
 
         assertThat(failureOf(attempt).cause()).isInstanceOf(ConnectionAttemptCancelledException.class);
         hold.countDown();
-        // 확정된 뒤의 취소는 접수하지 않는다.
         assertThat(attempt.cancel()).isFalse();
     }
 
@@ -453,7 +441,6 @@ class NettyConnectAttemptTest {
                 .handlerFactory(connection -> PreparedHandler.of(request -> request.respond(Status.OK, new byte[0])))
                 .build();
         Listener listener = listen(app);
-        // build 확인(1)·인증(2)·팩터리(3) 다음의 준비 성공 알림(4)만 거절한다. 서버는 성공을 알릴 앱 관찰자가 없다.
         server.executor.rejectTaskNumber(4);
 
         NettyStrandConnection connection =
@@ -469,7 +456,6 @@ class NettyConnectAttemptTest {
     @Test
     void cancellingWhileTheTcpConnectIsPendingEndsTheAttemptAsCancelledAndClosesTheChannel() throws Exception {
         AppFixture fixture = track(AppFixture.plain());
-        // 수락하지 않는 서버: 대기열이 차면 연결이 끝나지 않거나, 맺어져도 HELLO 응답이 없어 준비가 끝나지 않는다. 어느 쪽이든 준비 중에 취소한다.
         try (ServerSocket silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
                 java.net.Socket first = new java.net.Socket(InetAddress.getLoopbackAddress(), silent.getLocalPort());
                 java.net.Socket second = new java.net.Socket()) {

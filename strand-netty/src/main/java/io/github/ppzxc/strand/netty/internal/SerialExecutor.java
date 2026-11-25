@@ -5,13 +5,6 @@ import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * 앱이 준 실행기 위에서 연결 하나의 사용자 코드(인증·팩터리·핸들러·알림·기본 관찰)를 한 번에 하나씩, 낸 순서대로 돌린다. 비동기 업무가 끝나길 기다리지
- * 않고 호출이 돌아오면 다음 것을 돌린다. 전송 스레드에서 직접 실행하지 않는다.
- *
- * <p>대기 작업은 호출자가 먼저 예약한 한도(핸들러·관찰·준비 작업 슬롯)가 세므로 이 큐는 그 한도를 넘지 않는다. 뒤받침 실행기가 거절하면 그 작업은 큐에
- * 남기지 않고 예외를 호출자에게 그대로 던진다. 호출자는 그 작업의 예약을 돌려주고 실패를 관찰한다.
- */
 public final class SerialExecutor implements Executor {
     private final Executor backing;
     private final ArrayDeque<Runnable> queue = new ArrayDeque<>();
@@ -24,11 +17,9 @@ public final class SerialExecutor implements Executor {
     @Override
     public void execute(Runnable task) {
         Objects.requireNonNull(task);
-        // 큐 추가와 뒤받침 실행기 제출을 한 잠금 안에서 한다. 제출이 거절되면 이 호출이 넣은 작업만 거두므로, 그 사이 다른 호출이 넣은 작업을 잃지 않는다.
         synchronized (this) {
             queue.add(task);
             if (!scheduled) {
-                // 뒤받침 실행기가 호출 스레드에서 drain을 바로 돌려도(예: CallerRuns) drain이 끝내며 내린 표시를 덮지 않도록 먼저 올린다.
                 scheduled = true;
                 try {
                     backing.execute(this::drain);
@@ -45,6 +36,7 @@ public final class SerialExecutor implements Executor {
         return queue.size();
     }
 
+    @SuppressWarnings("EmptyCatch")
     private void drain() {
         for (; ; ) {
             Runnable task;
@@ -58,17 +50,10 @@ public final class SerialExecutor implements Executor {
             try {
                 task.run();
             } catch (Throwable ignored) {
-                // 사용자 코드의 실패는 이 작업을 건 쪽이 관찰한다. 뒤의 작업은 계속 돌린다.
             }
         }
     }
 
-    /**
-     * 실행기가 호출 스레드에서 바로 작업을 실행하면 거절한다. 직접 실행 실행기는 전송 스레드에서 사용자 코드가 돌아 지원하지 않는다. 확인용 작업 하나를
-     * 이 실행기에 낸다.
-     *
-     * @throws IllegalArgumentException 작업이 {@code execute} 안에서 호출 스레드에 실행됐거나 실행기가 확인 작업을 거절할 때
-     */
     public static void requireNotDirect(Executor executor) {
         Thread caller = Thread.currentThread();
         AtomicReference<Thread> ranOn = new AtomicReference<>();

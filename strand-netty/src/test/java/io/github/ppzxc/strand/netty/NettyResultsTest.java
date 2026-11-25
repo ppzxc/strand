@@ -24,7 +24,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 요청 결과를 연결의 EventLoop에 연결된 Netty Future로 바꾸는 변환과 Future 취소의 독립성을 실제 TCP 연결로 검증한다(#327). */
 class NettyResultsTest {
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 
@@ -44,7 +43,6 @@ class NettyResultsTest {
         return fixture;
     }
 
-    /** 서버 핸들러로 연결된 클라이언트 연결. */
     private NettyStrandConnection connect(AppFixture fixture, RequestHandler handler) throws Exception {
         NettyStrandServer server = fixture.serverBuilder()
                 .authenticate(c -> AuthenticationResult.accepted("p"))
@@ -110,7 +108,6 @@ class NettyResultsTest {
         RequestResult end = AppFixture.get(AppFixture.cf(disconnected));
         assertThat(disconnected.isSuccess()).isTrue();
         assertThat(end.certainty()).isNotNull();
-        // 접수 실패(연결이 끝난 뒤)도 성공 값이다.
         Future<RequestResult> rejected = NettyResults.toFuture(
                 connection.request(Request.of(TYPE, bytes("late"))).result());
         assertThat(AppFixture.get(AppFixture.cf(rejected)).status()).isEqualTo(Status.UNAVAILABLE);
@@ -124,7 +121,6 @@ class NettyResultsTest {
         NettyStrandConnection connection = connect(fixture, seen::complete);
         CountDownLatch release = new CountDownLatch(1);
         RequestHandle handle = connection.request(Request.of(TYPE, bytes("x")));
-        // 앱 observe가 앱 실행기 스레드를 붙잡고, 이후 실행기는 새 작업을 거절한다.
         handle.result().observe(result -> await(release));
         IncomingRequest request = seen.get(15, TimeUnit.SECONDS);
         Future<RequestResult> future = NettyResults.toFuture(handle.result());
@@ -156,7 +152,6 @@ class NettyResultsTest {
         assertThat(b.cancel(false)).isTrue();
         assertThat(b.isCancelled()).isTrue();
         assertThat(answer.await(15, TimeUnit.SECONDS)).isTrue();
-        // Future 취소는 실제 요청을 취소하지 않는다: 상대는 여전히 요청 중이고 결과도 미확정이다.
         assertThat(handle.result().isDone()).isFalse();
         assertThat(seen.get(0).ended().isDone()).isFalse();
         seen.get(0).respond(Status.OK, bytes("late"));
@@ -210,7 +205,6 @@ class NettyResultsTest {
         assertThat(saturated.isCancelled()).isFalse();
         assertThat(saturated.cause()).isInstanceOf(ResourceExhaustedException.class);
         assertThat(handle.result().isDone()).isFalse();
-        // 취소는 등록 예약을 돌려주므로 다음 변환이 다시 성공한다.
         assertThat(first.cancel(false)).isTrue();
         Future<RequestResult> again = NettyResults.toFuture(handle.result());
         assertThat(again.isDone()).isFalse();
@@ -247,7 +241,6 @@ class NettyResultsTest {
         awaitTrue(() -> handle.result().isDone());
         Future<RequestResult> future = NettyResults.toFuture(handle.result());
         assertThat(future.isDone()).isTrue();
-        // 연결의 EventLoop가 종료된 뒤에 붙인 리스너는 거절되어 실행되지 않는다. 완료 상태와 값은 조회된다.
         fixture.group.shutdownGracefully(0, 0, TimeUnit.SECONDS).awaitUninterruptibly(15, TimeUnit.SECONDS);
         awaitTrue(() -> fixture.group.isTerminated());
         AtomicInteger ran = new AtomicInteger();

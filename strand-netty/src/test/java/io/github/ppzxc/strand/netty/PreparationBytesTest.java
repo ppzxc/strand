@@ -10,7 +10,6 @@ import io.github.ppzxc.strand.netty.internal.ConnectionBudgets;
 import io.github.ppzxc.strand.netty.internal.OwnerBudgets;
 import org.junit.jupiter.api.Test;
 
-/** 준비 보관 바이트 예약: 모자라면 아무것도 예약하지 않고, 돌려주기는 한 번만 일어난다(#325). */
 class PreparationBytesTest {
 
     private static ResourceLimits limits() {

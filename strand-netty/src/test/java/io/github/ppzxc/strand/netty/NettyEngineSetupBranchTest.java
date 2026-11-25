@@ -11,7 +11,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
-/** 연결 엔진의 준비 전(채널 등록·주소·기한) 분기를 수동 시계와 직접 호출로 결정적으로 본다. */
 class NettyEngineSetupBranchTest {
 
     private static Throwable failureOf(NettyRig rig) {
@@ -91,7 +90,6 @@ class NettyEngineSetupBranchTest {
     @Test
     void aPreparationDeadlineThatPassesBeforeTheFirstAddressIsTriedEndsTheAttempt() throws Exception {
         try (NettyRig rig = NettyRig.idle()) {
-            // 이벤트 루프의 한 작업 안에서 시작해 타이머는 기한이 남은 채로 걸고, 연결 작업이 돌기 전에 수동 시계를 기한 너머로 옮긴다.
             rig.onLoop(() -> {
                 rig.connection.startClient(rig.target);
                 rig.advance(Duration.ofHours(2));
@@ -145,7 +143,6 @@ class NettyEngineSetupBranchTest {
             rig.connection.startClient(rig.target);
             rig.settleLoop();
 
-            // 등록 해제는 닫기 Future 뒤 이벤트 루프의 후속 작업이라 부하가 크면 settleLoop 직후에도 끝나지 않았을 수 있다.
             NettyRig.awaitTrue(() -> !rig.channel.isRegistered());
         }
     }

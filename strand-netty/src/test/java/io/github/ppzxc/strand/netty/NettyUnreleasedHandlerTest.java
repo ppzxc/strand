@@ -14,7 +14,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 활성화되지 못한 팩터리 결과의 폐기·미반환·실행 거절·앱 회수에서 소유권과 예약이 한 번만 옮겨지는지 본다(#325). */
 class NettyUnreleasedHandlerTest {
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -36,7 +35,6 @@ class NettyUnreleasedHandlerTest {
         }
     }
 
-    /** 팩터리가 막혀 있는 동안 연결을 끊고, 실행기를 거절 상태로 바꾼 뒤 팩터리를 반환시킨다. */
     private final class Scenario {
         final AppFixture server = track(AppFixture.plain());
         final AppFixture clientFixture = track(AppFixture.plain());
@@ -83,10 +81,8 @@ class NettyUnreleasedHandlerTest {
         scenario.returnFactoryWhileExecutorRejects();
 
         awaitTrue(() -> scenario.app.unreleasedHandlers().size() == 1);
-        // 폐기 동작은 아무 스레드에서도 대신 실행되지 않고, 예약은 앱이 인수할 때까지 유지된다.
         assertThat(scenario.disposals).hasValue(0);
         assertThat(scenario.app.resourceUsage(Resource.FACTORY_TASKS).current()).isEqualTo(1);
-        // 조회는 소유권을 옮기지 않는다.
         assertThat(scenario.app.unreleasedHandlers()).hasSize(1);
         assertThat(scenario.app.resourceUsage(Resource.FACTORY_TASKS).current()).isEqualTo(1);
     }
