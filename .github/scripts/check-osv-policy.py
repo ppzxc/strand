@@ -54,10 +54,21 @@ def main(path):
             raise ValueError("OSV report has no scan results")
         sources = {result.get("source", {}).get("path", "") for result in results}
         required_sources = {
+            "strand-api/gradle.lockfile",
+            "strand-core/gradle.lockfile",
+            "strand-nio/gradle.lockfile",
             "strand-netty/gradle.lockfile",
+            "strand-conformance/gradle.lockfile",
+            "strand-examples/gradle.lockfile",
+            "strand-integration-test/gradle.lockfile",
+            "strand-benchmark/gradle.lockfile",
+            "strand-load/gradle.lockfile",
             "build-logic/gradle.lockfile",
+            "gradle/verification-metadata.xml",
             "deploy-test/gradle-classpath/gradle.lockfile",
             "deploy-test/gradle-modulepath/gradle.lockfile",
+            "deploy-test/gradle-classpath/gradle/verification-metadata.xml",
+            "deploy-test/gradle-modulepath/gradle/verification-metadata.xml",
             "deploy-test/maven-classpath/target/bom.json",
             "deploy-test/maven-modulepath/target/bom.json",
         }
@@ -80,7 +91,8 @@ def main(path):
                 level = severity(vulnerability)
                 fixes = fixed_versions(vulnerability)
                 identifier = vulnerability.get("id", "unknown id")
-                print(f"{level}\t{identifier}\t{package.get('package', {}).get('name', 'unknown package')}\t{','.join(fixes) or 'no fix'}\t{source}")
+                details = package.get("package", {})
+                print(f"{level}\t{identifier}\t{details.get('name', 'unknown package')}@{details.get('version', 'unknown version')}\t{','.join(fixes) or 'no fix'}\t{source}")
                 blocked |= level == "CRITICAL" or (level == "HIGH" and bool(fixes))
 
     if scanned == 0:

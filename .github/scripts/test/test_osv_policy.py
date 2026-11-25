@@ -19,10 +19,21 @@ def finding(severity, fixed=None):
 class OsvPolicyTest(unittest.TestCase):
     def run_report(self, vulnerabilities, sources=None):
         paths = sources or [
+            "strand-api/gradle.lockfile",
+            "strand-core/gradle.lockfile",
+            "strand-nio/gradle.lockfile",
             "strand-netty/gradle.lockfile",
+            "strand-conformance/gradle.lockfile",
+            "strand-examples/gradle.lockfile",
+            "strand-integration-test/gradle.lockfile",
+            "strand-benchmark/gradle.lockfile",
+            "strand-load/gradle.lockfile",
             "build-logic/gradle.lockfile",
+            "gradle/verification-metadata.xml",
             "deploy-test/gradle-classpath/gradle.lockfile",
             "deploy-test/gradle-modulepath/gradle.lockfile",
+            "deploy-test/gradle-classpath/gradle/verification-metadata.xml",
+            "deploy-test/gradle-modulepath/gradle/verification-metadata.xml",
             "deploy-test/maven-classpath/target/bom.json",
             "deploy-test/maven-modulepath/target/bom.json",
         ]
@@ -39,6 +50,7 @@ class OsvPolicyTest(unittest.TestCase):
                 result = self.run_report([finding("CRITICAL", fix)])
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("TEST-CRITICAL", result.stdout)
+                self.assertIn("sample@1", result.stdout)
 
     def test_high_fails_only_when_fixed_version_exists(self):
         self.assertEqual(self.run_report([finding("HIGH")]).returncode, 0)

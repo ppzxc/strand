@@ -58,9 +58,9 @@ jobs:
         run: ./gradlew deployTest
       - name: Resolve SCA inputs
         run: |
-          ./gradlew --no-configuration-cache --write-locks -I .github/scripts/osv-locks.init.gradle resolveAllForOsv --console=plain
+          ./gradlew --no-configuration-cache --write-locks --write-verification-metadata sha256 -I .github/scripts/osv-locks.init.gradle resolveAllForOsv --console=plain
           for consumer in deploy-test/gradle-classpath deploy-test/gradle-modulepath; do
-            ./gradlew -p "$consumer" --no-configuration-cache --write-locks -I "$GITHUB_WORKSPACE/.github/scripts/osv-locks.init.gradle" -PstrandVersion="$(sed -n 's/^version=//p' gradle.properties)" resolveAllForOsv --console=plain
+            ./gradlew -p "$consumer" --no-configuration-cache --write-locks --write-verification-metadata sha256 -I "$GITHUB_WORKSPACE/.github/scripts/osv-locks.init.gradle" -PstrandVersion="$(sed -n 's/^version=//p' gradle.properties)" resolveAllForOsv --console=plain
           done
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends maven
@@ -71,13 +71,14 @@ jobs:
         run: |
           {
             echo "target_sha=$GITHUB_SHA"
+            echo "owner=build"
             echo "gate=SEC-015"
-            echo "scanner=OSV-Scanner v2.7.1"
-            echo "command=osv-scanner scan source --recursive --no-ignore --format json --verbosity error /src"
+            echo "scanner=OSV-Scanner v2.7.1 sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde"
+            echo "command=osv-scanner scan source --recursive --no-ignore --all-packages --format json --verbosity error /src"
           } > "$RUNNER_TEMP/osv-evidence.txt"
-          docker pull ghcr.io/google/osv-scanner:v2.7.1
+          docker pull ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde
           scan_status=0
-          docker run --rm -v "$GITHUB_WORKSPACE:/src" ghcr.io/google/osv-scanner:v2.7.1 scan source --recursive --no-ignore --format json --verbosity error /src > "$RUNNER_TEMP/osv-report.json" 2> "$RUNNER_TEMP/osv-errors.log" || scan_status=$?
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde scan source --recursive --no-ignore --all-packages --format json --verbosity error /src > "$RUNNER_TEMP/osv-report.json" 2> "$RUNNER_TEMP/osv-errors.log" || scan_status=$?
           echo "scanner_exit=$scan_status" >> "$RUNNER_TEMP/osv-evidence.txt"
           if [ "$scan_status" -gt 1 ] || [ -s "$RUNNER_TEMP/osv-errors.log" ]; then
             cat "$RUNNER_TEMP/osv-errors.log"
