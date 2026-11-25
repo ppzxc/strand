@@ -49,6 +49,8 @@ final class LoadGenRole {
     private final AtomicLong responded = new AtomicLong();
 
     private final AtomicLong respondedInWindow = new AtomicLong();
+    private volatile long windowStart;
+    private volatile long windowEnd = Long.MAX_VALUE;
 
     private final AtomicLong errors = new AtomicLong();
     private final AtomicLong unknown = new AtomicLong();
@@ -221,11 +223,14 @@ final class LoadGenRole {
             }
         }
         sleep(config.warmup);
-        markMeasureStart();
         long measureStart = System.nanoTime();
+        windowStart = measureStart;
+        markMeasureStart();
         phase = MEASURE;
         sleep(config.measure);
-        long measureNanos = System.nanoTime() - measureStart;
+        long measureEnd = System.nanoTime();
+        windowEnd = measureEnd;
+        long measureNanos = measureEnd - measureStart;
         markMeasureEnd();
         phase = DRAIN;
         stopped.set(true);
@@ -239,6 +244,8 @@ final class LoadGenRole {
         long warmupEnd = start + config.warmup.toNanos();
         long measureEnd = warmupEnd + config.measure.toNanos();
         long measureBegin = warmupEnd;
+        windowStart = measureBegin;
+        windowEnd = measureEnd;
         for (long i = 0; ; i++) {
             long intended = start + (long) (i * intervalNanos);
             if (intended >= measureEnd) {
@@ -248,6 +255,7 @@ final class LoadGenRole {
             if (now - intended > GIVE_UP_LAG_NANOS) {
                 gaveUp = true;
                 measureEnd = now;
+                windowEnd = measureEnd;
                 break;
             }
             while ((now = System.nanoTime()) < intended) {
@@ -316,7 +324,7 @@ final class LoadGenRole {
         connection.request(echo).result().observe(result -> {
             long done = System.nanoTime();
             if (tag == MEASURE && classify(result)) {
-                if (phase == MEASURE) {
+                if (inMeasurementWindow(done, windowStart, windowEnd)) {
                     respondedInWindow.incrementAndGet();
                 }
                 latency.recordValue(Math.max(0, (done - intended) / 1_000));
@@ -335,6 +343,10 @@ final class LoadGenRole {
                 }
             }
         });
+    }
+
+    static boolean inMeasurementWindow(long completedAt, long start, long end) {
+        return completedAt >= start && completedAt < end;
     }
 
     private boolean classify(RequestResult result) {
