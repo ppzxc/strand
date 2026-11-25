@@ -20,7 +20,24 @@ def severity(vulnerability):
         value = source.get("severity")
         if isinstance(value, str) and value.upper() in {"CRITICAL", "HIGH", "MEDIUM", "LOW"}:
             return value.upper()
+        if isinstance(value, (int, float)):
+            return severity_from_score(value)
+    for item in vulnerability.get("severity", []):
+        try:
+            return severity_from_score(float(item["score"]))
+        except (KeyError, TypeError, ValueError):
+            continue
     return "UNKNOWN"
+
+
+def severity_from_score(score):
+    if score >= 9:
+        return "CRITICAL"
+    if score >= 7:
+        return "HIGH"
+    if score >= 4:
+        return "MEDIUM"
+    return "LOW"
 
 
 def main(path):

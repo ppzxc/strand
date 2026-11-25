@@ -37,6 +37,10 @@ class OsvPolicyTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("TEST-HIGH", result.stdout)
 
+    def test_cvss_scores_map_to_the_agreed_severity_thresholds(self):
+        vulnerability = {"id": "TEST-CVSS", "severity": [{"type": "CVSS_V3", "score": "9.8"}]}
+        self.assertEqual(self.run_report([vulnerability]).returncode, 1)
+
     def test_lower_and_unclassified_are_reported_without_failure(self):
         result = self.run_report([finding("MEDIUM", "2"), {"id": "TEST-UNKNOWN"}])
         self.assertEqual(result.returncode, 0)
