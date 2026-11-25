@@ -3,11 +3,11 @@
 ## 프로젝트 현황
 
 - Policy: Java AI Engineering Quality Specification 1.3.3; source SHA-256 `36be76e7ecbe0b7f3985ab073f0daec0f5e642eab9e3e077b377b7ddf42bff6c`.
-- Target code SHA: `dfe9a3baf7a5e010eea108eff575715182ca8322` (`integrate/479-java-quality` before this report).
+- Target code SHA: `c1bc5c390c3968ec20817d6fe692d37530392bc2` (`integrate/479-java-quality`, PR #493 head).
 - Environment: JDK 25, Gradle 9.9.2. Consumer reports use Gradle/Maven and record their own command and environment.
 - Modules: four deployment modules, internal examples/conformance/integration/load/benchmark modules, included `build-logic`, and four independent Gradle/Maven consumers.
 - Profiles: DDD/hexagonal, Spring, and MyBatis remain inactive per applicability decisions; no framework was added.
-- Evidence date: 2026-11-25, Asia/Seoul. Most prior reports record commit time, not test execution time. Missing test timestamps are marked as unrecorded.
+- Evidence date: 2026-11-26, Asia/Seoul. Most prior reports record commit time, not test execution time. Missing test timestamps are marked as unrecorded.
 
 ## §13 Acceptance status
 
@@ -16,13 +16,13 @@
 | 1 | Technology stack and profiles | PASS locally | `issue-491-gap-register.md`; deployed Java 8 / JDK 25, active and inactive profiles mapped. |
 | 2 | 152 rule records | PARTIAL | This report indexes all 152 source IDs. 29 rows link to dedicated issue evidence; 24 rows cite inactive profiles; 3 rows identify deleted/transferred IDs; 96 rows still lack rule-specific execution evidence. |
 | 3 | Architecture and types first | PARTIAL | #480 architecture/dependency samples and #482 DTO/immutability tests pass. Full design review of all API/state invariants is not recorded. |
-| 4 | Working CI | PARTIAL | #490 tests required-result success/fail/cancel/missing gate behavior and active `ci / ci-ok` rule. PR #493 run `45643237410` passed CodeQL, Bats, policy/staging/gate tests, deployTest, and JDK 8/11/17/21/25 runtime jobs. OSV `ci / verify` failed on the known CRITICAL/HIGH baseline; `ci / ci-ok` ran the checked-out gate script and correctly rejected the failed `verify` result. |
+| 4 | Working CI | PARTIAL | #490 tests required-result success/fail/cancel/missing gate behavior and active `ci / ci-ok` rule. PR #493 run `45648947339` passed CodeQL, Bats, policy/staging/gate tests, deployTest, and JDK 8/11/17/21/25 runtime jobs. OSV `ci / verify` failed on the known CRITICAL/HIGH baseline; `ci / ci-ok` ran the checked-out gate script and correctly rejected the failed `verify` result. |
 | 5 | Custom rule tests | PASS locally | #481/#483/#484/#485 provide normal, violation, and allowed-exception fixtures. See linked evidence. |
 | 6 | Required rules are ERROR | PASS locally | #483 Error Prone violation samples fail in managed and Gradle/Maven consumer builds; #490 fail-closed gate fixtures pass. |
 | 7 | Suppression pair and expiry | PASS locally | #481 PMD pairing, production class expiry scan, and duplicate-preserving baseline tests pass. Internal reviewer: `review481`. |
 | 8 | Author-enforced policy | PARTIAL | Static gates cover DTO, nullness, style, suppression and logging rules. Manual decisions use internal review task IDs; no human GitHub approval is claimed. |
 | 9 | Per-commit evidence | PARTIAL | Evidence reports record target commits, environments, commands, and outcomes. Test execution timestamps are absent from some older reports. |
-| 10 | Failure and regression loop | PARTIAL | PR #493 run `45634765483` exposed generated Gradle TestKit POM cache parse errors; #494 fixed scan scoping. Run `45641400310` exposed a missing checkout in `ci-ok`; commit `7e70064` fixed it. Run `45643237410` proves the gate script evaluates needs and rejects failed OSV `verify`. |
+| 10 | Failure and regression loop | PARTIAL | PR #493 runs `45634765483`, `45641400310`, and `45645491691` exposed OSV scan scoping, missing `ci-ok` checkout, and a JDK 17 test race. #494, commit `7e70064`, and commit `c1bc5c3` fixed them; the latest hosted run `45648947339` reran successfully apart from the expected SCA policy failure. |
 | 11 | Defect regression prevention | PASS locally | #482 array-copy, #485 log-redaction, #481 expiry/baseline, and #483 compiler/style regressions have passing focused tests. |
 | 12 | Baseline protection | PASS locally | #481/#483/#484 multiset or exact baselines reject new/duplicate findings; frozen ArchUnit baseline disallows auto-creation. |
 | 13 | Lint promotion | PASS locally | Required Error Prone and custom PMD rules have normal/violation coverage before root check enforcement. Internal review IDs are listed in §11. |
@@ -48,7 +48,7 @@
 | INFO | `STYLE-011` | 320 existing PMD style/Javadoc findings are frozen. | #484's existing baseline passes; new findings fail. | Reduce baseline in reviewed changes; do not regenerate automatically. |
 | INFO | `STYLE-005` | 32 legacy suppression-pair findings are frozen. | #481 PMD baseline compares diagnostic multiplicities; new or duplicate same-location findings fail. | Add only independently reviewed, narrow, dated exceptions. |
 
-Actual hosted CI/PR incidents: run `45634765483` failed OSV extraction on generated Gradle TestKit POM caches. Issue #494 stages exactly the 17 declared inputs and rejects missing or workspace-escaping paths. Run `45638715862` scanned 17 sources / 1,104 packages with zero extraction errors, then failed severity policy on the known baseline. Run `45641400310` then found that `ci-ok` lacked checkout; commit `7e70064` added checkout and a regression assertion. Run `45643237410` confirmed `ci-ok` reads `needs` and fails with `verify` because OSV still blocks. No dependency upgrade or threshold change was made.
+Actual hosted CI/PR incidents: run `45634765483` failed OSV extraction on generated Gradle TestKit POM caches. Issue #494 stages exactly the 17 declared inputs and rejects missing or workspace-escaping paths. Run `45638715862` scanned 17 sources / 1,104 packages with zero extraction errors, then failed severity policy on the known baseline. Run `45641400310` then found that `ci-ok` lacked checkout; commit `7e70064` added checkout and a regression assertion. Run `45643237410` confirmed `ci-ok` reads `needs` and fails with `verify` because OSV still blocks. Run `45645491691` exposed a JDK 17 test race: the test observed the request reservation released before the byte reservation; commit `c1bc5c3` waits for both counters, passed 10 local reruns, and passed in run `45648947339`. No dependency upgrade or threshold change was made.
 
 ### Checks performed
 
@@ -60,14 +60,14 @@ Actual hosted CI/PR incidents: run `45634765483` failed OSV extraction on genera
 | `python3 .github/scripts/test/test_ci_gate.py` | PASS; 5 tests | Success passes; failure/cancel/skipped/missing/unexpected/malformed results fail. | `issue-490-evidence.md` |
 | `python3 .github/scripts/test/test_osv_policy.py` | PASS; 7 tests | Threshold and input/error behavior pass. | `issue-490-evidence.md` |
 | Gitleaks Bats tests | NOT RUN locally | Bats unavailable; workflow installs and runs the tests in hosted CI. | `issue-486-evidence.md` |
-| GitHub hosted PR CI #493 | PARTIAL / expected SCA failure; run `45643237410`, target branch commit `7e700648d9e68b511956f105fd608cfebecb8389`, merge SHA `91c14faae886e4a8537e1a96d4a7453730e8fb9a` | `./gradlew check` (6m 48s), CodeQL, Bats, OSV policy/staging/gate tests, deployTest, and JDK 8/11/17/21/25 pass. OSV scans exactly 17 staged sources (1,104 packages, 168 findings), with 5 CRITICAL and 64 HIGH rows; `ci / verify` fails on policy, and `ci / ci-ok` executes successfully then fails closed because `verify` failed. | [Run 45643237410](https://github.com/ppzxc/strand/actions/runs/45643237410); artifact `osv-scan-report`; #494 |
+| GitHub hosted PR CI #493 | PARTIAL / expected SCA failure; run `45648947339`, target SHA `c1bc5c390c3968ec20817d6fe692d37530392bc2`, merge SHA `e94134bed274bfbd069b03df4686c9b423ffb79d`, started `2026-11-25T15:49:03Z`, completed `2026-11-25T15:56:07Z` | `./gradlew check`, CodeQL, Bats, OSV policy/staging/gate tests, deployTest, and JDK 8/11/17/21/25 pass. OSV scans exactly 17 staged sources (1,104 packages, 168 findings), with 5 CRITICAL and 64 HIGH rows; `ci / verify` fails on policy, and `ci / ci-ok` executes successfully then fails closed because `verify` failed. | [Run 45648947339](https://github.com/ppzxc/strand/actions/runs/45648947339); artifact `osv-scan-report`; #494 |
 | GitHub weekly workflow | NOT RUN | No weekly run evidence from this workspace. | `issue-490-evidence.md` |
 | Central release / post-upload validation | NOT RUN | No artifact published; release YAML orders `VALIDATED` deployment test before public release. | `issue-490-evidence.md` |
 
 ### Gaps, exceptions, and review conditions
 
 - **Unverified rule rows:** 104 IDs have no direct rule-specific evidence pointer in the implementation reports. Of these, 96 lack rule-specific execution evidence; 8 have cross-references but no direct execution proof. The accountable owner is the §13 role in the source; see the per-ID index and `issue-491-gap-register.md`.
-- **Actual CI/PR incidents:** #493 runs `45634765483` and `45641400310` exposed the OSV cache-scan issue and missing `ci-ok` checkout. #494 and commit `7e70064` fix those defects. Run `45643237410` confirms clean OSV extraction and the gate's fail-closed behavior on the remaining vulnerability baseline.
+- **Actual CI/PR incidents:** #493 runs `45634765483` and `45641400310` exposed the OSV cache-scan issue and missing `ci-ok` checkout. #494 and commit `7e70064` fix those defects. Run `45645491691` exposed a flaky JDK 17 reservation assertion; commit `c1bc5c3` fixes it, with 10 local focused reruns and hosted JDK 17 success in `45648947339`. That run also confirms clean OSV extraction and the gate's fail-closed behavior on the remaining vulnerability baseline.
 - **SCA remediation:** build/module owners must upgrade the CRITICAL Netty and HIGH build-logic dependencies. Keep the gate blocking until the same scan passes on a new SHA.
 - **Live release:** release owner must record upload, `VALIDATED` deployment, and post-upload consumer result before publication; no release was made here. Hosted PR CI is recorded above.
 - **Human review:** repository is solo-maintained; main ruleset remains at zero required approvals. Internal AI review records above are not human approval.
