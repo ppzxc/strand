@@ -5,10 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/**
- * 쓰기를 시작했지만 마지막 바이트를 넘기지 못한 요청의 결과 확정성(규격 3.5절). 요청한 쪽이 받는 확정성과, 남은 출력을 상대 엔드포인트에 넣었을 때
- * 상대가 요청을 받는지를 함께 본다.
- */
 class EndpointPartialRequestCertaintyTest {
     @Test
     void errorCloseAfterPartialProgressIsUnknownAndPeerReceivesTheRequest() {
@@ -27,7 +23,6 @@ class EndpointPartialRequestCertaintyTest {
         assertThat(clientEvents).extracting(Event::kind).containsExactly(Event.Kind.RESULT, Event.Kind.CLOSED);
         assertThat(clientEvents.get(0).certainty()).hasValue(Certainty.UNKNOWN);
 
-        // 전송 모듈은 남은 출력(요청의 나머지와 CLOSE)을 마저 쓴다.
         deliver(client, server, request, firstPart, request.length() - firstPart);
         pump(client, server);
 
@@ -103,7 +98,6 @@ class EndpointPartialRequestCertaintyTest {
         assertThat(events.get(0).certainty()).hasValue(Certainty.UNKNOWN);
     }
 
-    /** 두 엔드포인트가 서로의 출력을 끝까지 넘겨 연결을 연다. */
     private static void connect(Endpoint client, Endpoint server) {
         pump(client, server);
         Drive.drainEvents(client);
@@ -129,7 +123,6 @@ class EndpointPartialRequestCertaintyTest {
         return moved;
     }
 
-    /** 출력의 {@code offset}부터 {@code count} 바이트를 쓴 것으로 보고하고 그 바이트를 상대에 넣는다. */
     private static void deliver(Endpoint from, Endpoint to, EndpointOutput output, int offset, int count) {
         from.outputProgress(output.id(), count);
         Drive.receive(to, java.util.Arrays.copyOfRange(output.bytes(), offset, offset + count));

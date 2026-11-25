@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.api;
 
-/** A resource that can limit admission or progress. */
 public enum Resource {
     OUTGOING_REQUESTS,
     OUTGOING_BYTES,
@@ -27,7 +26,6 @@ public enum Resource {
     TIMERS,
     UNRELEASED_HANDLERS;
 
-    /** TLS progress budgets may be zero: a plain connection needs none. */
     boolean isTlsProgress() {
         return this == TLS_PLAINTEXT_BYTES || this == TLS_CIPHERTEXT_BYTES || this == TLS_CONTROL_BYTES;
     }

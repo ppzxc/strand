@@ -7,10 +7,6 @@ import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/**
- * 넘기지 않은 내 요청(번호만 받음, 쓰는 중)의 스트림에 온 응답과 RESET은 조용히 버리고 요청은 그대로 둔다(규격 4.3절). 넘긴 요청은 지금
- * 처럼 처리한다. 서버 쪽 엔드포인트의 내 요청은 짝수 번호이고 첫 요청은 2번이다.
- */
 class EndpointResponseBeforeHandoffTest {
 
     private static final int REQUEST_TYPE = 257;
@@ -56,7 +52,6 @@ class EndpointResponseBeforeHandoffTest {
         assertThat(events.get(0).certainty()).contains(certainty);
     }
 
-    /** 번호만 받은 요청에 온 응답은 결과를 내지 않고, 요청 프레임은 그대로 나가며, 이후의 진짜 응답이 결과가 된다. */
     @Test
     void responseToNumberedOnlyRequestIsDiscardedAndRequestStillGoesOut() {
         Endpoint server = openServer();
@@ -73,7 +68,6 @@ class EndpointResponseBeforeHandoffTest {
         assertResult(server, 0, Certainty.RESPONSE);
     }
 
-    /** 번호만 받은 요청에 온 RESET도 버리고 요청은 나간다. */
     @Test
     void resetToNumberedOnlyRequestIsDiscardedAndRequestStillGoesOut() {
         Endpoint server = openServer();
@@ -88,7 +82,6 @@ class EndpointResponseBeforeHandoffTest {
         assertResult(server, Status.CANCELLED, Certainty.UNKNOWN);
     }
 
-    /** 쓰는 중인 요청(첫 바이트는 넘겼고 마지막 바이트는 아직)에 온 응답과 RESET도 버리고, 쓰기를 끝까지 마친다. */
     @Test
     void responseAndResetToRequestBeingWrittenAreDiscardedAndWritingContinues() {
         Endpoint server = openServer();
@@ -110,7 +103,6 @@ class EndpointResponseBeforeHandoffTest {
         assertResult(server, 0, Certainty.RESPONSE);
     }
 
-    /** 넘긴 요청에 온 응답은 결과가 된다. */
     @Test
     void responseToHandedOffRequestIsResult() {
         Endpoint server = openServer();
@@ -122,7 +114,6 @@ class EndpointResponseBeforeHandoffTest {
         assertResult(server, 0, Certainty.RESPONSE);
     }
 
-    /** 넘긴 요청에 온 RESET은 결과 모름으로 끝낸다. */
     @Test
     void resetToHandedOffRequestIsUnknownResult() {
         Endpoint server = openServer();
@@ -134,7 +125,6 @@ class EndpointResponseBeforeHandoffTest {
         assertResult(server, Status.CANCELLED, Certainty.UNKNOWN);
     }
 
-    /** 연결 오류 검사가 먼저다. 번호만 받은 요청의 스트림이어도 payload 크기가 틀린 RESET은 연결 오류다(규격 5.1절 3번). */
     @Test
     void connectionErrorCheckStillComesFirst() {
         Endpoint server = openServer();
@@ -147,7 +137,6 @@ class EndpointResponseBeforeHandoffTest {
         assertThat(Drive.drainEvents(server)).extracting(Event::kind).contains(Event.Kind.CLOSED);
     }
 
-    /** 종료 중인 연결은 내 요청이 남아 있는 동안 닫지 않는다. 버린 응답은 요청 수를 줄이지 않고, 진짜 응답이 오면 닫는다. */
     @Test
     void drainingConnectionStaysOpenWhileUnhandedRequestRemains() {
         Endpoint server = openServer();

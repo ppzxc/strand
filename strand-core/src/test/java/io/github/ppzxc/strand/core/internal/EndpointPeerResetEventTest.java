@@ -7,10 +7,6 @@ import java.util.List;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 
-/**
- * 상대가 받은 요청을 RESET하면 그 사실이 오류 코드와 함께 애플리케이션 사건으로 나온다(규격 4.4절 "받은 쪽은 할 수 있으면 처리를 멈추고"). 응답을 이미
- * 보낸 스트림, 거절한 스트림, 대기 중이 아닌 스트림의 RESET은 사건이 아니다(규격 4.3절).
- */
 class EndpointPeerResetEventTest {
 
     private static final int REQUEST_TYPE = 0x0100;

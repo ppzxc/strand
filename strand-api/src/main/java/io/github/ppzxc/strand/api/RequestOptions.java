@@ -4,7 +4,6 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Local options for a request. A deadline does not set a wire timeout extension. */
 public final class RequestOptions {
     private final Optional<Duration> deadline;
 

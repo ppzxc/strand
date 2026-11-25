@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** {@code CLOSED} 이벤트가 싣는 종료 원인: 끝난 방식(CLOSE, 오류 CLOSE, 끊김), error_code, CLOSE를 보낸 쪽. */
 class EndpointCloseReasonTest {
 
     private static final String HELLO = "0000001000010000000000000000000000000000";

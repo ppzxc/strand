@@ -3,7 +3,6 @@ package io.github.ppzxc.strand.api;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
-/** Connection and owner resource budgets. */
 public final class ResourceLimits {
     private final ConnectionLimits connection;
     private final OwnerLimits owner;
@@ -21,17 +20,6 @@ public final class ResourceLimits {
         return owner;
     }
 
-    /**
-     * Validate transport-specific progress requirements against both scopes.
-     *
-     * <p>This API module only checks that every given minimum is positive and that both the connection and owner
-     * budgets can hold it. It deliberately does not derive the minimums: the result-event reservation is the
-     * conservative Endpoint bound defined by #313 (open requests plus deferred requests plus a fixed margin), and
-     * the TLS plaintext, ciphertext and control minimums depend on the negotiated TLS configuration. A transport
-     * builder must compute those values and pass them here. The NIO builder does so from the core Endpoint
-     * reservation bounds and the SSLEngine buffer sizes (#316); the Netty builder does the same with its own
-     * engine sizes. The builder-time floor in {@code progressBytes} is therefore only a lower sanity bound, not a progress guarantee.
-     */
     public void requireProgress(
             long frame, long control, long result, long plaintext, long ciphertext, long tlsControl) {
         connection.requireProgress(frame, control, result, plaintext, ciphertext, tlsControl);
