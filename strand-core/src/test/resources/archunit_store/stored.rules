@@ -1,0 +1,4 @@
+#
+#Wed Nov 25 19:30:35 KST 2026
+no\ classes\ that\ reside\ in\ a\ package\ 'io.github.ppzxc.strand.core..'\ should\ depend\ on\ classes\ that\ reside\ in\ any\ package\ ['io.github.ppzxc.strand.nio..',\ 'io.github.ppzxc.strand.netty..']=465f02f7-cec8-4857-b202-71bb9ad76a8c
+slices\ matching\ 'io.github.ppzxc.strand.core.(*)..'\ should\ be\ free\ of\ cycles=ccb15fee-e236-4f91-b8f0-5a38835b572b
