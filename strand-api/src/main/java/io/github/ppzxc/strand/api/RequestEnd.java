@@ -2,7 +2,6 @@ package io.github.ppzxc.strand.api;
 
 import java.util.OptionalLong;
 
-/** Why a received request ended. */
 public final class RequestEnd {
     private enum Kind {
         RESPONSE_ACCEPTED,

@@ -8,10 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/**
- * core는 사용 환경(TCP인지 WebSocket인지)을 모른다. core의 타입과 메서드, 열거 상수 어디에도 WebSocket이라는 개념이 없고, 입력은 스트림 입력과 단위
- * 입력 둘뿐이다(ADR 0006).
- */
 class CoreKnowsNoUsageEnvironmentTest {
 
     private static List<Class<?>> coreClasses() throws Exception {

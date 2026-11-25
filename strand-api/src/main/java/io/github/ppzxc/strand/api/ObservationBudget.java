@@ -1,6 +1,5 @@
 package io.github.ppzxc.strand.api;
 
-/** Shared finite allowance for outstanding observation tasks. */
 public final class ObservationBudget {
     private final long limit;
     private long used;

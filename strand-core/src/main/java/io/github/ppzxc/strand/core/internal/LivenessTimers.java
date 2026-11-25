@@ -7,32 +7,21 @@ import java.util.Map;
 import java.util.OptionalLong;
 import org.jspecify.annotations.Nullable;
 
-/**
- * 생존 확인 타이머. 확인 대기(HELLO, AUTH, PING) 목록(보낸 순서)과 대기별 시작 시각·기한, 서버의 AUTH 대기 기한(규격 3.3절), 마지막 수신
- * 시각과 유휴 PING 횟수(규격 3.4.1절)를 소유하고, 시계는 읽지 않는다. 호출자가 가상 시각을 넘긴다. 판단만 돌려주고 프레임 생성과 CLOSE 결정은
- * 호출자의 몫이다.
- *
- * <p>대기는 {@link #await}로 등록하고, 프레임을 전송 계층에 넘긴 때에 {@link #started}로 시작한다. 시작 전의 대기는 기한이 없다. 쓰기 대기열 노드와
- * 대기는 {@code await}가 돌려준 식별자로 잇는다. 연결 하나의 타이머이므로 한 스레드에서만 쓴다.
- */
 final class LivenessTimers {
 
-    /** 대기 식별자가 아님을 뜻하는 값. {@link #await}는 이 값을 돌려주지 않는다. */
     static final long NO_WAIT = 0;
 
-    /** 무엇의 ACK를 기다리는가. */
     enum Kind {
         HELLO,
         AUTH,
         PING
     }
 
-    /** {@link #expiry}의 판단: 연결을 닫아야 하는 기한 경과. */
     enum Expiry {
         NONE,
-        /** AUTH 대기 시간 초과. */
+
         UNAUTHENTICATED,
-        /** 확인 대기 시간 초과. */
+
         UNRESPONSIVE
     }
 
@@ -52,21 +41,19 @@ final class LivenessTimers {
 
     private final long ackTimeoutMs;
     private final long authTimeoutMs;
-    /** 0 이하면 유휴 PING을 보내지 않는다. */
+
     private final long idleIntervalMs;
-    /** 식별자로 찾는다. 순회는 등록한 순서대로다(가장 먼저 등록한 대기가 먼저 나온다). */
+
     private final Map<Long, Wait> waits = new LinkedHashMap<>();
 
-    /** 등록된 PING 대기 수. {@link #hasPing}을 상수 시간에 답하려고 센다. */
     private int pingCount;
 
     private long lastId = NO_WAIT;
-    /** 서버의 AUTH 대기가 끝나는 시각. 대기 중이 아니면 null이다. */
+
     private @Nullable Long authDeadline;
 
-    /** 쓰기 대기열에 들었으나 아직 넘기지 못한 유휴 PING의 대기 식별자(규격 3.3절). 없으면 {@link #NO_WAIT}다. */
     private long unsentIdleId = NO_WAIT;
-    /** 넘기지 못한 유휴 PING의 기한을 세는 시작 시각: 쓰기 대기열에 든 때, 그 뒤 마지막으로 출력이 진행한 때 가운데 늦은 것. */
+
     private long unsentSince;
 
     private boolean ended;
@@ -79,27 +66,18 @@ final class LivenessTimers {
         this.idleIntervalMs = idleIntervalMs;
     }
 
-    /** 서버가 AUTH를 기다리기 시작했다. 기한은 {@code now + authTimeoutMs}다. */
     void authWaitStarted(long now) {
         authDeadline = now + authTimeoutMs;
     }
 
-    /** AUTH를 받아 AUTH 대기가 끝났다. */
     void authWaitEnded() {
         authDeadline = null;
     }
 
-    /** 프레임을 받았다. 유휴 간격은 이 시각부터 센다. */
     void frameReceived(long now) {
         lastReceivedAt = now;
     }
 
-    /**
-     * 확인 대기를 등록한다. 기한은 아직 세지 않는다.
-     *
-     * @param payload PING이면 보낸 8바이트, 아니면 null
-     * @return 대기 식별자
-     */
     long await(Kind kind, byte @Nullable [] payload) {
         long id = ++lastId;
         waits.put(id, new Wait(kind, payload));
@@ -109,20 +87,17 @@ final class LivenessTimers {
         return id;
     }
 
-    /** 대기 {@code id}의 PING이 유휴 PING으로 쓰기 대기열에 들어갔다. 넘기기 전까지 출력 진행이 없는 시간을 이때부터 센다. */
     void idlePingQueued(long id, long now) {
         unsentIdleId = id;
         unsentSince = now;
     }
 
-    /** 출력이 한 바이트라도 전송 계층에 넘어갔다. 넘기지 못한 유휴 PING의 기한을 이 시각부터 다시 센다. */
     void outputProgressed(long now) {
         if (unsentIdleId != NO_WAIT) {
             unsentSince = now;
         }
     }
 
-    /** 대기에 매인 프레임을 전송 계층에 넘겼다. 이때부터 {@code now + ackTimeoutMs}가 기한이다. 이미 끝났거나 시작한 대기는 그대로다. */
     void started(long id, long now) {
         if (id == unsentIdleId) {
             unsentIdleId = NO_WAIT;
@@ -134,10 +109,6 @@ final class LivenessTimers {
         }
     }
 
-    /**
-     * ACK를 받았다. 종류와 payload가 같은 대기 가운데 가장 먼저 등록한 하나가 끝난다. 프레임을 넘기기 전에 도착한 ACK도 그 대기를 끝낸다.
-     * 맞는 대기가 없으면 아무 일도 없다.
-     */
     void ackReceived(Kind kind, byte @Nullable [] payload) {
         for (Iterator<Map.Entry<Long, Wait>> it = waits.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<Long, Wait> entry = it.next();
@@ -155,15 +126,10 @@ final class LivenessTimers {
         }
     }
 
-    /** ACK를 기다리는 PING이 있는가. */
     boolean hasPing() {
         return pingCount > 0;
     }
 
-    /**
-     * 연결을 닫아야 하는 기한이 지났는가. AUTH 대기 기한을 먼저 보고 확인 대기 기한을 본다. 기한 정각은 지나지 않은 것이다. 연결이 끝난 뒤에는
-     * 항상 {@link Expiry#NONE}이다.
-     */
     Expiry expiry(long now) {
         if (ended) {
             return Expiry.NONE;
@@ -182,13 +148,6 @@ final class LivenessTimers {
         return Expiry.NONE;
     }
 
-    /**
-     * 시계를 진행해야 하는 가장 이른 시각. AUTH 대기 기한, 시작한 확인 대기의 기한(둘 다 기한 다음 밀리초), 그리고 유휴 PING을 보낼 수 있으면 그 일정
-     * (마지막 수신 + 간격) 가운데 가장 이른 것이다. 보낼 일정이 없거나 연결이 끝났으면 비어 있다. 이미 지난 일정은 호출 시점의 판단이 아니라 일정 시각
-     * 그대로 돌려준다.
-     *
-     * @param mayIdlePing 지금 유휴 PING을 보낼 수 있는 연결 단계인가
-     */
     OptionalLong nextAt(boolean mayIdlePing) {
         if (ended) {
             return OptionalLong.empty();
@@ -216,11 +175,6 @@ final class LivenessTimers {
         return found ? OptionalLong.of(earliest) : OptionalLong.empty();
     }
 
-    /**
-     * 지금 보낼 유휴 PING의 payload(횟수 카운터, 빅엔디언 8바이트). 보낼 때가 아니면 null이다. 간격이 설정되지 않았거나,
-     * 마지막 수신 뒤 간격이 차지 않았거나, 기다리는 PING이 있거나, 연결이 끝났으면 보내지 않는다. payload를 돌려주면 보내는 것으로 세고 횟수가
-     * 오른다.
-     */
     byte @Nullable [] idlePing(long now) {
         if (ended || idleIntervalMs <= 0 || now - lastReceivedAt < idleIntervalMs || hasPing()) {
             return null;
@@ -233,7 +187,6 @@ final class LivenessTimers {
         return payload;
     }
 
-    /** 연결이 끝났다. 모든 대기를 지우고 이후 판단을 하지 않는다. */
     void clear() {
         ended = true;
         authDeadline = null;

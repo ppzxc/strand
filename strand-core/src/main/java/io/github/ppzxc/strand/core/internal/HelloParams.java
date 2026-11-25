@@ -1,9 +1,7 @@
 package io.github.ppzxc.strand.core.internal;
 
-/** 규격 3.2절의 HELLO 파라미터: identifier, 기본값, 허용 범위. */
 final class HelloParams {
 
-    /** 파라미터 하나의 크기: identifier(u16)와 value(u32). */
     static final int HELLO_PARAM_SIZE = 6;
 
     static final int MAX_FRAME_SIZE_ID = 0x0001;

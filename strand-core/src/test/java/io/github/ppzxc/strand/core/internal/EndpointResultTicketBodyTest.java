@@ -8,10 +8,6 @@ import java.util.List;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 
-/**
- * 결과를 요청에 짝짓고 본문을 읽는다(#232). {@code RESULT}는 {@code request}가 돌려준 번호표를 담고, 응답 받음의 {@code RESULT}와
- * {@code REQUEST_RECEIVED}는 본문을 담는다. {@link Endpoint}의 외부 동작만 본다.
- */
 class EndpointResultTicketBodyTest {
 
     private static final int REQUEST_TYPE = 0x0100;
@@ -68,8 +64,6 @@ class EndpointResultTicketBodyTest {
         assertThat(events.get(1).kind()).isEqualTo(Event.Kind.RESULT);
         return events.get(1);
     }
-
-    // --- 번호표 ---
 
     @Test
     void resultOfAnAnsweredRequestCarriesItsTicket() {
@@ -277,8 +271,6 @@ class EndpointResultTicketBodyTest {
         }
     }
 
-    // --- 본문 ---
-
     @Test
     void responseBodyIsReadableFromTheAnsweredResult() {
         Endpoint client = establishedClient();
@@ -303,7 +295,6 @@ class EndpointResultTicketBodyTest {
         assertThat(onlyResult(client).body()).containsExactly(5, 6);
     }
 
-    /** 확장 영역이 없는 프레임에 확장 영역을 끼워 넣는다. */
     private static byte[] withExtensions(byte[] frame, byte[] extensions) {
         byte[] out = new byte[frame.length + extensions.length];
         System.arraycopy(frame, 0, out, 0, Frames.HEADER_SIZE);

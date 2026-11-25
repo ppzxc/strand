@@ -13,7 +13,6 @@ abstract class LimitBuilder<B extends LimitBuilder<B>> {
         values.put(resource, value);
     }
 
-    /** TLS progress budgets may be zero: a plain connection needs none. */
     private void putTls(Resource resource, long value) {
         if (value < 0) throw new IllegalArgumentException(resource + " must not be negative");
         values.put(resource, value);
@@ -51,11 +50,6 @@ abstract class LimitBuilder<B extends LimitBuilder<B>> {
         return self();
     }
 
-    /**
-     * Sets progress budgets. Only the frame and control floors are checked here; result-event and TLS budgets accept
-     * any positive value because their real minimums come from the Endpoint reservation (#313) and the TLS
-     * configuration. The transport builder must call {@code requireProgress} with those minimums (NIO and Netty).
-     */
     public B progressBytes(long frame, long control, long result, long plain, long cipher, long tlsControl) {
         if (frame < 20 || control < 32)
             throw new IllegalArgumentException("progress space cannot hold a minimal Strand frame");

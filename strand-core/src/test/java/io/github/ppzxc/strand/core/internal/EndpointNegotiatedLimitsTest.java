@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
-/** 협상된 한도를 전송 모듈이 읽을 수 있다. 상대 HELLO를 받기 전에는 기본값이고, 받은 뒤에는 상대가 알린 값이다. */
 class EndpointNegotiatedLimitsTest {
 
     private static final long DEFAULT_MAX_FRAME_SIZE = 65_536;

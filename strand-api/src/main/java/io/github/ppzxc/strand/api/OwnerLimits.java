@@ -4,7 +4,6 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 
-/** Aggregate limits for one client or server. */
 public final class OwnerLimits {
     private final Map<Resource, Long> values;
 
