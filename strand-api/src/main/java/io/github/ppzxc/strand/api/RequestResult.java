@@ -40,6 +40,6 @@ public final class RequestResult {
     }
 
     public byte[] payload() {
-        return payload;
+        return payload.clone();
     }
 }
