@@ -15,16 +15,10 @@ import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * 제품 공개 API(NioStrandServer, NioStrandClient) 위에서 도는 시험이 함께 쓰는 설정 도구. 필수 한도와 시간을 넉넉하게 채운 평문 TCP builder를 만든다. 요청 핸들러는
- * 시험이 정한다.
- */
 public final class TestNio {
 
-    /** 연결별로 한꺼번에 낼 수 있는 요청 수 한도. */
     public static final long REQUESTS_PER_CONNECTION = 128;
 
-    /** 소유 객체(서버 또는 클라이언트 하나)가 동시에 가질 수 있는 연결 수 한도. */
     public static final long CONNECTIONS = 64;
 
     private static final long BODY_BYTES = 1 << 20;
@@ -32,12 +26,6 @@ public final class TestNio {
 
     private TestNio() {}
 
-    /**
-     * 앱용 실행기. 핸들러와 알림이 여기서 돌아 전송 스레드를 막지 않는다. 종료는 부른 쪽 책임이다.
-     *
-     * @param name 스레드 이름
-     * @return 데몬 스레드를 쓰는 캐시 스레드 풀
-     */
     public static ExecutorService newExecutor(String name) {
         return Executors.newCachedThreadPool(runnable -> {
             Thread thread = new Thread(runnable, name);
@@ -46,11 +34,6 @@ public final class TestNio {
         });
     }
 
-    /**
-     * 평문 TCP용 넉넉한 한도. 진행 공간은 최소 필요량이다.
-     *
-     * @return 자원 한도
-     */
     public static ResourceLimits limits() {
         return limits(NioMinimumProgress.of(
                 NioSecurity.externallySecured(),
@@ -59,12 +42,6 @@ public final class TestNio {
                 REQUESTS_PER_CONNECTION));
     }
 
-    /**
-     * 넉넉한 한도. 진행 공간은 부른 쪽이 정한 최소 필요량이다.
-     *
-     * @param space 엔진이 계산한 최소 진행 공간
-     * @return 자원 한도
-     */
     public static ResourceLimits limits(MinimumProgressSpace space) {
         long[] min = {
             space.get(Resource.FRAME_ASSEMBLY_BYTES),
@@ -105,12 +82,6 @@ public final class TestNio {
                 .build();
     }
 
-    /**
-     * 필수 설정을 채운 서버 builder. 모든 연결을 통과시킨다. 요청 핸들러는 부른 쪽이 정한다.
-     *
-     * @param executor 앱용 실행기
-     * @return 서버 builder
-     */
     public static NioStrandServer.Builder serverBuilder(ExecutorService executor) {
         return NioStrandServer.builder()
                 .executor(executor)
@@ -122,12 +93,6 @@ public final class TestNio {
                 .authenticate(credentials -> AuthenticationResult.accepted("peer"));
     }
 
-    /**
-     * 필수 설정을 채운 클라이언트 builder. 요청 핸들러는 부른 쪽이 정한다.
-     *
-     * @param executor 앱용 실행기
-     * @return 클라이언트 builder
-     */
     public static NioStrandClient.Builder clientBuilder(ExecutorService executor) {
         return NioStrandClient.builder()
                 .executor(executor)

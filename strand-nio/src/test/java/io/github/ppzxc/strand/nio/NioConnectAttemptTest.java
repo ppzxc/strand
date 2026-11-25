@@ -24,7 +24,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 연결 시도의 취소·기한·순차 주소·준비 보관 바이트·알림 거절을 앱 공개 API로 본다(#319). */
 class NioConnectAttemptTest {
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -105,7 +104,7 @@ class NioConnectAttemptTest {
         assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
         assertThat(client.resourceUsage(Resource.PREPARING_CONNECTIONS).current())
                 .isZero();
-        // 서버가 끊김을 보고 연결을 정리한 뒤에 사용자 작업이 반환해야 늦은 완료다. 반환하지 않는 작업은 연결 정리를 막지 않는다.
+
         awaitTrue(() -> server.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
         assertThat(server.resourceUsage(Resource.AUTHENTICATION_TASKS).current())
                 .isEqualTo(1);
@@ -134,7 +133,7 @@ class NioConnectAttemptTest {
                                 .result())
                         .status())
                 .isEqualTo(Status.OK);
-        // 성공한 시도는 통로를 연결에 넘겼으므로 시도가 정리할 것이 남지 않는다.
+
         AppFixture.get(attempt.transportReleased());
         assertThat(client.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isEqualTo(1);
         connection.abort();
@@ -148,7 +147,7 @@ class NioConnectAttemptTest {
         Listener listener = listen(app);
         int port = ((InetSocketAddress) listener.localAddress()).getPort();
         List<String> tried = new CopyOnWriteArrayList<>();
-        // 127.0.0.2에는 아무도 듣지 않으므로 거부되고 다음 주소로 넘어간다.
+
         NioStrandClient client = clientFixture
                 .clientBuilder()
                 .resolver(host -> {
@@ -160,7 +159,6 @@ class NioConnectAttemptTest {
         NioStrandConnection connection =
                 AppFixture.get(client.connect(InetSocketAddress.createUnresolved("some-host", port)));
 
-        // 127.0.0.2는 거부됐으므로 연결이 성공했다면 다음 주소로 맺은 것이다.
         assertThat(tried).containsExactly("some-host");
         connection.abort();
     }
@@ -206,7 +204,7 @@ class NioConnectAttemptTest {
             assertThat(failure.stage()).isEqualTo(PreparationStage.CONNECTION);
             assertThat(failure.cause()).isInstanceOf(SocketTimeoutException.class);
             awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
-            // 반환하지 않은 해석 작업은 슬롯을 유지한다.
+
             assertThat(client.resourceUsage(Resource.RESOLVE_TASKS).current()).isEqualTo(1);
             hold.countDown();
             awaitTrue(() -> client.resourceUsage(Resource.RESOLVE_TASKS).current() == 0);
@@ -214,7 +212,7 @@ class NioConnectAttemptTest {
                 watcher.accept().close();
                 throw new AssertionError("늦은 해석 결과로 소켓을 열었다");
             } catch (SocketTimeoutException expected) {
-                // 늦은 완료로 연결하지 않는다.
+
             }
         }
     }
@@ -380,7 +378,7 @@ class NioConnectAttemptTest {
                 failureOf(client.connect(AppFixture.loopback(listener)).toCompletableFuture());
 
         assertThat(rootCauses(failure.cause())).anyMatch(t -> t instanceof RejectedExecutionException);
-        // 실행기가 거절한 알림을 대신할 스레드를 만들지 않는다.
+
         assertThat(Thread.getAllStackTraces().keySet())
                 .noneMatch(thread -> thread.getName().equals("strand-nio-notify"));
         awaitTrue(() -> client.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
@@ -461,7 +459,7 @@ class NioConnectAttemptTest {
                 .handlerFactory(connection -> PreparedHandler.of(request -> request.respond(Status.OK, new byte[0])))
                 .build();
         Listener listener = listen(app);
-        // build 확인(1)·인증(2)·팩터리(3) 다음의 준비 성공 알림(4)만 거절한다. 서버는 성공을 알릴 앱 관찰자가 없다.
+
         server.executor.rejectTaskNumber(4);
 
         NioStrandConnection connection =
@@ -494,7 +492,7 @@ class NioConnectAttemptTest {
 
     @Test
     void resolvedAddressesAreReservedAsPreparationBytesBeforeTheyAreKept() throws Exception {
-        // 주소 이름("h") 1바이트는 들어가지만 해석된 IPv4 주소 4바이트까지는 들어가지 않는다.
+
         AppFixture fixture = track(new AppFixture.Spec().preparationBytes(4, 4).plain());
         NioStrandClient client = fixture.clientBuilder()
                 .resolver(host -> new InetAddress[] {InetAddress.getByName("127.0.0.1")})

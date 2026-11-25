@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntFunction;
 
-/** 켜면 만들어 둔 프레임이 정해진 수만큼 읽혀 나오는 통로. 읽기를 기다리지 않는 대기에는 내놓지 않는다. */
 final class FloodPassage implements Passage {
     private Passage inner;
     private final AtomicInteger remaining = new AtomicInteger();

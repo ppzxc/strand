@@ -20,17 +20,8 @@ import java.util.concurrent.Executor;
 import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 
-/**
- * 소유 객체(클라이언트·서버) 하나의 전체 종료. 새 접수 차단 → 시도 정리 → 리스닝 중지 → 연결 CLOSE → shutdownGrace가 끝나면 남은 연결 abort → 내부 실행
- * 자원 종료 순서로 진행한다. 두 기한은 첫 {@link #shutdown()} 호출 시각부터 센다.
- *
- * <p>종료 결과({@link #result()})는 모든 내부 자원이 정리되거나 shutdownDeadline이 되면 한 번 확정하고 이후 바꾸지 않는다. 실제 정리 완료({@link
- * #terminated()})는 기한과 무관하게 연결·리스닝·잔존 작업·미정리 결과가 모두 풀린 뒤 따로 완료한다. 앱이 준 실행기는 종료하지 않는다.
- *
- * <p>기다림은 연결 종료·리스닝 정리·예약 반환·미정리 결과 인수 같은 실제 사건과 두 기한 시각만으로 깨어난다.
- */
 final class OwnerShutdown {
-    /** 전체 종료가 끝나길 기다리는 잔존 작업의 종류. 예약이 돌아오면 풀린 것이다. */
+
     private static final Resource[] TASKS = {
         Resource.HANDLER_TASKS, Resource.FACTORY_TASKS, Resource.AUTHENTICATION_TASKS, Resource.RESOLVE_TASKS
     };
@@ -69,18 +60,12 @@ final class OwnerShutdown {
         }
     }
 
-    /** 새 연결·리스닝·시도를 받을 수 있는지(종료를 시작하지 않았는지). 확인만 하며 예약하지 않는다. */
     boolean accepting() {
         synchronized (lock) {
             return !shuttingDown;
         }
     }
 
-    /**
-     * 연결(시도 포함)을 종료 대상으로 기록한다.
-     *
-     * @return 종료를 시작하지 않아 기록했으면 true
-     */
     boolean register(NioStrandConnection connection) {
         synchronized (lock) {
             if (shuttingDown) {
@@ -91,7 +76,6 @@ final class OwnerShutdown {
         }
     }
 
-    /** 전송 스레드가 모든 정리를 마친 연결을 기록에서 뺀다. */
     void unregister(NioStrandConnection connection) {
         synchronized (lock) {
             connections.remove(connection);
@@ -99,11 +83,6 @@ final class OwnerShutdown {
         }
     }
 
-    /**
-     * 리스닝을 종료 대상으로 기록한다.
-     *
-     * @return 종료를 시작하지 않아 기록했으면 true
-     */
     @SuppressWarnings("FutureReturnValueIgnored")
     boolean register(Listener listener) {
         synchronized (lock) {
@@ -123,11 +102,6 @@ final class OwnerShutdown {
         }
     }
 
-    /**
-     * 전체 종료를 시작한다. 처음 호출만 순서를 시작하고, 반복 호출은 같은 결과를 돌려주며 기한을 늦추지 않는다.
-     *
-     * @return 종료 결과. 성공은 {@code COMPLETED}, 기한 초과는 {@link ShutdownDeadlineExceededException}
-     */
     CompletionStage<Void> shutdown() {
         List<NioStrandConnection> toClose = new ArrayList<>();
         List<Listener> toStop = new ArrayList<>();
@@ -136,7 +110,7 @@ final class OwnerShutdown {
             first = !shuttingDown;
             if (first) {
                 shuttingDown = true;
-                // 기한의 시작은 처음 호출이 잠금을 얻은 순간이다. 동시 첫 호출이 서로 다른 시각을 기준으로 삼지 않게 잠금 안에서 읽는다.
+
                 startedAt = clock.getAsLong();
                 toClose.addAll(connections);
                 toStop.addAll(listeners);
@@ -207,8 +181,7 @@ final class OwnerShutdown {
                 publish(fix);
             }
             if (done) {
-                // 결과를 먼저 보존했다. 이제 실제 정리 완료를 알린다.
-                // 종료 결과 완료를 먼저 알린 뒤 실제 정리 완료를 알린다(다중 스레드 실행기에서도 이 순서가 바뀌지 않는다).
+
                 dispatch(() -> {
                     completeStopped();
                     terminated.complete(null);
@@ -221,8 +194,7 @@ final class OwnerShutdown {
         }
     }
 
-    /** 잠금을 쥔 채 부른다. 사건이 알리거나 {@code nanos}가 지나면 돌아온다. 중단됐으면 true. */
-    @SuppressWarnings("WaitNotInLoop") // 호출하는 감독 루프가 기다린 뒤 조건을 다시 평가한다.
+    @SuppressWarnings("WaitNotInLoop")
     private boolean await(long nanos) {
         try {
             if (nanos == Long.MAX_VALUE) {
@@ -236,13 +208,11 @@ final class OwnerShutdown {
         }
     }
 
-    /** 종료 결과를 한 번 확정해 보존하고, 보존한 뒤에 앱이 관찰하는 완료를 알린다. */
     private void publish(ShutdownResult fixed) {
         result.complete(fixed);
         dispatch(this::completeStopped);
     }
 
-    /** 보존된 종료 결과대로 앱이 관찰하는 종료 완료를 알린다. 여러 번 불려도 한 번만 효과가 있다. */
     private void completeStopped() {
         ShutdownResult fixed = result.resultNow();
         if (fixed.kind() == ShutdownKind.COMPLETED) {
@@ -252,12 +222,10 @@ final class OwnerShutdown {
         }
     }
 
-    /** 앱이 붙인 의존 단계가 이 스레드를 막지 않게 앱용 실행기에서 완료한다. 실행기가 거절하거나 종료 기한이 지나도록 실행하지 않으면 직접 완료한다. */
     private void dispatch(Runnable action) {
         StageCompletion.complete(executor, action, deadlineNanos);
     }
 
-    /** 잠금을 쥔 채 부른다. */
     private boolean isTerminated() {
         if (!connections.isEmpty()) {
             return false;
@@ -275,7 +243,6 @@ final class OwnerShutdown {
         return unreleased == null || unreleased.size() == 0;
     }
 
-    /** 잠금을 쥔 채 부른다. 아직 풀리지 않은 것만 담는다. */
     private Map<Resource, Long> remaining() {
         Map<Resource, Long> remaining = new EnumMap<>(Resource.class);
         put(remaining, Resource.TRANSPORTS, connections.size());

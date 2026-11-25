@@ -7,7 +7,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import org.junit.jupiter.api.Test;
 
-/** 진행 보고 방식 쓰기: 돌려주는 값이 실제 소켓 쓰기량이다(#316). */
 class TcpPassageWriteBytesTest {
 
     @Test

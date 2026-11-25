@@ -15,7 +15,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 연결 시도 취소 상태와 엔진의 만남: 상대가 응답하지 않는 준비 중 연결을 취소·전체 종료로 끝낸다. */
 class ConnectionEngineAttemptTest {
 
     private final AppFixture fixture = AppFixture.plain();
@@ -27,7 +26,6 @@ class ConnectionEngineAttemptTest {
         fixture.close();
     }
 
-    /** 상대가 아무것도 보내지 않는 메모리 통로 위의 준비 중 연결. 시작하지 않은 채 돌려준다. */
     private NioStrandConnection silentPeerConnection() {
         OwnerBudgets owner = new OwnerBudgets(fixture.limits);
         ConnectionBudgets budgets = owner.newConnection(fixture.limits);

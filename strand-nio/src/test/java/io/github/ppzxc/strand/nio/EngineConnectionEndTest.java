@@ -16,15 +16,10 @@ import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 연결이 어떻게 끝나든 요청 결과와 종료 알림이 한 번만, 맞는 종류와 원인으로 확정되는지 본다. 구 연결 드라이버의 종료 알림·CLOSED 뒤 마무리·요청 끝남 시험을 제품 엔진
- * 위로 옮긴 것이다. 수동 시계와 메모리 통로를 쓰고, 상대는 코어 엔드포인트다. 종료 알림은 전송 스레드가 끝날 때 확정되므로 알림을 읽는 것이 곧 끝남을 기다리는 것이다.
- */
 class EngineConnectionEndTest {
     private static final byte[] BODY = new byte[20];
     private static final long FINISH_MS = 100;
 
-    /** 통로를 감싸 고장을 주입한다. 출력을 닫은 뒤에 읽기를 실패시키는 고장도 낼 수 있다. */
     private static final class FaultyPassage implements Passage {
         private Passage inner;
         volatile boolean failReadsAfterShutdown;
@@ -94,7 +89,6 @@ class EngineConnectionEndTest {
         return rig.fixture.result(rig.connection.closed());
     }
 
-    /** 시계를 마무리 상한 너머로 올려 가며 연결이 끝나기를 기다린다(끝나기 전에 올린 시계는 마무리 상한을 새로 시작하지 못한다). */
     private CloseNotice noticeAfterAdvancing() throws Exception {
         long limit = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(AppFixture.WAIT_SECONDS);
         while (!rig.connection.closed().isDone() && System.nanoTime() < limit) {
@@ -181,7 +175,7 @@ class EngineConnectionEndTest {
 
     @Test
     void whenThePeerHangsUpWhileClosingTheNoticeIsOneDisconnectWithTheEndOfStreamException() throws Exception {
-        // 종료 중(CLOSE를 보냈고 스트림이 남음)에 EOF가 오면 입출력 예외가 기록된 끊김으로 한 번만 알린다.
+
         rig = EngineRig.client(tuning());
         RequestHandle pending = send();
         rig.settle();
@@ -227,7 +221,6 @@ class EngineConnectionEndTest {
         rig.connection.close();
         rig.settle();
 
-        // 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다: 상대는 끝을 읽었지만 연결은 아직 끝나지 않았다.
         assertThat(rig.peerSawEnd).isTrue();
         assertThat(rig.connection.closed().isDone()).isFalse();
 
@@ -254,7 +247,7 @@ class EngineConnectionEndTest {
     @Test
     void aWriteFailureRightAfterClosedIsNeitherInTheNoticeNorANewOne() throws Exception {
         rig = EngineRig.client(tuning());
-        // 엔진은 상대의 CLOSE를 받아 답하며 CLOSED를 내는 같은 차례에 쓰기가 실패한다. CLOSED가 먼저 확정된다.
+
         rig.client.failWrites();
 
         rig.peer.close(0);
@@ -268,7 +261,7 @@ class EngineConnectionEndTest {
 
     @Test
     void closeAndEndOfStreamReadTogetherAreOneCloseNoticeWithoutAnIoException() throws Exception {
-        // 상대의 CLOSE와 EOF가 잇따라 온다. CLOSE 교환이 먼저 처리되므로 EOF는 종료 뒤의 일이다.
+
         rig = EngineRig.client(tuning());
         rig.peer.close(0);
         rig.pumpPeer();
@@ -287,7 +280,6 @@ class EngineConnectionEndTest {
         RequestHandle pending = send();
         rig.settle();
 
-        // 길이가 머리보다 짧은 프레임은 프로토콜 위반이다.
         rig.client.inject(new byte[] {0, 0, 0, 1, 0, 0, 0, 0});
 
         CloseNotice notice = noticeAfterAdvancing();

@@ -18,7 +18,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** 필수 한도·준비 및 종료 시간·보안 설정은 build()에서 검증한다. 필수 누락, 범위 오류, 최소 진행 공간 부족을 거절한다(#316). */
 class NioStrandBuilderTest {
 
     private ExecutorService executor;
@@ -233,7 +232,6 @@ class NioStrandBuilderTest {
                 .hasMessageContaining("CONTROL_OUTPUT_BYTES");
     }
 
-    /** {@code connectionResultDelta}는 연결 범위 결과 사건 공간, {@code ownerControlDelta}는 소유 객체 제어 출력 공간에 더하는 값이다. */
     private static ResourceLimits limitsWith(
             long[] min, long unused, long connectionResultDelta, long ownerControlDelta) {
         return ResourceLimits.builder()

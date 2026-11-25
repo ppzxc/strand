@@ -32,7 +32,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 소유 객체 전체 종료의 순서, 기한 초과 결과의 고정, 실제 자원 정리 관찰, 개별 closed의 완료 경계를 앱 공개 API로 검증한다(#320). */
 class NioStrandShutdownTest {
 
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
@@ -86,7 +85,6 @@ class NioStrandShutdownTest {
         return connection;
     }
 
-    /** 현재 시각에 건너뛴 시간을 더하는 시계. 기한 계산을 실제로 기다리지 않고 검증한다. */
     private static final class SkewClock implements java.util.function.LongSupplier {
         private final AtomicLong skew = new AtomicLong();
 
@@ -120,8 +118,6 @@ class NioStrandShutdownTest {
         CompletionStage<Void> stopped = server.shutdown();
         AppFixture.get(stopped);
 
-        // 리스닝 중지·연결 CLOSE가 끝났고 실제 자원이 정리된 뒤에야 성공한다.
-        // listener.closed()는 앱 실행기를 거쳐 알리므로 종료 완료와 순서가 정해져 있지 않다. 기다려서 확인한다.
         AppFixture.get(listener.closed());
         assertThat(done(listener.closed())).isTrue();
         CloseNotice notice = serverFixture.result(serverSide.closed());
@@ -133,7 +129,7 @@ class NioStrandShutdownTest {
         assertThat(server.shutdownResult().resultNow().remainingResources()).isEmpty();
         AppFixture.get(server.resourcesTerminated());
         assertThat(server.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();
-        // 앱이 준 실행기는 종료하지 않는다.
+
         assertThat(serverFixture.pool.isShutdown()).isFalse();
     }
 
@@ -207,7 +203,7 @@ class NioStrandShutdownTest {
         Listener listener = listen(server);
         NioStrandConnection client =
                 connect(clientFixture.clientBuilder().handler(r -> {}).build(), listener);
-        // 서버가 서버 쪽 요청을 응답 없이 쥐고 있다. CLOSE는 이 요청이 끝나길 기다리므로 grace 만료 때 abort로 끊긴다.
+
         NioStrandConnection accepted = serverSide.get(15, TimeUnit.SECONDS);
         RequestHandle pending = accepted.request(Request.of(TYPE, bytes("never answered")));
         long start = System.nanoTime();
@@ -247,7 +243,7 @@ class NioStrandShutdownTest {
         clock.advance(Duration.ofSeconds(2));
         CompletionStage<Void> second = server.shutdown();
         assertThat(server.shutdownResult().isDone()).isFalse();
-        // 첫 호출 기준 3초가 지났다. 두 번째 호출이 기한을 5초 지점으로 미뤘다면 아직 확정되지 않아야 한다.
+
         clock.advance(Duration.ofMillis(1500));
         server.shutdown();
         awaitTrue(() -> server.shutdownResult().isDone());
@@ -296,7 +292,7 @@ class NioStrandShutdownTest {
         }
         assertThat(((ShutdownDeadlineExceededException) cause).remainingResources())
                 .isEqualTo(result.remainingResources());
-        // 기한 초과 뒤에도 실제 정리는 계속되고 잔존 작업이 풀려야 resourcesTerminated가 완료한다.
+
         assertThat(done(server.resourcesTerminated())).isFalse();
         releaseHandler.complete(null);
         AppFixture.get(server.resourcesTerminated());
@@ -392,7 +388,6 @@ class NioStrandShutdownTest {
         Listener listener = listen(server);
         List<String> threads = new CopyOnWriteArrayList<>();
 
-        // 완료 전에 붙여야 콜백이 완료한 스레드에서 돈다.
         server.resourcesTerminated()
                 .thenRun(() -> threads.add(Thread.currentThread().getName()));
         listener.closed().thenRun(() -> threads.add(Thread.currentThread().getName()));
@@ -415,7 +410,7 @@ class NioStrandShutdownTest {
                 .build();
         Listener listener = listen(server);
         connect(clientFixture.clientBuilder().handler(r -> {}).build(), listener);
-        // 응답 없는 요청이 grace 만료까지 종료를 붙들어, 아래 콜백은 항상 완료 전에 붙는다.
+
         serverSide.get(15, TimeUnit.SECONDS).request(Request.of(TYPE, bytes("never answered")));
         List<String> threads = new CopyOnWriteArrayList<>();
 
@@ -504,7 +499,6 @@ class NioStrandShutdownTest {
         serverSide.abort();
         CloseNotice notice = serverFixture.result(serverSide.closed());
 
-        // 통로는 이미 닫혔고 핸들러 작업 슬롯은 핸들러가 반환할 때까지 남는다.
         assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
         assertThat(server.resourceUsage(Resource.HANDLER_TASKS).current()).isEqualTo(1);
         assertThat(server.resourceUsage(Resource.TOTAL_CONNECTIONS).current()).isZero();

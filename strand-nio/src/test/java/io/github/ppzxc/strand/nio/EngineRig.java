@@ -23,15 +23,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * 연결 엔진 하나를 수동 시계와 메모리 통로에 꽂고 상대를 코어 {@link Endpoint}로 시험대 스레드에서 직접 굴린다. 통로의 쓰기 한도로 쓰기 0·부분·전체를
- * 결정적으로 만들고, 문(gate)으로 전송 스레드를 멈춰 앱 호출이 core 등록 전 대기에 머무는 틈을 만든다.
- */
 final class EngineRig implements AutoCloseable {
     static final int TYPE = AppFixture.TYPE;
     private static final long HOUR_MS = TimeUnit.HOURS.toMillis(1);
 
-    /** 전송 스레드를 {@code await} 입구에서 멈출 수 있는 통로. */
     static final class GatedPassage implements Passage {
         private final Passage delegate;
         private volatile CountDownLatch gate;
@@ -81,7 +76,6 @@ final class EngineRig implements AutoCloseable {
             delegate.close();
         }
 
-        /** 전송 스레드가 다음 {@code await} 입구에서 멈출 때까지 기다린다. */
         void closeGate() throws InterruptedException {
             CountDownLatch reached = new CountDownLatch(1);
             entered = reached;
@@ -101,7 +95,6 @@ final class EngineRig implements AutoCloseable {
         }
     }
 
-    /** 시험이 정하는 조정. 기본은 확인 대기 1시간, 유휴 PING 끔에 가까운 느슨한 값이다. */
     static final class Tuning {
         java.util.function.UnaryOperator<EndpointConfig> config = c -> c;
         java.util.function.UnaryOperator<Passage> passage = p -> p;
@@ -110,25 +103,21 @@ final class EngineRig implements AutoCloseable {
         long writeQueueBytes = 64L << 20;
         long perConnection = 8;
 
-        /** 연결별 한도 규모. 키우면 제어 출력 공간이 커져 쓰기 대기열 상한이 읽기를 먼저 멈춘다. */
         Tuning perConnection(long value) {
             this.perConnection = value;
             return this;
         }
 
-        /** 두 끝의 엔드포인트 설정을 고친다. */
         Tuning config(java.util.function.UnaryOperator<EndpointConfig> value) {
             this.config = value;
             return this;
         }
 
-        /** 엔진이 보는 통로를 감싼다(문 통로 안쪽). */
         Tuning passage(java.util.function.UnaryOperator<Passage> value) {
             this.passage = value;
             return this;
         }
 
-        /** 상대(코어 엔드포인트)의 설정만 더 고친다. */
         Tuning peerConfig(java.util.function.UnaryOperator<EndpointConfig> value) {
             this.peerConfig = value;
             return this;
@@ -218,7 +207,6 @@ final class EngineRig implements AutoCloseable {
         this.connection = new NioStrandConnection(params);
     }
 
-    /** 엔진이 클라이언트이고 상대(코어 서버)가 요청에 응답하는 연결. 준비가 끝난 상태로 돌려준다. */
     static EngineRig client() throws Exception {
         return client(new Tuning());
     }
@@ -229,7 +217,6 @@ final class EngineRig implements AutoCloseable {
         return rig;
     }
 
-    /** 엔진이 서버이고 상대(코어 클라이언트)가 요청을 보내는 연결. 준비가 끝난 상태로 돌려준다. */
     static EngineRig server(RequestHandler handler) throws Exception {
         return server(handler, (java.util.concurrent.Executor) null);
     }
@@ -240,7 +227,6 @@ final class EngineRig implements AutoCloseable {
         return rig;
     }
 
-    /** 앱용 실행기를 직접 정한다. 실행하지 않는 실행기처럼 앱 쪽 작업의 진행을 시험이 쥐어야 할 때 쓴다. */
     static EngineRig server(RequestHandler handler, java.util.concurrent.Executor appExecutor) throws Exception {
         EngineRig rig = new EngineRig(
                 ConnectionParams.Role.SERVER, handler, InMemoryPassage.streams(), appExecutor, new Tuning());
@@ -252,18 +238,15 @@ final class EngineRig implements AutoCloseable {
         connection.start();
         settle();
         ready.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
-        // 준비 알림은 엔진이 상대에게 마지막 응답(인증 성공 등)을 쓰기 전에 앱 쪽으로 나간다. 그 쓰기와 상대의 처리가 끝나기 전에 시험이 통로를 막거나 상대에게 요청을
-        // 시키면 상대는 아직 준비되지 않은 채라 요청이 영영 엔진에 닿지 않는다.
+
         settle();
     }
 
-    /** 수동 시계를 올리고 전송 스레드를 깨운다. */
     void advance(java.time.Duration duration) {
         clock.addAndGet(duration.toNanos());
         client.wakeup();
     }
 
-    /** 전송 스레드가 가라앉을 때까지 상대와 주고받는다. 상대가 낸 사건은 {@link #peerEvents}에 쌓인다. */
     void settle() {
         for (int round = 0; round < 200; round++) {
             InMemoryPassage.awaitQuiescence(client);
@@ -275,10 +258,6 @@ final class EngineRig implements AutoCloseable {
         throw new AssertionError("주고받음이 끝나지 않았다");
     }
 
-    /**
-     * 엔진이 통로를 닫았으면 마무리(남은 결과 확정, 종료 알림 확정)가 끝나 종료 알림이 나올 때까지 기다린다. 통로 닫힘은 가라앉음으로 읽히지만 엔진은 통로를 닫은
-     * 뒤에 마무리하므로, 가라앉음만으로는 그 결과를 볼 수 없다.
-     */
     private void awaitTeardownIfClosed() {
         if (!client.isClosed()) {
             return;
@@ -292,7 +271,6 @@ final class EngineRig implements AutoCloseable {
         }
     }
 
-    /** 엔진이 쓴 것을 상대에게 먹이고 상대가 쓰려는 것을 엔진 쪽 편지함에 넣는다. 한 일이 있었으면 true. */
     boolean pumpPeer() {
         boolean any = false;
         try {
@@ -324,12 +302,10 @@ final class EngineRig implements AutoCloseable {
         return any || !events.isEmpty();
     }
 
-    /** 상대가 연결을 끊는다(통로를 닫아 엔진이 끝남을 읽게 한다). */
     void peerHangsUp() {
         peerEnd.close();
     }
 
-    /** 상대가 받은 요청의 스트림 번호(받은 순서). */
     List<Long> peerRequestStreams() {
         List<Long> streams = new ArrayList<>();
         peerEvents.stream()
@@ -338,7 +314,6 @@ final class EngineRig implements AutoCloseable {
         return streams;
     }
 
-    /** 상대가 받은 RESET 사건의 스트림 번호와 오류 코드(받은 순서). */
     List<long[]> peerResets() {
         List<long[]> resets = new ArrayList<>();
         peerEvents.stream()
@@ -348,13 +323,11 @@ final class EngineRig implements AutoCloseable {
         return resets;
     }
 
-    /** 상대가 요청에 응답한다. */
     void peerRespond(long streamId, int status, byte[] body) {
         peer.respond(streamId, status, body);
         settle();
     }
 
-    /** 요청 사건이 받은 순서로 함께 쌓였는지 보는 보조: 사건 종류만 순서대로. */
     List<Event.Kind> peerEventKinds() {
         List<Event.Kind> kinds = new ArrayList<>();
         peerEvents.forEach(event -> kinds.add(event.kind()));

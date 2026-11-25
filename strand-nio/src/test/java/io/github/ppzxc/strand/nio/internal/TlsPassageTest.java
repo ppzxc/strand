@@ -16,7 +16,6 @@ import javax.net.ssl.SSLParameters;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** TCP 위의 TLS 통로. 평문 소비량을 정확히 보고하고, ALPN·호스트 이름 검증 같은 규격 3.7절 보안 조건을 통로에서 확인한다. */
 class TlsPassageTest {
 
     private TlsPassage client;
@@ -56,10 +55,6 @@ class TlsPassageTest {
                 TcpPassage.of(pair.accepted, sizes.packetBufferSize()), TlsEngines.server(TestTls.server()), sizes);
     }
 
-    /**
-     * 통로를 전송 스레드처럼 한 스레드에서 돌린다. {@code toWrite}를 다 소비하고 {@code expectedRead}바이트를 다 읽고 핸드셰이크가 끝나면
-     * 멈추고, 읽은 바이트를 돌려준다. 쓰기와 읽기를 같은 스레드가 하므로 통로를 한 스레드만 부른다.
-     */
     private static CompletableFuture<byte[]> drive(TlsPassage passage, byte[] toWrite, int expectedRead) {
         return CompletableFuture.supplyAsync(() -> {
             try {
@@ -125,7 +120,7 @@ class TlsPassageTest {
         }
 
         assertThat(offset).isEqualTo(payload.length);
-        // 한 번의 wrap은 레코드 하나(평문 16 KiB 이하)만 소비한다. 한꺼번에 다 받아 주지 않는다.
+
         assertThat(largest).isPositive().isLessThanOrEqualTo(sizes.applicationBufferSize());
         assertThat(serverRead.get(25, TimeUnit.SECONDS)).isEqualTo(payload);
     }
@@ -156,7 +151,6 @@ class TlsPassageTest {
         rawClient.cancel(true);
     }
 
-    /** ALPN을 제시하지 않는 클라이언트의 핸드셰이크를 {@link TlsPassage} 없이 엔진만으로 끝까지 진행한다. */
     private static void rawHandshake(java.nio.channels.SocketChannel channel, SSLEngine engine) {
         try {
             engine.beginHandshake();
@@ -198,7 +192,7 @@ class TlsPassageTest {
                 }
             }
         } catch (IOException e) {
-            // 서버가 연결을 끊었다.
+
         }
     }
 
@@ -209,7 +203,7 @@ class TlsPassageTest {
             try {
                 pumpUntilFailure(server);
             } catch (IOException e) {
-                // 클라이언트가 핸드셰이크를 중단하면 서버도 실패한다.
+
             }
         });
 
@@ -224,7 +218,7 @@ class TlsPassageTest {
             try {
                 pumpUntilFailure(server);
             } catch (IOException e) {
-                // 클라이언트가 핸드셰이크를 중단하면 서버도 실패한다.
+
             }
         });
 
@@ -300,7 +294,7 @@ class TlsPassageTest {
         for (int i = 0; i < 400 && !blocked; i++) {
             int count = client.writeBytes(chunk, 0, chunk.length);
             consumed += count;
-            // 상대 서버 통로는 읽지 않는다. 소켓 버퍼가 차면 암호문이 남고 평문 소비가 멈춘다.
+
             blocked = count == 0 && client.pendingOutput();
             if (count > 0) {
                 client.await(0, false, false);

@@ -20,10 +20,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 바이트 예약은 요청·응답 결과가 확정돼도 라이브러리 안에 그 본문을 가진 출력이 남아 있는 동안 유지되고, 실제 참조가 사라질 때 한 번만 돌아온다(#307
- * 결정: 요청 수는 결과 확정 시, 바이트는 실제 내부 참조 해제 시). 제한 쓰기 통로와 실행을 쥔 실행기로 부분 쓰기와 실행 대기를 결정적으로 만든다.
- */
 class OutputReferenceReturnTest {
     private static final byte[] BODY = new byte[200];
 
@@ -46,8 +42,6 @@ class OutputReferenceReturnTest {
         }
     }
 
-    // --- 송신 요청 바이트 ---
-
     @Test
     void outgoingBytesStayReservedWhileTheFrameOfACancelledRequestIsPartiallyWrittenThenReturnOnce() throws Exception {
         rig = EngineRig.client();
@@ -60,7 +54,7 @@ class OutputReferenceReturnTest {
 
         assertThat(handle.result().resultNow().status()).isEqualTo(Status.CANCELLED);
         assertThat(handle.result().resultNow().certainty()).isEqualTo(Certainty.UNKNOWN);
-        // 요청 수는 결과 확정 때 돌아오지만, 본문을 가진 프레임이 아직 절반만 나갔으므로 바이트는 남는다.
+
         assertThat(rig.used(Resource.OUTGOING_REQUESTS)).isZero();
         assertThat(rig.used(Resource.OUTGOING_BYTES)).isEqualTo(BODY.length);
 
@@ -106,8 +100,6 @@ class OutputReferenceReturnTest {
         assertThat(rig.owner.usage(Resource.OUTGOING_BYTES).current()).isZero();
     }
 
-    // --- 응답 바이트 ---
-
     private IncomingRequest receiveOne(BlockingQueue<IncomingRequest> received) throws Exception {
         rig.peer.request(EngineRig.TYPE, new byte[] {1});
         rig.settle();
@@ -127,7 +119,6 @@ class OutputReferenceReturnTest {
         awaitTrue(acceptance::isDone);
         rig.settle();
 
-        // 응답은 접수됐고 요청은 끝났지만 응답 프레임은 일부만 나갔다.
         assertThat(acceptance.resultNow().kind()).isEqualTo(AcceptanceKind.ACCEPTED);
         assertThat(request.ended().isDone()).isTrue();
         assertThat(rig.used(Resource.INCOMING_REQUESTS)).isZero();
@@ -160,9 +151,6 @@ class OutputReferenceReturnTest {
         assertThat(rig.owner.usage(Resource.RESPONSE_BYTES).current()).isZero();
     }
 
-    // --- 수신 요청 바이트 ---
-
-    /** 제출은 받되 시험이 부를 때까지 실행하지 않는 실행기. */
     private static final class HeldExecutor implements Executor {
         private final Executor delegate;
         private final Queue<Runnable> held = new ArrayDeque<>();
@@ -197,10 +185,6 @@ class OutputReferenceReturnTest {
             }
         }
 
-        /**
-         * 이미 위임한 작업이 모두 끝난 뒤에 붙잡기 시작한다. 연결 하나의 사용자 코드는 직렬 실행기가 한 번에 하나씩 돌리는데, 시작 때 낸 작업을 도는 직렬
-         * 실행기의 드레인이 아직 살아 있으면 그 뒤에 온 작업이 이 실행기를 거치지 않고 같은 드레인에서 바로 실행된다.
-         */
         void hold() throws Exception {
             awaitTrue(() -> delegated.get() == 0);
             holding = true;
@@ -235,7 +219,6 @@ class OutputReferenceReturnTest {
         rig.peer.cancelRequest(ticket);
         rig.settle();
 
-        // 요청은 끝나 수 예약은 돌아왔지만, 실행 대기 중인 작업이 아직 본문을 쥐고 있으므로 바이트와 작업 슬롯은 남는다.
         assertThat(rig.used(Resource.INCOMING_REQUESTS)).isZero();
         assertThat(rig.used(Resource.INCOMING_BYTES)).isEqualTo(3);
         assertThat(rig.used(Resource.HANDLER_TASKS)).isEqualTo(1);
@@ -256,7 +239,6 @@ class OutputReferenceReturnTest {
         IncomingRequest request = receiveOne(received);
         awaitTrue(() -> rig.used(Resource.HANDLER_TASKS) == 0);
 
-        // 핸들러 반환은 요청 종료가 아니다. 본문을 가진 받은 요청이 살아 있다.
         assertThat(request.ended().isDone()).isFalse();
         assertThat(rig.used(Resource.INCOMING_REQUESTS)).isEqualTo(1);
         assertThat(rig.used(Resource.INCOMING_BYTES)).isEqualTo(1);

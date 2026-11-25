@@ -15,18 +15,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 
-/** TCP 통로만의 동작: 읽기 버퍼 크기, 부분 쓰기와 백프레셔, 리셋, 보내는 쪽만 닫기. */
 class TcpPassageTest {
 
     private static final int SMALL_SOCKET_BUFFER = 4096;
-    /** 이 시간 동안 쓰기가 끝나지 않으면 막힌 것으로 본다. */
+
     private static final int SILENCE_MS = 300;
 
     private static <T> T within(CompletableFuture<T> future) throws Exception {
         return future.get(5, TimeUnit.SECONDS);
     }
 
-    /** 상대가 읽지 않는 동안 쓰기가 끝나지 않는다. 상한 부정 대기로 확인한다. */
     private static void assertStaysBlocked(CompletableFuture<Void> writing) {
         assertThatThrownBy(() -> writing.get(SILENCE_MS, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
     }
@@ -52,10 +50,6 @@ class TcpPassageTest {
         return result;
     }
 
-    /**
-     * 연결 엔진처럼 한 스레드에서 메시지들을 쓰면서 읽는다. 쓰기가 막히면 쓰기 가능과 읽기를 함께 기다리고, 다 쓴 뒤에는 상대가 보낸 만큼 읽어
-     * 모은다. 읽은 바이트를 돌려준다.
-     */
     private static byte[] writeWhileReading(Passage passage, List<OutboundMessage> messages) throws IOException {
         ByteArrayOutputStream received = new ByteArrayOutputStream();
         int expected = TestMessages.totalBytes(messages);
@@ -81,7 +75,6 @@ class TcpPassageTest {
         return received.toByteArray();
     }
 
-    /** 상한 시간 안에서 {@code count}바이트가 모일 때까지 기다리며 읽는다. */
     private static byte[] readExactly(Passage passage, int count) throws IOException {
         ByteArrayOutputStream collected = new ByteArrayOutputStream();
         long limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -130,7 +123,6 @@ class TcpPassageTest {
             }
         });
 
-        // 읽는 쪽이 읽기 전에는 다 쓸 수 없다(백프레셔). 읽기 시작하면 모두 닿고 쓰기가 끝난다.
         assertStaysBlocked(writing);
         byte[] received = readExactly(reader, TestMessages.totalBytes(messages));
         within(writing);
@@ -147,7 +139,6 @@ class TcpPassageTest {
         Passage b = TcpPassage.of(link.accepted);
         byte[][] receivedBy = new byte[2][];
 
-        // 양쪽이 모두 다 쓰고 나서야 읽으려 한다. 한쪽이 쓰기에 막혀도 읽기를 멈추지 않으면 소켓 버퍼가 비어 서로의 쓰기가 풀린다.
         CompletableFuture<Void> aDone = inBackground(() -> receivedBy[0] = writeWhileReading(a, messages));
         CompletableFuture<Void> bDone = inBackground(() -> receivedBy[1] = writeWhileReading(b, messages));
 
@@ -258,7 +249,6 @@ class TcpPassageTest {
             }
         });
 
-        // 상대는 보내는 쪽만 닫았을 뿐 계속 읽는다. 쓰기는 EOF를 만나도 끝까지 가야 한다.
         ByteBuffer sink = ByteBuffer.allocate(8192);
         int total = TestMessages.totalBytes(messages);
         int received = 0;
@@ -291,7 +281,7 @@ class TcpPassageTest {
                 "tcp-passage-await");
         thread.setDaemon(true);
         thread.start();
-        // 선택기에서 실제로 기다리기 시작한 뒤에 닫는다. 그래야 닫힘이 기다림을 깨우는지를 본다.
+
         StackWatch.awaitFrame(thread, StackWatch::inSelector);
 
         passage.close();

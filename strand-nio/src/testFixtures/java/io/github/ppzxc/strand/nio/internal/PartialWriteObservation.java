@@ -21,16 +21,11 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * 실행 경로별 적합성 테스트가 전송 계층의 부분 쓰기를 관찰할 수 있게 한다. 제품 서버와 클라이언트를 실제 TCP로 잇고, 클라이언트 통로를 {@link
- * PassageWrapping}으로 감싸 쓰기 용량을 제한한다.
- */
 public final class PartialWriteObservation {
 
     private static final long WRITE_WAIT_SECONDS = 5;
     private static final long RESUME_WRITE_CAPACITY = 1_000_000;
 
-    /** 실제 NIO 실행에서 관찰한 결과. */
     public static final class Result {
         private final int status;
         private final Certainty certainty;
@@ -63,7 +58,6 @@ public final class PartialWriteObservation {
 
     private PartialWriteObservation() {}
 
-    /** 요청 프레임을 제한된 바이트 수만 쓴 뒤 취소하고, 쓰기를 풀어 완성 프레임을 돌려준다. */
     public static Result cancelAfterPartialWrite(int type, byte[] payload, int initialWriteCapacity) throws Exception {
         ExecutorService executor = TestNio.newExecutor("partial-write-observer");
         BlockingQueue<ControlledPassage> clientPassages = new LinkedBlockingQueue<>();
@@ -108,7 +102,7 @@ public final class PartialWriteObservation {
             RequestResult result = handle.result().resultNow();
             clientPassage.addWriteCapacity(RESUME_WRITE_CAPACITY);
             awaitFrames(clientPassage, firstWrittenFrame + 2);
-            // 서버가 요청 프레임을 끝까지 읽었는지는 서버 통로가 읽은 프레임으로 본다. RESET이 핸들러 시작보다 먼저 처리되면 핸들러는 불리지 않는다.
+
             ControlledPassage serverPassage = serverPassages.poll(WRITE_WAIT_SECONDS, TimeUnit.SECONDS);
             if (serverPassage == null || !awaitRead(serverPassage, type)) {
                 throw new AssertionError("peer did not receive the completed request frame");

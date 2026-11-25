@@ -8,10 +8,8 @@ import java.util.ArrayDeque;
 import javax.net.ssl.SSLEngine;
 import org.junit.jupiter.api.Test;
 
-/** 암호문 통로가 막히거나 끊기거나 규칙을 어기는 경계: 소비한 평문 보고와 끝남 처리가 정확해야 한다. */
 class TlsPassageEdgeTest {
 
-    /** 암호문 통로를 흉내 낸다: 받아 줄 바이트 수와 읽힐 것을 테스트가 정한다. */
     private static final class ScriptedTransport implements Passage {
         final ArrayDeque<Inbound> inbox = new ArrayDeque<>();
         int acceptLimit = Integer.MAX_VALUE;
@@ -63,7 +61,6 @@ class TlsPassageEdgeTest {
 
         passage.await(0, true, true);
 
-        // ClientHello를 wrap했지만 통로가 한 바이트도 받지 않았다. 암호문이 남아 있고 평문은 소비하지 않았다.
         assertThat(passage.pendingOutput()).isTrue();
         assertThat(passage.writeBytes(new byte[] {1, 2, 3}, 0, 3)).isZero();
         assertThat(transport.written).isZero();
@@ -122,7 +119,6 @@ class TlsPassageEdgeTest {
         ScriptedTransport transport = new ScriptedTransport();
         TlsPassage passage = client(transport);
 
-        // 핸드셰이크 전에는 평문을 소비하지 않으므로 0이다.
         assertThat(TestMessages.write(passage, TestMessages.largeRequests().get(0), 0))
                 .isZero();
         assertThat(passage.peerPrincipalOr("fallback")).isEqualTo("fallback");

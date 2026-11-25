@@ -22,7 +22,6 @@ import java.util.function.LongSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 전체 종료의 기록·기한·잔존 집계 분기를 수동 시계와 막아 둔 수락자로 결정적으로 확인한다. */
 class OwnerShutdownBranchTest {
     private static final long SECOND = TimeUnit.SECONDS.toNanos(1);
 
@@ -134,7 +133,7 @@ class OwnerShutdownBranchTest {
 
     @Test
     void aStuckListenerAndAnUnreleasedResultAreCountedAsRemainingUntilTheyResolve() throws Exception {
-        // 시계는 읽을 때마다 1초씩 간다. 첫 읽기가 시작 시각이고 유예는 0이라 곧바로 abort, 기한 1.5초는 몇 번 읽으면 지난다.
+
         AtomicLong reads = new AtomicLong();
         LongSupplier clock = () -> reads.getAndIncrement() * SECOND;
         CommonSettings.Common common = common(Duration.ZERO, Duration.ofMillis(1500), clock);

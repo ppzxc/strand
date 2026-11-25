@@ -30,7 +30,6 @@ import javax.net.ssl.SSLException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 바인딩·인증·보안·기한 실패가 단계와 원인으로 관찰되고, 자격 증명 원문을 노출하지 않으며, 실패 뒤 자원이 돌아오는지 본다(#316). */
 class NioStrandPreparationFailureTest {
 
     private static final String SECRET = "TOP-SECRET-TOKEN";
@@ -223,7 +222,6 @@ class NioStrandPreparationFailureTest {
         Listener listener = listen(server);
         NioStrandClient client = fixture.clientBuilder().build();
 
-        // 클라이언트는 AUTH(ACK)로 준비를 마치므로 연결은 성공하고, 곧 서버가 CLOSE(INTERNAL_ERROR)로 닫는다.
         NioStrandConnection connection = AppFixture.get(client.connect(AppFixture.loopback(listener)));
         PreparationFailure serverFailure = serverFailures.poll(15, TimeUnit.SECONDS);
 
@@ -255,7 +253,6 @@ class NioStrandPreparationFailureTest {
                 AppFixture.get(fixture.clientBuilder().build().connect(AppFixture.loopback(listener)));
         assertThat(factoryEntered.await(15, TimeUnit.SECONDS)).isTrue();
 
-        // 팩터리가 끝나기 전에 연결이 끝난다. 늦게 돌아온 결과는 활성화되지 못했으므로 폐기된다.
         connection.abort();
         fixture.result(connection.closed());
         awaitTrue(() -> server.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
@@ -403,7 +400,7 @@ class NioStrandPreparationFailureTest {
         assertThat(serverFailure).isNotNull();
         assertThat(serverFailure.stage()).isEqualTo(PreparationStage.AUTHENTICATION);
         assertThat(serverFailure.cause()).isInstanceOf(PreparationDeadlineExceededException.class);
-        // 반환하지 않는 인증이 있어도 기한 실패는 관찰되고, 연결 슬롯은 돌아온다.
+
         awaitTrue(() -> server.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
         never.countDown();
         awaitTrue(() -> server.resourceUsage(Resource.AUTHENTICATION_TASKS).current() == 0);
@@ -477,7 +474,7 @@ class NioStrandPreparationFailureTest {
         assertThat(server.resourceUsage(Resource.TOTAL_CONNECTIONS).rejections()
                         + server.resourceUsage(Resource.PREPARING_CONNECTIONS).rejections())
                 .isGreaterThanOrEqualTo(1);
-        // 슬롯이 돌아오면 다시 받는다.
+
         first.close();
         clientFixture.result(first.closed());
         awaitTrue(() -> server.resourceUsage(Resource.TOTAL_CONNECTIONS).current() == 0);
