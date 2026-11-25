@@ -5,7 +5,6 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -780,21 +779,39 @@ final class Orchestrator {
         return process.isAlive() ? "실행 중" : String.valueOf(process.exitValue());
     }
 
-    private static final class StderrCapture {
-        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    static final class StderrCapture {
+        private static final int MAX_LOG_LINES = 20;
+        private static final int MAX_LINE_CHARS = 2_048;
+        private static final int MAX_LOG_CHARS = 16_384;
+        private final java.util.ArrayDeque<String> lines = new java.util.ArrayDeque<>();
+        private final java.util.ArrayDeque<String> leakLines = new java.util.ArrayDeque<>();
+        private long leakCount;
 
         private final Thread reader;
 
         StderrCapture(InputStream stream) {
             Thread thread = new Thread(() -> {
-                byte[] chunk = new byte[2048];
+                StringBuilder line = new StringBuilder();
+                StringBuilder marker = new StringBuilder();
+                boolean leak = false;
                 try {
-                    int n;
-                    while ((n = stream.read(chunk)) >= 0) {
-                        synchronized (buffer) {
-                            buffer.write(chunk, 0, n);
+                    java.io.Reader input = new java.io.InputStreamReader(stream, StandardCharsets.UTF_8);
+                    int ch;
+                    while ((ch = input.read()) >= 0) {
+                        if (ch == '\n') {
+                            record(line, leak);
+                            line.setLength(0);
+                            marker.setLength(0);
+                            leak = false;
+                            continue;
                         }
+                        char value = (char) ch;
+                        if (line.length() < MAX_LINE_CHARS) line.append(value);
+                        if (marker.length() == 5) marker.deleteCharAt(0);
+                        marker.append(value);
+                        leak |= marker.indexOf("LEAK:") >= 0;
                     }
+                    if (!line.isEmpty() || leak) record(line, leak);
                 } catch (IOException ignored) {
 
                 }
@@ -808,30 +825,29 @@ final class Orchestrator {
             reader.join(2_000);
         }
 
-        long leakCount() {
-            synchronized (buffer) {
-                return buffer.toString(StandardCharsets.UTF_8)
-                        .lines()
-                        .filter(l -> l.contains("LEAK:"))
-                        .count();
+        private synchronized void record(StringBuilder line, boolean leak) {
+            String text = line.toString();
+            if (lines.size() == MAX_LOG_LINES) lines.removeFirst();
+            lines.addLast(text);
+            if (leak) {
+                leakCount++;
+                if (leakLines.size() == MAX_LOG_LINES) leakLines.removeFirst();
+                leakLines.addLast(text);
             }
         }
 
-        java.util.List<String> leakLines() {
-            synchronized (buffer) {
-                return buffer.toString(StandardCharsets.UTF_8)
-                        .lines()
-                        .filter(l -> l.contains("LEAK:"))
-                        .limit(20)
-                        .toList();
-            }
+        synchronized long leakCount() {
+            return leakCount;
         }
 
-        String text() {
-            synchronized (buffer) {
-                String text = buffer.toString(StandardCharsets.UTF_8).strip();
-                return text.isEmpty() ? "(표준 오류 없음)" : text;
-            }
+        synchronized java.util.List<String> leakLines() {
+            return java.util.List.copyOf(leakLines);
+        }
+
+        synchronized String text() {
+            String text = String.join("\n", lines);
+            if (text.length() > MAX_LOG_CHARS) text = text.substring(text.length() - MAX_LOG_CHARS);
+            return text.isEmpty() ? "(표준 오류 없음)" : text;
         }
     }
 }
