@@ -11,10 +11,6 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 
-/**
- * 테스트용 TLS 컨텍스트. 처음 쓸 때 JDK의 {@code keytool}로 localhost·127.0.0.1용 자체 서명 인증서를 만들어 서버는 그 키를, 클라이언트는 그
- * 인증서를 신뢰한다. 저장소에 키 자료를 두지 않는다.
- */
 public final class TestTls {
     private static final char[] PASSWORD = "changeit".toCharArray();
     private static SSLContext server;
@@ -23,34 +19,16 @@ public final class TestTls {
 
     private TestTls() {}
 
-    /**
-     * 서버 쪽 컨텍스트(키를 가진다).
-     *
-     * @return 서버 컨텍스트
-     * @throws Exception 키 저장소를 만들거나 읽을 수 없을 때
-     */
     public static synchronized SSLContext server() throws Exception {
         init();
         return server;
     }
 
-    /**
-     * 클라이언트 쪽 컨텍스트(서버 인증서를 신뢰한다).
-     *
-     * @return 클라이언트 컨텍스트
-     * @throws Exception 키 저장소를 만들거나 읽을 수 없을 때
-     */
     public static synchronized SSLContext client() throws Exception {
         init();
         return client;
     }
 
-    /**
-     * 서버 인증서를 신뢰하지 않는 클라이언트 컨텍스트(JDK 기본 신뢰 저장소).
-     *
-     * @return 서버를 신뢰하지 않는 컨텍스트
-     * @throws Exception 컨텍스트를 만들 수 없을 때
-     */
     public static synchronized SSLContext stranger() throws Exception {
         init();
         return stranger;

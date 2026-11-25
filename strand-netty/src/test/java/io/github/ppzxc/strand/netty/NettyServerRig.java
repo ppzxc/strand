@@ -22,10 +22,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
-/**
- * 연결 엔진 하나(서버)를 쓰기량을 제한하는 실제 채널에 꽂고, 맞은편 실제 소켓에서 core 클라이언트 {@link Endpoint}를 {@link PeerLink}로 굴린다. 서버 쪽 채널의 쓰기
- * 한도로 응답 쓰기 0·부분·전체를 결정적으로 만든다. 앱용 실행기를 직접 줄 수 있어 실행하지 않는 실행기 같은 앱 쪽 작업의 진행을 시험이 쥘 수 있다.
- */
 final class NettyServerRig implements AutoCloseable {
     private static final long HOUR_MS = TimeUnit.HOURS.toMillis(1);
 
@@ -45,9 +41,6 @@ final class NettyServerRig implements AutoCloseable {
         this(handler, null);
     }
 
-    /**
-     * @param wrapExecutor 앱용 실행기를 감싸는 함수(실행하지 않는 실행기처럼 앱 쪽 작업의 진행을 시험이 쥐어야 할 때). 없으면 fixture의 실행기를 그대로 쓴다
-     */
     NettyServerRig(RequestHandler handler, java.util.function.UnaryOperator<Executor> wrapExecutor) throws Exception {
         EndpointConfig config = EndpointConfig.defaults()
                 .knownTypes(Collections.singleton(AppFixture.TYPE))
@@ -101,7 +94,6 @@ final class NettyServerRig implements AutoCloseable {
         awaitTrue(() -> peer.events().stream().anyMatch(e -> e.kind() == Event.Kind.AUTHENTICATED));
     }
 
-    /** 상대가 요청을 낸다. */
     long peerRequest(byte[] body) {
         long[] ticket = new long[1];
         peer.run(endpoint -> ticket[0] = endpoint.request(AppFixture.TYPE, body));
@@ -116,12 +108,10 @@ final class NettyServerRig implements AutoCloseable {
         channel.capacity(bytes);
     }
 
-    /** 서버 쪽 채널이 응답 바이트를 받아 주지 못한(일부라도 남긴) 횟수. */
     long stalls() {
         return channel.stallCount();
     }
 
-    /** 이벤트 루프를 막아, 그동안의 앱 호출이 core 등록 전 대기에 머물게 한다. */
     void closeGate() throws InterruptedException {
         java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
         java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
@@ -163,7 +153,6 @@ final class NettyServerRig implements AutoCloseable {
         try {
             listener.close();
         } catch (IOException ignored) {
-            // 정리 중의 오류는 할 수 있는 일이 없다.
         }
         fixture.close();
     }

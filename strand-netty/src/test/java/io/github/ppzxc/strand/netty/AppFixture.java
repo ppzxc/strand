@@ -21,12 +21,10 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** 앱 공개 API 테스트의 공통 도구: 앱용 실행기, 필수 설정을 모두 채운 builder, 실제 TCP/TLS 보안 설정. */
 final class AppFixture implements AutoCloseable {
     static final int TYPE = 0x0100;
     static final long WAIT_SECONDS = 15;
 
-    /** 테스트가 앱 실행기의 거절을 켜고 끌 수 있다. 처음 {@code acceptRemaining}개만 받고 나머지를 거절하게도 한다. */
     static final class ToggleExecutor implements java.util.concurrent.Executor {
         private final java.util.concurrent.Executor delegate;
         volatile boolean rejecting;
@@ -41,7 +39,6 @@ final class AppFixture implements AutoCloseable {
         private final AtomicInteger submitted = new AtomicInteger();
         private final java.util.List<String> journal = new java.util.concurrent.CopyOnWriteArrayList<>();
 
-        /** 이 실행기가 받은 작업의 번호·수락 여부·호출 위치. 단정이 실패할 때 원인을 남기기 위한 기록이다. */
         String journal() {
             return String.join("\n", journal);
         }
@@ -65,7 +62,6 @@ final class AppFixture implements AutoCloseable {
             return where.toString();
         }
 
-        /** 이 실행기에 들어오는 {@code number}번째 작업(1부터)만 거절한다. build()의 확인 작업이 1번이다. */
         void rejectTaskNumber(int number) {
             rejectedNumbers.add(number);
         }
@@ -73,14 +69,12 @@ final class AppFixture implements AutoCloseable {
         private final java.util.concurrent.atomic.AtomicBoolean rejectNext =
                 new java.util.concurrent.atomic.AtomicBoolean();
 
-        /** 다음에 들어오는 작업 하나만 거절한다. 작업 번호가 아니라 호출 시점에 기대므로 앞선 작업 수에 흔들리지 않는다. */
         void rejectNextTask() {
             rejectNext.set(true);
         }
 
         private volatile boolean rejectReadyNotification;
 
-        /** 준비 성공 알림을 내는 제출(엔진의 notifyReady)만 거절한다. 다른 작업은 받는다. */
         void rejectNextReadyNotification() {
             rejectReadyNotification = true;
         }
@@ -111,7 +105,6 @@ final class AppFixture implements AutoCloseable {
         }
     }
 
-    /** 앱이 소유하는 EventLoopGroup. 이 모듈은 종료하지 않으므로 fixture가 종료한다. */
     final EventLoopGroup group = new NioEventLoopGroup(2);
 
     final ExecutorService pool;
@@ -154,7 +147,6 @@ final class AppFixture implements AutoCloseable {
         return new AppFixture(true, limits(8, 8, 4, client), NettySecurity.tls(TestTls.server()), client);
     }
 
-    /** 테스트가 고치는 한도의 사양. 기본은 넉넉하고, 진행 공간만 도출한 최소치다. */
     static final class Spec {
         long perConnection = 8;
         long owner = 8;
@@ -186,7 +178,6 @@ final class AppFixture implements AutoCloseable {
             return this;
         }
 
-        /** 연결·소유 객체 범위의 송수신·응답 바이트 한도. */
         Spec bodyBytes(long value) {
             this.bodyBytes = value;
             this.ownerIncomingBytes = value * 8;
@@ -228,7 +219,6 @@ final class AppFixture implements AutoCloseable {
             return this;
         }
 
-        /** 연결 범위의 핸들러 작업 한도만 따로 정한다(기본은 {@code perConnection}). */
         Spec connectionHandlerTasks(long value) {
             this.connectionHandlerTasks = value;
             return this;
@@ -367,7 +357,6 @@ final class AppFixture implements AutoCloseable {
         return future.get(WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
-    /** Netty Future를 테스트가 기다리기 쉬운 CompletableFuture로 옮긴다(취소·실패 원인을 그대로 옮긴다). */
     static <T> CompletableFuture<T> cf(Future<T> future) {
         CompletableFuture<T> result = new CompletableFuture<>();
         future.addListener(done -> {
@@ -388,9 +377,6 @@ final class AppFixture implements AutoCloseable {
         return result.toCompletionStage(pool).toCompletableFuture().get(WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
-    /**
-     * 응답하지 않는 핸들러에 요청을 하나 내고 핸들러가 활성화되어 시작했음을 기다리지 않는다. 팩터리 틈에 거절된 요청은 다시 낸다.
-     */
     void requestWhenServed(
             NettyStrandConnection connection, io.github.ppzxc.strand.api.Request request, boolean unanswered)
             throws Exception {
@@ -407,7 +393,6 @@ final class AppFixture implements AutoCloseable {
         throw new AssertionError("서버가 핸들러를 활성화하지 않았다");
     }
 
-    /** 팩터리가 있는 서버는 인증 뒤 팩터리가 끝나기 전의 요청을 REFUSED(UNAVAILABLE, 처리 안 됨)로 거절하므로 그 결과는 다시 낸다. */
     io.github.ppzxc.strand.api.RequestResult requestWhenServed(
             NettyStrandConnection connection, io.github.ppzxc.strand.api.Request request) throws Exception {
         for (int attempt = 0; attempt < 100; attempt++) {

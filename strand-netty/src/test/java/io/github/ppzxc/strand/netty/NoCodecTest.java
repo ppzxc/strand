@@ -9,10 +9,6 @@ import io.github.ppzxc.strand.api.RequestResult;
 import io.github.ppzxc.strand.api.Status;
 import org.junit.jupiter.api.Test;
 
-/**
- * {@code netty-codec-http}가 클래스패스에 없을 때(Gradle {@code testWithoutCodec} 과제가 코덱을 뺀 클래스패스로 돌린다): TCP는 그대로 동작하고
- * WebSocket 전송을 고르는 호출만 분명한 오류로 실패한다.
- */
 class NoCodecTest {
 
     @Test

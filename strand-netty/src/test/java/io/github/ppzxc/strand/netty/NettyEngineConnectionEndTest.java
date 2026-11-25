@@ -14,11 +14,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * 연결이 어떻게 끝나든 요청 결과와 종료 알림이 한 번만, 맞는 종류와 원인으로 확정되는지 본다. nio의 {@code EngineConnectionEndTest}에 대응한다. 수동 시계와 실제 채널을
- * 쓰고, 상대는 코어 엔드포인트다. 읽기 실패는 채널 파이프라인에 예외를 흘려 만들고, 상대의 CLOSE는 상대 엔드포인트가 낸 바이트를 엔진 입력에 직접 넣어 엔진이 그것을 읽는 걸음을
- * 결정한다.
- */
 class NettyEngineConnectionEndTest {
     private static final byte[] BODY = new byte[20];
     private static final long FINISH_MS = 100;
@@ -116,7 +111,6 @@ class NettyEngineConnectionEndTest {
 
     @Test
     void whenThePeerHangsUpWhileClosingTheNoticeIsOneDisconnectWithTheEndOfStreamException() throws Exception {
-        // 종료 중(CLOSE를 보냈고 스트림이 남음)에 EOF가 오면 입출력 예외가 기록된 끊김으로 한 번만 알린다.
         client();
         RequestHandle pending = sendAndAwaitPeer();
         rig.connection.close();
@@ -160,7 +154,6 @@ class NettyEngineConnectionEndTest {
 
         rig.connection.close();
 
-        // 보내는 쪽만 닫고 상대가 끊을 때까지 읽는다: 상대는 끝을 읽었지만 연결은 아직 끝나지 않았다.
         NettyRig.awaitTrue(rig.peer::ended);
         assertThat(rig.closed()).isFalse();
 
@@ -187,7 +180,6 @@ class NettyEngineConnectionEndTest {
     @Test
     void aWriteFailureRightAfterClosedIsNeitherInTheNoticeNorANewOne() throws Exception {
         client();
-        // 엔진은 상대의 CLOSE를 받아 답하며 CLOSED를 내는 같은 차례에 쓰기가 실패한다. CLOSED가 먼저 확정된다.
         rig.channel.failWrites();
 
         rig.inject(rig.peer.runDetached(endpoint -> endpoint.close(0)));
@@ -201,7 +193,6 @@ class NettyEngineConnectionEndTest {
 
     @Test
     void closeAndEndOfStreamReadTogetherAreOneCloseNoticeWithoutAnIoException() throws Exception {
-        // 상대의 CLOSE와 EOF가 잇따라 온다. CLOSE 교환이 먼저 처리되므로 EOF는 종료 뒤의 일이다.
         client();
         rig.inject(rig.peer.runDetached(endpoint -> endpoint.close(0)));
         rig.peerHangsUp();
@@ -218,7 +209,6 @@ class NettyEngineConnectionEndTest {
         client();
         RequestHandle pending = sendAndAwaitPeer();
 
-        // 길이가 머리보다 짧은 프레임은 프로토콜 위반이다.
         rig.inject(new byte[] {0, 0, 0, 1, 0, 0, 0, 0});
         rig.tick(FINISH_MS + 5);
 

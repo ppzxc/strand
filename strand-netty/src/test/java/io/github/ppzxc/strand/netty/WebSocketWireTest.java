@@ -13,7 +13,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
-/** 제품 WebSocket 통로를 소켓 없이 직접 구동해 메시지 변환·Close·거절 경로를 확인한다. */
 class WebSocketWireTest {
     private static final int MAX = 1024;
 
@@ -58,7 +57,6 @@ class WebSocketWireTest {
         assertThat(text.pollMessage().kind()).isEqualTo(WireMessage.Kind.UNSUPPORTED);
         assertThat(oversized.pollMessage().kind()).isEqualTo(WireMessage.Kind.UNSUPPORTED);
         assertThat(unmasked.pollMessage().kind()).isEqualTo(WireMessage.Kind.UNSUPPORTED);
-        // 위반 뒤의 입력은 무시한다.
         text.feed(clientFrame(RawWebSocket.BINARY, true, new byte[] {1}));
         assertThat(text.pollMessage()).isNull();
         assertThat(WireMessage.unsupported().toString()).isEqualTo("UNSUPPORTED");
@@ -88,7 +86,6 @@ class WebSocketWireTest {
         assertThat(echo.closeStatus()).isEqualTo(1001);
         assertThat(echo.closeReason()).isEmpty();
         assertThat(wire.closeSent()).isTrue();
-        // 이미 닫았으므로 더 보내지 않고, 메시지도 보낼 수 없다.
         wire.sendClose(1000);
         assertThat(wire.pollWire()).isNull();
         assertThatThrownBy(() -> wire.sendMessage(new byte[] {1})).isInstanceOf(IOException.class);

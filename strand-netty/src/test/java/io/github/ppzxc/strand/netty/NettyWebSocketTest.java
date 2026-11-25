@@ -27,7 +27,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** 실제 소켓 위의 WebSocket 서버·클라이언트: 기본 왕복, 경로·하위 프로토콜 규칙(규격 1.2.1절), 업그레이드 실패 보고. */
 class NettyWebSocketTest {
     private static final String GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -80,7 +79,6 @@ class NettyWebSocketTest {
         return result;
     }
 
-    /** 원시 HTTP 요청을 보내고 응답의 상태 줄을 돌려준다. 서버가 닫을 때까지 읽는다. */
     private static String httpStatusLine(int port, String request) throws Exception {
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout((int) TimeUnit.SECONDS.toMillis(AppFixture.WAIT_SECONDS));
@@ -96,7 +94,6 @@ class NettyWebSocketTest {
                     response.write(buffer, 0, count);
                 }
             } catch (IOException ignored) {
-                // 서버가 연결을 끊었다. 읽은 만큼으로 판단한다.
             }
             String text = new String(response.toByteArray(), StandardCharsets.US_ASCII);
             return text.contains("\r\n") ? text.substring(0, text.indexOf("\r\n")) : text;
@@ -247,7 +244,6 @@ class NettyWebSocketTest {
                         try (Socket socket = fake.accept()) {
                             seen.set(readHeaders(socket));
                         } catch (IOException ignored) {
-                            // 시험이 끝났다.
                         }
                     },
                     "fake-ws-server");
@@ -303,7 +299,6 @@ class NettyWebSocketTest {
             socket.getOutputStream().flush();
             socket.getInputStream().read();
         } catch (Exception ignored) {
-            // 시험이 끝났다.
         }
     }
 

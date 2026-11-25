@@ -14,10 +14,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * Netty 요청 개시자의 취소·기한·끊김이 규격(3.5절, 4.4절, 4.4.1절)의 status와 결과 확정성으로 한 번만 확정되는지 본다. 수동 시계와 쓰기량을 제한하는 실제 채널로
- * 경합을 결정적으로 만든다. 엔진의 한 걸음은 입력 처리 → 시계 → 명령 처리 순서이므로, 같은 걸음에 겹친 응답·만료·취소는 이 순서로 판정된다.
- */
 class NettyRequestOutcomeTest {
     private static final Duration DEADLINE = Duration.ofMillis(10);
     private static final byte[] BODY = new byte[200];
@@ -39,7 +35,6 @@ class NettyRequestOutcomeTest {
         return rig.connection.request(Request.of(NettyRig.TYPE, BODY));
     }
 
-    /** 결과가 보존될 때까지 기다린 뒤 status와 결과 확정성을 확인한다. */
     private static RequestResult assertOutcome(RequestHandle handle, int status, Certainty certainty) throws Exception {
         NettyRig.awaitTrue(() -> handle.result().isDone());
         RequestResult result = handle.result().resultNow();
@@ -48,15 +43,11 @@ class NettyRequestOutcomeTest {
         return result;
     }
 
-    /** 상대가 요청을 받을 때까지 기다리고 그 스트림 번호를 돌려준다. */
     private long awaitPeerStream(int count) throws Exception {
         NettyRig.awaitTrue(() -> rig.peerRequestStreams().size() >= count);
         return rig.peerRequestStreams().get(count - 1);
     }
 
-    /**
-     * 쓰기 한도를 {@code bytes}로 두어 요청 프레임이 그만큼만 나가게 하고, 엔진이 더 쓰려다 막힌 것을 본 뒤 돌려준다. 한도 0이면 한 바이트도 나가지 않은 채 막힌다.
-     */
     private RequestHandle sendWithWriteLimit(long bytes, Duration deadline) throws Exception {
         long writtenBefore = rig.written();
         long stallsBefore = rig.stalls();
@@ -67,7 +58,6 @@ class NettyRequestOutcomeTest {
         return handle;
     }
 
-    /** 이 시험이 보내는 요청 프레임의 길이: 20바이트 머리 + 본문. */
     private static long frameBytes() {
         return 20L + BODY.length;
     }
@@ -76,13 +66,10 @@ class NettyRequestOutcomeTest {
         rig.writeCapacity(Long.MAX_VALUE);
     }
 
-    /** 상대가 연결을 끊고 종료 알림이 보존될 때까지 기다린다. */
     private void endConnection() throws Exception {
         rig.peer.disconnect();
         rig.fixture.result(rig.connection.closed());
     }
-
-    // --- 기한: core 등록 전 대기와 0·기한 없음 ---
 
     @Test
     void aDeadlineOfZeroEndsAtOnceAsDeadlineExceededNotProcessedAndWritesNothing() throws Exception {
@@ -141,8 +128,6 @@ class NettyRequestOutcomeTest {
         awaitPeerStream(1);
         assertThat(handle.result().isDone()).isFalse();
     }
-
-    // --- 같은 걸음에 겹친 응답·취소·만료 ---
 
     @Test
     void aResponseReadInTheSameStepBeatsACancelQueuedForThatStep() throws Exception {
@@ -218,8 +203,6 @@ class NettyRequestOutcomeTest {
         assertOutcome(handle, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
     }
 
-    // --- 쓰기 0·부분·전체 전후의 취소 ---
-
     @Test
     void cancelBeforeAnyByteOfTheFrameWasWrittenIsCancelledNotProcessedWithoutReset() throws Exception {
         rig = NettyRig.client();
@@ -266,8 +249,6 @@ class NettyRequestOutcomeTest {
         NettyRig.awaitTrue(() -> rig.peerResets().size() == 1);
     }
 
-    // --- 쓰기 0·부분·전체 전후의 기한 ---
-
     @Test
     void expiryBeforeAnyByteOfTheFrameWasWrittenIsDeadlineExceededNotProcessedWithoutReset() throws Exception {
         rig = NettyRig.client();
@@ -306,8 +287,6 @@ class NettyRequestOutcomeTest {
         assertOutcome(handle, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
         NettyRig.awaitTrue(() -> rig.peerResets().size() == 1);
     }
-
-    // --- 쓰기 0·부분·전체 전후의 끊김 ---
 
     @Test
     void aDisconnectBeforeAnyByteOfTheFrameWasWrittenIsUnavailableNotProcessed() throws Exception {
@@ -353,8 +332,6 @@ class NettyRequestOutcomeTest {
         assertOutcome(next, Status.UNAVAILABLE, Certainty.NOT_PROCESSED);
     }
 
-    // --- 확정한 결과는 늦은 사건이 바꾸지 않는다 ---
-
     @Test
     void aWriteFailureAfterAResponseWasPreservedDoesNotChangeThatResult() throws Exception {
         rig = NettyRig.client();
@@ -381,8 +358,6 @@ class NettyRequestOutcomeTest {
 
         assertOutcome(handle, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
     }
-
-    // --- 끝난 연결과 cancel 호출 ---
 
     @Test
     void aRequestOnAnEndedConnectionIsUnavailableNotProcessedAndCancelDoesNotMakeItCancelled() throws Exception {
@@ -419,11 +394,8 @@ class NettyRequestOutcomeTest {
 
         rig.inSameStep(handle::cancel, response);
 
-        // 취소를 불렀지만 응답이 먼저 처리되어 취소는 성공하지 못했다. 호출자는 보존된 결과로만 안다.
         assertOutcome(handle, Status.NOT_FOUND, Certainty.RESPONSE);
     }
-
-    // --- 결과 사건이 종료 사건보다 먼저 보존된다 ---
 
     @Test
     void everyPendingResultIsPreservedBeforeTheClosedResultCompletes() throws Exception {

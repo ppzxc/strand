@@ -22,7 +22,6 @@ import javax.net.ssl.SSLSocket;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/** TLS 위의 WebSocket(wss): 기존 {@code security(tls)}를 재사용하고 ALPN 없이 협상한다(규격 3.7절). */
 class NettyWebSocketTlsTest {
     private final List<AutoCloseable> closeables = new CopyOnWriteArrayList<>();
 
@@ -105,7 +104,6 @@ class NettyWebSocketTlsTest {
         }
     }
 
-    /** ALPN API는 Java 8(8u252 이전)에 없으므로 리플렉션으로 부른다. */
     private static void offerAlpn(SSLParameters parameters) throws Exception {
         SSLParameters.class.getMethod("setApplicationProtocols", String[].class).invoke(parameters, (Object)
                 new String[] {"strand"});

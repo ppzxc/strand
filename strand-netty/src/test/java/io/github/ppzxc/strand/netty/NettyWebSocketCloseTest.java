@@ -17,10 +17,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-/**
- * WebSocket Close의 상태 코드와 순서(규격 1.2절, #409 결정): {@code NO_ERROR}는 남은 출력을 보낸 뒤 1000, CLOSE를 보내는 종료는 CLOSE 송신 뒤 Close, 오류 종료는 원인별 코드
- * (보내든 받든 같은 표), 사유 문자열은 늘 비어 있고, WebSocket Ping·Pong은 생존 확인에 쓰이지 않는다. 이 표는 strand-netty의 동작이며 규격과 벡터는 단언하지 않는다.
- */
 class NettyWebSocketCloseTest {
     private static final String PATH = "/strand";
 
@@ -99,7 +95,6 @@ class NettyWebSocketCloseTest {
         awaitWebSocketClose(peer);
         assertThat(status(peer)).isEqualTo(1000);
         assertThat(peer.closes().get(0).closeReason()).isEmpty();
-        // 상대는 CLOSE 프레임을 읽을 수 있어야 한다: WebSocket Close는 CLOSE 송신 뒤에만 나간다.
         List<String> arrivals = peer.arrivals();
         assertThat(arrivals.indexOf("CLOSE:1000")).isGreaterThan(arrivals.lastIndexOf("BINARY"));
         assertThat(peer.events())
@@ -115,7 +110,6 @@ class NettyWebSocketCloseTest {
         NettyStrandConnection connection = accepted.get(AppFixture.WAIT_SECONDS, TimeUnit.SECONDS);
         int before = peer.binaryMessages().size();
 
-        // 크기가 큰 요청 여러 개를 내고 곧바로 닫는다: 남은 출력(요청)이 모두 간 뒤에 Close가 나가야 한다.
         for (int i = 0; i < 4; i++) {
             connection.request(Request.of(AppFixture.TYPE, new byte[64 * 1024]));
         }
@@ -265,7 +259,6 @@ class NettyWebSocketCloseTest {
         awaitOpen(peer);
         int framesBefore = peer.binaryMessages().size();
 
-        // WebSocket Ping만 계속 보내도 유휴 간격이 지나면 서버는 Strand PING을 낸다(규격 3.3절·3.4.1절).
         long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(900);
         while (System.nanoTime() < until) {
             peer.sendPing(new byte[0]);

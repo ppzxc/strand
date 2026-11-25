@@ -16,10 +16,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * WebSocket 서버가 메시지 통로의 입력 규칙(규격 1.2절·3.1절·5.1절)대로 반응하는지 실제 소켓과 직접 만든 프레임으로 확인한다: 텍스트 메시지, 크기가 다른 메시지, 조각 모으기, 한도 초과,
- * 서문 위반, WebSocket 끊김.
- */
 class NettyWebSocketMessageTest {
     private static final String PATH = "/strand";
 
@@ -60,7 +56,6 @@ class NettyWebSocketMessageTest {
         return peer;
     }
 
-    /** 연결이 열림 단계에 이를 때까지(서버의 AUTH 확인을 받을 때까지) 기다린다. */
     private static void awaitOpen(WsPeer peer) throws Exception {
         WsPeer.await(() -> peer.events().stream().anyMatch(event -> event.kind() == Event.Kind.AUTHENTICATED));
     }
@@ -147,7 +142,6 @@ class NettyWebSocketMessageTest {
         WsPeer peer = peer();
         awaitOpen(peer);
 
-        // 한도보다 긴 길이를 주장하는 머리만 보낸다. 페이로드가 오기를 기다리지 않고 거절해야 한다(메모리를 쓰기 전).
         peer.sendRaw(RawWebSocket.headerClaiming(RawWebSocket.BINARY, true, fixture.maxFrameSize + 1, true));
 
         WsPeer.await(peer::sawClosed);
@@ -163,7 +157,6 @@ class NettyWebSocketMessageTest {
 
         peer.sendRaw(RawWebSocket.encode(RawWebSocket.BINARY, false, new byte[piece], true));
         peer.sendRaw(RawWebSocket.encode(RawWebSocket.CONTINUATION, false, new byte[piece], true));
-        // 마지막 조각(fin)은 보내지 않았다. 누적이 한도를 넘는 순간 닫혀야 한다.
 
         WsPeer.await(peer::sawClosed);
         assertThat(closedReason(peer).errorCode()).isEqualTo(ErrorCode.PROTOCOL_ERROR);
@@ -178,7 +171,6 @@ class NettyWebSocketMessageTest {
         peer.sendBinary(new byte[8]);
 
         WsPeer.await(() -> !peer.closes().isEmpty());
-        // 서문 오류는 아무것도 보내지 않고 닫는다: 서버의 Strand CLOSE 프레임이 없다.
         assertThat(peer.sawClosed()).isFalse();
         assertThat(peer.binaryMessages()).noneMatch(message -> message.length > 8);
     }
@@ -194,7 +186,6 @@ class NettyWebSocketMessageTest {
 
         CloseNotice notice = fixture.result(connection.closed());
         assertThat(notice.kind()).isEqualTo(CloseNotice.Kind.DISCONNECTED);
-        // 상대가 먼저 닫으면 상대의 코드를 그대로 돌려준다(앱에는 노출하지 않는다).
         WsPeer.await(() -> !peer.closes().isEmpty());
         assertThat(peer.closes().get(0).closeStatus()).isEqualTo(1001);
     }
@@ -231,13 +222,10 @@ class NettyWebSocketMessageTest {
                                                         + "Sec-WebSocket-Protocol: strand\r\n\r\n")
                                                 .getBytes(java.nio.charset.StandardCharsets.US_ASCII));
                         socket.getOutputStream().flush();
-                        // 서문 대신 텍스트 메시지를 보낸다.
                         RawWebSocket.write(
                                 socket.getOutputStream(),
                                 RawWebSocket.encode(RawWebSocket.TEXT, true, new byte[] {'h', 'i'}, false));
-                        while (socket.getInputStream().read() >= 0) {
-                            // 클라이언트가 닫을 때까지 읽는다.
-                        }
+                        while (socket.getInputStream().read() >= 0) {}
                     } catch (Exception e) {
                         failure.set(e);
                     }
