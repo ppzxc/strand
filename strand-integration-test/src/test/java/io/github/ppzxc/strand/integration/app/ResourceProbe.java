@@ -49,7 +49,11 @@ final class ResourceProbe {
     static Set<Thread> strandThreads() {
         Set<Thread> found = new HashSet<>();
         for (Thread thread : Thread.getAllStackTraces().keySet()) {
-            if (thread.isAlive() && thread.getName().startsWith("strand-")) {
+            // These JVM-wide executors outlive individual test rigs.
+            if (thread.isAlive()
+                    && thread.getName().startsWith("strand-")
+                    && !thread.getName().equals("strand-nio-stage-supervisor")
+                    && !thread.getName().equals("strand-nio-stage-completion")) {
                 found.add(thread);
             }
         }

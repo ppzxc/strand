@@ -18,6 +18,7 @@ jmh-plugin = "0.7.4"
 jmh = "1.37"
 hdrhistogram = "2.2.2"
 archunit = "1.5.1"
+instancio = "5.5.0"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -31,6 +32,8 @@ errorprone-core = { module = "com.google.errorprone:error_prone_core", version.r
 nullaway = { module = "com.uber.nullaway:nullaway", version.ref = "nullaway" }
 japicmp = { module = "com.github.siom79.japicmp:japicmp", version.ref = "japicmp" }
 archunit = { module = "com.tngtech.archunit:archunit", version.ref = "archunit" }
+instancio-core = { module = "org.instancio:instancio-core", version.ref = "instancio" }
+instancio-junit = { module = "org.instancio:instancio-junit", version.ref = "instancio" }
 
 [plugins]
 errorprone = { id = "net.ltgt.errorprone", version.ref = "errorprone-plugin" }
