@@ -11,14 +11,14 @@
 
 ## Latest SCA remediation
 
-Ticket #495 resolved the CRITICAL Netty and HIGH build-logic baseline described in the historical findings below. Netty minimum is now `4.1.141.Final`; build-logic selects Guava `33.7.2-jre`. PR #493 hosted run [45727363940](https://github.com/ppzxc/strand/actions/runs/45727363940) passed `ci / verify`, `ci / ci-ok`, and JDK 8/11/17/21/25. Its OSV artifact scanned 17 inputs / 1,097 packages with zero findings, scanner exit 0, and policy exit 0. Details: [#495 remediation evidence](issue-495-remediation-evidence.md). #492 remains open for 72 applicable rule rows without complete rule-specific execution evidence. Maven Central deployment validation remains a pre-publication condition for a future release.
+Ticket #495 resolved the CRITICAL Netty and HIGH build-logic baseline described in the historical findings below. Netty minimum is now `4.1.141.Final`; build-logic selects Guava `33.7.2-jre`. PR #493 hosted run [45727363940](https://github.com/ppzxc/strand/actions/runs/45727363940) passed `ci / verify`, `ci / ci-ok`, and JDK 8/11/17/21/25. Its OSV artifact scanned 17 inputs / 1,097 packages with zero findings, scanner exit 0, and policy exit 0. Details: [#495 remediation evidence](issue-495-remediation-evidence.md). #492 remains open for 69 applicable rule rows without complete rule-specific execution evidence. Maven Central deployment validation remains a pre-publication condition for a future release.
 
 ## §13 Acceptance status
 
 | # | Criterion | Status | Evidence and limits |
 |---:|---|---|---|
 | 1 | Technology stack and profiles | PASS locally | `issue-491-gap-register.md`; deployed Java 8 / JDK 25, active and inactive profiles mapped. |
-| 2 | 152 rule records | PARTIAL | This report indexes all 152 source IDs. 48 rows link to dedicated issue evidence; 29 rows have inactive-profile, optional-rule, or conditional dispositions; 3 rows identify deleted/transferred IDs; 72 applicable rows still lack complete rule-specific execution evidence. |
+| 2 | 152 rule records | PARTIAL | This report indexes all 152 source IDs. 51 rows link to dedicated issue evidence; 29 rows have inactive-profile, optional-rule, or conditional dispositions; 3 rows identify deleted/transferred IDs; 69 applicable rows still lack complete rule-specific execution evidence. |
 | 3 | Architecture and types first | PARTIAL | #480 architecture/dependency samples and #482 DTO/immutability tests pass. Full design review of all API/state invariants is not recorded. |
 | 4 | Working CI | PASS | #490 tests required-result success/fail/cancel/missing gate behavior and active `ci / ci-ok` rule. Earlier run `45648947339` correctly blocked on the then-known SCA baseline. After #495, run `45727363940` passed `ci / verify`, `ci / ci-ok`, OSV, and all five runtime jobs. |
 | 5 | Custom rule tests | PASS locally | #481/#483/#484/#485 provide normal, violation, and allowed-exception fixtures. See linked evidence. |
@@ -61,6 +61,7 @@ Actual hosted CI/PR incidents: run `45634765483` failed OSV extraction on genera
 | `./gradlew clean check --console=plain` | PASS on `08e0ebba71e8c2576dcac048eba2e62b872216c7`; 2026-11-25; JDK 25 / Gradle 9.9.2 | `BUILD SUCCESSFUL` in 2m 41s; 99 tasks (61 executed, 23 from cache, 15 up-to-date). | `issue-491-gap-register.md` |
 | `./gradlew clean check --rerun-tasks --console=plain` | PASS on target SHA `2ed58f6a6db465a5ae78ccc5924b22658ea53670`; 2026-11-26 11:41–11:50 KST; Linux aarch64, Red Hat OpenJDK 25.0.4.1, Gradle 9.9.1 | `BUILD SUCCESSFUL` in 9m 21s; 88 actionable tasks (87 executed, 1 up-to-date). Full tests and coverage verification executed without task-result cache. | Local run in detached worktree at target SHA. |
 | `./gradlew :strand-nio:test --tests '*TlsEnginesTest' --tests '*TlsPassageTest' :strand-netty:test --tests '*TlsEnginesTest' --tests '*NettyWebSocketTlsTest' :strand-integration-test:test --tests '*FrameSizeIntegrationTest' --tests '*ResourceReleaseTest' :strand-core:test --tests '*EndpointInputValidationTest' --tests '*EndpointUnitInputTest' --rerun-tasks --console=plain` | PASS on target SHA `2ed58f6a6db465a5ae78ccc5924b22658ea53670`; 2026-11-26 about 11:53–12:00 KST; Linux aarch64, Red Hat OpenJDK 25.0.4.1, Gradle 9.9.1 | 33 tasks executed; TLS, input validation, frame-size and resource-release tests passed. | Local run in detached worktree at target SHA. |
+| `rg -n -i 'openrewrite|refaster' --glob '*.gradle*' --glob '*.toml' --glob 'pom.xml' .`; same command with `checkstyle|spotbugs`; convention plugin search | PASS on `2ed58f6a6db465a5ae78ccc5924b22658ea53670`; 2026-11-26 12:02 KST | No prohibited plugin configuration found. Java/Library/Internal convention plugins centralize Spotless and Java conventions in `build-logic`. | Local configuration audit at target SHA. |
 | `deploy-test/run.sh 0.2.0` | PASS in #480/#483/#484 evidence; exact per-run time not captured | Four Gradle/Maven classpath/modulepath consumers pass. | `issue-480-evidence.md`, `issue-483-evidence.md`, `issue-484-evidence.md` |
 | OSV v2.7.1 required-input scan | PASS as a scan; gate outcome is expected failure; exact scan time not captured | 17 required inputs scanned; CRITICAL/HIGH findings cause exit 1. | `issue-487-baseline.md` |
 | `python3 .github/scripts/test/test_ci_gate.py` | PASS; 5 tests | Success passes; failure/cancel/skipped/missing/unexpected/malformed results fail. | `issue-490-evidence.md` |
@@ -73,7 +74,7 @@ Actual hosted CI/PR incidents: run `45634765483` failed OSV extraction on genera
 
 ### Gaps, exceptions, and review conditions
 
-- **Unverified rule rows:** 72 applicable IDs lack complete rule-specific execution evidence. Four optional `MAY` rows and one conditional rule are recorded with applicability dispositions; inactive profiles and historical IDs remain separately classified. `SEC-009` has partial frame-size evidence, with other applicable resource limits still unverified. See the per-ID index and `issue-491-gap-register.md`.
+- **Unverified rule rows:** 69 applicable IDs lack complete rule-specific execution evidence. Four optional `MAY` rows and one conditional rule are recorded with applicability dispositions; inactive profiles and historical IDs remain separately classified. `SEC-009` has partial frame-size evidence, with other applicable resource limits still unverified. See the per-ID index and `issue-491-gap-register.md`.
 - **Actual CI/PR incidents:** #493 runs `45634765483` and `45641400310` exposed the OSV cache-scan issue and missing `ci-ok` checkout. #494 and commit `7e70064` fix those defects. Run `45645491691` exposed a JDK 17 reservation assertion race; commit `c1bc5c3` fixes it, with 10 local focused reruns and hosted JDK 17 success in `45648947339`. In `45727363940`, attempt 1 measured Netty branch coverage at 0.89 against 0.90 and attempt 2 passed without a code change. Cause and preventive evidence remain unknown.
 - **SCA remediation:** complete in #495. Keep SEC-015 blocking for future findings; no waiver or threshold reduction was added.
 - **Live release:** release owner must record upload, `VALIDATED` deployment, and post-upload consumer result before publication; no release was made here. Hosted PR CI is recorded above.
@@ -232,10 +233,10 @@ Each linked report contains the owner, rule IDs, commands, results, target commi
 | `AGT-008` | 7.1 최소 AI 작업 계약 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `AGT-009` | 7.1 최소 AI 작업 계약 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `TOOL-001` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-480-evidence.md, issue-483-evidence.md, issue-486-evidence.md, issue-490-evidence.md, issue-491-gap-register.md |
-| `TOOL-002` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `TOOL-003` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `TOOL-002` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 증거 연결; OpenRewrite/Refaster 빌드 플러그인·의존성 검색 결과 없음 | build | target-SHA toolchain config audit, issue-491-gap-register.md |
+| `TOOL-003` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 증거 연결; Checkstyle/SpotBugs 빌드 플러그인·의존성 검색 결과 없음 | build | target-SHA toolchain config audit, issue-491-gap-register.md |
 | `TOOL-004` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `TOOL-005` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `TOOL-006` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-483-evidence.md, issue-490-evidence.md, issue-491-gap-register.md |
 | `TOOL-007` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-483-evidence.md, issue-491-gap-register.md |
-| `TOOL-008` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `TOOL-008` | 8.1 기본 툴체인 최소화 및 책임 이관 (작성자 강제 정책) | 증거 연결; 제품 모듈이 build-logic convention plugin을 적용하고 검사 설정 중앙화 | build | target-SHA toolchain config audit, issue-491-gap-register.md |
