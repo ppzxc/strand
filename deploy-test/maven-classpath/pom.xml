@@ -46,13 +46,75 @@
     <dependency>
       <groupId>io.netty</groupId>
       <artifactId>netty-transport</artifactId>
-      <version>4.1.101.Final</version>
+      <version>4.1.141.Final</version>
     </dependency>
   </dependencies>
 
   <build>
     <sourceDirectory>../shared/src/main/java</sourceDirectory>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.14.1</version>
+        <configuration>
+          <fork>true</fork>
+          <release>11</release>
+          <compilerArgs>
+            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED</arg>
+            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</arg>
+            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED</arg>
+            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED</arg>
+            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED</arg>
+            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED</arg>
+            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED</arg>
+            <arg>-J--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED</arg>
+            <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED</arg>
+            <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED</arg>
+            <arg>-XDcompilePolicy=simple</arg>
+            <arg>--should-stop=ifError=FLOW</arg>
+            <arg>-Xlint:all</arg>
+            <arg>-Xplugin:ErrorProne -Xep:ArrayEquals:ERROR -Xep:ArrayToString:ERROR -Xep:EqualsIncompatibleType:ERROR -Xep:EqualsHashCode:ERROR -Xep:ModifyCollectionInEnhancedForLoop:ERROR -Xep:ModifySourceCollectionInStream:ERROR -Xep:NarrowCalculation:ERROR -Xep:NarrowingCompoundAssignment:ERROR</arg>
+          </compilerArgs>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>com.google.errorprone</groupId>
+              <artifactId>error_prone_core</artifactId>
+              <version>2.52.0</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.6.3</version>
+        <executions>
+          <execution>
+            <id>consumer-dependency-allowlist</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes><exclude>*:*</exclude></excludes>
+                  <includes>
+                    <include>io.github.ppzxc:strand-core</include>
+                    <include>io.github.ppzxc:strand-nio</include>
+                    <include>io.github.ppzxc:strand-netty</include>
+                    <include>io.github.ppzxc:strand-api</include>
+                    <include>io.netty:netty-transport</include>
+                    <include>io.netty:netty-common</include>
+                    <include>io.netty:netty-buffer</include>
+                    <include>io.netty:netty-resolver</include>
+                    <include>org.jspecify:jspecify</include>
+                    <include>com.google.errorprone:error_prone_annotations</include>
+                  </includes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>

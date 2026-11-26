@@ -79,17 +79,23 @@ check_output() {
   tr -d "\r" < "$here/$1/output.log" | grep -qx "OK"
 }
 
+check_warning_baseline() {
+  python3 "$here/scripts/check_warning_baseline.py" "$1" "$here/$1/output.log"
+}
+
 run_gradle() {
   echo "=== $1 ==="
   # 소비자는 strand 빌드와 분리돼 있어도 같은 Gradle 래퍼를 쓴다.
-  "$root/gradlew" -p "$here/$1" run --no-daemon --console=plain "${gradle_args[@]}" | tee "$here/$1/output.log"
+  "$root/gradlew" -p "$here/$1" clean run --no-daemon --console=plain "${gradle_args[@]}" 2>&1 | tee "$here/$1/output.log"
   check_output "$1"
+  check_warning_baseline "$1"
 }
 
 run_maven() {
   echo "=== $1 ==="
-  "$mvn" -B -ntp ${maven_opts[@]+"${maven_opts[@]}"} -f "$here/$1/pom.xml" compile exec:exec "${maven_args[@]}" | tee "$here/$1/output.log"
+  "$mvn" -B -ntp ${maven_opts[@]+"${maven_opts[@]}"} -f "$here/$1/pom.xml" clean compile exec:exec "${maven_args[@]}" 2>&1 | tee "$here/$1/output.log"
   check_output "$1"
+  check_warning_baseline "$1"
   if [ "$repo" != "mavenLocal" ]; then
     # Central에도 같은 좌표가 있을 수 있다. core, nio, netty가 지정 저장소에서 왔는지 로컬 저장소의 출처 기록으로 확인한다.
     for module in strand-core strand-nio strand-netty; do

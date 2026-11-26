@@ -23,7 +23,7 @@ updates:
       maven:
         patterns: ['*']
     ignore:
-      # Netty는 검증한 하한(4.1.101.Final)이 컴파일 기준이자 소비자 기준이다. 올리려면 지원 범위 문서와 함께 직접 바꾼다.
+      # Netty는 검증한 하한(4.1.141.Final)이 컴파일 기준이자 소비자 기준이다. 올리려면 지원 범위 문서와 함께 직접 바꾼다.
       - dependency-name: 'io.netty:*'
 
   # 버전 카탈로그(gradle/libs.versions.toml)는 루트와 build-logic이 공유한다.
@@ -40,7 +40,7 @@ updates:
       gradle:
         patterns: ['*']
     ignore:
-      # Netty는 검증한 하한(4.1.101.Final)이 컴파일 기준이자 소비자 기준이다. 올리려면 지원 범위 문서와 함께 직접 바꾼다.
+      # Netty는 검증한 하한(4.1.141.Final)이 컴파일 기준이자 소비자 기준이다. 올리려면 지원 범위 문서와 함께 직접 바꾼다.
       - dependency-name: 'io.netty:*'
       - dependency-name: 'org.junit:*'
         update-types: ['version-update:semver-major']

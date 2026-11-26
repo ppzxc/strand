@@ -1,5 +1,6 @@
 plugins {
   `kotlin-dsl`
+  alias(libs.plugins.spotless)
 }
 
 // 외부 Gradle 플러그인은 버전 카탈로그의 [plugins]에서 플러그인 마커 좌표로 끌어온다.
@@ -17,8 +18,11 @@ dependencies {
   implementation(libs.plugins.cyclonedx.asDependency())
   implementation(libs.plugins.japicmp.asDependency())
   implementation(libs.plugins.jmh.asDependency())
+  implementation(libs.guava)
   // 플러그인 0.4.6이 끌어오는 japicmp 코어(0.23.1) 대신 카탈로그에 고정한 코어를 쓴다. 플러그인은 코어를 자기 클래스패스에서 읽는다.
   implementation(libs.japicmp)
+  implementation(libs.pmd.java)
+  implementation(libs.archunit)
 
   testImplementation(gradleTestKit())
   testImplementation(platform(libs.junit.bom))
@@ -32,5 +36,11 @@ tasks.test {
   useJUnitPlatform()
   testLogging {
     exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+  }
+}
+
+spotless {
+  java {
+    palantirJavaFormat(libs.versions.palantir.java.format.get())
   }
 }

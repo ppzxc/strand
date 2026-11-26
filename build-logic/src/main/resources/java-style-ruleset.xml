@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<ruleset name="strand Java style" xmlns="http://pmd.sourceforge.net/ruleset/2.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+  <description>strand comment, API documentation, naming, import, and nullness rules.</description>
+  <rule ref="category/java/bestpractices.xml/OnDemandImport"/>
+  <rule ref="category/java/codestyle.xml/ClassNamingConventions"/>
+  <rule ref="category/java/codestyle.xml/FieldNamingConventions"/>
+  <rule ref="category/java/codestyle.xml/FormalParameterNamingConventions"/>
+  <rule ref="category/java/codestyle.xml/LocalVariableNamingConventions"/>
+  <rule ref="category/java/codestyle.xml/MethodNamingConventions"/>
+  <rule ref="category/java/codestyle.xml/TypeParameterNamingConventions"/>
+  <rule name="AllowedJavaComments" language="java" class="io.github.ppzxc.strand.quality.AllowedJavaCommentsRule" message="Only approved Java comments are allowed."/>
+  <rule name="PublicApiJavadoc" language="java" class="io.github.ppzxc.strand.quality.PublicApiJavadocRule" message="Public API declaration requires Javadoc."/>
+  <rule name="NUL-002" language="java" class="io.github.ppzxc.strand.quality.NullnessImportRule" message="Use JSpecify for nullness annotations."/>
+</ruleset>

@@ -1,0 +1,11 @@
+allprojects {
+  def resolvedProject = it
+  dependencyLocking { lockAllConfigurations() }
+  afterEvaluate {
+    tasks.register('resolveAllForOsv') {
+      doLast {
+        resolvedProject.configurations.findAll { it.canBeResolved }.each { it.resolve() }
+      }
+    }
+  }
+}

@@ -4,11 +4,11 @@ import com.vanniktech.maven.publish.SourcesJar
 import net.ltgt.gradle.errorprone.errorprone
 import net.ltgt.gradle.nullaway.nullaway
 import org.gradle.external.javadoc.StandardJavadocDocletOptions
+import java.time.LocalDate
 
 plugins {
   id("strand.java-conventions")
   id("strand.api-compat-conventions")
-  id("net.ltgt.errorprone")
   id("net.ltgt.nullaway")
   jacoco
   id("com.vanniktech.maven.publish")
@@ -21,7 +21,6 @@ private val moduleName = "io.github.ppzxc.strand.${project.name.removePrefix("st
 private val minimumCoverage = "0.90".toBigDecimal()
 
 dependencies {
-  errorprone(catalog.library("errorprone-core"))
   errorprone(catalog.library("nullaway"))
   compileOnlyApi(catalog.library("jspecify"))
 }
@@ -44,6 +43,47 @@ tasks.named<JavaCompile>("compileJava") {
   // 병렬 빌드에서 다른 태스크(다른 모듈의 compileTestJava 등)의 경고가 섞이므로 이 태스크의 main 소스 경로만 본다.
   val collector = CompilerWarningCollector(
     sourceSets.main.get().java.srcDirs.map { it.absolutePath },
+    taskName = "compileJava",
+    sourceSet = "main",
+    targetRelease = StrandBuild.JAVA_RELEASE,
+    exceptions = listOf(
+      CompilerWarningException(
+        "unknown enum constant ElementType.MODULE",
+        taskName = "compileJava",
+        sourceSet = "main",
+        targetRelease = 8,
+        reason = "JSpecify @NullMarked targets MODULE, which is unavailable to --release 8.",
+        approvedBy = "ppzxc (#478)",
+        reviewBy = LocalDate.parse("2027-02-23"),
+      ),
+      CompilerWarningException(
+        "[options] source value 8 is obsolete and will be removed in a future release",
+        taskName = "compileJava",
+        sourceSet = "main",
+        targetRelease = 8,
+        reason = "Java 8 release options are reported by javac although the target is intentional.",
+        approvedBy = "ppzxc (#478)",
+        reviewBy = LocalDate.parse("2027-02-23"),
+      ),
+      CompilerWarningException(
+        "[options] target value 8 is obsolete and will be removed in a future release",
+        taskName = "compileJava",
+        sourceSet = "main",
+        targetRelease = 8,
+        reason = "Java 8 release options are reported by javac although the target is intentional.",
+        approvedBy = "ppzxc (#478)",
+        reviewBy = LocalDate.parse("2027-02-23"),
+      ),
+      CompilerWarningException(
+        "[options] To suppress warnings about obsolete options, use -Xlint:-options.",
+        taskName = "compileJava",
+        sourceSet = "main",
+        targetRelease = 8,
+        reason = "Java 8 release options are reported by javac although the target is intentional.",
+        approvedBy = "ppzxc (#478)",
+        reviewBy = LocalDate.parse("2027-02-23"),
+      ),
+    ),
   )
   doFirst {
     logging.addStandardOutputListener(collector)

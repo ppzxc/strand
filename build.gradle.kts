@@ -9,6 +9,7 @@ plugins {
 // build-logic의 TestKit 기능 테스트(호환성 검사, 의존성 0 검사)를 루트 check에 묶는다. JDK 25에서만 돌고 런타임 매트릭스에는 넣지 않는다.
 tasks.check {
   dependsOn(gradle.includedBuild("build-logic").task(":test"))
+  dependsOn(gradle.includedBuild("build-logic").task(":spotlessCheck"))
 }
 
 // 런타임 매트릭스(CI의 JDK 8/11/17/21/25)가 실행할 테스트 모음. 모듈을 추가할 때 여기만 고친다.
@@ -32,6 +33,7 @@ tasks.register<Exec>("deployTest") {
   group = "verification"
   description = "~/.m2에 strand-core·strand-api·strand-nio·strand-netty를 발행하고(정리하지 않는다) deploy-test/run.sh로 외부 소비자 4개를 돌린다(하네스 a)."
   dependsOn(":strand-core:publishToMavenLocal", ":strand-api:publishToMavenLocal", ":strand-nio:publishToMavenLocal", ":strand-netty:publishToMavenLocal")
+  dependsOn(tasks.named("check"))
   workingDir = layout.projectDirectory.asFile
   executable = layout.projectDirectory.file("deploy-test/run.sh").asFile.path
   argumentProviders.add(VersionArg(deployTestVersion))

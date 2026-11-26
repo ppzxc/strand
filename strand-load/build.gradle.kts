@@ -5,9 +5,10 @@ plugins {
 }
 
 // netty 서버 전송 측정은 -PnettyVersion=<버전>으로 지원 릴리스를 바꾼다(다른 내부 모듈과 같은 방식).
-val nettyVersion = providers.gradleProperty("nettyVersion").orElse("4.1.101.Final")
+val nettyVersion = providers.gradleProperty("nettyVersion")
 
 dependencies {
+  testImplementation(libsCatalog.library("archunit"))
   implementation(project(":strand-nio"))
   implementation(project(":strand-netty"))
   implementation("io.netty:netty-transport:${nettyVersion.get()}")

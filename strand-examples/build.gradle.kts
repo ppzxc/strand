@@ -3,7 +3,7 @@ plugins {
 }
 
 // Netty 앱 예제는 -PnettyVersion=<버전>으로 지원 릴리스를 바꿔 실행한다(docs/research/app-api-integration-acceptance.md).
-val nettyVersion = providers.gradleProperty("nettyVersion").orElse("4.1.101.Final")
+val nettyVersion = providers.gradleProperty("nettyVersion")
 
 dependencies {
   // 예제는 전송 모듈(strand-nio, core를 api로 노출) 위에서 돈다.

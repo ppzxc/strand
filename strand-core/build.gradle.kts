@@ -8,6 +8,10 @@ plugins {
 
 description = "strand: 바이트 인코딩·디코딩 규격의 Java 구현"
 
+dependencies {
+  testImplementation(libsCatalog.library("archunit"))
+}
+
 // 엔드포인트 구동 도구(EndpointDriver)를 core 테스트, netty 테스트, 적합성 러너가 함께 쓰도록 test fixtures로 낸다.
 // test fixtures는 test 코드처럼 NullAway 대상이 아니다.
 tasks.named<JavaCompile>("compileTestFixturesJava") {

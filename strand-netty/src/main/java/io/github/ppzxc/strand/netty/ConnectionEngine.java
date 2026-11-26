@@ -55,6 +55,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -1270,15 +1271,40 @@ final class ConnectionEngine {
         }
     }
 
-    @SuppressWarnings("EmptyCatch")
+    @SuppressWarnings({"EmptyCatch", "PMD.LOG-001", "PMD.LOG-002"})
+    @io.github.ppzxc.strand.api.PolicyException(
+            rule = "PMD.LOG-001",
+            reason = "고정 WARNING 형식으로 요청 유형만 남기고 민감 값을 기록하지 않는다.",
+            approvedBy = "Codex independent review",
+            reviewBy = "2027-02-23")
+    @io.github.ppzxc.strand.api.PolicyException(
+            rule = "PMD.LOG-002",
+            reason = "정제된 Throwable로 스택과 중첩 cause만 보존하고 메시지는 제외한다.",
+            approvedBy = "Codex independent review",
+            reviewBy = "2027-02-23")
     private void diagnoseHandlerFailure(IncomingRequest request, Throwable failure) {
         try {
-            LOGGER.log(
-                    Level.WARNING,
-                    "받은 요청 핸들러가 예외를 던졌다(type=" + request.type() + ", 상대=" + p.remoteAddress + ")",
-                    failure);
+            LOGGER.log(Level.WARNING, "받은 요청 핸들러가 예외를 던졌다(type=" + request.type() + ")", sanitizedFailure(failure));
         } catch (RuntimeException ignored) {
         }
+    }
+
+    private static Throwable sanitizedFailure(Throwable failure) {
+        Throwable copy = new Throwable(failure.getClass().getName());
+        copy.setStackTrace(failure.getStackTrace());
+        IdentityHashMap<Throwable, Boolean> seen = new IdentityHashMap<>();
+        seen.put(failure, Boolean.TRUE);
+        Throwable tail = copy;
+        for (Throwable cause = failure.getCause();
+                cause != null && !seen.containsKey(cause);
+                cause = cause.getCause()) {
+            seen.put(cause, Boolean.TRUE);
+            Throwable causeCopy = new Throwable(cause.getClass().getName());
+            causeCopy.setStackTrace(cause.getStackTrace());
+            tail.initCause(causeCopy);
+            tail = causeCopy;
+        }
+        return copy;
     }
 
     private interface Outbound {
