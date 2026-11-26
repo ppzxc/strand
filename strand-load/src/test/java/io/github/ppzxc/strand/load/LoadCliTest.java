@@ -71,9 +71,7 @@ class LoadCliTest {
                         : new String[] {
                             "loadgen",
                             "--port",
-                            invalidPort.equals("not-a-number")
-                                    ? "abc"
-                                    : invalidPort.equals("zero") ? "0" : "65536"
+                            invalidPort.equals("not-a-number") ? "abc" : invalidPort.equals("zero") ? "0" : "65536"
                         };
 
         Outcome outcome = execute(args);
