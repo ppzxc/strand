@@ -25,6 +25,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -432,6 +434,38 @@ class NioStrandShutdownTest {
         server.shutdown();
         awaitTrue(() -> threads.size() == 2);
         assertThat(threads).allMatch(name -> name.startsWith("app-executor-"));
+    }
+
+    @Test
+    void resourcesTerminatedDoesNotWaitForABlockingShutdownCallback() throws Exception {
+        AppFixture fixture = track(AppFixture.plain());
+        ExecutorService appExecutor = Executors.newSingleThreadExecutor();
+        closeables.add(() -> appExecutor.shutdownNow());
+        NioStrandServer server = fixture.serverBuilder()
+                .executor(appExecutor)
+                .authenticate(c -> AuthenticationResult.accepted("p"))
+                .handler(r -> {})
+                .shutdownGrace(Duration.ofMillis(100))
+                .shutdownDeadline(Duration.ofMillis(300))
+                .build();
+        listen(server);
+        CountDownLatch callbackEntered = new CountDownLatch(1);
+        CountDownLatch releaseCallback = new CountDownLatch(1);
+        server.shutdown().thenRun(() -> {
+            callbackEntered.countDown();
+            try {
+                releaseCallback.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        try {
+            assertThat(callbackEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            server.resourcesTerminated().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseCallback.countDown();
+        }
     }
 
     @Test
