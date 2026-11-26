@@ -1,11 +1,19 @@
-# strand
+# Strand
 
-Java 8 이상을 지원하는 바이트 인코딩·디코딩 라이브러리입니다.
+Strand는 서버 간 장기 연결에서 여러 요청과 응답을 한 연결로 다중화하는 Java 라이브러리입니다. 연결별로 요청을 동시에 처리하고, TCP 또는 WebSocket을 통해 통신합니다.
 
-## 상태
+## Java 지원
 
-프로젝트 셋업 단계입니다. 구조, 빌드, 배포 방식을 확정하는 중이며 아직 코드는 없습니다.
-진행 상황은 [[MAP] strand 프로젝트 셋업](https://github.com/ppzxc/strand/issues/1)에서 추적합니다.
+라이브러리 모듈은 Java 8 이상을 지원합니다.
+
+## 전송과 사용 안내
+
+| 모듈 | 지원 전송 | 사용 안내 |
+| --- | --- | --- |
+| `strand-nio` | TCP, TLS | [NIO 안내](strand-nio/README.md) |
+| `strand-netty` | TCP, WebSocket | [Netty 안내](strand-netty/README.md) |
+
+Netty 모듈의 의존성 및 전송 선택 방법은 Netty 안내를 참고하세요. 실행 가능한 예제는 [`strand-examples`](strand-examples/src/main/java/io/github/ppzxc/strand/examples/)에서 볼 수 있습니다.
 
 ## 저장소 문서
 
