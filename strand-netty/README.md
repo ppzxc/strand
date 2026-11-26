@@ -11,7 +11,7 @@ Netty는 앱이 제공한다. 이 모듈은 Netty를 컴파일에만 쓰고 런�
 | TCP | `netty-transport` |
 | WebSocket | `netty-transport`와 `netty-codec-http` (같은 Netty 버전) |
 
-TCP만 쓰면 `netty-codec-http`가 클래스패스에 없어도 동작한다. WebSocket을 고른 `listen`·`connect`·`connectAttempt` 호출은 코덱이 없으면 `IllegalStateException`으로 곧바로 실패한다. 지원하는 Netty 하한은 4.1.101.Final이고 `-PnettyVersion=<버전>`으로 반복 검증한다.
+TCP만 쓰면 `netty-codec-http`가 클래스패스에 없어도 동작한다. WebSocket을 고른 `listen`·`connect`·`connectAttempt` 호출은 코덱이 없으면 `IllegalStateException`으로 곧바로 실패한다. 지원하는 Netty 하한은 4.1.141.Final이고 `-PnettyVersion=<버전>`으로 반복 검증한다.
 
 ## 전송 고르기
 

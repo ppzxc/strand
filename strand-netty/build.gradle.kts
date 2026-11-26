@@ -7,9 +7,9 @@ plugins {
 
 description = "strand: strand-core 규격을 Netty 채널 위에서 주고받는 Netty 전송 구현"
 
-// 컴파일 기준은 검증한 하한(4.1.101.Final)이다. 테스트는 -PnettyVersion=<버전>으로 지원 릴리스를 바꿔 반복 실행한다(docs/research/netty-progress-verification.md).
-val nettyCompileVersion = "4.1.101.Final"
-val nettyVersion = providers.gradleProperty("nettyVersion").orElse(nettyCompileVersion)
+// 공개 소비자 하한도 root gradle.properties와 같은 수정 릴리스로 유지한다.
+val nettyCompileVersion = providers.gradleProperty("nettyVersion").get()
+val nettyVersion = providers.gradleProperty("nettyVersion")
 
 dependencies {
   api(project(":strand-core"))

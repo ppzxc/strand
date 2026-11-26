@@ -28,7 +28,7 @@ dependencies {
   implementation("io.github.ppzxc:strand-nio:$strandVersion")
   implementation("io.github.ppzxc:strand-netty:$strandVersion")
   // strand-netty는 Netty를 compileOnlyApi로 의존하며 게시된 POM에는 compile 범위로 실린다. 소비자는 사용할 Netty 버전을 직접 지정한다.
-  implementation("io.netty:netty-transport:4.1.101.Final")
+  implementation("io.netty:netty-transport:4.1.141.Final")
 }
 
 apply(from = "../shared/errorprone.gradle.kts")

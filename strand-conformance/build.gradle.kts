@@ -4,7 +4,7 @@ plugins {
 }
 
 // 제품 netty 경로(WebSocket 코덱)를 돌리는 Netty 버전. -PnettyVersion=<버전>으로 바꿔 반복 실행한다(strand-netty와 같다).
-val nettyVersion = providers.gradleProperty("nettyVersion").orElse("4.1.101.Final")
+val nettyVersion = providers.gradleProperty("nettyVersion")
 
 dependencies {
   testImplementation(project(":strand-core"))

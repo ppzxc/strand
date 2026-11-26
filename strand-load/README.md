@@ -96,7 +96,7 @@ JSON이 원본이다(`schemaVersion`, `metadata`(JDK·OS·코어 수·git SHA·�
 수치는 다음에 따라 달라진다. 결과를 공유할 때 JSON의 `metadata`를 함께 남기고 아래를 기록한다.
 
 - 코어 수와 서버·부하 생성기의 코어 분리 여부(같은 머신에서 코어를 다투면 서버 수치가 낮게 나온다. `taskset` 등으로 나눌 수 있다)
-- JDK 버전, netty 릴리스(`-PnettyVersion=<버전>`, 기본 4.1.101.Final), 커널·TLS 가속
+- JDK 버전, netty 릴리스(`-PnettyVersion=<버전>`, 기본 4.1.141.Final), 커널·TLS 가속
 - netty 서버는 이벤트 루프 스레드 2개로 독립 실행한다(이미 netty가 있는 호스트에 삽입하는 경우는 범위 밖). 값은 JSON의 `nettyEventLoops`에 기록된다
 - 지연은 시계 해상도와 스케줄링에 민감하다. `loadgenBottleneck`이 true인 실행은 버린다
 

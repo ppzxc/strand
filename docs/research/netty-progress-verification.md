@@ -6,6 +6,8 @@ checked: 2026-11-18
 
 # Netty TCP/TLS 실제 진행 경계 선행 검증 (#315)
 
+이 문서는 2026-11-18의 역사적 검증 기록이다. 여기서 검증한 4.1.101.Final은 #495에서 보안 지원 하한 4.1.141.Final로 대체했으며, 최신 하한 검증 결과는 `docs/quality/issue-495-remediation-evidence.md`에 기록한다.
+
 대상: `strand-integration-test/src/test/java/io/github/ppzxc/strand/integration/netty/`. 이슈 #312의 구현 결정 21(지원 조합 선행 검증)과 #306·#310·#311의 승인 결정을 실행으로 확인한 기록이다.
 
 ## 결론
