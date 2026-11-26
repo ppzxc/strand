@@ -40,8 +40,10 @@ public final class LoadCli {
                     return table(rest, out, err);
                 case "server":
                     return ServerRole.run(RunConfig.parse(withoutPort(rest)), out);
-                case "loadgen":
-                    return LoadGenRole.run(RunConfig.parse(withoutPort(rest)), portOf(rest), out);
+                case "loadgen": {
+                    int port = portOf(rest);
+                    return LoadGenRole.run(RunConfig.parse(withoutPort(rest)), port, out);
+                }
                 default:
                     err.println("모르는 명령 '" + command + "'. 지원: run, matrix, stall, soak, table");
                     return 2;
@@ -63,7 +65,6 @@ public final class LoadCli {
         boolean plan = false;
         boolean longRun = false;
         String duration = null;
-        String output = null;
         String rate = "1000";
         for (int i = 0; i < args.size(); i++) {
             String arg = args.get(i);
@@ -151,7 +152,23 @@ public final class LoadCli {
         return result;
     }
 
-    private static int portOf(List<String> args) {
-        return Integer.parseInt(args.get(args.indexOf("--port") + 1));
+    private static int portOf(List<String> args) throws RunConfig.Invalid {
+        int index = args.indexOf("--port");
+        if (index < 0) {
+            throw new RunConfig.Invalid("--port 값이 필요하다");
+        }
+        if (index + 1 >= args.size() || args.get(index + 1).startsWith("--")) {
+            throw new RunConfig.Invalid("--port 값이 없다");
+        }
+        final int port;
+        try {
+            port = Integer.parseInt(args.get(index + 1));
+        } catch (NumberFormatException e) {
+            throw new RunConfig.Invalid("--port는 정수여야 한다: " + args.get(index + 1));
+        }
+        if (port < 1 || port > 65535) {
+            throw new RunConfig.Invalid("--port는 1~65535 범위여야 한다: " + port);
+        }
+        return port;
     }
 }
