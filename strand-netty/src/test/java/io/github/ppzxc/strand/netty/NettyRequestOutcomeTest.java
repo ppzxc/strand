@@ -9,6 +9,7 @@ import io.github.ppzxc.strand.api.RequestOptions;
 import io.github.ppzxc.strand.api.RequestResult;
 import io.github.ppzxc.strand.api.Resource;
 import io.github.ppzxc.strand.api.Status;
+import io.github.ppzxc.strand.core.internal.ErrorCode;
 import io.github.ppzxc.strand.core.internal.Event;
 import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
@@ -280,12 +281,13 @@ class NettyRequestOutcomeTest {
     void expiryAfterTheWholeFrameWasWrittenSendsResetAndIsDeadlineExceededUnknown() throws Exception {
         rig = NettyRig.client();
         RequestHandle handle = send(DEADLINE);
-        awaitPeerStream(1);
+        long stream = awaitPeerStream(1);
 
         rig.advance(DEADLINE.plusMillis(5));
 
         assertOutcome(handle, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
         NettyRig.awaitTrue(() -> rig.peerResets().size() == 1);
+        assertThat(rig.peerResets().get(0)).containsExactly(stream, ErrorCode.CANCEL);
     }
 
     @Test
