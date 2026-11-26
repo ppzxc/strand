@@ -11,14 +11,14 @@
 
 ## Latest SCA remediation
 
-Ticket #495 resolved the CRITICAL Netty and HIGH build-logic baseline described in the historical findings below. Netty minimum is now `4.1.141.Final`; build-logic selects Guava `33.7.2-jre`. PR #493 hosted run [45727363940](https://github.com/ppzxc/strand/actions/runs/45727363940) passed `ci / verify`, `ci / ci-ok`, and JDK 8/11/17/21/25. Its OSV artifact scanned 17 inputs / 1,097 packages with zero findings, scanner exit 0, and policy exit 0. Details: [#495 remediation evidence](issue-495-remediation-evidence.md). #492 remains open for the 89 rule rows without rule-specific execution evidence and missing live release evidence.
+Ticket #495 resolved the CRITICAL Netty and HIGH build-logic baseline described in the historical findings below. Netty minimum is now `4.1.141.Final`; build-logic selects Guava `33.7.2-jre`. PR #493 hosted run [45727363940](https://github.com/ppzxc/strand/actions/runs/45727363940) passed `ci / verify`, `ci / ci-ok`, and JDK 8/11/17/21/25. Its OSV artifact scanned 17 inputs / 1,097 packages with zero findings, scanner exit 0, and policy exit 0. Details: [#495 remediation evidence](issue-495-remediation-evidence.md). #492 remains open for 84 applicable rule rows without rule-specific execution evidence. Maven Central deployment validation remains a pre-publication condition for a future release.
 
 ## §13 Acceptance status
 
 | # | Criterion | Status | Evidence and limits |
 |---:|---|---|---|
 | 1 | Technology stack and profiles | PASS locally | `issue-491-gap-register.md`; deployed Java 8 / JDK 25, active and inactive profiles mapped. |
-| 2 | 152 rule records | PARTIAL | This report indexes all 152 source IDs. 36 rows link to dedicated issue evidence; 24 rows cite inactive profiles; 3 rows identify deleted/transferred IDs; 89 rows still lack rule-specific execution evidence. |
+| 2 | 152 rule records | PARTIAL | This report indexes all 152 source IDs. 36 rows link to dedicated issue evidence; 29 rows have inactive-profile, optional-rule, or conditional dispositions; 3 rows identify deleted/transferred IDs; 84 applicable rows still lack rule-specific execution evidence. |
 | 3 | Architecture and types first | PARTIAL | #480 architecture/dependency samples and #482 DTO/immutability tests pass. Full design review of all API/state invariants is not recorded. |
 | 4 | Working CI | PASS | #490 tests required-result success/fail/cancel/missing gate behavior and active `ci / ci-ok` rule. Earlier run `45648947339` correctly blocked on the then-known SCA baseline. After #495, run `45727363940` passed `ci / verify`, `ci / ci-ok`, OSV, and all five runtime jobs. |
 | 5 | Custom rule tests | PASS locally | #481/#483/#484/#485 provide normal, violation, and allowed-exception fixtures. See linked evidence. |
@@ -31,7 +31,7 @@ Ticket #495 resolved the CRITICAL Netty and HIGH build-logic baseline described 
 | 12 | Baseline protection | PASS locally | #481/#483/#484 multiset or exact baselines reject new/duplicate findings; frozen ArchUnit baseline disallows auto-creation. |
 | 13 | Lint promotion | PASS locally | Required Error Prone and custom PMD rules have normal/violation coverage before root check enforcement. Internal review IDs are listed in §11. |
 | 14 | Working automation | PASS locally | Gradle tasks, `deployTest`, workflow checks, OSV, Gitleaks, and release gates have reproducible commands in evidence reports. |
-| 15 | Constraint disclosure | PASS | Resolved SCA findings and remaining missing release execution, timestamps, and unverified rows are listed with owners or follow-up conditions. |
+| 15 | Constraint disclosure | PASS | Resolved SCA findings and remaining missing timestamps and rule evidence are listed with owners or follow-up conditions. Maven Central deployment validation is recorded as a pre-publication condition for the next release. |
 
 ## Applied result format (§11.2)
 
@@ -71,7 +71,7 @@ Actual hosted CI/PR incidents: run `45634765483` failed OSV extraction on genera
 
 ### Gaps, exceptions, and review conditions
 
-- **Unverified rule rows:** 104 IDs have no direct rule-specific evidence pointer in the implementation reports. Of these, 96 lack rule-specific execution evidence; 8 have cross-references but no direct execution proof. The accountable owner is the §13 role in the source; see the per-ID index and `issue-491-gap-register.md`.
+- **Unverified rule rows:** 84 applicable IDs lack rule-specific execution evidence. Four optional `MAY` rows and one conditional rule are recorded with applicability dispositions; inactive profiles and historical IDs remain separately classified. See the per-ID index and `issue-491-gap-register.md`.
 - **Actual CI/PR incidents:** #493 runs `45634765483` and `45641400310` exposed the OSV cache-scan issue and missing `ci-ok` checkout. #494 and commit `7e70064` fix those defects. Run `45645491691` exposed a flaky JDK 17 reservation assertion; commit `c1bc5c3` fixes it, with 10 local focused reruns and hosted JDK 17 success in `45648947339`. Run `45727363940` confirms the upgraded dependencies pass the same OSV gate. Its first `check` attempt missed the coverage threshold; the retry passed without source changes.
 - **SCA remediation:** complete in #495. Keep SEC-015 blocking for future findings; no waiver or threshold reduction was added.
 - **Live release:** release owner must record upload, `VALIDATED` deployment, and post-upload consumer result before publication; no release was made here. Hosted PR CI is recorded above.
@@ -209,17 +209,17 @@ Each linked report contains the owner, rule IDs, commands, results, target commi
 | `VER-014` | 5. Runtime Verification: 실행·회귀 검증 요구사항 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `VER-015` | 5. Runtime Verification: 실행·회귀 검증 요구사항 | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-490-evidence.md, issue-491-gap-register.md |
 | `FORM-001` | 6. Formal Verification 및 상태 기반 검증 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `FORM-002` | 6. Formal Verification 및 상태 기반 검증 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `FORM-003` | 6. Formal Verification 및 상태 기반 검증 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `FORM-004` | 6. Formal Verification 및 상태 기반 검증 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `FORM-002` | 6. Formal Verification 및 상태 기반 검증 | 미적용; MAY 선택 사항이며 상태 모델 도입 근거 없음 | 빌드·모듈 담당 | issue-491-gap-register.md; issue-491 §6 |
+| `FORM-003` | 6. Formal Verification 및 상태 기반 검증 | 미적용; MAY 선택 사항이며 분산 시스템/TLA+ 검증 대상 없음 | 빌드·모듈 담당 | issue-491-gap-register.md; issue-491 §6 |
+| `FORM-004` | 6. Formal Verification 및 상태 기반 검증 | 미적용; MAY 선택 사항이며 형식 증명 도입 대상 없음 | 빌드·모듈 담당 | issue-491-gap-register.md; issue-491 §6 |
 | `FORM-005` | 6. Formal Verification 및 상태 기반 검증 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `FORM-006` | 6. Formal Verification 및 상태 기반 검증 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `FORM-006` | 6. Formal Verification 및 상태 기반 검증 | 조건부; 형식 검증 도입 시 모델과 구현 연결 근거 필요; 현재 도입 없음 | 빌드·모듈 담당 | issue-491-gap-register.md; issue-491 §6 |
 | `TST-001` | 6.1 생성 데이터 기반 검증 정책 | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-488-evidence.md, issue-491-gap-register.md |
 | `TST-002` | 6.1 생성 데이터 기반 검증 정책 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `TST-003` | 6.1 생성 데이터 기반 검증 정책 | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-488-evidence.md, issue-491-gap-register.md |
 | `TST-004` | 6.1 생성 데이터 기반 검증 정책 | 증거 연결; 상세 판정은 보고서 참조 | 연결된 보고서의 Owner 필드 | issue-488-evidence.md, issue-489-evidence.md, issue-491-gap-register.md |
 | `TST-005` | 6.1 생성 데이터 기반 검증 정책 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `TST-006` | 6.1 생성 데이터 기반 검증 정책 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `TST-006` | 6.1 생성 데이터 기반 검증 정책 | 미적용; MAY 선택 사항이며 최소 반례 축소 도구를 채택하지 않음 | 테스트 담당 | issue-488-evidence.md |
 | `AGT-001` | 7.1 최소 AI 작업 계약 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `AGT-002` | 7.1 최소 AI 작업 계약 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `AGT-003` | 7.1 최소 AI 작업 계약 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
