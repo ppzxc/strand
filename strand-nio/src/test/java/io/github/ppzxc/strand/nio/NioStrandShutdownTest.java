@@ -451,16 +451,28 @@ class NioStrandShutdownTest {
         listen(server);
         CountDownLatch callbackEntered = new CountDownLatch(1);
         CountDownLatch releaseCallback = new CountDownLatch(1);
+        CountDownLatch executorHeld = new CountDownLatch(1);
+        CountDownLatch releaseExecutor = new CountDownLatch(1);
+        appExecutor.execute(() -> {
+            executorHeld.countDown();
+            try {
+                releaseExecutor.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertThat(executorHeld.await(5, TimeUnit.SECONDS)).isTrue();
         server.shutdown().thenRun(() -> {
             callbackEntered.countDown();
             try {
-                releaseCallback.await();
+                releaseCallback.await(5, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         });
 
         try {
+            releaseExecutor.countDown();
             assertThat(callbackEntered.await(5, TimeUnit.SECONDS)).isTrue();
             server.resourcesTerminated().toCompletableFuture().get(5, TimeUnit.SECONDS);
         } finally {

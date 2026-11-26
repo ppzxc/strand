@@ -182,7 +182,6 @@ final class OwnerShutdown {
             }
             if (done) {
                 dispatch(() -> terminated.complete(null));
-                dispatch(this::completeStopped);
                 break;
             }
         }

@@ -194,9 +194,11 @@ class RequestOutcomeTest {
         rig.settle();
         long stream = rig.peerRequestStreams().get(0);
 
+        assertThat(rig.peer.respond(stream, Status.OK, BODY)).isTrue();
         rig.advance(DEADLINE.plusMillis(5));
         rig.settle();
-        rig.peerRespond(stream, Status.OK, BODY);
+        assertOutcome(handle, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
+        rig.sendPeerOutputs();
 
         assertOutcome(handle, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
     }
