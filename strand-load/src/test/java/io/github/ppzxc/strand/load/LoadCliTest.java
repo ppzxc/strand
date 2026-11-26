@@ -62,6 +62,25 @@ class LoadCliTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"missing", "empty", "not-a-number", "zero", "too-large"})
+    void invalidLoadgenPortIsReportedAsConfigurationError(String invalidPort) {
+        String[] args = invalidPort.equals("missing")
+                ? new String[] {"loadgen"}
+                : invalidPort.equals("empty")
+                        ? new String[] {"loadgen", "--port"}
+                        : new String[] {
+                            "loadgen",
+                            "--port",
+                            invalidPort.equals("not-a-number") ? "abc" : invalidPort.equals("zero") ? "0" : "65536"
+                        };
+
+        Outcome outcome = execute(args);
+
+        assertThat(outcome.exit).isEqualTo(2);
+        assertThat(outcome.err).contains("설정 오류", "--port");
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"nio", "netty"})
     void smokeRunEndsWithoutErrorsAndRecordsTheServerTransport(String transport) throws Exception {
         Path result = dir.resolve("result.json");

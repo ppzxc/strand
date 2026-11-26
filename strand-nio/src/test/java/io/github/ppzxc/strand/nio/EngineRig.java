@@ -323,6 +323,17 @@ final class EngineRig implements AutoCloseable {
         return resets;
     }
 
+    void sendPeerOutputs() {
+        for (OutboundMessage message : TestMessages.takeOutputs(peer)) {
+            try {
+                TestMessages.write(peerEnd, message, 0);
+            } catch (IOException e) {
+                throw new AssertionError(e);
+            }
+        }
+        settle();
+    }
+
     void peerRespond(long streamId, int status, byte[] body) {
         peer.respond(streamId, status, body);
         settle();

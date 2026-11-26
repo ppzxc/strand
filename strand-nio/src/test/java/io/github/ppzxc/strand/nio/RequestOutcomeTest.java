@@ -8,6 +8,7 @@ import io.github.ppzxc.strand.api.RequestHandle;
 import io.github.ppzxc.strand.api.RequestOptions;
 import io.github.ppzxc.strand.api.RequestResult;
 import io.github.ppzxc.strand.api.Status;
+import io.github.ppzxc.strand.core.internal.ErrorCode;
 import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -193,9 +194,11 @@ class RequestOutcomeTest {
         rig.settle();
         long stream = rig.peerRequestStreams().get(0);
 
+        assertThat(rig.peer.respond(stream, Status.OK, BODY)).isTrue();
         rig.advance(DEADLINE.plusMillis(5));
         rig.settle();
-        rig.peerRespond(stream, Status.OK, BODY);
+        assertOutcome(handle, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
+        rig.sendPeerOutputs();
 
         assertOutcome(handle, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
     }
@@ -288,12 +291,14 @@ class RequestOutcomeTest {
         rig = EngineRig.client();
         RequestHandle handle = send(DEADLINE);
         rig.settle();
+        long stream = rig.peerRequestStreams().get(0);
 
         rig.advance(DEADLINE.plusMillis(5));
         rig.settle();
 
         assertOutcome(handle, Status.DEADLINE_EXCEEDED, Certainty.UNKNOWN);
         assertThat(rig.peerResets()).hasSize(1);
+        assertThat(rig.peerResets().get(0)).containsExactly(stream, ErrorCode.CANCEL);
     }
 
     @Test

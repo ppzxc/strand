@@ -181,11 +181,7 @@ final class OwnerShutdown {
                 publish(fix);
             }
             if (done) {
-
-                dispatch(() -> {
-                    completeStopped();
-                    terminated.complete(null);
-                });
+                dispatch(() -> terminated.complete(null));
                 break;
             }
         }
