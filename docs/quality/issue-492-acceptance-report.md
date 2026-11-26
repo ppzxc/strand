@@ -11,14 +11,14 @@
 
 ## Latest SCA remediation
 
-Ticket #495 resolved the CRITICAL Netty and HIGH build-logic baseline described in the historical findings below. Netty minimum is now `4.1.141.Final`; build-logic selects Guava `33.7.2-jre`. PR #493 hosted run [45727363940](https://github.com/ppzxc/strand/actions/runs/45727363940) passed `ci / verify`, `ci / ci-ok`, and JDK 8/11/17/21/25. Its OSV artifact scanned 17 inputs / 1,097 packages with zero findings, scanner exit 0, and policy exit 0. Details: [#495 remediation evidence](issue-495-remediation-evidence.md). #492 remains open for the 96 rule rows without rule-specific execution evidence and missing live release evidence.
+Ticket #495 resolved the CRITICAL Netty and HIGH build-logic baseline described in the historical findings below. Netty minimum is now `4.1.141.Final`; build-logic selects Guava `33.7.2-jre`. PR #493 hosted run [45727363940](https://github.com/ppzxc/strand/actions/runs/45727363940) passed `ci / verify`, `ci / ci-ok`, and JDK 8/11/17/21/25. Its OSV artifact scanned 17 inputs / 1,097 packages with zero findings, scanner exit 0, and policy exit 0. Details: [#495 remediation evidence](issue-495-remediation-evidence.md). #492 remains open for the 89 rule rows without rule-specific execution evidence and missing live release evidence.
 
 ## §13 Acceptance status
 
 | # | Criterion | Status | Evidence and limits |
 |---:|---|---|---|
 | 1 | Technology stack and profiles | PASS locally | `issue-491-gap-register.md`; deployed Java 8 / JDK 25, active and inactive profiles mapped. |
-| 2 | 152 rule records | PARTIAL | This report indexes all 152 source IDs. 29 rows link to dedicated issue evidence; 24 rows cite inactive profiles; 3 rows identify deleted/transferred IDs; 96 rows still lack rule-specific execution evidence. |
+| 2 | 152 rule records | PARTIAL | This report indexes all 152 source IDs. 36 rows link to dedicated issue evidence; 24 rows cite inactive profiles; 3 rows identify deleted/transferred IDs; 89 rows still lack rule-specific execution evidence. |
 | 3 | Architecture and types first | PARTIAL | #480 architecture/dependency samples and #482 DTO/immutability tests pass. Full design review of all API/state invariants is not recorded. |
 | 4 | Working CI | PASS | #490 tests required-result success/fail/cancel/missing gate behavior and active `ci / ci-ok` rule. Earlier run `45648947339` correctly blocked on the then-known SCA baseline. After #495, run `45727363940` passed `ci / verify`, `ci / ci-ok`, OSV, and all five runtime jobs. |
 | 5 | Custom rule tests | PASS locally | #481/#483/#484/#485 provide normal, violation, and allowed-exception fixtures. See linked evidence. |
@@ -107,16 +107,16 @@ Each linked report contains the owner, rule IDs, commands, results, target commi
 | `ARC-010` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-010 |
 | `ARC-011` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-011 |
 | `ARC-012` | 1.1 아키텍처 선택 프로파일: DDD/헥사고날 | 미적용 프로파일; DDD/헥사고날 미채택 | 빌드·모듈 담당 | issue-491-gap-register.md, source row ARC-012 |
-| `OBJ-001` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `OBJ-002` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `OBJ-003` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `OBJ-004` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `OBJ-001` | 2.1 객체·타입·동등성·컬렉션 | 증거 연결; 필수 Error Prone 체크를 ERROR로 설정하고 컴파일 검사 실행 | `strand-build`, 소비자 빌드 담당 | issue-483-evidence.md, issue-491-gap-register.md |
+| `OBJ-002` | 2.1 객체·타입·동등성·컬렉션 | 증거 연결; 필수 Error Prone 체크를 ERROR로 설정하고 컴파일 검사 실행 | `strand-build`, 소비자 빌드 담당 | issue-483-evidence.md, issue-491-gap-register.md |
+| `OBJ-003` | 2.1 객체·타입·동등성·컬렉션 | 증거 연결; 필수 Error Prone 체크를 ERROR로 설정하고 컴파일 검사 실행 | `strand-build`, 소비자 빌드 담당 | issue-483-evidence.md, issue-491-gap-register.md |
+| `OBJ-004` | 2.1 객체·타입·동등성·컬렉션 | 증거 연결; 필수 Error Prone 체크를 ERROR로 설정하고 컴파일 검사 실행 | `strand-build`, 소비자 빌드 담당 | issue-483-evidence.md, issue-491-gap-register.md |
 | `OBJ-005` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `OBJ-006` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `OBJ-007` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `OBJ-006` | 2.1 객체·타입·동등성·컬렉션 | 증거 연결; 필수 Error Prone 체크를 ERROR로 설정하고 컴파일 검사 실행 | `strand-build`, 소비자 빌드 담당 | issue-483-evidence.md, issue-491-gap-register.md |
+| `OBJ-007` | 2.1 객체·타입·동등성·컬렉션 | 증거 연결; 필수 Error Prone 체크를 ERROR로 설정하고 컴파일 검사 실행 | `strand-build`, 소비자 빌드 담당 | issue-483-evidence.md, issue-491-gap-register.md |
 | `OBJ-008` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `OBJ-009` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
-| `OBJ-010` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
+| `OBJ-010` | 2.1 객체·타입·동등성·컬렉션 | 증거 연결; 필수 Error Prone 체크를 ERROR로 설정하고 컴파일 검사 실행 | `strand-build`, 소비자 빌드 담당 | issue-483-evidence.md, issue-491-gap-register.md |
 | `OBJ-011` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `OBJ-012` | 2.1 객체·타입·동등성·컬렉션 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
 | `ERR-001` | 2.2 예외 및 실패 처리 | 미확인; 규칙별 실행·통과 증거 연결 없음 | §13 담당; 행별 지정 미완료 | issue-491-gap-register.md |
