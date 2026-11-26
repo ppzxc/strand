@@ -120,7 +120,8 @@ class NettyStrandIncomingEndTest {
         assertThat(end.isConnectionEnd()).isFalse();
         assertThat(end.errorCode()).isEqualTo(OptionalLong.of(0x1234));
         NettyRig.awaitTrue(() ->
-                request.connection().resourceUsage(Resource.INCOMING_REQUESTS).current() == 0);
+                request.connection().resourceUsage(Resource.INCOMING_REQUESTS).current() == 0
+                        && request.connection().resourceUsage(Resource.INCOMING_BYTES).current() == 0);
         assertThat(request.connection().resourceUsage(Resource.INCOMING_BYTES).current())
                 .isZero();
     }

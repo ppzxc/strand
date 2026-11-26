@@ -165,7 +165,8 @@ class NettyStrandReservationTest {
         assertThat(refused.status()).isEqualTo(Status.UNAVAILABLE);
         assertThat(accepted.status()).isEqualTo(Status.OK);
         assertThat(app.resourceUsage(Resource.INCOMING_BYTES).rejections()).isEqualTo(1);
-        awaitTrue(() -> app.resourceUsage(Resource.INCOMING_REQUESTS).current() == 0);
+        awaitTrue(() -> app.resourceUsage(Resource.INCOMING_REQUESTS).current() == 0
+                && app.resourceUsage(Resource.INCOMING_BYTES).current() == 0);
         assertThat(app.resourceUsage(Resource.INCOMING_BYTES).current()).isZero();
     }
 
