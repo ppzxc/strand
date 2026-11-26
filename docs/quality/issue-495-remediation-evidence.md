@@ -3,6 +3,7 @@
 ## 결과
 
 - 대상 코드 SHA: `18bd48259cebcf3e1f91132385b0ca4d1966c1b9` (`integrate/479-java-quality`)
+- 호스팅 검증 head SHA: `0e807a77d9acc9a62382c87ed5ed16c804131d81`; PR 검증 merge SHA: `2e41918876e88180cb47a369c7a8cf056211f2ea`.
 - 실행일: 2026-11-26, Asia/Seoul. OSV 실행: `2026-11-25T23:59:20Z`–`2026-11-25T23:59:22Z`.
 - 환경: Linux 5.14, aarch64; Gradle 9.9.1; Red Hat OpenJDK 25.0.4.1; 런타임 매트릭스 JDK 8/11/17/21/25.
 - 담당: 빌드·모듈 담당.
@@ -28,4 +29,8 @@
 | `./gradlew runtimeMatrixTest -PtestJavaVersion=8 --console=plain`; same command with `11`, `17`, `21`, `25` | JDK 8/11/17/21/25 | PASS, 각 버전 실행. |
 | `osv-scanner scan source --recursive --no-ignore --all-packages --format json --verbosity error /src` | OSV-Scanner v2.7.1, image digest `sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde`; 17 staged inputs | PASS; 1,097 packages, zero findings, scanner exit 0, policy exit 0, stderr empty. |
 
-CI artifact and hosted timestamps will be added after PR #493 checks finish.
+| [PR #493 hosted `ci / verify`](https://github.com/ppzxc/strand/actions/runs/45725935219) | Head `0e807a77d9acc9a62382c87ed5ed16c804131d81`; started `2026-11-26T00:03:26Z`, completed `2026-11-26T00:13:04Z` | PASS; `./gradlew check`, script/policy tests, four consumer builds, OSV scan and report upload. OSV artifact `osv-scan-report`: 17 inputs, 1,097 packages, zero findings; scanner exit 0, policy exit 0. |
+| [PR #493 hosted `ci / ci-ok`](https://github.com/ppzxc/strand/actions/runs/45725935219) | `2026-11-26T00:13:00Z`; needs: verify=success, runtime=success | PASS. |
+| [PR #493 hosted CodeQL](https://github.com/ppzxc/strand/actions/runs/45725935218) | Head `0e807a77d9acc9a62382c87ed5ed16c804131d81`; started `2026-11-26T00:03:26Z`, completed `2026-11-26T00:08:22Z` | PASS. |
+
+PR #493 required checks pass on the recorded head SHA. The run's OSV artifact is retained by GitHub Actions.
